@@ -86,8 +86,12 @@ type AllocationResult struct {
 	OrderNo     string
 	Type        domain.AllocationType
 	ID          uint
+	ProductID   uint
+	Created     bool
 	Email       string
 	SupplyScope SupplyScope
+	CreatedAt   time.Time
+	ReleasedAt  *time.Time
 }
 
 type AllocationPort interface {
@@ -222,8 +226,13 @@ type GmailDeliverySummary struct {
 	ExpiresAt     *time.Time
 }
 
+type GmailDeliveryOrder struct {
+	OrderNo     string
+	ProductType domain.ProductType
+}
+
 type GmailDeliveryPort interface {
-	ListGmailDeliveries(ctx context.Context, orderNos []string) (map[string]GmailDeliverySummary, error)
+	ListGmailDeliveries(ctx context.Context, orders []GmailDeliveryOrder) (map[string]GmailDeliverySummary, error)
 }
 
 type GmailPurchaseDelivery struct {
@@ -384,6 +393,7 @@ type CreateHistoricalGmailOrderCommand struct {
 	UserID                  uint
 	ProjectID               uint
 	ProjectProductID        uint
+	ProductType             domain.ProductType
 	CodeWindowMinutes       int
 	ActivationWindowMinutes int
 	WarrantyMinutes         int
@@ -413,6 +423,7 @@ type HistoricalGmailUsage struct {
 	ResourceID              uint
 	ProjectID               uint
 	ProductID               uint
+	ProductType             domain.ProductType
 	Mailbox                 string
 	Email                   string
 	CodeWindowMinutes       int
@@ -714,6 +725,7 @@ func (uc *UseCase) ImportHistoricalGmailUsage(ctx context.Context, matches []His
 			match.Mailbox = strings.ToLower(strings.TrimSpace(match.Mailbox))
 			match.Email = strings.ToLower(strings.TrimSpace(match.Email))
 			if match.ResourceID == 0 || match.ProjectID == 0 || match.ProductID == 0 || match.Email == "" ||
+				!domain.IsGmailProductType(match.ProductType) ||
 				match.EvidenceCount <= 0 || !validHistoricalGmailMailbox(match.Mailbox) {
 				return domain.ErrInvalidOrderRequest
 			}
@@ -738,11 +750,27 @@ func (uc *UseCase) ImportHistoricalGmailUsage(ctx context.Context, matches []His
 			if allocation == nil {
 				continue
 			}
-			if strings.TrimSpace(allocation.OrderNo) == "" || allocation.ID == 0 || allocation.Type != domain.AllocationTypeGmail ||
+			if strings.TrimSpace(allocation.OrderNo) == "" || allocation.ID == 0 || allocation.ProductID == 0 ||
+				allocation.Type != domain.AllocationTypeGmail || allocation.SupplyScope != SupplyScopePublic ||
 				!strings.EqualFold(allocation.Email, match.Email) {
 				return domain.ErrInvalidOrderRequest
 			}
 			orderNo := strings.TrimSpace(allocation.OrderNo)
+			existing, findErr := uc.repo.FindOrder(txCtx, orderNo)
+			if findErr == nil {
+				if allocation.Created || !sameHistoricalGmailOrder(existing, allocation, match) {
+					return domain.ErrIdempotencyConflict
+				}
+				continue
+			}
+			if !errors.Is(findErr, domain.ErrOrderNotFound) {
+				return findErr
+			}
+			// Only a newly created allocation may create an order. An older
+			// allocation without its order is an inconsistent historical fact.
+			if !allocation.Created || allocation.ProductID != match.ProductID {
+				return domain.ErrIdempotencyConflict
+			}
 			debit, err := uc.wallet.RecordHistoricalZeroDebit(txCtx, WalletCommand{
 				UserID: ownerID, Amount: "0", Reason: "order:" + orderNo,
 				IdempotencyKey: "history:" + orderNo + ":debit",
@@ -755,6 +783,7 @@ func (uc *UseCase) ImportHistoricalGmailUsage(ctx context.Context, matches []His
 			}
 			if err := uc.historicalGmailOrders.CreateHistoricalGmailOrder(txCtx, CreateHistoricalGmailOrderCommand{
 				OrderNo: orderNo, UserID: ownerID, ProjectID: match.ProjectID, ProjectProductID: match.ProductID,
+				ProductType:       match.ProductType,
 				CodeWindowMinutes: match.CodeWindowMinutes, ActivationWindowMinutes: match.ActivationWindowMinutes,
 				WarrantyMinutes: match.WarrantyMinutes, DebitTxID: debit.ID, GmailAllocationID: allocation.ID,
 				DeliveryEmail: match.Email, CreatedAt: createdAt, ExpiredAt: expiredAt, Now: now,
@@ -777,6 +806,45 @@ func validHistoricalMicrosoftMailbox(mailbox string) bool {
 
 func validHistoricalGmailMailbox(mailbox string) bool {
 	return mailbox == "main" || mailbox == "dot" || mailbox == "plus"
+}
+
+func sameHistoricalGmailOrder(
+	order *domain.Order,
+	allocation *AllocationResult,
+	match HistoricalGmailUsage,
+) bool {
+	if order == nil || allocation == nil {
+		return false
+	}
+	requestFingerprint := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.TrimSpace(allocation.OrderNo))))
+	if order.OrderNo != strings.TrimSpace(allocation.OrderNo) ||
+		order.UserID != historicalGmailOwnerUserID || order.ProjectID != match.ProjectID ||
+		order.ProjectProductID != allocation.ProductID || order.ServiceMode != domain.ServiceModePurchase ||
+		order.SupplyPolicy != domain.SupplyPolicyPublicOnly || order.Status != domain.OrderStatusCompleted ||
+		order.FailureCode != "" || order.PayAmount != "0.00" || order.RefundAmount != "0.00" ||
+		order.LegacyRandomMicrosoftPayAmount != "" || order.LegacyRandomDomainPayAmount != "" ||
+		order.DebitTxID == nil || *order.DebitTxID == 0 || order.RefundTxID != nil ||
+		order.AllocationType == nil || *order.AllocationType != domain.AllocationTypeGmail ||
+		!strings.EqualFold(order.DeliveryEmail, match.Email) || order.ClientChannel != domain.ClientChannelConsole ||
+		order.APIKeyID != nil || order.IdempotencyKey != "history:"+order.OrderNo ||
+		order.RequestFingerprint != requestFingerprint || order.ServiceCleanupStatus != "succeeded" ||
+		allocation.CreatedAt.IsZero() || allocation.ReleasedAt == nil || allocation.ReleasedAt.Before(allocation.CreatedAt) ||
+		!sameHistoricalGmailTime(order.CreatedAt, allocation.CreatedAt) ||
+		order.ReceiveStartedAt == nil || !sameHistoricalGmailTime(*order.ReceiveStartedAt, allocation.CreatedAt) ||
+		order.ReceiveUntil == nil || !sameHistoricalGmailTime(*order.ReceiveUntil, *allocation.ReleasedAt) ||
+		order.ActivatedAt == nil || !sameHistoricalGmailTime(*order.ActivatedAt, allocation.CreatedAt) ||
+		order.AfterSaleUntil == nil || !sameHistoricalGmailTime(*order.AfterSaleUntil, *allocation.ReleasedAt) {
+		return false
+	}
+	if allocation.ProductID == match.ProductID {
+		return order.ProductType == match.ProductType
+	}
+	return match.ProductType == domain.ProductTypeGmailVariant && match.Mailbox == "plus" &&
+		order.ProductType == domain.ProductTypeGmail
+}
+
+func sameHistoricalGmailTime(actual, expected time.Time) bool {
+	return actual.UTC().Truncate(time.Second).Equal(expected.UTC().Truncate(time.Second))
 }
 
 func (uc *UseCase) Checkout(ctx context.Context, req CheckoutRequest) (result *CheckoutResult, runErr error) {
@@ -952,6 +1020,11 @@ func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.P
 				return domain.ErrInvalidOrderRequest
 			}
 			prepared.emailSuffix = ""
+		case domain.ProductTypeGmailVariant:
+			if prepared.selectorSuffix != "gmail_variant" {
+				return domain.ErrInvalidOrderRequest
+			}
+			prepared.emailSuffix = ""
 		case domain.ProductTypeICloud:
 			if prepared.selectorSuffix != "icloud.com" {
 				return domain.ErrInvalidOrderRequest
@@ -991,7 +1064,7 @@ func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.P
 				prepared.emailSuffix = normalized
 			}
 		}
-	case domain.ProductTypeLegacyRandom, domain.ProductTypeGmail, domain.ProductTypeICloud:
+	case domain.ProductTypeLegacyRandom, domain.ProductTypeGmail, domain.ProductTypeGmailVariant, domain.ProductTypeICloud:
 		prepared.emailSuffix = ""
 	default:
 		return domain.ErrInvalidOrderRequest
@@ -1088,30 +1161,41 @@ func (uc *UseCase) prepareCheckoutQuote(ctx context.Context, prepared *checkoutP
 	if err := finalizeCheckoutProduct(prepared, quote.ProductType); err != nil {
 		return err
 	}
-	if quote.ProductType == domain.ProductTypeGmail {
+	if domain.IsGmailProductType(quote.ProductType) {
 		if uc.gmailSupply == nil {
 			return domain.ErrUpstreamUnavailable
 		}
 		gmailQuote, localErr := uc.gmailSupply.CheckSupply(
 			ctx, quote.ProjectID, quote.ProductID, prepared.request.UserID, prepared.mode, prepared.policy, quote.PayAmount,
 		)
-		if localErr != nil && !errors.Is(localErr, domain.ErrUpstreamUnavailable) {
-			return localErr
-		}
-		demand, err := gmailUpstreamDemand(
-			quote.ProjectID, quote.ProductID, prepared.request.UserID, prepared.mode, quote.PayAmount,
-		)
-		if err != nil {
-			return err
-		}
-		offer, useLocal, err := uc.upstreams.Choose(ctx, demand, gmailQuote != nil)
-		if err != nil {
-			return tradeUpstreamError(err)
-		}
-		if useLocal {
+		localErr = checkoutGmailSupplyError(quote.ProductType, localErr)
+		if quote.ProductType == domain.ProductTypeGmailVariant {
+			if localErr != nil {
+				return localErr
+			}
+			if gmailQuote == nil || gmailQuote.Source != "local" {
+				return checkoutGmailSupplyError(quote.ProductType, domain.ErrUpstreamUnavailable)
+			}
 			prepared.gmailQuote = gmailQuote
 		} else {
-			prepared.upstreamOffer = offer
+			if localErr != nil && !errors.Is(localErr, domain.ErrUpstreamUnavailable) {
+				return localErr
+			}
+			demand, err := gmailUpstreamDemand(
+				quote.ProjectID, quote.ProductID, prepared.request.UserID, prepared.mode, quote.PayAmount,
+			)
+			if err != nil {
+				return err
+			}
+			offer, useLocal, err := uc.upstreams.Choose(ctx, demand, gmailQuote != nil)
+			if err != nil {
+				return tradeUpstreamError(err)
+			}
+			if useLocal {
+				prepared.gmailQuote = gmailQuote
+			} else {
+				prepared.upstreamOffer = offer
+			}
 		}
 	}
 	prepared.quote = quote
@@ -1142,6 +1226,13 @@ func tradeUpstreamError(err error) error {
 	}
 }
 
+func checkoutGmailSupplyError(productType domain.ProductType, err error) error {
+	if productType == domain.ProductTypeGmailVariant && errors.Is(err, domain.ErrUpstreamUnavailable) {
+		return domain.ErrInsufficientInventory
+	}
+	return err
+}
+
 func (uc *UseCase) checkoutUpstreamAfterLocalInventoryMiss(
 	ctx context.Context,
 	prepared checkoutPreparation,
@@ -1149,6 +1240,9 @@ func (uc *UseCase) checkoutUpstreamAfterLocalInventoryMiss(
 	created bool,
 ) (*CheckoutResult, bool, error) {
 	if prepared.fallbackAttempted || prepared.upstreamOwned || prepared.mode != domain.ServiceModeCode || prepared.quote == nil || order == nil {
+		return nil, false, nil
+	}
+	if order.ProductType != domain.ProductTypeGmail {
 		return nil, false, nil
 	}
 	if err := uc.allocation.ReleaseByOrder(ctx, order.OrderNo); err != nil {
@@ -1187,7 +1281,7 @@ func (uc *UseCase) checkoutPrepared(ctx context.Context, prepared checkoutPrepar
 		return nil, prepared.prepareErr
 	}
 	if prepared.existing != nil {
-		if prepared.existing.ProductType == domain.ProductTypeGmail {
+		if domain.IsGmailProductType(prepared.existing.ProductType) {
 			return uc.checkoutGmailPrepared(ctx, prepared)
 		}
 		return uc.resumeExistingCheckout(
@@ -1200,7 +1294,7 @@ func (uc *UseCase) checkoutPrepared(ctx context.Context, prepared checkoutPrepar
 	if prepared.quote == nil {
 		return nil, errors.New("checkout quote was not prepared")
 	}
-	if prepared.quote.ProductType == domain.ProductTypeGmail {
+	if domain.IsGmailProductType(prepared.quote.ProductType) {
 		return uc.checkoutGmailPrepared(ctx, prepared)
 	}
 	order, created, err := uc.repo.LoadOrCreatePendingOrder(ctx, CreatePendingOrderCommand{
@@ -1283,14 +1377,16 @@ func (uc *UseCase) checkoutGmailPrepared(ctx context.Context, prepared checkoutP
 		prepared.mode = prepared.existing.ServiceMode
 		prepared.policy = prepared.existing.SupplyPolicy
 
-		offer, owned, err := uc.upstreams.Owner(ctx, prepared.existing.OrderNo)
-		if err != nil {
-			return nil, err
-		}
-		if owned {
-			prepared.upstreamOffer = offer
-			prepared.upstreamOwned = true
-			return uc.checkoutUpstreamGmailPrepared(ctx, prepared)
+		if prepared.existing.ProductType == domain.ProductTypeGmail {
+			offer, owned, err := uc.upstreams.Owner(ctx, prepared.existing.OrderNo)
+			if err != nil {
+				return nil, err
+			}
+			if owned {
+				prepared.upstreamOffer = offer
+				prepared.upstreamOwned = true
+				return uc.checkoutUpstreamGmailPrepared(ctx, prepared)
+			}
 		}
 		if prepared.existing.Status == domain.OrderStatusPaid {
 			sessionID, err := uc.gmailSupply.FindSessionID(ctx, prepared.existing.OrderNo)
@@ -1309,28 +1405,39 @@ func (uc *UseCase) checkoutGmailPrepared(ctx context.Context, prepared checkoutP
 				ctx, prepared.existing.ProjectID, prepared.existing.ProjectProductID, prepared.existing.UserID,
 				prepared.existing.ServiceMode, prepared.existing.SupplyPolicy, prepared.existing.PayAmount,
 			)
-			if localErr != nil && !errors.Is(localErr, domain.ErrUpstreamUnavailable) {
-				return nil, localErr
-			}
-			demand, err := gmailUpstreamDemand(
-				prepared.existing.ProjectID, prepared.existing.ProjectProductID, prepared.existing.UserID,
-				prepared.existing.ServiceMode, prepared.existing.PayAmount,
-			)
-			if err != nil {
-				return nil, err
-			}
-			offer, useLocal, err := uc.upstreams.Choose(ctx, demand, gmailQuote != nil)
-			if err != nil {
-				return nil, tradeUpstreamError(err)
-			}
-			if useLocal {
+			localErr = checkoutGmailSupplyError(prepared.existing.ProductType, localErr)
+			if prepared.existing.ProductType == domain.ProductTypeGmailVariant {
+				if localErr != nil {
+					return nil, localErr
+				}
+				if gmailQuote == nil || gmailQuote.Source != "local" {
+					return nil, checkoutGmailSupplyError(prepared.existing.ProductType, domain.ErrUpstreamUnavailable)
+				}
 				prepared.gmailQuote = gmailQuote
 			} else {
-				prepared.upstreamOffer = offer
+				if localErr != nil && !errors.Is(localErr, domain.ErrUpstreamUnavailable) {
+					return nil, localErr
+				}
+				demand, err := gmailUpstreamDemand(
+					prepared.existing.ProjectID, prepared.existing.ProjectProductID, prepared.existing.UserID,
+					prepared.existing.ServiceMode, prepared.existing.PayAmount,
+				)
+				if err != nil {
+					return nil, err
+				}
+				offer, useLocal, err := uc.upstreams.Choose(ctx, demand, gmailQuote != nil)
+				if err != nil {
+					return nil, tradeUpstreamError(err)
+				}
+				if useLocal {
+					prepared.gmailQuote = gmailQuote
+				} else {
+					prepared.upstreamOffer = offer
+				}
 			}
 		}
 	}
-	if prepared.quote == nil || prepared.quote.ProductType != domain.ProductTypeGmail {
+	if prepared.quote == nil || !domain.IsGmailProductType(prepared.quote.ProductType) {
 		return nil, domain.ErrInvalidOrderRequest
 	}
 	if prepared.upstreamOffer != nil {
@@ -1495,7 +1602,7 @@ func (uc *UseCase) checkoutLocalGmailCodePrepared(ctx context.Context, prepared 
 			return nil, err
 		}
 	}
-	if order == nil || order.ProductType != domain.ProductTypeGmail || order.ServiceMode != domain.ServiceModeCode {
+	if order == nil || !domain.IsGmailProductType(order.ProductType) || order.ServiceMode != domain.ServiceModeCode {
 		return nil, domain.ErrInvalidOrderRequest
 	}
 
@@ -1647,7 +1754,7 @@ func (uc *UseCase) checkoutGmailPurchasePrepared(ctx context.Context, prepared c
 			prepared.gmailQuote = gmailQuote
 		}
 	}
-	if prepared.quote == nil || prepared.quote.ProductType != domain.ProductTypeGmail || prepared.mode != domain.ServiceModePurchase ||
+	if prepared.quote == nil || !domain.IsGmailProductType(prepared.quote.ProductType) || prepared.mode != domain.ServiceModePurchase ||
 		prepared.gmailQuote == nil || prepared.gmailQuote.Source != "local" {
 		return nil, domain.ErrInvalidOrderRequest
 	}
@@ -1679,7 +1786,7 @@ func (uc *UseCase) checkoutGmailPurchasePrepared(ctx context.Context, prepared c
 			return nil, err
 		}
 	}
-	if order == nil || order.ProductType != domain.ProductTypeGmail || order.ServiceMode != domain.ServiceModePurchase {
+	if order == nil || !domain.IsGmailProductType(order.ProductType) || order.ServiceMode != domain.ServiceModePurchase {
 		return nil, domain.ErrInvalidOrderRequest
 	}
 
@@ -1881,7 +1988,7 @@ func (uc *UseCase) gmailCheckoutResult(ctx context.Context, order domain.Order, 
 }
 
 func (uc *UseCase) attachGmailPurchase(ctx context.Context, result *CheckoutResult) error {
-	if result == nil || result.Order.ProductType != domain.ProductTypeGmail || result.Order.ServiceMode != domain.ServiceModePurchase ||
+	if result == nil || !domain.IsGmailProductType(result.Order.ProductType) || result.Order.ServiceMode != domain.ServiceModePurchase ||
 		(result.Order.Status != domain.OrderStatusActive && result.Order.Status != domain.OrderStatusCompleted) {
 		return nil
 	}
@@ -2045,7 +2152,7 @@ func (uc *UseCase) precheckCheckoutInventory(ctx context.Context, prepared []che
 		if item.prepareErr != nil || item.existing != nil || item.quote == nil {
 			continue
 		}
-		if item.quote.ProductType == domain.ProductTypeGmail {
+		if domain.IsGmailProductType(item.quote.ProductType) {
 			continue
 		}
 		key := inventoryKey{
@@ -2219,6 +2326,10 @@ func (uc *UseCase) prepareCheckoutBatch(ctx context.Context, requests []Checkout
 			continue
 		}
 		if err := uc.prepareCheckoutQuote(ctx, &prepared[i], quotes); err != nil {
+			if errors.Is(err, domain.ErrInsufficientInventory) {
+				prepared[i].prepareErr = err
+				continue
+			}
 			return nil, err
 		}
 	}
@@ -2422,7 +2533,7 @@ func (uc *UseCase) GetOrder(ctx context.Context, orderNo string, userID uint, is
 		if err != nil {
 			return nil, err
 		}
-		if token == nil && order.ProductType == domain.ProductTypeGmail {
+		if token == nil && domain.IsGmailProductType(order.ProductType) {
 			token, err = uc.tokens.IssueOrderToken(ctx, order.OrderNo, tokenExpireAtFromOrder(*order))
 			if err != nil {
 				return nil, err
@@ -2438,7 +2549,7 @@ func (uc *UseCase) GetOrder(ctx context.Context, orderNo string, userID uint, is
 	if err := uc.attachOrderDelivery(ctx, result); err != nil {
 		return nil, err
 	}
-	if result.Order.ProductType == domain.ProductTypeGmail {
+	if domain.IsGmailProductType(result.Order.ProductType) {
 		gmailResults := []CheckoutResult{*result}
 		if err := uc.attachGmailDeliveries(ctx, gmailResults); err != nil {
 			return nil, err
@@ -2674,21 +2785,23 @@ func (uc *UseCase) attachGmailDeliveries(ctx context.Context, results []Checkout
 	if uc.gmailDeliveries == nil || len(results) == 0 {
 		return nil
 	}
-	orderNos := make([]string, 0, len(results))
+	orders := make([]GmailDeliveryOrder, 0, len(results))
 	for i := range results {
-		if results[i].Order.ProductType == domain.ProductTypeGmail {
-			orderNos = append(orderNos, results[i].Order.OrderNo)
+		if domain.IsGmailProductType(results[i].Order.ProductType) {
+			orders = append(orders, GmailDeliveryOrder{
+				OrderNo: results[i].Order.OrderNo, ProductType: results[i].Order.ProductType,
+			})
 		}
 	}
-	if len(orderNos) == 0 {
+	if len(orders) == 0 {
 		return nil
 	}
-	deliveries, err := uc.gmailDeliveries.ListGmailDeliveries(ctx, orderNos)
+	deliveries, err := uc.gmailDeliveries.ListGmailDeliveries(ctx, orders)
 	if err != nil {
 		return err
 	}
 	for i := range results {
-		if results[i].Order.ProductType != domain.ProductTypeGmail {
+		if !domain.IsGmailProductType(results[i].Order.ProductType) {
 			continue
 		}
 		delivery, ok := deliveries[results[i].Order.OrderNo]
@@ -2873,7 +2986,7 @@ func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrder
 			return nil, err
 		}
 		for _, recovery := range recoveries {
-			if recovery.ProductType == domain.ProductTypeGmail {
+			if domain.IsGmailProductType(recovery.ProductType) {
 				if uc.gmailSupply == nil {
 					result.Failed++
 					continue
@@ -3088,7 +3201,7 @@ func (uc *UseCase) ActivateGmailOrder(ctx context.Context, req ActivateGmailOrde
 	if err != nil {
 		return err
 	}
-	if order.ProductType != domain.ProductTypeGmail {
+	if !domain.IsGmailProductType(order.ProductType) {
 		return domain.ErrInvalidOrderRequest
 	}
 	if order.Status == domain.OrderStatusActive || order.Status == domain.OrderStatusCompleted {
@@ -3200,7 +3313,7 @@ func (uc *UseCase) GmailOrderReceiveUntil(ctx context.Context, orderNo string) (
 	if err != nil {
 		return time.Time{}, err
 	}
-	if order.ProductType != domain.ProductTypeGmail || order.ServiceMode != domain.ServiceModeCode || order.ReceiveUntil == nil || order.ReceiveUntil.IsZero() {
+	if !domain.IsGmailProductType(order.ProductType) || order.ServiceMode != domain.ServiceModeCode || order.ReceiveUntil == nil || order.ReceiveUntil.IsZero() {
 		return time.Time{}, domain.ErrInvalidOrderRequest
 	}
 	return order.ReceiveUntil.UTC(), nil
@@ -3216,7 +3329,7 @@ func (uc *UseCase) CompleteGmailOrder(ctx context.Context, orderNo, reason strin
 		if err != nil {
 			return err
 		}
-		if order.ProductType != domain.ProductTypeGmail || order.ServiceMode != domain.ServiceModeCode {
+		if !domain.IsGmailProductType(order.ProductType) || order.ServiceMode != domain.ServiceModeCode {
 			return domain.ErrInvalidOrderRequest
 		}
 		if _, _, err := uc.repo.CompleteExpiredOrder(txCtx, orderNo, strings.TrimSpace(reason)); err != nil {
@@ -3236,7 +3349,7 @@ func (uc *UseCase) FailGmailOrder(ctx context.Context, orderNo, reason string) e
 	if err != nil {
 		return err
 	}
-	if order.ProductType != domain.ProductTypeGmail {
+	if !domain.IsGmailProductType(order.ProductType) {
 		return domain.ErrInvalidOrderRequest
 	}
 	switch order.Status {
@@ -3425,12 +3538,16 @@ func (uc *UseCase) confirmGmailUpstreamCancellation(ctx context.Context, order d
 
 func (uc *UseCase) cleanupOrderService(ctx context.Context, order domain.Order, releaseAllocation bool, reason string, requestID string) error {
 	failures := make([]string, 0, 3)
-	if order.ProductType == domain.ProductTypeGmail {
-		handled, upstreamErr := uc.upstreams.CancelOrder(ctx, order.OrderNo)
-		if upstreamErr != nil {
-			failures = append(failures, "cancel upstream order: "+upstreamErr.Error())
+	if domain.IsGmailProductType(order.ProductType) {
+		handled := false
+		if order.ProductType == domain.ProductTypeGmail {
+			var upstreamErr error
+			handled, upstreamErr = uc.upstreams.CancelOrder(ctx, order.OrderNo)
+			if upstreamErr != nil {
+				failures = append(failures, "cancel upstream order: "+upstreamErr.Error())
+			}
 		}
-		if !handled && upstreamErr == nil {
+		if !handled && len(failures) == 0 {
 			if uc.gmailSupply == nil {
 				failures = append(failures, "cancel Gmail session: service unavailable")
 			} else if err := uc.gmailSupply.CancelGmailOrder(ctx, order.OrderNo); err != nil {
@@ -4046,6 +4163,9 @@ func normalizeCheckoutProductSuffix(value string) (string, error) {
 	if value == "" || strings.Contains(value, "@") || strings.HasPrefix(value, ".") {
 		return "", domain.ErrInvalidOrderRequest
 	}
+	if value == "gmail_variant" {
+		return value, nil
+	}
 	normalized, err := coredomain.NormalizeDomainSuffix(value)
 	if err != nil {
 		return "", domain.ErrInvalidOrderRequest
@@ -4068,6 +4188,8 @@ func checkoutProductTypeForSuffix(suffix string) (domain.ProductType, error) {
 	switch suffix {
 	case "gmail.com":
 		return domain.ProductTypeGmail, nil
+	case "gmail_variant":
+		return domain.ProductTypeGmailVariant, nil
 	case "icloud.com":
 		return domain.ProductTypeICloud, nil
 	case coredomain.RandomMicrosoftSuffixSelector:

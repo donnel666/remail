@@ -1620,11 +1620,12 @@ func toProjectListFacetsResponse(facets *coreapp.ProjectListFacets) *ProjectList
 			Strict: facets.Match.Strict,
 		},
 		ProductType: ProjectProductTypeFacetsResponse{
-			All:       facets.ProductType.All,
-			Microsoft: facets.ProductType.Microsoft,
-			Domain:    facets.ProductType.Domain,
-			Gmail:     facets.ProductType.Gmail,
-			ICloud:    facets.ProductType.ICloud,
+			All:          facets.ProductType.All,
+			Microsoft:    facets.ProductType.Microsoft,
+			Domain:       facets.ProductType.Domain,
+			Gmail:        facets.ProductType.Gmail,
+			GmailVariant: facets.ProductType.GmailVariant,
+			ICloud:       facets.ProductType.ICloud,
 		},
 	}
 }

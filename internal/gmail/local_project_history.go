@@ -177,11 +177,11 @@ func (s *Service) ReleaseLocalGmailProjectHistoryDispatch(ctx context.Context, t
 
 func (s *Service) scanLocalGmailProjectHistoryPage(ctx context.Context, task localGmailProjectHistoryTask) (bool, localGmailProjectHistoryTask, error) {
 	next := task
-	scope, err := s.findLocalGmailProjectHistoryScope(ctx, task.ProjectID)
+	scopes, err := s.findLocalGmailProjectHistoryScopes(ctx, task.ProjectID)
 	if err != nil {
 		return false, next, fmt.Errorf("%w: load Gmail project history scope: %v", errLocalGmailProjectHistoryInfrastructure, err)
 	}
-	if scope == nil {
+	if len(scopes) == 0 {
 		return true, next, nil
 	}
 	if next.MaxResourceID == 0 {
@@ -209,7 +209,7 @@ func (s *Service) scanLocalGmailProjectHistoryPage(ctx context.Context, task loc
 		next.SkippedCount++
 		return false, next, nil
 	}
-	matched, skipped, err := s.scanLocalGmailProjectHistoryResource(ctx, task, *scope, resource)
+	matched, skipped, err := s.scanLocalGmailProjectHistoryResource(ctx, task, scopes, resource)
 	if matched {
 		next.MatchedCount++
 	}
@@ -222,7 +222,7 @@ func (s *Service) scanLocalGmailProjectHistoryPage(ctx context.Context, task loc
 func (s *Service) scanLocalGmailProjectHistoryResource(
 	ctx context.Context,
 	task localGmailProjectHistoryTask,
-	scope localGmailHistoryScope,
+	scopes []localGmailHistoryScope,
 	resource localResourceModel,
 ) (bool, bool, error) {
 	matches := make([]localGmailHistoryMatch, 0)
@@ -239,32 +239,37 @@ func (s *Service) scanLocalGmailProjectHistoryResource(
 		for _, fetched := range messages {
 			message := parseLocalGmailHistoryMessage(fetched.Raw, fetched.ReceivedAt)
 			mailbox, recipient, ok := localGmailHistoryRecipient(resource.Email, []string{fetched.Recipient})
-			if !ok || !localGmailHistoryMatchesScope(message, mailbox, scope) {
+			if !ok {
 				continue
 			}
-			matchedAt := message.ReceivedAt.UTC()
-			if matchedAt.IsZero() {
-				matchedAt = s.now().UTC()
+			for _, scope := range scopes {
+				if !localGmailHistoryMatchesScope(message, mailbox, scope) {
+					continue
+				}
+				matchedAt := message.ReceivedAt.UTC()
+				if matchedAt.IsZero() {
+					matchedAt = s.now().UTC()
+				}
+				key := localGmailHistoryMatchKey{ProjectID: scope.ProjectID, ProductID: scope.ProductID, Mailbox: mailbox, Email: recipient}
+				index, exists := matchIndex[key]
+				if !exists {
+					matchIndex[key] = len(matches)
+					matches = append(matches, localGmailHistoryMatch{
+						ResourceID: resource.ID, ProjectID: scope.ProjectID, ProductID: scope.ProductID, ProductType: scope.ProductType,
+						CodeWindowMinutes: scope.CodeWindowMinutes, ActivationWindowMinutes: scope.ActivationWindowMinutes,
+						WarrantyMinutes: scope.WarrantyMinutes, Mailbox: mailbox, Email: recipient,
+						FirstMatchedAt: matchedAt, LastMatchedAt: matchedAt, EvidenceCount: 1,
+					})
+					continue
+				}
+				if matchedAt.Before(matches[index].FirstMatchedAt) {
+					matches[index].FirstMatchedAt = matchedAt
+				}
+				if matchedAt.After(matches[index].LastMatchedAt) {
+					matches[index].LastMatchedAt = matchedAt
+				}
+				matches[index].EvidenceCount++
 			}
-			key := localGmailHistoryMatchKey{ProjectID: scope.ProjectID, Mailbox: mailbox, Email: recipient}
-			index, exists := matchIndex[key]
-			if !exists {
-				matchIndex[key] = len(matches)
-				matches = append(matches, localGmailHistoryMatch{
-					ResourceID: resource.ID, ProjectID: scope.ProjectID, ProductID: scope.ProductID,
-					CodeWindowMinutes: scope.CodeWindowMinutes, ActivationWindowMinutes: scope.ActivationWindowMinutes,
-					WarrantyMinutes: scope.WarrantyMinutes, Mailbox: mailbox, Email: recipient,
-					FirstMatchedAt: matchedAt, LastMatchedAt: matchedAt, EvidenceCount: 1,
-				})
-				continue
-			}
-			if matchedAt.Before(matches[index].FirstMatchedAt) {
-				matches[index].FirstMatchedAt = matchedAt
-			}
-			if matchedAt.After(matches[index].LastMatchedAt) {
-				matches[index].LastMatchedAt = matchedAt
-			}
-			matches[index].EvidenceCount++
 		}
 		if nextCursors == cursors {
 			break
@@ -276,11 +281,11 @@ func (s *Service) scanLocalGmailProjectHistoryResource(
 		if err := s.assertLocalGmailProjectHistoryFence(tx, task.ProjectID, task.Generation); err != nil {
 			return err
 		}
-		currentScope, err := s.findLocalGmailProjectHistoryScope(platform.WithGormTx(ctx, tx), task.ProjectID)
+		currentScopes, err := s.findLocalGmailProjectHistoryScopes(platform.WithGormTx(ctx, tx), task.ProjectID)
 		if err != nil {
 			return err
 		}
-		if currentScope == nil || !sameLocalGmailHistoryScopes([]localGmailHistoryScope{scope}, []localGmailHistoryScope{*currentScope}) {
+		if !sameLocalGmailHistoryScopes(scopes, currentScopes) {
 			return errLocalGmailHistoryScopeChanged
 		}
 		var current localResourceModel
@@ -312,7 +317,7 @@ func (s *Service) scanLocalGmailProjectHistoryResource(
 	return len(matches) > 0, false, nil
 }
 
-func (s *Service) findLocalGmailProjectHistoryScope(ctx context.Context, projectID uint) (*localGmailHistoryScope, error) {
+func (s *Service) findLocalGmailProjectHistoryScopes(ctx context.Context, projectID uint) ([]localGmailHistoryScope, error) {
 	if projectID == 0 {
 		return nil, nil
 	}
@@ -320,12 +325,13 @@ func (s *Service) findLocalGmailProjectHistoryScope(ctx context.Context, project
 	if err != nil {
 		return nil, err
 	}
-	for i := range scopes {
-		if scopes[i].ProjectID == projectID {
-			return &scopes[i], nil
+	result := make([]localGmailHistoryScope, 0, 2)
+	for _, scope := range scopes {
+		if scope.ProjectID == projectID {
+			result = append(result, scope)
 		}
 	}
-	return nil, nil
+	return result, nil
 }
 
 func (s *Service) enqueueLocalGmailProjectHistory(ctx context.Context, task localGmailProjectHistoryTask) (bool, error) {

@@ -166,6 +166,35 @@ func TestUnifiedGmailAllocationHonorsPrivateFirstAndPublicOnly(t *testing.T) {
 	require.Equal(t, "7.00", mustLocalGmailAllocation(t, db, public.ID).CostPointsSnapshot)
 }
 
+func TestUnifiedGmailProductsUseFixedMailboxKinds(t *testing.T) {
+	db := newLocalGmailAllocationTestDB(t, "gmail-fixed-product-mailboxes")
+	require.NoError(t, db.Exec(`
+INSERT INTO project_products(
+    id, project_id, type, status, code_enabled, purchase_enabled,
+    code_supplier_price, purchase_supplier_price, main_weight, dot_weight, plus_weight
+) VALUES (13, 11, 'gmail_variant', 'enabled', 1, 1, '9', '10', 1, 1, 0)`).Error)
+	require.NoError(t, db.Exec("UPDATE project_products SET main_weight = 0, dot_weight = 0, plus_weight = 1 WHERE id = 12").Error)
+	root := resourceRootModel{Type: "gmail", OwnerUserID: 1}
+	require.NoError(t, db.Create(&root).Error)
+	require.NoError(t, db.Create(&localResourceModel{
+		ID: root.ID, ResourceType: "gmail", OwnerUserID: 1,
+		Email: "fixed@gmail.com", Identity: "fixed@gmail.com", Password: "password",
+		TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "app-password", ForSale: true, Status: LocalResourceNormal,
+	}).Error)
+
+	allocator := allocapp.NewUseCase(allocinfra.NewRepo(db))
+	main := allocateLocalGmailTest(t, allocator, "GMAIL-FIXED-MAIN", 2, 12, allocdomain.GmailServiceModeCode, allocdomain.SupplyScopePublic)
+	require.Equal(t, GmailMailboxMain, mustLocalGmailAllocation(t, db, main.ID).Mailbox)
+	variant := allocateLocalGmailTest(t, allocator, "GMAIL-FIXED-VARIANT", 2, 13, allocdomain.GmailServiceModeCode, allocdomain.SupplyScopePublic)
+	require.Equal(t, GmailMailboxPlus, mustLocalGmailAllocation(t, db, variant.ID).Mailbox)
+
+	quote, err := NewService(db, nil).CheckSupply(
+		context.Background(), 11, 13, 2, tradedomain.ServiceModeCode, tradedomain.SupplyPolicyPublicOnly, "1.00",
+	)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, quote.Available)
+}
+
 func TestUnifiedGmailAllocationRechecksProductModeAndPublicOwner(t *testing.T) {
 	db := newLocalGmailAllocationTestDB(t, "gmail-local-allocation-recheck")
 	root := resourceRootModel{Type: "gmail", OwnerUserID: 1}
@@ -198,8 +227,8 @@ func TestUnifiedGmailDotAndPlusHistoryIsProjectScoped(t *testing.T) {
 INSERT INTO project_products(
     id, project_id, type, status, code_enabled, purchase_enabled,
     code_supplier_price, purchase_supplier_price, main_weight, dot_weight, plus_weight
-) VALUES (22, 21, 'gmail', 'enabled', 1, 1, '0', '0', 0, 1, 0)`).Error)
-	require.NoError(t, db.Exec("UPDATE project_products SET main_weight = 0, dot_weight = 1, plus_weight = 0 WHERE id = 12").Error)
+) VALUES (22, 21, 'gmail', 'enabled', 1, 1, '0', '0', 0, 1, 0),
+         (13, 11, 'gmail_variant', 'enabled', 1, 1, '0', '0', 1, 1, 0)`).Error)
 
 	root := resourceRootModel{Type: "gmail", OwnerUserID: 1}
 	require.NoError(t, db.Create(&root).Error)
@@ -209,6 +238,14 @@ INSERT INTO project_products(
 		TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "app-password", ForSale: true, Status: LocalResourceNormal,
 	}).Error)
 	allocator := allocapp.NewUseCase(allocinfra.NewRepo(db))
+	createdAt := time.Now().UTC().Add(-time.Hour)
+	for _, history := range []allocapp.HistoricalGmailAllocationCommand{
+		{ProjectID: 11, ProductID: 12, ResourceID: root.ID, Mailbox: allocdomain.GmailMailboxMain, Email: "firstname@gmail.com", CreatedAt: createdAt, ReleasedAt: createdAt},
+		{ProjectID: 21, ProductID: 22, ResourceID: root.ID, Mailbox: allocdomain.GmailMailboxMain, Email: "firstname@gmail.com", CreatedAt: createdAt, ReleasedAt: createdAt},
+	} {
+		_, err := allocator.ImportHistoricalGmailAllocation(context.Background(), history)
+		require.NoError(t, err)
+	}
 	allocateDot := func(orderNo string, productID uint) allocationModel {
 		result := allocateLocalGmailTest(
 			t, allocator, orderNo, 2, productID,
@@ -232,9 +269,8 @@ INSERT INTO project_products(
 
 	_, err = allocator.ReleaseByOrder(context.Background(), otherProject.OrderNo)
 	require.NoError(t, err)
-	require.NoError(t, db.Exec("UPDATE project_products SET main_weight = 0, dot_weight = 0, plus_weight = 1 WHERE id = 12").Error)
 	plus := allocateLocalGmailTest(
-		t, allocator, "GMAIL-PLUS", 2, 12,
+		t, allocator, "GMAIL-PLUS", 2, 13,
 		allocdomain.GmailServiceModeCode, allocdomain.SupplyScopePublic,
 	)
 	plusAllocation := mustLocalGmailAllocation(t, db, plus.ID)

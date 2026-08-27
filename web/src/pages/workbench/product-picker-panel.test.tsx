@@ -115,6 +115,14 @@ describe("ProductPickerPanel", () => {
       toWorkbenchProducts(1, { ...product, suffixes: [], type: "domain" })[0]
         .emailSuffix,
     ).toBe("domain");
+    expect(
+      toWorkbenchProducts(1, { ...product, suffixes: [], type: "gmail_variant" })[0],
+    ).toMatchObject({
+      emailSuffix: "gmail_variant",
+      id: "gmail_variant",
+      label: "Gmail variant",
+      suffix: "@gmail变种",
+    });
 
     const noop = vi.fn();
     const { container } = render(

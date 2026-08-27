@@ -217,6 +217,13 @@ VALUES (1003, 'running', UTC_TIMESTAMP(3))`).Error)
 func TestGmailUnifiedAllocationInventoryMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "gmail", 1, 1, 1)
+	require.NoError(t, db.Exec(`
+INSERT INTO project_products(
+    id, project_id, type, status, code_enabled, purchase_enabled,
+    code_price, purchase_price, code_supplier_price, purchase_supplier_price,
+    code_window_minutes, activation_window_minutes, warranty_minutes,
+    main_weight, dot_weight, plus_weight
+) VALUES (21, 10, 'gmail_variant', 'enabled', TRUE, FALSE, 1, 0, 0.5, 0, 10, 60, 60, 0, 0, 1)`).Error)
 	seedGmailResources(t, db, []gmailResourceSeed{
 		{ID: 1000, OwnerUserID: 1, Email: "firstname@gmail.com", ForSale: true},
 		{ID: 1001, OwnerUserID: 1, Email: "ab@gmail.com", ForSale: true},
@@ -255,29 +262,32 @@ func TestGmailUnifiedAllocationInventoryMySQL(t *testing.T) {
 
 		totals, err := repo.GetProductInventoryTotals(context.Background(), 10)
 		require.NoError(t, err)
-		require.Len(t, totals.Items, 1)
-		item := totals.Items[0]
-		require.NotNil(t, item.CodeAvailable)
-		require.NotNil(t, item.PurchaseAvailable)
-		require.Equal(t, int64(11), *item.CodeAvailable)
-		require.Equal(t, int64(11), *item.PurchaseAvailable)
+		require.Len(t, totals.Items, 2)
+		require.Equal(t, coredomain.ProductTypeGmail, totals.Items[0].ProductType)
+		require.Equal(t, int64(9), totals.Items[0].TotalAvailable)
+		require.Equal(t, coredomain.ProductTypeGmailVariant, totals.Items[1].ProductType)
+		require.Equal(t, int64(2), totals.Items[1].TotalAvailable)
 	}
 
 	assertInventory(true, false)
 	privateInventory, err := repo.ListPrivateGmailInventoryTotals(context.Background(), 10, 2)
 	require.NoError(t, err)
-	require.Equal(t, []allocapp.PrivateSingletonInventoryTotal{{ProductID: 20, Available: 3}}, privateInventory)
+	require.Equal(t, []allocapp.PrivateSingletonInventoryTotal{
+		{ProductID: 20, ProductType: coredomain.ProductTypeGmail, Available: 2},
+		{ProductID: 21, ProductType: coredomain.ProductTypeGmailVariant, Available: 1},
+	}, privateInventory)
 	viewerTotals, err := uc.GetProductInventoryTotals(context.Background(), 10, 2)
 	require.NoError(t, err)
 	require.EqualValues(t, 14, viewerTotals.TotalAvailable)
-	require.EqualValues(t, 14, *viewerTotals.Items[0].CodeAvailable)
-	require.EqualValues(t, 14, *viewerTotals.Items[0].PurchaseAvailable)
-	require.EqualValues(t, 11, *viewerTotals.Items[0].CodePublicAvailable)
-	require.EqualValues(t, 11, *viewerTotals.Items[0].PurchasePublicAvailable)
+	require.EqualValues(t, 11, *viewerTotals.Items[0].CodeAvailable)
+	require.EqualValues(t, 11, *viewerTotals.Items[0].PurchaseAvailable)
+	require.EqualValues(t, 9, *viewerTotals.Items[0].CodePublicAvailable)
+	require.EqualValues(t, 3, *viewerTotals.Items[1].CodeAvailable)
+	require.EqualValues(t, 2, *viewerTotals.Items[1].CodePublicAvailable)
 	require.NoError(t, db.Table("project_products").Where("id = ?", 20).
 		Updates(map[string]any{"main_weight": 0, "dot_weight": 0, "plus_weight": 1}).Error)
 	active, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-gmail-active", BuyerUserID: 2, ProjectProductID: 20,
+		OrderNo: "ord-gmail-active", BuyerUserID: 2, ProjectProductID: 21,
 		ServiceMode: domain.GmailServiceModeCode, SupplyScope: domain.SupplyScopePublic,
 	})
 	require.NoError(t, err)
@@ -293,7 +303,7 @@ func TestGmailUnifiedAllocationInventoryMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, stats.ActiveGmailAllocations)
 
-	require.NoError(t, db.Table("project_products").Where("id = ?", 20).
+	require.NoError(t, db.Table("project_products").Where("id IN ?", []uint{20, 21}).
 		Updates(map[string]any{"code_enabled": false, "purchase_enabled": true}).Error)
 	assertInventory(false, true)
 }

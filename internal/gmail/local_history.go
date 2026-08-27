@@ -21,6 +21,7 @@ import (
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
+	tradedomain "github.com/donnel666/remail/internal/trade/domain"
 	"github.com/hibiken/asynq"
 	htmlcharset "golang.org/x/net/html/charset"
 	"gorm.io/gorm"
@@ -55,6 +56,7 @@ type localGmailHistoryRule struct {
 type localGmailHistoryScope struct {
 	ProjectID               uint
 	ProductID               uint
+	ProductType             tradedomain.ProductType
 	CodeWindowMinutes       int
 	ActivationWindowMinutes int
 	WarrantyMinutes         int
@@ -74,6 +76,7 @@ type localGmailHistoryMatch struct {
 	ResourceID              uint
 	ProjectID               uint
 	ProductID               uint
+	ProductType             tradedomain.ProductType
 	CodeWindowMinutes       int
 	ActivationWindowMinutes int
 	WarrantyMinutes         int
@@ -86,6 +89,7 @@ type localGmailHistoryMatch struct {
 
 type localGmailHistoryMatchKey struct {
 	ProjectID uint
+	ProductID uint
 	Mailbox   string
 	Email     string
 }
@@ -199,12 +203,12 @@ func (s *Service) ProcessValidatedLocalGmailHistory(ctx context.Context, task lo
 				if matchedAt.IsZero() {
 					matchedAt = s.now().UTC()
 				}
-				key := localGmailHistoryMatchKey{ProjectID: scope.ProjectID, Mailbox: mailbox, Email: recipient}
+				key := localGmailHistoryMatchKey{ProjectID: scope.ProjectID, ProductID: scope.ProductID, Mailbox: mailbox, Email: recipient}
 				index, exists := matchIndex[key]
 				if !exists {
 					matchIndex[key] = len(matches)
 					matches = append(matches, localGmailHistoryMatch{
-						ResourceID: task.ResourceID, ProjectID: scope.ProjectID, ProductID: scope.ProductID,
+						ResourceID: task.ResourceID, ProjectID: scope.ProjectID, ProductID: scope.ProductID, ProductType: scope.ProductType,
 						CodeWindowMinutes: scope.CodeWindowMinutes, ActivationWindowMinutes: scope.ActivationWindowMinutes,
 						WarrantyMinutes: scope.WarrantyMinutes,
 						Mailbox:         mailbox, Email: recipient, FirstMatchedAt: matchedAt, LastMatchedAt: matchedAt,
@@ -247,34 +251,35 @@ func (s *Service) loadLocalGmailHistoryResource(ctx context.Context, task localG
 
 func (s *Service) listLocalGmailHistoryScopes(ctx context.Context) ([]localGmailHistoryScope, error) {
 	var rows []struct {
-		ProjectID               uint   `gorm:"column:project_id"`
-		ProductID               uint   `gorm:"column:product_id"`
-		CodeWindowMinutes       int    `gorm:"column:code_window_minutes"`
-		ActivationWindowMinutes int    `gorm:"column:activation_window_minutes"`
-		WarrantyMinutes         int    `gorm:"column:warranty_minutes"`
-		LooseMatch              bool   `gorm:"column:loose_match"`
-		RuleType                string `gorm:"column:rule_type"`
-		Pattern                 string `gorm:"column:pattern"`
+		ProjectID               uint                    `gorm:"column:project_id"`
+		ProductID               uint                    `gorm:"column:product_id"`
+		ProductType             tradedomain.ProductType `gorm:"column:product_type"`
+		CodeWindowMinutes       int                     `gorm:"column:code_window_minutes"`
+		ActivationWindowMinutes int                     `gorm:"column:activation_window_minutes"`
+		WarrantyMinutes         int                     `gorm:"column:warranty_minutes"`
+		LooseMatch              bool                    `gorm:"column:loose_match"`
+		RuleType                string                  `gorm:"column:rule_type"`
+		Pattern                 string                  `gorm:"column:pattern"`
 	}
 	err := s.dbFor(ctx).Table("projects AS p").
-		Select("p.id AS project_id, pp.id AS product_id, pp.code_window_minutes, pp.activation_window_minutes, pp.warranty_minutes, p.loose_match, pmr.rule_type, pmr.pattern").
-		Joins(`JOIN project_products AS pp ON pp.project_id = p.id AND pp.type = 'gmail'
-			AND pp.id = (SELECT MIN(candidate.id) FROM project_products AS candidate WHERE candidate.project_id = p.id AND candidate.type = 'gmail')`).
+		Select("p.id AS project_id, pp.id AS product_id, pp.type AS product_type, pp.code_window_minutes, pp.activation_window_minutes, pp.warranty_minutes, p.loose_match, pmr.rule_type, pmr.pattern").
+		Joins(`JOIN project_products AS pp ON pp.project_id = p.id AND pp.type IN ('gmail', 'gmail_variant')
+			AND pp.id = (SELECT MIN(candidate.id) FROM project_products AS candidate WHERE candidate.project_id = p.id AND candidate.type = pp.type)`).
 		Joins("JOIN project_mail_rules AS pmr ON pmr.project_id = p.id AND pmr.enabled = 1").
 		Where("p.status IN ?", []string{"listed", "delisted"}).
-		Order("p.id ASC, pmr.id ASC").Scan(&rows).Error
+		Order("p.id ASC, pp.id ASC, pmr.id ASC").Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("list Gmail history project scopes: %w", err)
 	}
 	scopes := make([]localGmailHistoryScope, 0)
-	indexByProject := make(map[uint]int)
+	indexByProduct := make(map[uint]int)
 	for _, row := range rows {
-		index, exists := indexByProject[row.ProjectID]
+		index, exists := indexByProduct[row.ProductID]
 		if !exists {
 			index = len(scopes)
-			indexByProject[row.ProjectID] = index
+			indexByProduct[row.ProductID] = index
 			scopes = append(scopes, localGmailHistoryScope{
-				ProjectID: row.ProjectID, ProductID: row.ProductID,
+				ProjectID: row.ProjectID, ProductID: row.ProductID, ProductType: row.ProductType,
 				CodeWindowMinutes: row.CodeWindowMinutes, ActivationWindowMinutes: row.ActivationWindowMinutes,
 				WarrantyMinutes: row.WarrantyMinutes, LooseMatch: row.LooseMatch,
 			})
@@ -400,7 +405,7 @@ func (s *Service) commitLocalGmailHistory(
 func (s *Service) importLocalGmailHistoryMatch(ctx context.Context, tx *gorm.DB, match localGmailHistoryMatch) error {
 	match.Email = strings.ToLower(strings.TrimSpace(match.Email))
 	if match.ResourceID == 0 || match.ProjectID == 0 || match.ProductID == 0 || match.Email == "" ||
-		match.EvidenceCount <= 0 || !isGmailMailbox(match.Mailbox) {
+		match.EvidenceCount <= 0 || !localGmailHistoryProductAcceptsMailbox(match.ProductType, match.Mailbox) {
 		return ErrLocalValidationConflict
 	}
 	createdAt := match.FirstMatchedAt.UTC()
@@ -416,7 +421,7 @@ func (s *Service) importLocalGmailHistoryMatch(ctx context.Context, tx *gorm.DB,
 	}
 	return s.trade.ImportHistoricalGmailUsage(platform.WithGormTx(ctx, tx), []tradeapp.HistoricalGmailUsage{{
 		ResourceID: match.ResourceID, ProjectID: match.ProjectID, ProductID: match.ProductID,
-		Mailbox: match.Mailbox, Email: match.Email,
+		ProductType: match.ProductType, Mailbox: match.Mailbox, Email: match.Email,
 		CodeWindowMinutes: match.CodeWindowMinutes, ActivationWindowMinutes: match.ActivationWindowMinutes,
 		WarrantyMinutes: match.WarrantyMinutes, FirstMatchedAt: createdAt, LastMatchedAt: releasedAt,
 		EvidenceCount: match.EvidenceCount,
@@ -428,7 +433,7 @@ func sameLocalGmailHistoryScopes(left, right []localGmailHistoryScope) bool {
 		return false
 	}
 	for i := range left {
-		if left[i].ProjectID != right[i].ProjectID || left[i].ProductID != right[i].ProductID ||
+		if left[i].ProjectID != right[i].ProjectID || left[i].ProductID != right[i].ProductID || left[i].ProductType != right[i].ProductType ||
 			left[i].CodeWindowMinutes != right[i].CodeWindowMinutes ||
 			left[i].ActivationWindowMinutes != right[i].ActivationWindowMinutes ||
 			left[i].WarrantyMinutes != right[i].WarrantyMinutes || left[i].LooseMatch != right[i].LooseMatch || len(left[i].Rules) != len(right[i].Rules) {
@@ -485,12 +490,7 @@ func localGmailHistoryAliasForms(value string) (exact string, plusBase string, d
 }
 
 func localGmailHistoryMatchesScope(message localGmailHistoryMessage, mailbox string, scope localGmailHistoryScope) bool {
-	recipientRule := "exact"
-	if mailbox == GmailMailboxDot || mailbox == GmailMailboxPlus {
-		recipientRule = mailbox
-	}
-	if !localGmailHistoryHasRecipientRule(scope.Rules, recipientRule) ||
-		!localGmailHistoryMatchesRegexRule(scope.Rules, "sender", message.Sender) {
+	if !localGmailHistoryProductAcceptsMailbox(scope.ProductType, mailbox) || !localGmailHistoryMatchesRegexRule(scope.Rules, "sender", message.Sender) {
 		return false
 	}
 	if scope.LooseMatch {
@@ -500,13 +500,9 @@ func localGmailHistoryMatchesScope(message localGmailHistoryMessage, mailbox str
 		localGmailHistoryMatchesRegexRule(scope.Rules, "body", message.Body)
 }
 
-func localGmailHistoryHasRecipientRule(rules []localGmailHistoryRule, want string) bool {
-	for _, rule := range rules {
-		if rule.Type == "recipient" && strings.EqualFold(strings.TrimSpace(rule.Pattern), want) {
-			return true
-		}
-	}
-	return false
+func localGmailHistoryProductAcceptsMailbox(productType tradedomain.ProductType, mailbox string) bool {
+	return productType == tradedomain.ProductTypeGmail && (mailbox == GmailMailboxMain || mailbox == GmailMailboxDot) ||
+		productType == tradedomain.ProductTypeGmailVariant && mailbox == GmailMailboxPlus
 }
 
 type localGmailHistoryCachedRegex struct{ re *regexp.Regexp }

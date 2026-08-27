@@ -157,7 +157,9 @@ export function OrderDetailModal({
               <CopyableValue copiedText={t("Copied")} text={order.deliveryEmail} />
             }
           />
-          {order.productType === "gmail" && order.serviceMode === "purchase" && order.gmailPassword ? (
+          {(order.productType === "gmail" || order.productType === "gmail_variant") &&
+          order.serviceMode === "purchase" &&
+          order.gmailPassword ? (
             <>
               <DetailRow
                 label={t("Password")}

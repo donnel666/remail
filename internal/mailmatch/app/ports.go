@@ -2071,7 +2071,11 @@ func matchAndExtractWithPriority(message FetchedMessage, scope OrderScope) (bool
 }
 
 func matchScopeFilters(message FetchedMessage, scope OrderScope, enabled map[MailRuleType][]string) (bool, string) {
-	if !matchRequiredRule(MailRuleRecipient, enabled, message, scope) {
+	localGmail := scope.AllocationType == domain.ResourceTypeGmail && scope.EmailResourceID > 0
+	if localGmail && (normalizeEmail(message.Recipient) == "" || normalizeEmail(message.Recipient) != normalizeEmail(scope.Recipient)) {
+		return false, "Message recipient did not exactly match the local Gmail allocation."
+	}
+	if !localGmail && !matchRequiredRule(MailRuleRecipient, enabled, message, scope) {
 		return false, "Message did not match recipient project mail rules."
 	}
 	if scope.LooseMatch {

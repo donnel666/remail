@@ -10,7 +10,12 @@ export type OrderStatus =
   | "refunded"
   | "failed"
   | "closed";
-export type ProductType = "microsoft" | "domain" | "gmail" | "icloud";
+export type ProductType =
+  | "microsoft"
+  | "domain"
+  | "gmail"
+  | "gmail_variant"
+  | "icloud";
 export type OrderProductType = ProductType | "random";
 export type ServiceMode = "purchase" | "code";
 export type ServiceState =

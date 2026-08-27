@@ -711,14 +711,7 @@ FROM gmail_allocations ga
 JOIN orders o ON o.order_no = ga.order_no AND o.allocation_type = 'gmail'
 JOIN projects p ON p.id = o.project_id
 WHERE ga.resource_id = ?
-  AND (
-    ga.email = ?
-    OR (
-      ga.mailbox = 'main'
-      AND LOWER(SUBSTRING_INDEX(ga.email, '@', -1)) IN ('gmail.com', 'googlemail.com')
-      AND REPLACE(LOWER(SUBSTRING_INDEX(ga.email, '@', 1)), '.', '') = ?
-    )
-  )
+  AND ga.email = ?
   AND ga.status = 'allocated'
   AND (o.receive_started_at IS NULL OR ? >= DATE_SUB(o.receive_started_at, INTERVAL 2 MINUTE))
   AND (
@@ -1038,26 +1031,7 @@ func (r *Repo) ListMatchingScopesByRecipient(ctx context.Context, resourceType d
 			}
 		}
 	case domain.ResourceTypeGmail:
-		_, _, canonical, ok := domain.RecipientAliasForms(recipient)
-		if !ok {
-			return nil, nil
-		}
-		canonicalLocal, canonicalHost, _ := strings.Cut(canonical, "@")
-		if canonicalHost != "gmail.com" && canonicalHost != "googlemail.com" {
-			return nil, nil
-		}
-		err = r.dbFor(ctx).Raw(gmailMatchingScopesSQL, emailResourceID, recipient, canonicalLocal, receivedAt, receivedAt).Scan(&rows).Error
-		if err == nil {
-			exact := make([]orderScopeRow, 0, len(rows))
-			for _, row := range rows {
-				if strings.EqualFold(strings.TrimSpace(row.Recipient), recipient) {
-					exact = append(exact, row)
-				}
-			}
-			if len(exact) > 0 {
-				rows = exact
-			}
-		}
+		err = r.dbFor(ctx).Raw(gmailMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt).Scan(&rows).Error
 	case domain.ResourceTypeDomain:
 		canonical := mailbox.Normalize(recipient)
 		if canonical == "" {

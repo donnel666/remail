@@ -119,38 +119,34 @@ func (s *Service) checkLocalSupply(
 		modeColumn, costColumn = "pp.purchase_enabled", "purchase_supplier_price"
 	}
 	var row struct {
-		Cost       string `gorm:"column:cost_points"`
-		MainWeight int    `gorm:"column:main_weight"`
-		DotWeight  int    `gorm:"column:dot_weight"`
-		PlusWeight int    `gorm:"column:plus_weight"`
-		Available  uint64 `gorm:"column:available"`
+		Cost      string `gorm:"column:cost_points"`
+		Available uint64 `gorm:"column:available"`
 	}
 	result := s.dbFor(ctx).Table("project_products AS pp").
 		Select(`pp.`+costColumn+` AS cost_points,
-	pp.main_weight, pp.dot_weight, pp.plus_weight,
 	(SELECT COUNT(*) FROM gmail_resources AS gr
 	 JOIN email_resources AS er ON er.id = gr.id AND er.type = 'gmail'
 	 JOIN users AS owner ON owner.id = er.owner_user_id
 	 WHERE gr.status IN (?, ?)
 	   AND (
-	     (pp.main_weight > 0
-	       AND NOT EXISTS (SELECT 1 FROM gmail_allocations AS active WHERE active.source = 'local' AND active.resource_id = gr.id AND active.project_id = pp.project_id AND active.mailbox = 'main' AND active.status = ?)
-	       AND NOT EXISTS (SELECT 1 FROM gmail_allocations AS history WHERE history.source = 'local' AND history.resource_id = gr.id AND history.project_id = pp.project_id AND history.mailbox = 'main'))
-	     OR (pp.dot_weight > 0 AND gr.email LIKE '__%@%')
-	     OR pp.plus_weight > 0
+	     pp.type = 'gmail_variant'
+	     OR (pp.type = 'gmail' AND (
+	       NOT EXISTS (SELECT 1 FROM gmail_allocations AS history WHERE history.source = 'local' AND history.resource_id = gr.id AND history.project_id = pp.project_id AND history.mailbox = 'main')
+	       OR gr.email LIKE '__%@%'
+	     ))
 	   )
 	   AND ((? = 'private_first' AND gr.for_sale = FALSE AND er.owner_user_id = ?)
 	        OR (gr.for_sale = TRUE AND owner.status = 'active' AND owner.role IN ('supplier','admin','super_admin')))) AS available`,
-			LocalResourceNormal, localResourceRollbackNormal, AllocationStatusAllocated, string(policy), buyerUserID).
+			LocalResourceNormal, localResourceRollbackNormal, string(policy), buyerUserID).
 		Joins("JOIN projects AS p ON p.id = pp.project_id").
-		Where("pp.id = ? AND pp.project_id = ? AND pp.type = ? AND pp.status = ? AND "+modeColumn+" = ?", productID, projectID, "gmail", "enabled", true).
+		Where("pp.id = ? AND pp.project_id = ? AND pp.type IN ? AND pp.status = ? AND "+modeColumn+" = ?", productID, projectID, []string{"gmail", "gmail_variant"}, "enabled", true).
 		Where("p.status = ?", "listed").
 		Where("p.access_type = ? OR EXISTS (SELECT 1 FROM project_accesses AS pa WHERE pa.project_id = p.id AND pa.user_id = ?)", "public", buyerUserID).
 		Limit(1).Scan(&row)
 	if result.Error != nil {
 		return nil, fmt.Errorf("load local Gmail supply: %w", result.Error)
 	}
-	if result.RowsAffected == 0 || row.Available == 0 || row.MainWeight+row.DotWeight+row.PlusWeight <= 0 {
+	if result.RowsAffected == 0 || row.Available == 0 {
 		return nil, tradedomain.ErrUpstreamUnavailable
 	}
 	cost, err := money.Parse(row.Cost)

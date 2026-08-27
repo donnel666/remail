@@ -389,6 +389,9 @@ func RecordAllocationBucketFallback(allocationType, reason string) {
 }
 
 func normalizeAllocationType(value string) string {
+	if value == "gmail_variant" {
+		return "gmail"
+	}
 	switch value {
 	case "microsoft", "domain", "gmail", "icloud":
 		return value

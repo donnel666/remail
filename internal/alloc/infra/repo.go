@@ -1906,7 +1906,7 @@ func (r *Repo) ListInventoryProjects(ctx context.Context) ([]allocapp.InventoryP
 		Table("projects AS p").
 		Select("p.id, p.name").
 		Where("p.status = 'listed'").
-		Where("EXISTS (SELECT 1 FROM project_products pp WHERE pp.project_id = p.id AND pp.status = 'enabled' AND pp.type IN ('microsoft', 'domain', 'gmail', 'icloud'))").
+		Where("EXISTS (SELECT 1 FROM project_products pp WHERE pp.project_id = p.id AND pp.status = 'enabled' AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud'))").
 		Order("p.id ASC").
 		Scan(&projects).Error; err != nil {
 		return nil, fmt.Errorf("list inventory projects: %w", err)
@@ -1936,7 +1936,7 @@ JOIN project_products pp ON pp.project_id = p.id
 	WHERE p.id = ?
 	  AND p.status = 'listed'
 	  AND pp.status = 'enabled'
-	  AND pp.type IN ('microsoft', 'domain', 'gmail', 'icloud')`, projectID).Scan(&productRows).Error; err != nil {
+	  AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud')`, projectID).Scan(&productRows).Error; err != nil {
 		return nil, fmt.Errorf("load inventory project products: %w", err)
 	}
 	if len(productRows) == 0 {
@@ -1956,9 +1956,13 @@ JOIN project_products pp ON pp.project_id = p.id
 			stats.Gmail.Enabled = true
 			stats.Gmail.CodeEnabled = stats.Gmail.CodeEnabled || row.CodeEnabled
 			stats.Gmail.PurchaseEnabled = stats.Gmail.PurchaseEnabled || row.PurchaseEnabled
-			stats.Gmail.MainEnabled = stats.Gmail.MainEnabled || row.MainWeight > 0
-			stats.Gmail.DotEnabled = stats.Gmail.DotEnabled || row.DotWeight > 0
-			stats.Gmail.PlusEnabled = stats.Gmail.PlusEnabled || row.PlusWeight > 0
+			stats.Gmail.MainEnabled = true
+			stats.Gmail.DotEnabled = true
+		case coredomain.ProductTypeGmailVariant:
+			stats.Gmail.Enabled = true
+			stats.Gmail.CodeEnabled = stats.Gmail.CodeEnabled || row.CodeEnabled
+			stats.Gmail.PurchaseEnabled = stats.Gmail.PurchaseEnabled || row.PurchaseEnabled
+			stats.Gmail.PlusEnabled = true
 		case coredomain.ProductTypeICloud:
 			stats.ICloud.Enabled = true
 		}
@@ -2357,7 +2361,7 @@ JOIN project_products pp ON pp.project_id = p.id
 	WHERE p.id = ?
 	  AND p.status = 'listed'
 	  AND pp.status = 'enabled'
-	  AND pp.type IN ('microsoft', 'domain', 'gmail', 'icloud')
+	  AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud')
 	ORDER BY pp.id ASC`, projectID).Scan(&productRows).Error; err != nil {
 		return nil, fmt.Errorf("load product inventory rows: %w", err)
 	}
@@ -2385,7 +2389,7 @@ JOIN project_products pp ON pp.project_id = p.id
 			item.Suffixes, err = r.microsoftProductInventorySuffixTotals(ctx, projectID, row)
 		case coredomain.ProductTypeDomain:
 			item.Suffixes, err = r.domainProductInventorySuffixTotals(ctx)
-		case coredomain.ProductTypeGmail, coredomain.ProductTypeICloud:
+		case coredomain.ProductTypeGmail, coredomain.ProductTypeGmailVariant, coredomain.ProductTypeICloud:
 			codeAvailable, codePublicAvailable := item.TotalAvailable, item.PublicAvailable
 			purchaseAvailable, purchasePublicAvailable := item.TotalAvailable, item.PublicAvailable
 			item.CodeAvailable, item.CodePublicAvailable = &codeAvailable, &codePublicAvailable
@@ -2421,17 +2425,9 @@ func productInventoryTotalFromStats(row productInventoryRow, stats *allocapp.Inv
 	case coredomain.ProductTypeDomain:
 		return stats.Domain.TotalAvailable
 	case coredomain.ProductTypeGmail:
-		total := int64(0)
-		if row.MainWeight > 0 {
-			total += stats.Gmail.MainAvailable
-		}
-		if row.DotWeight > 0 {
-			total += stats.Gmail.DotAvailable
-		}
-		if row.PlusWeight > 0 {
-			total += stats.Gmail.PlusAvailable
-		}
-		return total
+		return stats.Gmail.MainAvailable + stats.Gmail.DotAvailable
+	case coredomain.ProductTypeGmailVariant:
+		return stats.Gmail.PlusAvailable
 	case coredomain.ProductTypeICloud:
 		return stats.ICloud.TotalAvailable
 	default:
@@ -2440,20 +2436,17 @@ func productInventoryTotalFromStats(row productInventoryRow, stats *allocapp.Inv
 }
 
 func productInventoryPublicTotalFromStats(row productInventoryRow, stats *allocapp.InventoryStats) int64 {
-	if stats == nil || coredomain.ProductType(row.Type) != coredomain.ProductTypeGmail {
+	if stats == nil {
+		return 0
+	}
+	switch coredomain.ProductType(row.Type) {
+	case coredomain.ProductTypeGmail:
+		return stats.Gmail.MainPublicAvailable + stats.Gmail.DotPublicAvailable
+	case coredomain.ProductTypeGmailVariant:
+		return stats.Gmail.PlusPublicAvailable
+	default:
 		return productInventoryTotalFromStats(row, stats)
 	}
-	total := int64(0)
-	if row.MainWeight > 0 {
-		total += stats.Gmail.MainPublicAvailable
-	}
-	if row.DotWeight > 0 {
-		total += stats.Gmail.DotPublicAvailable
-	}
-	if row.PlusWeight > 0 {
-		total += stats.Gmail.PlusPublicAvailable
-	}
-	return total
 }
 
 type suffixInventoryValue struct {
@@ -2715,14 +2708,25 @@ func privateProductInventoryTotals(productID uint, totals map[string]int64) []al
 }
 
 func (r *Repo) ListPrivateGmailInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]allocapp.PrivateSingletonInventoryTotal, error) {
-	row, err := r.enabledProductInventoryRow(ctx, projectID, coredomain.ProductTypeGmail)
-	if err != nil || row == nil {
-		return nil, err
+	var rows []productInventoryRow
+	if err := r.dbFor(ctx).Raw(`
+SELECT pp.id AS product_id, pp.type AS type
+FROM projects p
+JOIN project_products pp ON pp.project_id = p.id
+WHERE p.id = ?
+  AND p.status = 'listed'
+  AND pp.status = 'enabled'
+  AND pp.type IN ('gmail', 'gmail_variant')
+ORDER BY pp.id ASC`, projectID).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("load private Gmail product inventory rows: %w", err)
 	}
-	available := int64(0)
-	if row.MainWeight > 0 {
-		var mainAvailable int64
-		if err := r.dbFor(ctx).Raw(`
+	result := make([]allocapp.PrivateSingletonInventoryTotal, 0, len(rows))
+	for _, row := range rows {
+		available := int64(0)
+		switch coredomain.ProductType(row.Type) {
+		case coredomain.ProductTypeGmail:
+			var mainAvailable int64
+			if err := r.dbFor(ctx).Raw(`
 SELECT COUNT(*)
 FROM gmail_resources gr
 JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
@@ -2744,22 +2748,20 @@ WHERE gr.status IN ('normal', 'available')
         AND history.project_id = ?
         AND history.mailbox = 'main'
   )`, buyerUserID, projectID, projectID).Scan(&mainAvailable).Error; err != nil {
-			return nil, fmt.Errorf("private Gmail main inventory: %w", err)
-		}
-		available += mainAvailable
-	}
-	if row.DotWeight > 0 {
-		var capacity, used int64
-		if err := r.dbFor(ctx).Raw(`
+				return nil, fmt.Errorf("private Gmail main inventory: %w", err)
+			}
+			available += mainAvailable
+			var capacity, used int64
+			if err := r.dbFor(ctx).Raw(`
 SELECT COALESCE(SUM(`+gmailDotCapacityExpression("gr")+`), 0)
 FROM gmail_resources gr
 JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
 WHERE gr.status IN ('normal', 'available')
   AND gr.for_sale = FALSE
   AND er.owner_user_id = ?`, buyerUserID).Scan(&capacity).Error; err != nil {
-			return nil, fmt.Errorf("private Gmail dot capacity: %w", err)
-		}
-		if err := r.dbFor(ctx).Raw(`
+				return nil, fmt.Errorf("private Gmail dot capacity: %w", err)
+			}
+			if err := r.dbFor(ctx).Raw(`
 SELECT COUNT(*)
 FROM gmail_allocations history
 JOIN gmail_resources gr ON gr.id = history.resource_id
@@ -2770,30 +2772,29 @@ WHERE history.source = 'local'
   AND gr.status IN ('normal', 'available')
   AND gr.for_sale = FALSE
   AND er.owner_user_id = ?`, projectID, buyerUserID).Scan(&used).Error; err != nil {
-			return nil, fmt.Errorf("private Gmail dot usage: %w", err)
-		}
-		available += nonNegative(capacity - used)
-	}
-	if row.PlusWeight > 0 {
-		var plusAvailable int64
-		if err := r.dbFor(ctx).Raw(`
+				return nil, fmt.Errorf("private Gmail dot usage: %w", err)
+			}
+			available += nonNegative(capacity - used)
+		case coredomain.ProductTypeGmailVariant:
+			var plusAvailable int64
+			if err := r.dbFor(ctx).Raw(`
 SELECT COUNT(*)
 FROM gmail_resources gr
 JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
 WHERE gr.status IN ('normal', 'available')
   AND gr.for_sale = FALSE
   AND er.owner_user_id = ?`, buyerUserID).Scan(&plusAvailable).Error; err != nil {
-			return nil, fmt.Errorf("private Gmail plus inventory: %w", err)
+				return nil, fmt.Errorf("private Gmail plus inventory: %w", err)
+			}
+			available += plusAvailable
 		}
-		available += plusAvailable
+		if available > 0 {
+			result = append(result, allocapp.PrivateSingletonInventoryTotal{
+				ProductID: row.ProductID, ProductType: coredomain.ProductType(row.Type), Available: available,
+			})
+		}
 	}
-	if available <= 0 {
-		return nil, nil
-	}
-	return []allocapp.PrivateSingletonInventoryTotal{{
-		ProductID: row.ProductID,
-		Available: available,
-	}}, nil
+	return result, nil
 }
 
 func (r *Repo) ListPrivateICloudInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]allocapp.PrivateSingletonInventoryTotal, error) {

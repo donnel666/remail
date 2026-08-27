@@ -136,6 +136,8 @@ type UnifiedAllocation struct {
 	Status      AllocationStatus
 	CreatedAt   time.Time
 	ReleasedAt  *time.Time
+	// Created is transient result metadata and is never persisted.
+	Created bool
 }
 
 func IsValidAllocationType(value AllocationType) bool {

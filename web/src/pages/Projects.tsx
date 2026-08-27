@@ -197,7 +197,13 @@ function parseEmailTypes(value?: string) {
     if (normalized.includes("domain") || normalized.includes("域名")) {
       types.add("domain");
     }
-    if (normalized.includes("gmail")) {
+    if (
+      normalized.includes("gmail variant") ||
+      normalized.includes("gmail变种") ||
+      normalized.includes("谷歌变种")
+    ) {
+      types.add("gmail_variant");
+    } else if (normalized.includes("gmail")) {
       types.add("gmail");
     }
     if (normalized.includes("icloud") || normalized.includes("苹果")) {
@@ -787,6 +793,11 @@ function ProjectSquareSidebar({
           },
           { count: productTypeCounts.domain, label: t("Domain email"), value: "domain" },
           { count: productTypeCounts.gmail, label: t("Gmail email"), value: "gmail" },
+          {
+            count: productTypeCounts.gmail_variant,
+            label: t("Gmail variant"),
+            value: "gmail_variant",
+          },
           { count: productTypeCounts.icloud, label: t("iCloud email"), value: "icloud" },
         ]}
         onChange={onProductTypeChange}
@@ -1122,6 +1133,7 @@ export default function Projects() {
     all: 0,
     domain: 0,
     gmail: 0,
+    gmail_variant: 0,
     icloud: 0,
     microsoft: 0,
   });
@@ -1172,6 +1184,7 @@ export default function Projects() {
         all: facets?.productType.all ?? listResponse.total,
         domain: facets?.productType.domain ?? 0,
         gmail: facets?.productType.gmail ?? 0,
+        gmail_variant: facets?.productType.gmailVariant ?? 0,
         icloud: facets?.productType.icloud ?? 0,
         microsoft: facets?.productType.microsoft ?? 0,
       });

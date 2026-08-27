@@ -32,14 +32,15 @@ const (
 	ProductStatusDisabled ProductStatus = "disabled"
 )
 
-// ProductType is the resource type a project product allocates from.
+// ProductType identifies a saleable project product SKU.
 type ProductType string
 
 const (
-	ProductTypeMicrosoft ProductType = "microsoft"
-	ProductTypeDomain    ProductType = "domain"
-	ProductTypeGmail     ProductType = "gmail"
-	ProductTypeICloud    ProductType = "icloud"
+	ProductTypeMicrosoft    ProductType = "microsoft"
+	ProductTypeDomain       ProductType = "domain"
+	ProductTypeGmail        ProductType = "gmail"
+	ProductTypeGmailVariant ProductType = "gmail_variant"
+	ProductTypeICloud       ProductType = "icloud"
 )
 
 const (
@@ -153,7 +154,7 @@ func IsValidProductStatus(status ProductStatus) bool {
 
 func IsValidProductType(productType ProductType) bool {
 	switch productType {
-	case ProductTypeMicrosoft, ProductTypeDomain, ProductTypeGmail, ProductTypeICloud:
+	case ProductTypeMicrosoft, ProductTypeDomain, ProductTypeGmail, ProductTypeGmailVariant, ProductTypeICloud:
 		return true
 	default:
 		return false
@@ -212,6 +213,8 @@ func NormalizeProductType(productType string) (ProductType, bool) {
 		return ProductTypeDomain, true
 	case ProductTypeGmail:
 		return ProductTypeGmail, true
+	case ProductTypeGmailVariant:
+		return ProductTypeGmailVariant, true
 	case ProductTypeICloud:
 		return ProductTypeICloud, true
 	default:

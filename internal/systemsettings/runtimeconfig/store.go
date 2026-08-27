@@ -74,7 +74,7 @@ func ProductPriceMultiplier(productType string) string {
 	switch canonicalKey(productType) {
 	case "microsoft":
 		key = MicrosoftPriceMultiplierKey
-	case "gmail":
+	case "gmail", "gmail_variant":
 		key = GmailPriceMultiplierKey
 	case "icloud":
 		key = ICloudPriceMultiplierKey

@@ -169,6 +169,7 @@ func (r *Repo) CreateHistoricalGmailOrder(ctx context.Context, cmd tradeapp.Crea
 	orderNo := strings.TrimSpace(cmd.OrderNo)
 	deliveryEmail := strings.ToLower(strings.TrimSpace(cmd.DeliveryEmail))
 	if orderNo == "" || cmd.UserID == 0 || cmd.ProjectID == 0 || cmd.ProjectProductID == 0 ||
+		!domain.IsGmailProductType(cmd.ProductType) ||
 		cmd.DebitTxID == 0 || cmd.GmailAllocationID == 0 || deliveryEmail == "" ||
 		cmd.CreatedAt.IsZero() || cmd.ExpiredAt.IsZero() || !cmd.ExpiredAt.Before(cmd.Now) {
 		return domain.ErrInvalidOrderRequest
@@ -180,7 +181,7 @@ func (r *Repo) CreateHistoricalGmailOrder(ctx context.Context, cmd tradeapp.Crea
 	requestFingerprint := fmt.Sprintf("%x", sha256.Sum256([]byte(orderNo)))
 	model := OrderModel{
 		OrderNo: orderNo, UserID: cmd.UserID, ProjectID: cmd.ProjectID, ProjectProductID: cmd.ProjectProductID,
-		ProductType: string(domain.ProductTypeGmail), ServiceMode: string(domain.ServiceModePurchase),
+		ProductType: string(cmd.ProductType), ServiceMode: string(domain.ServiceModePurchase),
 		SupplyPolicy: string(domain.SupplyPolicyPublicOnly), Status: string(domain.OrderStatusCompleted),
 		FailureCode: "", PayAmount: "0", RefundAmount: "0",
 		CodeWindowMinutes: cmd.CodeWindowMinutes, ActivationWindowMinutes: cmd.ActivationWindowMinutes,
@@ -888,10 +889,10 @@ func (r *Repo) ListEvents(ctx context.Context, orderNo string, userID uint, isAd
 }
 
 func (r *Repo) ListExpiredCodeOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error) {
-	return r.listOrderNos(ctx, limit, "status = ? AND service_mode = ? AND product_type <> ? AND receive_until IS NOT NULL AND receive_until < ?",
+	return r.listOrderNos(ctx, limit, "status = ? AND service_mode = ? AND product_type NOT IN ? AND receive_until IS NOT NULL AND receive_until < ?",
 		string(domain.OrderStatusActive),
 		string(domain.ServiceModeCode),
-		string(domain.ProductTypeGmail),
+		[]string{string(domain.ProductTypeGmail), string(domain.ProductTypeGmailVariant)},
 		now.UTC(),
 	)
 }
@@ -959,10 +960,10 @@ func (r *Repo) ListUnavailableMicrosoftOrderNos(ctx context.Context, resourceID 
 }
 
 func (r *Repo) ListCodeOrderNosReadyForCleanup(ctx context.Context, now time.Time, limit int) ([]string, error) {
-	return r.listOrderNos(ctx, limit, "status IN ? AND service_mode = ? AND product_type <> ? AND service_cleanup_status = ? AND after_sale_until IS NOT NULL AND after_sale_until < ?",
+	return r.listOrderNos(ctx, limit, "status IN ? AND service_mode = ? AND product_type NOT IN ? AND service_cleanup_status = ? AND after_sale_until IS NOT NULL AND after_sale_until < ?",
 		[]string{string(domain.OrderStatusCompleted), string(domain.OrderStatusRefunded)},
 		string(domain.ServiceModeCode),
-		string(domain.ProductTypeGmail),
+		[]string{string(domain.ProductTypeGmail), string(domain.ProductTypeGmailVariant)},
 		"none",
 		now.UTC(),
 	)
@@ -1027,7 +1028,7 @@ func (r *Repo) CompleteCodeOrder(ctx context.Context, orderNo string, matchedAt 
 			"version":       gorm.Expr("version + 1"),
 		}
 		// Gmail warranty is fixed by the local session or upstream activation.
-		if model.ProductType != string(domain.ProductTypeGmail) || model.AfterSaleUntil == nil {
+		if !domain.IsGmailProductType(domain.ProductType(model.ProductType)) || model.AfterSaleUntil == nil {
 			updates["after_sale_until"] = readUntil.UTC()
 		}
 		result := tx.Model(&OrderModel{}).

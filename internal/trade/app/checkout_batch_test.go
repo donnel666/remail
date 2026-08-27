@@ -11,6 +11,7 @@ import (
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/donnel666/remail/internal/trade/domain"
+	"github.com/donnel666/remail/internal/upstream"
 	"github.com/stretchr/testify/require"
 )
 
@@ -417,6 +418,7 @@ type checkoutGmailSupplySpy struct {
 	purchases   int
 	purchase    *GmailPurchaseDelivery
 	purchaseErr error
+	noQuote     bool
 }
 
 func (s *checkoutGmailSupplySpy) CheckSupply(
@@ -430,6 +432,9 @@ func (s *checkoutGmailSupplySpy) CheckSupply(
 	s.lastMode = mode
 	if s.checkErr != nil {
 		return nil, s.checkErr
+	}
+	if s.noQuote {
+		return nil, nil
 	}
 	return &GmailSupplyQuote{Source: "local", CostPoints: "1"}, nil
 }
@@ -456,7 +461,7 @@ func (s *checkoutGmailSupplySpy) CancelGmailOrder(context.Context, string) error
 	return nil
 }
 
-func (*checkoutGmailSupplySpy) ListGmailDeliveries(context.Context, []string) (map[string]GmailDeliverySummary, error) {
+func (*checkoutGmailSupplySpy) ListGmailDeliveries(context.Context, []GmailDeliveryOrder) (map[string]GmailDeliverySummary, error) {
 	return map[string]GmailDeliverySummary{}, nil
 }
 
@@ -570,6 +575,7 @@ func TestCheckoutProductTypeForSuffix(t *testing.T) {
 		want   domain.ProductType
 	}{
 		{suffix: "gmail.com", want: domain.ProductTypeGmail},
+		{suffix: "gmail_variant", want: domain.ProductTypeGmailVariant},
 		{suffix: "icloud.com", want: domain.ProductTypeICloud},
 		{suffix: "outlook.com", want: domain.ProductTypeMicrosoft},
 		{suffix: "hotmail.com", want: domain.ProductTypeMicrosoft},
@@ -646,6 +652,12 @@ func TestPrepareCheckoutRequestNormalizesSuffixAndKeepsLegacyIDPriority(t *testi
 	require.NoError(t, err)
 	require.True(t, prepared.selectedBySuffix)
 	require.Equal(t, "outlook.com", prepared.selectorSuffix)
+	variant := batchRequest("gmail-variant-suffix", 1)
+	variant.ProductID = 0
+	variant.EmailSuffix = " @GMAIL_VARIANT "
+	prepared, err = prepareCheckoutRequest(variant)
+	require.NoError(t, err)
+	require.Equal(t, "gmail_variant", prepared.selectorSuffix)
 
 	legacy := batchRequest("legacy-order", 1)
 	legacy.EmailSuffix = "gmail.com"
@@ -935,6 +947,94 @@ func TestGmailCodeCheckoutUsesLocalGmailAllocation(t *testing.T) {
 	require.Equal(t, 1, supply.creates)
 	require.Equal(t, 2, supply.schedules)
 	require.Equal(t, 1, allocation.allocationCalls)
+}
+
+func TestGmailVariantCodeCheckoutNeverCallsUpstream(t *testing.T) {
+	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+	provider := &checkoutUpstreamSpy{
+		quote:  &upstream.SupplyQuote{Strategy: upstream.StrategyUpstreamFirst, Available: 1},
+		accept: activateAcceptedOrder(repo),
+	}
+	supply := &checkoutGmailSupplySpy{}
+	allocation := newCheckoutGmailInventorySpy()
+	uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmailVariant}, &batchWalletSpy{}, allocation, batchTokenSpy{})
+	uc.SetGmailPorts(supply, supply)
+	uc.SetUpstreams(upstream.NewRouter(provider))
+	request := batchRequest("gmail-variant-code", 1)
+	request.ServiceMode = string(domain.ServiceModeCode)
+	request.SupplyPolicy = string(domain.SupplyPolicyPublicOnly)
+
+	result, err := uc.Checkout(context.Background(), request)
+
+	require.NoError(t, err)
+	require.Equal(t, domain.ProductTypeGmailVariant, result.Order.ProductType)
+	require.Equal(t, domain.OrderStatusPaid, result.Order.Status)
+	require.Equal(t, 1, allocation.allocationCalls)
+	require.Equal(t, 1, supply.creates)
+	require.Zero(t, provider.supplyCalls)
+	require.Zero(t, provider.ownerCalls)
+	require.Zero(t, provider.acceptCalls)
+}
+
+func TestGmailVariantCheckoutClassifiesOnlyLocalSupplyMissAsInventory(t *testing.T) {
+	infrastructureErr := errors.New("gmail inventory query failed")
+	for _, test := range []struct {
+		name      string
+		supplyErr error
+		wantErr   error
+		noQuote   bool
+	}{
+		{name: "local inventory miss", supplyErr: domain.ErrUpstreamUnavailable, wantErr: domain.ErrInsufficientInventory},
+		{name: "empty local quote", wantErr: domain.ErrInsufficientInventory, noQuote: true},
+		{name: "infrastructure error", supplyErr: infrastructureErr, wantErr: infrastructureErr},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+			supply := &checkoutGmailSupplySpy{checkErr: test.supplyErr, noQuote: test.noQuote}
+			uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmailVariant}, &batchWalletSpy{}, newCheckoutGmailInventorySpy(), batchTokenSpy{})
+			uc.SetGmailPorts(supply, supply)
+			request := batchRequest("gmail-variant-empty", 1)
+			request.ServiceMode = string(domain.ServiceModeCode)
+			request.SupplyPolicy = string(domain.SupplyPolicyPublicOnly)
+
+			result, err := uc.Checkout(context.Background(), request)
+
+			require.Nil(t, result)
+			require.ErrorIs(t, err, test.wantErr)
+			require.Equal(t, 1, supply.checks)
+			require.Zero(t, repo.topTx)
+		})
+	}
+}
+
+func TestPaidGmailVariantResumeClassifiesLocalSupplyMissAsInventory(t *testing.T) {
+	const key = "gmail-variant-paid"
+	order := domain.Order{
+		ID: 1, OrderNo: "ORDER-GMAIL-VARIANT-PAID", UserID: 7, ProjectID: 8, ProjectProductID: 9,
+		ProductType: domain.ProductTypeGmailVariant, ServiceMode: domain.ServiceModeCode,
+		SupplyPolicy: domain.SupplyPolicyPublicOnly, Status: domain.OrderStatusPaid,
+		PayAmount: "1.00", CodeWindowMinutes: 10, ClientChannel: domain.ClientChannelConsole,
+		IdempotencyKey: key,
+	}
+	repo := &batchRepoSpy{orders: map[string]domain.Order{key: order}}
+	supply := &checkoutGmailSupplySpy{checkErr: domain.ErrUpstreamUnavailable}
+	provider := &checkoutUpstreamSpy{quote: &upstream.SupplyQuote{Strategy: upstream.StrategyUpstreamFirst, Available: 1}}
+	uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmailVariant}, &batchWalletSpy{}, newCheckoutGmailInventorySpy(), batchTokenSpy{})
+	uc.SetGmailPorts(supply, supply)
+	uc.SetUpstreams(upstream.NewRouter(provider))
+	request := batchRequest(key, 1)
+	request.ServiceMode = string(domain.ServiceModeCode)
+	request.SupplyPolicy = string(domain.SupplyPolicyPublicOnly)
+
+	result, err := uc.Checkout(context.Background(), request)
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
+	require.Equal(t, 1, supply.finds)
+	require.Equal(t, 1, supply.checks)
+	require.Zero(t, provider.supplyCalls)
+	require.Zero(t, provider.ownerCalls)
+	require.Zero(t, repo.topTx)
 }
 
 func TestGmailTerminalReplayReleasesUnifiedAllocation(t *testing.T) {
@@ -1286,6 +1386,42 @@ func TestCheckoutBatchChecksSharedZeroInventoryOnceAndReturnsEveryItem(t *testin
 	}
 	require.Equal(t, 1, inventory.checks)
 	require.Zero(t, inventory.allocationCalls)
+	require.Zero(t, repo.topTx)
+	require.Zero(t, wallet.locks)
+}
+
+func TestCheckoutBatchTreatsGmailVariantSupplyMissAsItemInventoryFailure(t *testing.T) {
+	const quantity = 3
+	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+	wallet := &batchWalletSpy{}
+	supply := &checkoutGmailSupplySpy{checkErr: domain.ErrUpstreamUnavailable}
+	provider := &checkoutUpstreamSpy{quote: &upstream.SupplyQuote{Strategy: upstream.StrategyUpstreamFirst, Available: 1}}
+	uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmailVariant}, wallet, newCheckoutGmailInventorySpy(), batchTokenSpy{})
+	uc.SetGmailPorts(supply, supply)
+	uc.SetUpstreams(upstream.NewRouter(provider))
+	requests := make([]CheckoutRequest, quantity)
+	for i := range requests {
+		requests[i] = batchRequest(fmt.Sprintf("gmail-variant-empty-%d", i), quantity)
+		requests[i].ServiceMode = string(domain.ServiceModeCode)
+		requests[i].SupplyPolicy = string(domain.SupplyPolicyPublicOnly)
+	}
+
+	items, err := uc.CheckoutBatch(context.Background(), requests)
+
+	require.NoError(t, err)
+	require.Len(t, items, quantity)
+	for _, item := range items {
+		require.Nil(t, item.Result)
+		require.ErrorIs(t, item.Err, domain.ErrInsufficientInventory)
+		require.True(t, item.attempted)
+	}
+	succeeded, businessFailed, systemFailed, unprocessed := checkoutBatchCounts(quantity, items, nil)
+	require.Zero(t, succeeded)
+	require.Equal(t, quantity, businessFailed)
+	require.Zero(t, systemFailed)
+	require.Zero(t, unprocessed)
+	require.Equal(t, quantity, supply.checks)
+	require.Zero(t, provider.supplyCalls)
 	require.Zero(t, repo.topTx)
 	require.Zero(t, wallet.locks)
 }

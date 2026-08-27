@@ -212,8 +212,9 @@ type PrivateProductInventoryTotal struct {
 }
 
 type PrivateSingletonInventoryTotal struct {
-	ProductID uint
-	Available int64
+	ProductID   uint
+	ProductType coredomain.ProductType
+	Available   int64
 }
 
 type ProjectProductInventoryTotals struct {

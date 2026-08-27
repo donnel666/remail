@@ -1516,6 +1516,49 @@ func TestGmailRecipientRulesNormalizeGooglemailDotAndPlusAliases(t *testing.T) {
 	require.Equal(t, "654321", code)
 }
 
+func TestLocalGmailOnlyMatchesTheAllocatedAddress(t *testing.T) {
+	tests := []struct {
+		name      string
+		allocated string
+		recipient string
+		wantMatch bool
+	}{
+		{name: "main exact", allocated: "username@gmail.com", recipient: "UserName@GMAIL.COM", wantMatch: true},
+		{name: "main rejects dot", allocated: "username@gmail.com", recipient: "user.name@gmail.com"},
+		{name: "main rejects plus", allocated: "username@gmail.com", recipient: "username+tag@gmail.com"},
+		{name: "main rejects googlemail", allocated: "username@gmail.com", recipient: "username@googlemail.com"},
+		{name: "dot exact", allocated: "user.name@gmail.com", recipient: "user.name@gmail.com", wantMatch: true},
+		{name: "dot rejects main", allocated: "user.name@gmail.com", recipient: "username@gmail.com"},
+		{name: "plus exact", allocated: "username+p123@gmail.com", recipient: "username+p123@gmail.com", wantMatch: true},
+		{name: "plus rejects another tag", allocated: "username+p123@gmail.com", recipient: "username+p456@gmail.com"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			matched, code, _ := matchAndExtract(FetchedMessage{
+				ResourceType: domain.ResourceTypeGmail,
+				Recipient:    test.recipient,
+				Sender:       "sender@example.net",
+				Body:         "Code: 654321",
+			}, OrderScope{
+				AllocationType:  domain.ResourceTypeGmail,
+				EmailResourceID: 1,
+				Recipient:       test.allocated,
+				LooseMatch:      true,
+				Rules: []MailRule{
+					{Type: MailRuleRecipient, Pattern: "exact", Enabled: true},
+					{Type: MailRuleRecipient, Pattern: "dot", Enabled: true},
+					{Type: MailRuleRecipient, Pattern: "plus", Enabled: true},
+					{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+				},
+			})
+			require.Equal(t, test.wantMatch, matched)
+			if test.wantMatch {
+				require.Equal(t, "654321", code)
+			}
+		})
+	}
+}
+
 func TestICloudRecipientRulesUseConfiguredAliasKinds(t *testing.T) {
 	scope := OrderScope{Recipient: "alias.name@icloud.com", RecipientKind: "exact"}
 

@@ -30,6 +30,7 @@ func TestProductPriceMultiplier(t *testing.T) {
 
 	require.Equal(t, "0.8", ProductPriceMultiplier("MICROSOFT"))
 	require.Equal(t, "0.7", ProductPriceMultiplier("gmail"))
+	require.Equal(t, "0.7", ProductPriceMultiplier("gmail_variant"))
 	require.Equal(t, "1", ProductPriceMultiplier("retired"))
 	require.Equal(t, "1", ProductPriceMultiplier("icloud"))
 }

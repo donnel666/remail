@@ -275,7 +275,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 						result, err = uc.allocateMicrosoft(txCtx, attemptCmd, *config)
 					case coredomain.ProductTypeDomain:
 						result, err = uc.allocateDomain(txCtx, attemptCmd, *config)
-					case coredomain.ProductTypeGmail:
+					case coredomain.ProductTypeGmail, coredomain.ProductTypeGmailVariant:
 						result, err = uc.allocateGmail(txCtx, attemptCmd, *config)
 					case coredomain.ProductTypeICloud:
 						result, err = uc.allocateICloud(txCtx, attemptCmd, *config)
@@ -655,7 +655,7 @@ func (uc *UseCase) ImportHistoricalGmailAllocation(ctx context.Context, cmd Hist
 			return err
 		}
 		if existing != nil {
-			if !sameHistoricalGmailAllocation(*existing, orderNo, cmd) {
+			if !sameHistoricalGmailAllocationIdentity(*existing, orderNo, cmd) {
 				return domain.ErrAllocationConflict
 			}
 			result = existing
@@ -685,7 +685,7 @@ func (uc *UseCase) ImportHistoricalGmailAllocation(ctx context.Context, cmd Hist
 			Type: domain.AllocationTypeGmail, ID: allocation.ID, OrderNo: allocation.OrderNo,
 			ProjectID: allocation.ProjectID, ProductID: allocation.ProductID, ResourceID: allocation.ResourceID,
 			SupplyScope: allocation.SupplyScope, Mailbox: string(allocation.Mailbox), Email: allocation.Email,
-			Status: allocation.Status, CreatedAt: allocation.CreatedAt, ReleasedAt: allocation.ReleasedAt,
+			Status: allocation.Status, CreatedAt: allocation.CreatedAt, ReleasedAt: allocation.ReleasedAt, Created: true,
 		}
 		result = &unified
 		return nil
@@ -701,10 +701,11 @@ func historicalGmailAllocationOrderNo(cmd HistoricalGmailAllocationCommand) stri
 	return "HIST-GMAIL-" + hex.EncodeToString(sum[:20])
 }
 
-func sameHistoricalGmailAllocation(existing domain.UnifiedAllocation, orderNo string, cmd HistoricalGmailAllocationCommand) bool {
+func sameHistoricalGmailAllocationIdentity(existing domain.UnifiedAllocation, orderNo string, cmd HistoricalGmailAllocationCommand) bool {
 	emailMatches := cmd.Mailbox == domain.GmailMailboxMain || strings.EqualFold(existing.Email, cmd.Email)
+	productMatches := existing.ProductID == cmd.ProductID || cmd.Mailbox == domain.GmailMailboxPlus
 	return existing.Type == domain.AllocationTypeGmail && existing.OrderNo == orderNo &&
-		existing.ProjectID == cmd.ProjectID && existing.ProductID == cmd.ProductID && existing.ResourceID == cmd.ResourceID &&
+		existing.ProjectID == cmd.ProjectID && productMatches && existing.ResourceID == cmd.ResourceID &&
 		existing.Mailbox == string(cmd.Mailbox) && emailMatches && existing.Status == domain.AllocationStatusReleased
 }
 
@@ -984,7 +985,11 @@ func mergePrivateSingletonInventory(result *ProjectProductInventoryTotals, inven
 			}
 		}
 		if itemIndex < 0 {
-			result.Items = append(result.Items, ProductInventoryTotal{ProductID: private.ProductID, ProductType: productType})
+			itemProductType := productType
+			if private.ProductType != "" {
+				itemProductType = private.ProductType
+			}
+			result.Items = append(result.Items, ProductInventoryTotal{ProductID: private.ProductID, ProductType: itemProductType})
 			itemIndex = len(result.Items) - 1
 		}
 		item := &result.Items[itemIndex]
@@ -1549,7 +1554,7 @@ func (uc *UseCase) allocateGmail(ctx context.Context, cmd AllocateCommand, confi
 	if err != nil {
 		return nil, err
 	}
-	preferences := gmailMailboxPreferences(cmd.OrderNo, config)
+	preferences := gmailMailboxPreferences(config)
 	if len(preferences) == 0 {
 		return nil, domain.ErrProjectNotAllocatable
 	}
@@ -2395,13 +2400,15 @@ func microsoftMailboxPreferences(orderNo string, config ProductAllocationConfig)
 	return result
 }
 
-func gmailMailboxPreferences(orderNo string, config ProductAllocationConfig) []domain.GmailMailbox {
-	microsoft := microsoftMailboxPreferences(orderNo, config)
-	result := make([]domain.GmailMailbox, 0, len(microsoft))
-	for _, mailbox := range microsoft {
-		result = append(result, domain.GmailMailbox(mailbox))
+func gmailMailboxPreferences(config ProductAllocationConfig) []domain.GmailMailbox {
+	switch config.ProductType {
+	case coredomain.ProductTypeGmail:
+		return []domain.GmailMailbox{domain.GmailMailboxMain, domain.GmailMailboxDot}
+	case coredomain.ProductTypeGmailVariant:
+		return []domain.GmailMailbox{domain.GmailMailboxPlus}
+	default:
+		return nil
 	}
-	return result
 }
 
 func bucketProbeSequence(orderNo string, projectID uint, kind string, bucketCount uint16) []uint16 {

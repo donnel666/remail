@@ -5647,12 +5647,12 @@ export interface components {
         };
         CreateOrderRequest: {
             projectId: number;
-            /** @description Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
+            /** @description Product selector. gmail.com selects Gmail (local main or dot-alias allocation), gmail_variant selects the local Gmail variant product (plus-alias allocation only; it is not a real domain), icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
             emailSuffix: string;
         };
         CreateOrderBatchRequest: {
             projectId: number;
-            /** @description Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
+            /** @description Product selector. gmail.com selects Gmail (local main or dot-alias allocation), gmail_variant selects the local Gmail variant product (plus-alias allocation only; it is not a real domain), icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
             emailSuffix: string;
             /** @description Number of independent orders to create. */
             quantity: number;
@@ -5715,7 +5715,7 @@ export interface components {
              * @description Product type snapshot. `random` is returned only for historical orders created before that product was retired.
              * @enum {string}
              */
-            productType: "microsoft" | "domain" | "random" | "gmail" | "icloud";
+            productType: "microsoft" | "domain" | "random" | "gmail" | "gmail_variant" | "icloud";
             /** @enum {string} */
             serviceMode: "code" | "purchase";
             /** @enum {string} */
@@ -7225,7 +7225,7 @@ export interface components {
             accessType?: "public" | "private";
             looseMatch?: boolean;
             /** @enum {string} */
-            productType?: "microsoft" | "domain" | "gmail" | "icloud";
+            productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud";
             search?: string;
             targetPlatform?: string;
             /** Format: date-time */
@@ -7267,7 +7267,7 @@ export interface components {
         };
         ProjectProductRequest: {
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "icloud";
+            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud";
             /**
              * @default enabled
              * @enum {string}
@@ -7328,6 +7328,7 @@ export interface components {
             microsoft: number;
             domain: number;
             gmail: number;
+            gmailVariant: number;
             icloud: number;
         };
         ProjectItem: {
@@ -7359,7 +7360,7 @@ export interface components {
         };
         ProjectProductSummary: {
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "icloud";
+            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
@@ -7402,7 +7403,7 @@ export interface components {
         ProjectProduct: {
             projectId: number;
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "icloud";
+            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
@@ -7726,7 +7727,7 @@ export interface components {
         };
         ProjectProductInventoryTotal: {
             /** @enum {string} */
-            productType: "microsoft" | "domain" | "gmail" | "icloud";
+            productType: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud";
             totalAvailable: number;
             publicAvailable: number;
             /** Format: int64 */
@@ -13227,7 +13228,7 @@ export interface operations {
                 status?: "reviewing" | "listed" | "delisted";
                 accessType?: "public" | "private";
                 looseMatch?: boolean;
-                productType?: "microsoft" | "domain" | "gmail" | "icloud";
+                productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud";
                 search?: string;
                 targetPlatform?: string;
                 createdFrom?: string;

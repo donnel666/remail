@@ -536,6 +536,32 @@ func TestProjectUseCaseAllowsPurchaseOnlyGmailProduct(t *testing.T) {
 	require.Equal(t, "99.000000", detail.Products[0].PurchasePrice)
 }
 
+func TestGmailVariantNormalizesToPlusAndUsesGmailDefaults(t *testing.T) {
+	key := "default_project_gmail_code_price"
+	previous := runtimeconfig.String(key, "")
+	runtimeconfig.Set(key, "12.345678")
+	t.Cleanup(func() {
+		if previous == "" {
+			runtimeconfig.Delete(key)
+		} else {
+			runtimeconfig.Set(key, previous)
+		}
+	})
+
+	products, err := normalizeProductRequests([]ProjectProductRequest{{
+		Type: " GMAIL_VARIANT ", Status: "enabled", CodeEnabled: true, CodeWindowMinutes: 10,
+	}}, true, true)
+
+	require.NoError(t, err)
+	require.Len(t, products, 1)
+	require.Equal(t, domain.ProductTypeGmailVariant, products[0].Type)
+	require.Equal(t, "12.345678", products[0].CodePrice)
+	require.Equal(t, 0, products[0].MainWeight)
+	require.Equal(t, 0, products[0].DotWeight)
+	require.Equal(t, 1, products[0].PlusWeight)
+	require.True(t, projectHasGmailProduct(products))
+}
+
 func TestProjectUseCaseAdminUpdatePreservesDisabledHistoricalProduct(t *testing.T) {
 	repo := &fakeProjectRepo{}
 	uc := NewProjectUseCase(repo)

@@ -183,6 +183,8 @@ export function toWorkbenchProducts(
         ? "Domain"
         : product.type === "gmail"
           ? "Gmail"
+          : product.type === "gmail_variant"
+            ? "Gmail variant"
           : "iCloud";
   const totalAvailable =
     inventory?.totalAvailable ?? product.totalAvailable ?? 0;
@@ -209,6 +211,8 @@ export function toWorkbenchProducts(
         ? "domain"
         : product.type === "gmail"
           ? "gmail.com"
+          : product.type === "gmail_variant"
+            ? "gmail_variant"
           : "icloud.com";
   const baseProduct: WorkbenchProduct = {
     activationWindowMinutes: product.activationWindowMinutes,
@@ -228,9 +232,11 @@ export function toWorkbenchProducts(
     purchasePublicInventory: purchasePublicAvailable,
     purchasePrice: moneyToNumber(product.purchasePrice),
     suffix:
-      product.type === "gmail" || product.type === "icloud"
-        ? `@${emailSuffix}`
-        : label,
+      product.type === "gmail_variant"
+        ? "@gmail变种"
+        : product.type === "gmail" || product.type === "icloud"
+          ? `@${emailSuffix}`
+          : label,
     warrantyHours: Math.max(1, Math.ceil(product.warrantyMinutes / 60)),
   };
   const suffixProducts =

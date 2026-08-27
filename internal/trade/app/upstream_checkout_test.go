@@ -240,6 +240,33 @@ func TestLocalFirstGmailFallsBackUpstreamAfterFinalAllocationMiss(t *testing.T) 
 	require.Equal(t, 1, wallet.debits)
 }
 
+func TestMainGmailLocalSupplyMissStillFallsBackUpstream(t *testing.T) {
+	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+	wallet := &batchWalletSpy{}
+	gmail := &checkoutGmailSupplySpy{checkErr: domain.ErrUpstreamUnavailable}
+	allocation := &checkoutInventorySpy{}
+	provider := &checkoutUpstreamSpy{
+		quote:  &upstream.SupplyQuote{Strategy: upstream.StrategyLocalFirst, Available: 1},
+		accept: activateAcceptedOrder(repo),
+	}
+	uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeGmail}, wallet, allocation, batchTokenSpy{})
+	uc.SetGmailPorts(gmail, gmail)
+	uc.SetUpstreams(upstream.NewRouter(provider))
+	request := batchRequest("gmail-local-supply-miss", 1)
+	request.ServiceMode = string(domain.ServiceModeCode)
+	request.SupplyPolicy = string(domain.SupplyPolicyPublicOnly)
+
+	result, err := uc.Checkout(context.Background(), request)
+
+	require.NoError(t, err)
+	require.Equal(t, domain.OrderStatusActive, result.Order.Status)
+	require.Equal(t, 1, gmail.checks)
+	require.Equal(t, 1, provider.supplyCalls)
+	require.Equal(t, 1, provider.acceptCalls)
+	require.Zero(t, allocation.allocationCalls)
+	require.Equal(t, 1, wallet.debits)
+}
+
 func TestUpstreamFirstGmailFallsBackLocalAfterFinalReservationMiss(t *testing.T) {
 	repo := &batchRepoSpy{orders: map[string]domain.Order{}}
 	wallet := &batchWalletSpy{}

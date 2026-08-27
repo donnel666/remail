@@ -452,13 +452,13 @@ func TestInventoryRefreshDiscoversAndRestoresBackendSchedule(t *testing.T) {
 	require.Equal(t, 2, repo.projectCalls)
 }
 
-func TestInventoryCacheV6DoesNotServeV4InventorySemantics(t *testing.T) {
+func TestInventoryCacheV7DoesNotServeV6InventorySemantics(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
 	cache := NewInventoryCache(client)
-	oldKey := "alloc:inventory:v4:products:10"
-	oldActiveKey := "alloc:inventory:v4:active"
+	oldKey := "alloc:inventory:v6:products:10"
+	oldActiveKey := "alloc:inventory:v6:active"
 	require.NoError(t, server.Set(oldKey, `{"ProjectID":10,"TotalAvailable":21,"Items":[{"ProductID":20,"TotalAvailable":21,"Suffixes":[{"Suffix":"outlook.com","TotalAvailable":14}]}]}`))
 	require.NoError(t, client.ZAdd(context.Background(), oldActiveKey, redis.Z{
 		Score: float64(time.Now().UnixMilli()), Member: oldKey,
@@ -539,21 +539,21 @@ func TestInventoryCacheAcceptsGmailOnlyStats(t *testing.T) {
 	require.Zero(t, queue.calls)
 }
 
-func TestInventoryCacheV6KeysAreProjectScoped(t *testing.T) {
+func TestInventoryCacheV7KeysAreProjectScoped(t *testing.T) {
 	entry := allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheStats, ProjectID: 10}
-	require.Equal(t, "alloc:inventory:v6:stats:10", inventoryCacheKey(entry.Kind, entry.ProjectID))
-	require.Equal(t, "alloc:inventory:v6:lock:stats:10", inventoryCacheLockKey(entry))
-	require.Equal(t, "alloc:inventory:v6:active", inventoryCacheScheduleKey)
-	require.Equal(t, "alloc:inventory:v6:unavailable:10:20:public:outlook.com", productUnavailableMarkerKey(
+	require.Equal(t, "alloc:inventory:v7:stats:10", inventoryCacheKey(entry.Kind, entry.ProjectID))
+	require.Equal(t, "alloc:inventory:v7:lock:stats:10", inventoryCacheLockKey(entry))
+	require.Equal(t, "alloc:inventory:v7:active", inventoryCacheScheduleKey)
+	require.Equal(t, "alloc:inventory:v7:unavailable:10:20:public:outlook.com", productUnavailableMarkerKey(
 		allocapp.ProductInventoryAvailabilityRequest{
 			ProjectID: 10, ProductID: 20, EmailSuffix: "@OUTLOOK.COM", PublicOnly: true,
 		},
 	))
 
-	parsed, ok := parseInventoryCacheKey("alloc:inventory:v6:stats:10")
+	parsed, ok := parseInventoryCacheKey("alloc:inventory:v7:stats:10")
 	require.True(t, ok)
 	require.Equal(t, entry, parsed)
-	_, ok = parseInventoryCacheKey("alloc:inventory:v6:stats:10:7")
+	_, ok = parseInventoryCacheKey("alloc:inventory:v7:stats:10:7")
 	require.False(t, ok)
 }
 
@@ -599,8 +599,8 @@ func TestInventoryCacheSharesOneProjectSnapshotAcrossViewers(t *testing.T) {
 	require.Equal(t, 1, repo.productCalls, "the shared aggregate must run only once")
 	require.Equal(t, 2, repo.accessCalls, "each viewer must still be authorized")
 	require.True(t, server.Exists(inventoryCacheKey(allocapp.InventoryCacheProducts, 10)))
-	require.False(t, server.Exists("alloc:inventory:v6:products:10:7"))
-	require.False(t, server.Exists("alloc:inventory:v6:products:10:8"))
+	require.False(t, server.Exists("alloc:inventory:v7:products:10:7"))
+	require.False(t, server.Exists("alloc:inventory:v7:products:10:8"))
 }
 
 func TestColdProductInventoryIncludesOwnedPrivateSingletonModes(t *testing.T) {
@@ -608,7 +608,10 @@ func TestColdProductInventoryIncludesOwnedPrivateSingletonModes(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
 	repo := &inventoryCacheRepoStub{
-		privateGmail:  []allocapp.PrivateSingletonInventoryTotal{{ProductID: 20, Available: 2}},
+		privateGmail: []allocapp.PrivateSingletonInventoryTotal{
+			{ProductID: 20, ProductType: coredomain.ProductTypeGmail, Available: 2},
+			{ProductID: 22, ProductType: coredomain.ProductTypeGmailVariant, Available: 1},
+		},
 		privateICloud: []allocapp.PrivateSingletonInventoryTotal{{ProductID: 21, Available: 3}},
 	}
 	cache := NewInventoryCache(client)
@@ -621,13 +624,13 @@ func TestColdProductInventoryIncludesOwnedPrivateSingletonModes(t *testing.T) {
 	totals, err := useCase.GetProductInventoryTotals(context.Background(), 10, 7)
 	require.NoError(t, err)
 	require.True(t, totals.Cold)
-	require.EqualValues(t, 5, totals.TotalAvailable)
-	require.Len(t, totals.Items, 2)
+	require.EqualValues(t, 6, totals.TotalAvailable)
+	require.Len(t, totals.Items, 3)
 	for index, expected := range []struct {
 		productID   uint
 		productType coredomain.ProductType
 		available   int64
-	}{{20, coredomain.ProductTypeGmail, 2}, {21, coredomain.ProductTypeICloud, 3}} {
+	}{{20, coredomain.ProductTypeGmail, 2}, {22, coredomain.ProductTypeGmailVariant, 1}, {21, coredomain.ProductTypeICloud, 3}} {
 		item := totals.Items[index]
 		require.Equal(t, expected.productID, item.ProductID)
 		require.Equal(t, expected.productType, item.ProductType)
@@ -638,6 +641,19 @@ func TestColdProductInventoryIncludesOwnedPrivateSingletonModes(t *testing.T) {
 		require.Equal(t, expected.available, *item.PurchaseAvailable)
 		require.Zero(t, *item.PurchasePublicAvailable)
 	}
+}
+
+func TestGmailProductInventoryTotalsAreSplitBySKU(t *testing.T) {
+	stats := &allocapp.InventoryStats{Gmail: allocapp.GmailInventoryStats{
+		MainAvailable: 1, DotAvailable: 8, PlusAvailable: 2,
+		MainPublicAvailable: 1, DotPublicAvailable: 7, PlusPublicAvailable: 2,
+	}}
+	main := productInventoryRow{Type: string(coredomain.ProductTypeGmail), PlusWeight: 100}
+	require.EqualValues(t, 9, productInventoryTotalFromStats(main, stats))
+	require.EqualValues(t, 8, productInventoryPublicTotalFromStats(main, stats))
+	variant := productInventoryRow{Type: string(coredomain.ProductTypeGmailVariant), MainWeight: 100, DotWeight: 100}
+	require.EqualValues(t, 2, productInventoryTotalFromStats(variant, stats))
+	require.EqualValues(t, 2, productInventoryPublicTotalFromStats(variant, stats))
 }
 
 type blockingInventoryRepoStub struct {

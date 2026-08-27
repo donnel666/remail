@@ -310,7 +310,7 @@ func (a coreOrderingAdapter) projectProductIDFromDB(ctx context.Context, project
 
 func isCheckoutProductType(productType domain.ProductType) bool {
 	switch productType {
-	case domain.ProductTypeMicrosoft, domain.ProductTypeDomain, domain.ProductTypeGmail, domain.ProductTypeICloud:
+	case domain.ProductTypeMicrosoft, domain.ProductTypeDomain, domain.ProductTypeGmail, domain.ProductTypeGmailVariant, domain.ProductTypeICloud:
 		return true
 	default:
 		return false
@@ -475,8 +475,12 @@ func (a allocationAdapter) Allocate(ctx context.Context, cmd tradeapp.Allocation
 		OrderNo:     result.OrderNo,
 		Type:        domain.AllocationType(result.Type),
 		ID:          result.ID,
+		ProductID:   result.ProductID,
+		Created:     result.Created,
 		Email:       result.Email,
 		SupplyScope: tradeSupplyScope(result.SupplyScope),
+		CreatedAt:   result.CreatedAt,
+		ReleasedAt:  result.ReleasedAt,
 	}, nil
 }
 
@@ -500,7 +504,9 @@ func (a allocationAdapter) FindAllocationsByOrders(ctx context.Context, orderNos
 	for orderNo, allocation := range allocations {
 		result[orderNo] = tradeapp.AllocationResult{
 			OrderNo: allocation.OrderNo, Type: domain.AllocationType(allocation.Type), ID: allocation.ID,
+			ProductID: allocation.ProductID, Created: allocation.Created,
 			Email: allocation.Email, SupplyScope: tradeSupplyScope(allocation.SupplyScope),
+			CreatedAt: allocation.CreatedAt, ReleasedAt: allocation.ReleasedAt,
 		}
 	}
 	return result, nil
@@ -522,8 +528,9 @@ func (a allocationAdapter) ImportHistoricalMicrosoftAllocation(ctx context.Conte
 		return nil, nil
 	}
 	return &tradeapp.AllocationResult{
-		OrderNo: result.OrderNo, Type: domain.AllocationType(result.Type), ID: result.ID, Email: result.Email,
-		SupplyScope: tradeSupplyScope(result.SupplyScope),
+		OrderNo: result.OrderNo, Type: domain.AllocationType(result.Type), ID: result.ID,
+		ProductID: result.ProductID, Created: result.Created, Email: result.Email,
+		SupplyScope: tradeSupplyScope(result.SupplyScope), CreatedAt: result.CreatedAt, ReleasedAt: result.ReleasedAt,
 	}, nil
 }
 
@@ -540,8 +547,9 @@ func (a allocationAdapter) ImportHistoricalGmailAllocation(ctx context.Context, 
 		return nil, nil
 	}
 	return &tradeapp.AllocationResult{
-		OrderNo: result.OrderNo, Type: domain.AllocationType(result.Type), ID: result.ID, Email: result.Email,
-		SupplyScope: tradeSupplyScope(result.SupplyScope),
+		OrderNo: result.OrderNo, Type: domain.AllocationType(result.Type), ID: result.ID,
+		ProductID: result.ProductID, Created: result.Created, Email: result.Email,
+		SupplyScope: tradeSupplyScope(result.SupplyScope), CreatedAt: result.CreatedAt, ReleasedAt: result.ReleasedAt,
 	}, nil
 }
 

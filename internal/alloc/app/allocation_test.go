@@ -671,6 +671,75 @@ func TestDotAliasVariantsSkipPositionsAdjacentToExistingDots(t *testing.T) {
 	}
 }
 
+func TestGmailMailboxPreferencesAreFixedByProduct(t *testing.T) {
+	main := gmailMailboxPreferences(ProductAllocationConfig{
+		ProductType: coredomain.ProductTypeGmail, PlusWeight: 100,
+	})
+	if want := []domain.GmailMailbox{domain.GmailMailboxMain, domain.GmailMailboxDot}; !slices.Equal(main, want) {
+		t.Fatalf("gmail preferences = %v, want %v", main, want)
+	}
+	variant := gmailMailboxPreferences(ProductAllocationConfig{
+		ProductType: coredomain.ProductTypeGmailVariant, MainWeight: 100, DotWeight: 100,
+	})
+	if want := []domain.GmailMailbox{domain.GmailMailboxPlus}; !slices.Equal(variant, want) {
+		t.Fatalf("gmail variant preferences = %v, want %v", variant, want)
+	}
+}
+
+type historicalGmailReplayRepo struct {
+	Repository
+	existing domain.UnifiedAllocation
+}
+
+func (r *historicalGmailReplayRepo) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+func (r *historicalGmailReplayRepo) LockResourceRoot(context.Context, uint, domain.AllocationType) (bool, error) {
+	return true, nil
+}
+
+func (r *historicalGmailReplayRepo) FindExistingAllocation(context.Context, string) (*domain.UnifiedAllocation, error) {
+	result := r.existing
+	return &result, nil
+}
+
+func TestHistoricalGmailAllocationReplayPreservesOriginalProduct(t *testing.T) {
+	createdAt := time.Now().UTC().Add(-time.Hour)
+	cmd := HistoricalGmailAllocationCommand{
+		ProjectID: 10, ProductID: 21, ResourceID: 30, Mailbox: domain.GmailMailboxPlus,
+		Email: "user+legacy@gmail.com", CreatedAt: createdAt, ReleasedAt: createdAt.Add(time.Minute),
+	}
+	orderNo := historicalGmailAllocationOrderNo(cmd)
+	repo := &historicalGmailReplayRepo{existing: domain.UnifiedAllocation{
+		Type: domain.AllocationTypeGmail, ID: 40, OrderNo: orderNo, ProjectID: cmd.ProjectID,
+		ProductID: 20, ResourceID: cmd.ResourceID, Mailbox: string(cmd.Mailbox), Email: cmd.Email,
+		Status: domain.AllocationStatusReleased,
+	}}
+
+	result, err := NewUseCase(repo).ImportHistoricalGmailAllocation(context.Background(), cmd)
+
+	if err != nil {
+		t.Fatalf("ImportHistoricalGmailAllocation() error = %v", err)
+	}
+	if result == nil || result.ProductID != 20 || repo.existing.ProductID != 20 {
+		t.Fatalf("historical allocation product changed: result=%#v stored=%#v", result, repo.existing)
+	}
+	if result.Created {
+		t.Fatal("replayed historical allocation reported as newly created")
+	}
+
+	cmd.Mailbox = domain.GmailMailboxDot
+	cmd.Email = "u.ser@gmail.com"
+	repo.existing.OrderNo = historicalGmailAllocationOrderNo(cmd)
+	repo.existing.Mailbox = string(cmd.Mailbox)
+	repo.existing.Email = cmd.Email
+	_, err = NewUseCase(repo).ImportHistoricalGmailAllocation(context.Background(), cmd)
+	if !errors.Is(err, domain.ErrAllocationConflict) {
+		t.Fatalf("dot allocation replay error = %v, want allocation conflict", err)
+	}
+}
+
 func TestAllocationRuntimeSettingsApplyToNewWork(t *testing.T) {
 	settings := map[string]string{
 		"candidate_window_size":              "2",

@@ -292,7 +292,7 @@ INSERT INTO gmail_resources(
 	expiredAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 	uc := newTradeUseCase(db)
 	require.NoError(t, uc.ImportHistoricalGmailUsage(context.Background(), []tradeapp.HistoricalGmailUsage{{
-		ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "plus",
+		ResourceID: 1000, ProjectID: 10, ProductID: 20, ProductType: tradedomain.ProductTypeGmail, Mailbox: "plus",
 		Email: "firstname+legacy@gmail.com", FirstMatchedAt: createdAt, LastMatchedAt: expiredAt, EvidenceCount: 2,
 	}}))
 	var allocation struct {
@@ -338,7 +338,7 @@ INSERT INTO gmail_resources(
 	rollbackErr := errors.New("rollback Gmail historical facts")
 	err := db.Transaction(func(tx *gorm.DB) error {
 		if err := uc.ImportHistoricalGmailUsage(platform.WithGormTx(context.Background(), tx), []tradeapp.HistoricalGmailUsage{{
-			ResourceID: 1000, ProjectID: 10, ProductID: 20, Mailbox: "dot",
+			ResourceID: 1000, ProjectID: 10, ProductID: 20, ProductType: tradedomain.ProductTypeGmail, Mailbox: "dot",
 			Email: "first.name@gmail.com", FirstMatchedAt: createdAt, LastMatchedAt: expiredAt, EvidenceCount: 1,
 		}}); err != nil {
 			return err

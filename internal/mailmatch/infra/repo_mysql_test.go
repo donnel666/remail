@@ -642,7 +642,7 @@ func TestGmailScopesKeepHistoryButStopMatchingReleasedAllocationMySQL(t *testing
 	require.Empty(t, scopes)
 }
 
-func TestGmailScopesUseDotPlusKindsAndPreferExactAliasMySQL(t *testing.T) {
+func TestGmailScopesUseDotPlusKindsAndRequireExactAddressMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	now := time.Now().UTC().Truncate(time.Second)
 	seedGmailMailmatchScope(t, db, now)
@@ -740,9 +740,7 @@ INSERT INTO gmail_allocations(
 		ctx, domain.ResourceTypeGmail, 100, "first.name+other@googlemail.com", now,
 	)
 	require.NoError(t, err)
-	require.Len(t, scopes, 1)
-	require.Equal(t, "OR_GMAIL_SCOPE", scopes[0].OrderNo)
-	require.Equal(t, "exact", scopes[0].RecipientKind)
+	require.Empty(t, scopes)
 
 	orderScope, err := repo.LoadOrderScope(ctx, "OR_GMAIL_ALIAS_SCOPE", 2, false)
 	require.NoError(t, err)

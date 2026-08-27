@@ -11,6 +11,7 @@ import (
 	allocinfra "github.com/donnel666/remail/internal/alloc/infra"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/platform"
+	tradedomain "github.com/donnel666/remail/internal/trade/domain"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -105,6 +106,16 @@ func TestValidatedLocalGmailHistoryIdentifiesMainDotAndPlusUsage(t *testing.T) {
 	require.Equal(t, "firstname@gmail.com", byMailbox[GmailMailboxMain].Email)
 	require.Equal(t, "first.name@gmail.com", byMailbox[GmailMailboxDot].Email)
 	require.Equal(t, "first.name+legacy@googlemail.com", byMailbox[GmailMailboxPlus].Email)
+	require.Equal(t, uint(12), byMailbox[GmailMailboxMain].ProductID)
+	require.Equal(t, uint(12), byMailbox[GmailMailboxDot].ProductID)
+	require.Equal(t, uint(13), byMailbox[GmailMailboxPlus].ProductID)
+	for _, history := range trade.history {
+		if history.Mailbox == GmailMailboxPlus {
+			require.Equal(t, tradedomain.ProductTypeGmailVariant, history.ProductType)
+		} else {
+			require.Equal(t, tradedomain.ProductTypeGmail, history.ProductType)
+		}
+	}
 
 	available, err := allocinfra.NewRepo(db).IsGmailMailboxAvailable(
 		context.Background(), root.ID, 11, allocdomain.GmailMailboxMain, "firstname@gmail.com",
@@ -179,6 +190,23 @@ func TestLocalGmailHistoryRequiresOneOriginalRecipient(t *testing.T) {
 	require.Equal(t, "first.name+legacy@googlemail.com", recipient)
 }
 
+func TestLocalGmailHistoryRoutesMailboxByProductAndIgnoresRecipientRules(t *testing.T) {
+	message := localGmailHistoryMessage{Sender: "noreply@example.com", Subject: "Legacy sign-in", Body: "old project code"}
+	rules := []localGmailHistoryRule{
+		{Type: "recipient", Pattern: "plus"},
+		{Type: "sender", Pattern: `noreply@example\.com`},
+		{Type: "subject", Pattern: "Legacy sign-in"},
+		{Type: "body", Pattern: "old project code"},
+	}
+	main := localGmailHistoryScope{ProductType: "gmail", Rules: rules}
+	require.True(t, localGmailHistoryMatchesScope(message, GmailMailboxMain, main))
+	require.True(t, localGmailHistoryMatchesScope(message, GmailMailboxDot, main))
+	require.False(t, localGmailHistoryMatchesScope(message, GmailMailboxPlus, main))
+	variant := localGmailHistoryScope{ProductType: "gmail_variant", Rules: rules}
+	require.True(t, localGmailHistoryMatchesScope(message, GmailMailboxPlus, variant))
+	require.False(t, localGmailHistoryMatchesScope(message, GmailMailboxMain, variant))
+}
+
 func prepareLocalGmailHistorySchema(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	require.NoError(t, db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, status TEXT NOT NULL, role TEXT NOT NULL)").Error)
@@ -196,10 +224,8 @@ func prepareLocalGmailHistorySchema(t *testing.T, db *gorm.DB) {
 	require.NoError(t, db.Exec("CREATE TABLE project_accesses (project_id INTEGER NOT NULL, user_id INTEGER NOT NULL)").Error)
 	require.NoError(t, db.Exec("INSERT INTO users(id, status, role) VALUES (7, 'active', 'supplier')").Error)
 	require.NoError(t, db.Exec("INSERT INTO projects(id, status, access_type, loose_match) VALUES (11, 'listed', 'public', 0)").Error)
-	require.NoError(t, db.Exec("INSERT INTO project_products(id, project_id, type, status, code_enabled, purchase_enabled, main_weight, dot_weight, plus_weight) VALUES (12, 11, 'gmail', 'enabled', 1, 1, 1, 1, 1)").Error)
-	for id, pattern := range []string{"exact", "dot", "plus"} {
-		require.NoError(t, db.Exec("INSERT INTO project_mail_rules(id, project_id, rule_type, pattern, enabled) VALUES (?, 11, 'recipient', ?, 1)", id+1, pattern).Error)
-	}
+	require.NoError(t, db.Exec("INSERT INTO project_products(id, project_id, type, status, code_enabled, purchase_enabled, main_weight, dot_weight, plus_weight) VALUES (12, 11, 'gmail', 'enabled', 1, 1, 1, 0, 0), (13, 11, 'gmail_variant', 'enabled', 1, 1, 0, 0, 1)").Error)
+	require.NoError(t, db.Exec("INSERT INTO project_mail_rules(id, project_id, rule_type, pattern, enabled) VALUES (1, 11, 'recipient', 'exact', 1)").Error)
 	require.NoError(t, db.Exec("INSERT INTO project_mail_rules(id, project_id, rule_type, pattern, enabled) VALUES (4, 11, 'sender', 'noreply@example\\.com', 1)").Error)
 	require.NoError(t, db.Exec("INSERT INTO project_mail_rules(id, project_id, rule_type, pattern, enabled) VALUES (5, 11, 'subject', 'Legacy sign-in', 1)").Error)
 	require.NoError(t, db.Exec("INSERT INTO project_mail_rules(id, project_id, rule_type, pattern, enabled) VALUES (6, 11, 'body', 'old project code', 1)").Error)

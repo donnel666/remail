@@ -13,9 +13,10 @@ import (
 	mailmatchapi "github.com/donnel666/remail/internal/mailmatch/api"
 	mailmatchdomain "github.com/donnel666/remail/internal/mailmatch/domain"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
-	openapiapp "github.com/donnel666/remail/internal/openapi/app"
+	openapidomain "github.com/donnel666/remail/internal/openapi/domain"
 	"github.com/donnel666/remail/internal/smsbower"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
+	tradedomain "github.com/donnel666/remail/internal/trade/domain"
 	"github.com/donnel666/remail/internal/upstream"
 )
 
@@ -119,10 +120,19 @@ func (m smsbowerAlertMailer) NotifySMSBower(ctx context.Context, alert smsbower.
 	return result
 }
 
+type gmailPickupReader interface {
+	PickupByOrder(ctx context.Context, orderNo, email string) (*gmail.CodeOnlyPickup, bool, error)
+	ListGmailDeliveries(ctx context.Context, orderNos []string) (map[string]tradeapp.GmailDeliverySummary, error)
+}
+
+type gmailOrderTokenReader interface {
+	FindOrderTokenByPlain(ctx context.Context, tokenPlain string) (*openapidomain.OrderToken, error)
+}
+
 type gmailPickupAdapter struct {
-	service   *gmail.Service
+	service   gmailPickupReader
 	upstreams *upstream.Router
-	tokens    *openapiapp.UseCase
+	tokens    gmailOrderTokenReader
 }
 
 func (a gmailPickupAdapter) ReadCodeOnlyPickup(ctx context.Context, email, tokenPlain string) (*mailmatchapi.CodeOnlyPickupResult, bool, error) {
@@ -133,55 +143,89 @@ func (a gmailPickupAdapter) ReadCodeOnlyPickup(ctx context.Context, email, token
 	if err != nil {
 		return nil, false, mailmatchdomain.ErrPickupCredentialInvalid
 	}
-	upstreamPickup, handled, err := a.upstreams.Pickup(ctx, upstream.PickupRequest{OrderNo: token.OrderNo, Email: email})
-	if errors.Is(err, upstream.ErrPickupInvalid) {
-		return nil, true, mailmatchdomain.ErrPickupCredentialInvalid
-	}
-	if err != nil || handled {
-		if err != nil || upstreamPickup == nil {
-			return nil, handled, err
-		}
-		codes := make([]mailmatchapi.CodeOnlyPickupCode, len(upstreamPickup.Codes))
-		for i := range upstreamPickup.Codes {
-			codes[i] = mailmatchapi.CodeOnlyPickupCode{
-				Seq: upstreamPickup.Codes[i].Seq, Code: upstreamPickup.Codes[i].Value, ReceivedAt: upstreamPickup.Codes[i].ReceivedAt,
-			}
-		}
-		return &mailmatchapi.CodeOnlyPickupResult{
-			Email: upstreamPickup.Email, Codes: codes, ReceivedCount: upstreamPickup.ReceivedCount,
-			MaxCodes: upstreamPickup.MaxCodes, ExpiresAt: upstreamPickup.ExpiresAt,
-		}, true, nil
-	}
 	pickup, matched, err := a.service.PickupByOrder(ctx, token.OrderNo, email)
 	if errors.Is(err, gmail.ErrPickupInvalid) {
 		return nil, true, mailmatchdomain.ErrPickupCredentialInvalid
 	}
-	if err != nil || !matched {
-		return nil, matched, err
+	if err != nil || matched {
+		if err != nil || pickup == nil {
+			return nil, matched, err
+		}
+		codes := make([]mailmatchapi.CodeOnlyPickupCode, len(pickup.Codes))
+		for i := range pickup.Codes {
+			codes[i] = mailmatchapi.CodeOnlyPickupCode{
+				Seq: pickup.Codes[i].Seq, Code: pickup.Codes[i].Code, ReceivedAt: pickup.Codes[i].ReceivedAt,
+			}
+		}
+		return &mailmatchapi.CodeOnlyPickupResult{
+			Email: pickup.Email, Codes: codes, ReceivedCount: pickup.ReceivedCount,
+			MaxCodes: pickup.MaxCodes, ExpiresAt: pickup.ExpiresAt,
+		}, true, nil
 	}
-	codes := make([]mailmatchapi.CodeOnlyPickupCode, len(pickup.Codes))
-	for i := range pickup.Codes {
+	localDeliveries, err := a.service.ListGmailDeliveries(ctx, []string{token.OrderNo})
+	if err != nil {
+		return nil, false, err
+	}
+	if _, local := localDeliveries[token.OrderNo]; local {
+		return nil, false, nil
+	}
+	upstreamPickup, handled, err := a.upstreams.Pickup(ctx, upstream.PickupRequest{OrderNo: token.OrderNo, Email: email})
+	if errors.Is(err, upstream.ErrPickupInvalid) {
+		return nil, true, mailmatchdomain.ErrPickupCredentialInvalid
+	}
+	if err != nil || !handled {
+		return nil, handled, err
+	}
+	if upstreamPickup == nil {
+		return nil, true, nil
+	}
+	codes := make([]mailmatchapi.CodeOnlyPickupCode, len(upstreamPickup.Codes))
+	for i := range upstreamPickup.Codes {
 		codes[i] = mailmatchapi.CodeOnlyPickupCode{
-			Seq: pickup.Codes[i].Seq, Code: pickup.Codes[i].Code, ReceivedAt: pickup.Codes[i].ReceivedAt,
+			Seq: upstreamPickup.Codes[i].Seq, Code: upstreamPickup.Codes[i].Value, ReceivedAt: upstreamPickup.Codes[i].ReceivedAt,
 		}
 	}
 	return &mailmatchapi.CodeOnlyPickupResult{
-		Email: pickup.Email, Codes: codes, ReceivedCount: pickup.ReceivedCount,
-		MaxCodes: pickup.MaxCodes, ExpiresAt: pickup.ExpiresAt,
+		Email: upstreamPickup.Email, Codes: codes, ReceivedCount: upstreamPickup.ReceivedCount,
+		MaxCodes: upstreamPickup.MaxCodes, ExpiresAt: upstreamPickup.ExpiresAt,
 	}, true, nil
 }
 
-type gmailDeliveryComposite struct {
-	gmail    *gmail.Service
-	smsbower *smsbower.Service
+type gmailDeliveryReader interface {
+	ListGmailDeliveries(ctx context.Context, orderNos []string) (map[string]tradeapp.GmailDeliverySummary, error)
 }
 
-func (c gmailDeliveryComposite) ListGmailDeliveries(ctx context.Context, orderNos []string) (map[string]tradeapp.GmailDeliverySummary, error) {
+type smsbowerDeliveryReader interface {
+	ListDeliveries(ctx context.Context, orderNos []string) (map[string]upstream.PickupResult, error)
+}
+
+type gmailDeliveryComposite struct {
+	gmail    gmailDeliveryReader
+	smsbower smsbowerDeliveryReader
+}
+
+func (c gmailDeliveryComposite) ListGmailDeliveries(ctx context.Context, orders []tradeapp.GmailDeliveryOrder) (map[string]tradeapp.GmailDeliverySummary, error) {
+	orderNos := make([]string, 0, len(orders))
+	for _, order := range orders {
+		orderNos = append(orderNos, order.OrderNo)
+	}
 	result, err := c.gmail.ListGmailDeliveries(ctx, orderNos)
 	if err != nil {
 		return nil, err
 	}
-	upstreamDeliveries, err := c.smsbower.ListDeliveries(ctx, orderNos)
+	upstreamOrderNos := make([]string, 0, len(orders))
+	for _, order := range orders {
+		if order.ProductType != tradedomain.ProductTypeGmail {
+			continue
+		}
+		if _, local := result[order.OrderNo]; !local {
+			upstreamOrderNos = append(upstreamOrderNos, order.OrderNo)
+		}
+	}
+	if len(upstreamOrderNos) == 0 {
+		return result, nil
+	}
+	upstreamDeliveries, err := c.smsbower.ListDeliveries(ctx, upstreamOrderNos)
 	if err != nil {
 		return nil, err
 	}

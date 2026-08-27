@@ -14,7 +14,7 @@ const json = (schema) => ({
 });
 
 const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
-const emailSuffixDescription = "商品选择后缀。gmail.com 选择谷歌邮箱，icloud.com 选择苹果邮箱；outlook.com 等具体后缀精确选择对应库存，特殊值 outlook 会在有货的微软白名单后缀中按库存量加权随机，特殊值 domain 会在有货的域名后缀中按库存量加权随机。private_first 随机时先在自有库存内按数量加权；只有自有后缀无货时才使用公共库存。private_first 下也可指定当前用户自有的完整域名，例如 mydomain.com。不接受完整邮箱地址。";
+const emailSuffixDescription = "商品选择后缀。gmail.com 选择谷歌邮箱（本地主邮箱或点别名），gmail_variant 选择仅分配加号别名的 Gmail 变种商品（它不是实际域名），icloud.com 选择苹果邮箱；outlook.com 等具体后缀精确选择对应库存，特殊值 outlook 会在有货的微软白名单后缀中按库存量加权随机，特殊值 domain 会在有货的域名后缀中按库存量加权随机。private_first 随机时先在自有库存内按数量加权；只有自有后缀无货时才使用公共库存。private_first 下也可指定当前用户自有的完整域名，例如 mydomain.com。不接受完整邮箱地址。";
 const batchEmailSuffixDescription = `${emailSuffixDescription} 批量下单只随机一次，所有子订单固定使用该后缀；该后缀库存耗尽后不再随机其他后缀。`;
 const listOf = (name) => ({ type: "array", items: ref(name) });
 const nullable = (type) => ({ type: [type, "null"] });
@@ -183,7 +183,7 @@ const schemas = {
   ProjectProductSummary: {
     type: "object",
     properties: {
-      type: stringEnum(["microsoft", "domain", "gmail", "icloud"]),
+      type: stringEnum(["microsoft", "domain", "gmail", "gmail_variant", "icloud"]),
       status: stringEnum(["enabled", "disabled"]),
       codeEnabled: { type: "boolean", example: true },
       purchaseEnabled: { type: "boolean", example: true },
@@ -315,7 +315,7 @@ const schemas = {
       orderNo: { type: "string", example: "R20260709135800983" },
       userId: { type: "integer", example: 1 },
       projectId: { type: "integer", example: 1001 },
-      productType: stringEnum(["microsoft", "domain", "random", "gmail", "icloud"]),
+      productType: stringEnum(["microsoft", "domain", "random", "gmail", "gmail_variant", "icloud"]),
       serviceMode: stringEnum(["code", "purchase"]),
       supplyPolicy: stringEnum(["private_first", "public_only"]),
       status: stringEnum(["pending_payment", "paid", "active", "completed", "refunded", "failed", "closed"]),
@@ -815,7 +815,7 @@ const spec = {
           { name: "scope", in: "query", schema: stringEnum(["visible", "mine"]) },
           { name: "status", in: "query", schema: { type: "string" } },
           { name: "accessType", in: "query", schema: stringEnum(["public", "private"]) },
-          { name: "productType", in: "query", schema: stringEnum(["microsoft", "domain", "gmail", "icloud"]) },
+          { name: "productType", in: "query", schema: stringEnum(["microsoft", "domain", "gmail", "gmail_variant", "icloud"]) },
           { name: "search", in: "query", schema: { type: "string" } },
         ],
         responses: {

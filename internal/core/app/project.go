@@ -130,11 +130,12 @@ type ProjectMatchFacets struct {
 }
 
 type ProjectProductTypeFacets struct {
-	All       int64
-	Microsoft int64
-	Domain    int64
-	Gmail     int64
-	ICloud    int64
+	All          int64
+	Microsoft    int64
+	Domain       int64
+	Gmail        int64
+	GmailVariant int64
+	ICloud       int64
 }
 
 type ProjectListFacets struct {
@@ -608,7 +609,7 @@ func projectHasMicrosoftProduct(products []domain.Product) bool {
 
 func projectHasGmailProduct(products []domain.Product) bool {
 	for _, product := range products {
-		if product.Type == domain.ProductTypeGmail {
+		if product.Type == domain.ProductTypeGmail || product.Type == domain.ProductTypeGmailVariant {
 			return true
 		}
 	}
@@ -936,13 +937,18 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled, 
 			DotWeight:               req.DotWeight,
 			PlusWeight:              req.PlusWeight,
 		}
+		if product.Type == domain.ProductTypeGmailVariant {
+			product.MainWeight = 0
+			product.DotWeight = 0
+			product.PlusWeight = 1
+		}
 		if product.CodeEnabled && product.CodeWindowMinutes <= 0 {
 			return nil, domain.ErrInvalidProduct
 		}
 		if product.PurchaseEnabled && (product.ActivationWindowMinutes <= 0 || product.WarrantyMinutes <= 0) {
 			return nil, domain.ErrInvalidProduct
 		}
-		if (product.Type == domain.ProductTypeMicrosoft || product.Type == domain.ProductTypeGmail || product.Type == domain.ProductTypeICloud) && product.MainWeight+product.DotWeight+product.PlusWeight <= 0 {
+		if (product.Type == domain.ProductTypeMicrosoft || product.Type == domain.ProductTypeGmail || product.Type == domain.ProductTypeGmailVariant || product.Type == domain.ProductTypeICloud) && product.MainWeight+product.DotWeight+product.PlusWeight <= 0 {
 			return nil, domain.ErrInvalidProduct
 		}
 		if product.Type == domain.ProductTypeDomain {
@@ -962,6 +968,9 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled, 
 func projectPriceOrDefault(value string, productType domain.ProductType, field string, applyDefault bool) string {
 	if !applyDefault || strings.TrimSpace(value) != "" {
 		return value
+	}
+	if productType == domain.ProductTypeGmailVariant {
+		productType = domain.ProductTypeGmail
 	}
 	key := "default_project_" + string(productType) + "_" + field
 	return runtimeconfig.String(key, projectPriceFallbacks[key])

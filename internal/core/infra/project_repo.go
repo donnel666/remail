@@ -745,6 +745,8 @@ func (r *ProjectRepo) Facets(ctx context.Context, filter coreapp.ProjectListFilt
 			facets.ProductType.Domain = row.Count
 		case domain.ProductTypeGmail:
 			facets.ProductType.Gmail = row.Count
+		case domain.ProductTypeGmailVariant:
+			facets.ProductType.GmailVariant = row.Count
 		case domain.ProductTypeICloud:
 			facets.ProductType.ICloud = row.Count
 		}
@@ -1298,6 +1300,7 @@ func activeProjectProductTypes() []string {
 		string(domain.ProductTypeMicrosoft),
 		string(domain.ProductTypeDomain),
 		string(domain.ProductTypeGmail),
+		string(domain.ProductTypeGmailVariant),
 		string(domain.ProductTypeICloud),
 	}
 }

@@ -15,11 +15,11 @@ import (
 )
 
 const (
-	inventoryCacheKeyPrefix        = "alloc:inventory:v6:"
-	inventoryCacheFailureKeyPrefix = "alloc:inventory:v6:failure:"
+	inventoryCacheKeyPrefix        = "alloc:inventory:v7:"
+	inventoryCacheFailureKeyPrefix = "alloc:inventory:v7:failure:"
 	// The Redis name is retained for compatibility; scores are backend-owned
 	// next-refresh times, not client activity times.
-	inventoryCacheScheduleKey = "alloc:inventory:v6:active"
+	inventoryCacheScheduleKey = "alloc:inventory:v7:active"
 )
 
 type InventoryCache struct {
@@ -74,11 +74,11 @@ func (c *InventoryCache) GetProductInventorySnapshots(ctx context.Context, proje
 		if err := json.Unmarshal([]byte(fmt.Sprint(payload)), &totals); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", keys[i], err)
 		}
-		// Gmail and iCloud share one inventory pool across both service modes.
-		// Backfill v6 snapshots written before the mode fields were introduced.
+		// Gmail products and iCloud share one inventory pool across both service modes.
+		// Tolerate snapshots written without the mode-specific fields.
 		for itemIndex := range totals.Items {
 			item := &totals.Items[itemIndex]
-			if item.ProductType != coredomain.ProductTypeGmail && item.ProductType != coredomain.ProductTypeICloud {
+			if item.ProductType != coredomain.ProductTypeGmail && item.ProductType != coredomain.ProductTypeGmailVariant && item.ProductType != coredomain.ProductTypeICloud {
 				continue
 			}
 			if item.CodeAvailable == nil {

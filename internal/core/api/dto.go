@@ -118,7 +118,7 @@ type ProjectBulkCommandRequest struct {
 // ProjectBulkUpdateProductsRequest replaces complete product configurations for selected projects.
 type ProjectBulkUpdateProductsRequest struct {
 	ProjectIDs []uint                  `json:"projectIds" binding:"required,min=1,max=1000,dive,gt=0"`
-	Products   []ProjectProductRequest `json:"products" binding:"required,min=1,max=4"`
+	Products   []ProjectProductRequest `json:"products" binding:"required,min=1,max=5"`
 }
 
 // ProjectPriceDefaultsResponse returns the non-sensitive project price defaults.
@@ -386,11 +386,12 @@ type ProjectMatchFacetsResponse struct {
 }
 
 type ProjectProductTypeFacetsResponse struct {
-	All       int64 `json:"all"`
-	Microsoft int64 `json:"microsoft"`
-	Domain    int64 `json:"domain"`
-	Gmail     int64 `json:"gmail"`
-	ICloud    int64 `json:"icloud"`
+	All          int64 `json:"all"`
+	Microsoft    int64 `json:"microsoft"`
+	Domain       int64 `json:"domain"`
+	Gmail        int64 `json:"gmail"`
+	GmailVariant int64 `json:"gmailVariant"`
+	ICloud       int64 `json:"icloud"`
 }
 
 // ProjectProductResponse is a product view under a project.

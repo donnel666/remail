@@ -475,6 +475,15 @@ func (r *mockProjectRepo) Facets(_ context.Context, _ coreapp.ProjectListFilter)
 		if _, ok := seenTypes[coredomain.ProductTypeDomain]; ok {
 			facets.ProductType.Domain++
 		}
+		if _, ok := seenTypes[coredomain.ProductTypeGmail]; ok {
+			facets.ProductType.Gmail++
+		}
+		if _, ok := seenTypes[coredomain.ProductTypeGmailVariant]; ok {
+			facets.ProductType.GmailVariant++
+		}
+		if _, ok := seenTypes[coredomain.ProductTypeICloud]; ok {
+			facets.ProductType.ICloud++
+		}
 	}
 	return facets, nil
 }
@@ -4304,6 +4313,11 @@ func TestCoreHandler_AdminProjectsProductsAcceptsAllActiveProductTypes(t *testin
 			"activationWindowMinutes":60,"warrantyMinutes":60,"mainWeight":1,"dotWeight":0,"plusWeight":0
 		},
 		{
+			"type":"gmail_variant","status":"enabled","codeEnabled":false,"purchaseEnabled":true,
+			"purchasePrice":"0.03","purchaseSupplierPrice":"0.015",
+			"activationWindowMinutes":60,"warrantyMinutes":60,"mainWeight":0,"dotWeight":0,"plusWeight":1
+		},
+		{
 			"type":"icloud","status":"enabled","codeEnabled":false,"purchaseEnabled":true,
 			"purchasePrice":"0.02","purchaseSupplierPrice":"0.01",
 			"activationWindowMinutes":60,"warrantyMinutes":60,"mainWeight":1,"dotWeight":0,"plusWeight":0
@@ -4318,7 +4332,7 @@ func TestCoreHandler_AdminProjectsProductsAcceptsAllActiveProductTypes(t *testin
 	h.PostAdminProjectsProducts(c)
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.Len(t, repo.details[10].Products, 4)
+	require.Len(t, repo.details[10].Products, 5)
 	product := repo.details[10].Products[1]
 	require.Equal(t, coredomain.ProductTypeDomain, product.Type)
 	require.True(t, product.PurchaseEnabled)

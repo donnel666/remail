@@ -24,14 +24,19 @@ const (
 type ProductType string
 
 const (
-	ProductTypeMicrosoft ProductType = "microsoft"
-	ProductTypeDomain    ProductType = "domain"
-	ProductTypeGmail     ProductType = "gmail"
-	ProductTypeICloud    ProductType = "icloud"
+	ProductTypeMicrosoft    ProductType = "microsoft"
+	ProductTypeDomain       ProductType = "domain"
+	ProductTypeGmail        ProductType = "gmail"
+	ProductTypeGmailVariant ProductType = "gmail_variant"
+	ProductTypeICloud       ProductType = "icloud"
 
 	// ProductTypeLegacyRandom is read only. New checkout quotes reject it.
 	ProductTypeLegacyRandom ProductType = "random"
 )
+
+func IsGmailProductType(productType ProductType) bool {
+	return productType == ProductTypeGmail || productType == ProductTypeGmailVariant
+}
 
 type OrderStatus string
 

@@ -14,9 +14,9 @@ const projectsSource = readFileSync(new URL("./Projects.tsx", import.meta.url), 
 describe("iCloud project products", () => {
   it("keeps iCloud available in project applications and admin product editors", () => {
     expect(applicationSource).toContain('<Select.Option value="icloud">');
-    expect(adminSource).toContain('"microsoft", "domain", "gmail", "icloud"');
+    expect(adminSource).toContain('"microsoft", "domain", "gmail", "gmail_variant", "icloud"');
     expect(adminSource).toContain('purchaseEnabled: type === "microsoft" || type === "icloud"');
-    expect(adminSource).toContain('return type !== "domain";');
+    expect(adminSource).toContain('return type === "microsoft" || type === "icloud";');
     expect(projectsSource).toContain('types.add("icloud")');
   });
 });

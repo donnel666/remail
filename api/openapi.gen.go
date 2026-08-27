@@ -2743,11 +2743,12 @@ func (e OrderResponseFailureCode) Valid() bool {
 
 // Defines values for OrderResponseProductType.
 const (
-	OrderResponseProductTypeDomain    OrderResponseProductType = "domain"
-	OrderResponseProductTypeGmail     OrderResponseProductType = "gmail"
-	OrderResponseProductTypeIcloud    OrderResponseProductType = "icloud"
-	OrderResponseProductTypeMicrosoft OrderResponseProductType = "microsoft"
-	OrderResponseProductTypeRandom    OrderResponseProductType = "random"
+	OrderResponseProductTypeDomain       OrderResponseProductType = "domain"
+	OrderResponseProductTypeGmail        OrderResponseProductType = "gmail"
+	OrderResponseProductTypeGmailVariant OrderResponseProductType = "gmail_variant"
+	OrderResponseProductTypeIcloud       OrderResponseProductType = "icloud"
+	OrderResponseProductTypeMicrosoft    OrderResponseProductType = "microsoft"
+	OrderResponseProductTypeRandom       OrderResponseProductType = "random"
 )
 
 // Valid indicates whether the value is a known member of the OrderResponseProductType enum.
@@ -2756,6 +2757,8 @@ func (e OrderResponseProductType) Valid() bool {
 	case OrderResponseProductTypeDomain:
 		return true
 	case OrderResponseProductTypeGmail:
+		return true
+	case OrderResponseProductTypeGmailVariant:
 		return true
 	case OrderResponseProductTypeIcloud:
 		return true
@@ -2986,10 +2989,11 @@ func (e ProjectBulkFilterAccessType) Valid() bool {
 
 // Defines values for ProjectBulkFilterProductType.
 const (
-	ProjectBulkFilterProductTypeDomain    ProjectBulkFilterProductType = "domain"
-	ProjectBulkFilterProductTypeGmail     ProjectBulkFilterProductType = "gmail"
-	ProjectBulkFilterProductTypeIcloud    ProjectBulkFilterProductType = "icloud"
-	ProjectBulkFilterProductTypeMicrosoft ProjectBulkFilterProductType = "microsoft"
+	ProjectBulkFilterProductTypeDomain       ProjectBulkFilterProductType = "domain"
+	ProjectBulkFilterProductTypeGmail        ProjectBulkFilterProductType = "gmail"
+	ProjectBulkFilterProductTypeGmailVariant ProjectBulkFilterProductType = "gmail_variant"
+	ProjectBulkFilterProductTypeIcloud       ProjectBulkFilterProductType = "icloud"
+	ProjectBulkFilterProductTypeMicrosoft    ProjectBulkFilterProductType = "microsoft"
 )
 
 // Valid indicates whether the value is a known member of the ProjectBulkFilterProductType enum.
@@ -2998,6 +3002,8 @@ func (e ProjectBulkFilterProductType) Valid() bool {
 	case ProjectBulkFilterProductTypeDomain:
 		return true
 	case ProjectBulkFilterProductTypeGmail:
+		return true
+	case ProjectBulkFilterProductTypeGmailVariant:
 		return true
 	case ProjectBulkFilterProductTypeIcloud:
 		return true
@@ -3154,10 +3160,11 @@ func (e ProjectProductStatus) Valid() bool {
 
 // Defines values for ProjectProductType.
 const (
-	ProjectProductTypeDomain    ProjectProductType = "domain"
-	ProjectProductTypeGmail     ProjectProductType = "gmail"
-	ProjectProductTypeIcloud    ProjectProductType = "icloud"
-	ProjectProductTypeMicrosoft ProjectProductType = "microsoft"
+	ProjectProductTypeDomain       ProjectProductType = "domain"
+	ProjectProductTypeGmail        ProjectProductType = "gmail"
+	ProjectProductTypeGmailVariant ProjectProductType = "gmail_variant"
+	ProjectProductTypeIcloud       ProjectProductType = "icloud"
+	ProjectProductTypeMicrosoft    ProjectProductType = "microsoft"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductType enum.
@@ -3166,6 +3173,8 @@ func (e ProjectProductType) Valid() bool {
 	case ProjectProductTypeDomain:
 		return true
 	case ProjectProductTypeGmail:
+		return true
+	case ProjectProductTypeGmailVariant:
 		return true
 	case ProjectProductTypeIcloud:
 		return true
@@ -3178,10 +3187,11 @@ func (e ProjectProductType) Valid() bool {
 
 // Defines values for ProjectProductInventoryTotalProductType.
 const (
-	ProjectProductInventoryTotalProductTypeDomain    ProjectProductInventoryTotalProductType = "domain"
-	ProjectProductInventoryTotalProductTypeGmail     ProjectProductInventoryTotalProductType = "gmail"
-	ProjectProductInventoryTotalProductTypeIcloud    ProjectProductInventoryTotalProductType = "icloud"
-	ProjectProductInventoryTotalProductTypeMicrosoft ProjectProductInventoryTotalProductType = "microsoft"
+	ProjectProductInventoryTotalProductTypeDomain       ProjectProductInventoryTotalProductType = "domain"
+	ProjectProductInventoryTotalProductTypeGmail        ProjectProductInventoryTotalProductType = "gmail"
+	ProjectProductInventoryTotalProductTypeGmailVariant ProjectProductInventoryTotalProductType = "gmail_variant"
+	ProjectProductInventoryTotalProductTypeIcloud       ProjectProductInventoryTotalProductType = "icloud"
+	ProjectProductInventoryTotalProductTypeMicrosoft    ProjectProductInventoryTotalProductType = "microsoft"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductInventoryTotalProductType enum.
@@ -3190,6 +3200,8 @@ func (e ProjectProductInventoryTotalProductType) Valid() bool {
 	case ProjectProductInventoryTotalProductTypeDomain:
 		return true
 	case ProjectProductInventoryTotalProductTypeGmail:
+		return true
+	case ProjectProductInventoryTotalProductTypeGmailVariant:
 		return true
 	case ProjectProductInventoryTotalProductTypeIcloud:
 		return true
@@ -3220,10 +3232,11 @@ func (e ProjectProductRequestStatus) Valid() bool {
 
 // Defines values for ProjectProductRequestType.
 const (
-	ProjectProductRequestTypeDomain    ProjectProductRequestType = "domain"
-	ProjectProductRequestTypeGmail     ProjectProductRequestType = "gmail"
-	ProjectProductRequestTypeIcloud    ProjectProductRequestType = "icloud"
-	ProjectProductRequestTypeMicrosoft ProjectProductRequestType = "microsoft"
+	ProjectProductRequestTypeDomain       ProjectProductRequestType = "domain"
+	ProjectProductRequestTypeGmail        ProjectProductRequestType = "gmail"
+	ProjectProductRequestTypeGmailVariant ProjectProductRequestType = "gmail_variant"
+	ProjectProductRequestTypeIcloud       ProjectProductRequestType = "icloud"
+	ProjectProductRequestTypeMicrosoft    ProjectProductRequestType = "microsoft"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductRequestType enum.
@@ -3232,6 +3245,8 @@ func (e ProjectProductRequestType) Valid() bool {
 	case ProjectProductRequestTypeDomain:
 		return true
 	case ProjectProductRequestTypeGmail:
+		return true
+	case ProjectProductRequestTypeGmailVariant:
 		return true
 	case ProjectProductRequestTypeIcloud:
 		return true
@@ -3262,10 +3277,11 @@ func (e ProjectProductSummaryStatus) Valid() bool {
 
 // Defines values for ProjectProductSummaryType.
 const (
-	ProjectProductSummaryTypeDomain    ProjectProductSummaryType = "domain"
-	ProjectProductSummaryTypeGmail     ProjectProductSummaryType = "gmail"
-	ProjectProductSummaryTypeIcloud    ProjectProductSummaryType = "icloud"
-	ProjectProductSummaryTypeMicrosoft ProjectProductSummaryType = "microsoft"
+	ProjectProductSummaryTypeDomain       ProjectProductSummaryType = "domain"
+	ProjectProductSummaryTypeGmail        ProjectProductSummaryType = "gmail"
+	ProjectProductSummaryTypeGmailVariant ProjectProductSummaryType = "gmail_variant"
+	ProjectProductSummaryTypeIcloud       ProjectProductSummaryType = "icloud"
+	ProjectProductSummaryTypeMicrosoft    ProjectProductSummaryType = "microsoft"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductSummaryType enum.
@@ -3274,6 +3290,8 @@ func (e ProjectProductSummaryType) Valid() bool {
 	case ProjectProductSummaryTypeDomain:
 		return true
 	case ProjectProductSummaryTypeGmail:
+		return true
+	case ProjectProductSummaryTypeGmailVariant:
 		return true
 	case ProjectProductSummaryTypeIcloud:
 		return true
@@ -5035,10 +5053,11 @@ func (e GetProjectsParamsAccessType) Valid() bool {
 
 // Defines values for GetProjectsParamsProductType.
 const (
-	GetProjectsParamsProductTypeDomain    GetProjectsParamsProductType = "domain"
-	GetProjectsParamsProductTypeGmail     GetProjectsParamsProductType = "gmail"
-	GetProjectsParamsProductTypeIcloud    GetProjectsParamsProductType = "icloud"
-	GetProjectsParamsProductTypeMicrosoft GetProjectsParamsProductType = "microsoft"
+	GetProjectsParamsProductTypeDomain       GetProjectsParamsProductType = "domain"
+	GetProjectsParamsProductTypeGmail        GetProjectsParamsProductType = "gmail"
+	GetProjectsParamsProductTypeGmailVariant GetProjectsParamsProductType = "gmail_variant"
+	GetProjectsParamsProductTypeIcloud       GetProjectsParamsProductType = "icloud"
+	GetProjectsParamsProductTypeMicrosoft    GetProjectsParamsProductType = "microsoft"
 )
 
 // Valid indicates whether the value is a known member of the GetProjectsParamsProductType enum.
@@ -5047,6 +5066,8 @@ func (e GetProjectsParamsProductType) Valid() bool {
 	case GetProjectsParamsProductTypeDomain:
 		return true
 	case GetProjectsParamsProductTypeGmail:
+		return true
+	case GetProjectsParamsProductTypeGmailVariant:
 		return true
 	case GetProjectsParamsProductTypeIcloud:
 		return true
@@ -7908,7 +7929,7 @@ type CreateOrderBatchItemResponseStatus string
 
 // CreateOrderBatchRequest defines model for CreateOrderBatchRequest.
 type CreateOrderBatchRequest struct {
-	// EmailSuffix Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
+	// EmailSuffix Product selector. gmail.com selects Gmail (local main or dot-alias allocation), gmail_variant selects the local Gmail variant product (plus-alias allocation only; it is not a real domain), icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
 	EmailSuffix string `json:"emailSuffix"`
 	ProjectId   int    `json:"projectId"`
 
@@ -7921,7 +7942,7 @@ type CreateOrderBatchResponse = []CreateOrderBatchItemResponse
 
 // CreateOrderRequest defines model for CreateOrderRequest.
 type CreateOrderRequest struct {
-	// EmailSuffix Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
+	// EmailSuffix Product selector. gmail.com selects Gmail (local main or dot-alias allocation), gmail_variant selects the local Gmail variant product (plus-alias allocation only; it is not a real domain), icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
 	EmailSuffix string `json:"emailSuffix"`
 	ProjectId   int    `json:"projectId"`
 }
@@ -9669,11 +9690,12 @@ type ProjectProductSummaryType string
 
 // ProjectProductTypeFacets defines model for ProjectProductTypeFacets.
 type ProjectProductTypeFacets struct {
-	All       int `json:"all"`
-	Domain    int `json:"domain"`
-	Gmail     int `json:"gmail"`
-	Icloud    int `json:"icloud"`
-	Microsoft int `json:"microsoft"`
+	All          int `json:"all"`
+	Domain       int `json:"domain"`
+	Gmail        int `json:"gmail"`
+	GmailVariant int `json:"gmailVariant"`
+	Icloud       int `json:"icloud"`
+	Microsoft    int `json:"microsoft"`
 }
 
 // ProjectStatusFacets defines model for ProjectStatusFacets.

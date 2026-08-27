@@ -2780,7 +2780,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [microsoft, domain, gmail, icloud]
+            enum: [microsoft, domain, gmail, gmail_variant, icloud]
         - name: search
           in: query
           schema:
@@ -15047,7 +15047,7 @@ components:
           type: integer
         emailSuffix:
           type: string
-          description: Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
+          description: Product selector. gmail.com selects Gmail (local main or dot-alias allocation), gmail_variant selects the local Gmail variant product (plus-alias allocation only; it is not a real domain), icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
       additionalProperties: false
 
     CreateOrderBatchRequest:
@@ -15061,7 +15061,7 @@ components:
           type: integer
         emailSuffix:
           type: string
-          description: Product selector. gmail.com selects Gmail, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
+          description: Product selector. gmail.com selects Gmail (local main or dot-alias allocation), gmail_variant selects the local Gmail variant product (plus-alias allocation only; it is not a real domain), icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
         quantity:
           type: integer
           minimum: 2
@@ -15228,7 +15228,7 @@ components:
           description: Current display logo URL of the ordered project; omitted when the project no longer exists or has no logo.
         productType:
           type: string
-          enum: [microsoft, domain, random, gmail, icloud]
+          enum: [microsoft, domain, random, gmail, gmail_variant, icloud]
           description: Product type snapshot. `random` is returned only for historical orders created before that product was retired.
         serviceMode:
           type: string
@@ -19125,7 +19125,7 @@ components:
           type: boolean
         productType:
           type: string
-          enum: [microsoft, domain, gmail, icloud]
+          enum: [microsoft, domain, gmail, gmail_variant, icloud]
         search:
           type: string
         targetPlatform:
@@ -19222,7 +19222,7 @@ components:
         products:
           type: array
           minItems: 1
-          maxItems: 4
+          maxItems: 5
           items:
             $ref: "#/components/schemas/ProjectProductRequest"
       additionalProperties: false
@@ -19256,7 +19256,7 @@ components:
       properties:
         type:
           type: string
-          enum: [microsoft, domain, gmail, icloud]
+          enum: [microsoft, domain, gmail, gmail_variant, icloud]
         status:
           type: string
           enum: [enabled, disabled]
@@ -19391,7 +19391,7 @@ components:
 
     ProjectProductTypeFacets:
       type: object
-      required: [all, microsoft, domain, gmail, icloud]
+      required: [all, microsoft, domain, gmail, gmailVariant, icloud]
       properties:
         all:
           type: integer
@@ -19400,6 +19400,8 @@ components:
         domain:
           type: integer
         gmail:
+          type: integer
+        gmailVariant:
           type: integer
         icloud:
           type: integer
@@ -19486,7 +19488,7 @@ components:
       properties:
         type:
           type: string
-          enum: [microsoft, domain, gmail, icloud]
+          enum: [microsoft, domain, gmail, gmail_variant, icloud]
         status:
           type: string
           enum: [enabled, disabled]
@@ -19572,7 +19574,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [microsoft, domain, gmail, icloud]
+          enum: [microsoft, domain, gmail, gmail_variant, icloud]
         status:
           type: string
           enum: [enabled, disabled]
@@ -20379,7 +20381,7 @@ components:
       properties:
         productType:
           type: string
-          enum: [microsoft, domain, gmail, icloud]
+          enum: [microsoft, domain, gmail, gmail_variant, icloud]
         totalAvailable:
           type: integer
         publicAvailable:
