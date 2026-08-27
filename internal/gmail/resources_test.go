@@ -43,11 +43,13 @@ func TestLocalGmailPurchaseUsesUnifiedAllocationAndOrderLookup(t *testing.T) {
 
 	replayed := allocateLocalGmailTest(t, allocator, "PURCHASE-1", 2, 12, allocdomain.GmailServiceModePurchase, allocdomain.SupplyScopePublic)
 	require.Equal(t, allocation.ID, replayed.ID)
-	_, err = allocator.Allocate(context.Background(), allocapp.AllocateCommand{
+	dot, err := allocator.Allocate(context.Background(), allocapp.AllocateCommand{
 		OrderNo: "PURCHASE-2", BuyerUserID: 2, ProjectProductID: 12,
 		ServiceMode: allocdomain.GmailServiceModePurchase, SupplyScope: allocdomain.SupplyScopePublic,
 	})
-	require.ErrorIs(t, err, allocdomain.ErrInsufficientInventory)
+	require.NoError(t, err)
+	require.NotNil(t, dot)
+	require.Equal(t, GmailMailboxDot, mustLocalGmailAllocation(t, db, dot.ID).Mailbox)
 
 	_, err = allocator.ReleaseByOrder(context.Background(), "PURCHASE-1")
 	require.NoError(t, err)
@@ -124,11 +126,12 @@ func TestLocalGmailSupplyIgnoresUpstreamHistoryButKeepsLocalHistory(t *testing.T
 	require.NoError(t, db.Model(&allocationModel{}).Where("order_no = ?", "UPSTREAM-HISTORY").Updates(map[string]any{
 		"project_id": 11, "status": AllocationStatusReleased,
 	}).Error)
-	_, err = service.CheckSupply(
+	quote, err = service.CheckSupply(
 		context.Background(), 11, 12, 2,
 		tradedomain.ServiceModeCode, tradedomain.SupplyPolicyPublicOnly, "1.00",
 	)
-	require.ErrorIs(t, err, tradedomain.ErrUpstreamUnavailable)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, quote.Available, "main history must preserve dot-alias supply")
 }
 
 func TestUnifiedGmailAllocationHonorsPrivateFirstAndPublicOnly(t *testing.T) {
