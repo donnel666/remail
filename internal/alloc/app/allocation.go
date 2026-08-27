@@ -993,15 +993,19 @@ func mergePrivateSingletonInventory(result *ProjectProductInventoryTotals, inven
 			itemIndex = len(result.Items) - 1
 		}
 		item := &result.Items[itemIndex]
-		codeAvailable := private.Available
-		if item.CodeAvailable != nil {
-			codeAvailable += *item.CodeAvailable
+		fixedInventory := item.ProductType == coredomain.ProductTypeGmailVariant || private.ProductType == coredomain.ProductTypeGmailVariant
+		mergeAvailable := func(current *int64) int64 {
+			if current == nil {
+				return private.Available
+			}
+			if fixedInventory {
+				return max(*current, private.Available)
+			}
+			return *current + private.Available
 		}
+		codeAvailable := mergeAvailable(item.CodeAvailable)
 		item.CodeAvailable = &codeAvailable
-		purchaseAvailable := private.Available
-		if item.PurchaseAvailable != nil {
-			purchaseAvailable += *item.PurchaseAvailable
-		}
+		purchaseAvailable := mergeAvailable(item.PurchaseAvailable)
 		item.PurchaseAvailable = &purchaseAvailable
 		if item.CodePublicAvailable == nil {
 			available := int64(0)
@@ -1011,8 +1015,13 @@ func mergePrivateSingletonInventory(result *ProjectProductInventoryTotals, inven
 			available := int64(0)
 			item.PurchasePublicAvailable = &available
 		}
-		item.TotalAvailable += private.Available
-		result.TotalAvailable += private.Available
+		previous := item.TotalAvailable
+		if fixedInventory {
+			item.TotalAvailable = max(item.TotalAvailable, private.Available)
+		} else {
+			item.TotalAvailable += private.Available
+		}
+		result.TotalAvailable += item.TotalAvailable - previous
 	}
 }
 
@@ -1680,7 +1689,11 @@ func (uc *UseCase) tryGmailCandidate(
 	case domain.GmailMailboxMain:
 		emails = []string{candidate.Email}
 	case domain.GmailMailboxDot:
-		emails = dotAliasVariants(candidate.Email)
+		offset, err := uc.repo.CountGmailDotHistory(ctx, candidate.ResourceID, config.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		emails = gmailDotAliasVariants(candidate.Email, offset)
 	case domain.GmailMailboxPlus:
 		emails = plusAliasVariants(candidate.Email, config.ProjectID, cmd.OrderNo)
 	default:
@@ -2446,6 +2459,50 @@ func dotAliasVariants(email string) []string {
 	return result
 }
 
+func gmailDotAliasVariants(email string, offset uint64) []string {
+	local, domainPart, ok := splitEmail(email)
+	characters := make([]rune, 0, len(local))
+	originalMask := uint64(0)
+	for _, character := range local {
+		if character == '.' {
+			if len(characters) > 0 {
+				originalMask |= uint64(1) << (len(characters) - 1)
+			}
+			continue
+		}
+		characters = append(characters, character)
+	}
+	if !ok || len(characters) < 2 || len(characters) > GmailDotMaxLocalCharacters {
+		return nil
+	}
+	patternCount := uint64(1) << (len(characters) - 1)
+	aliasCount := patternCount - 1
+	limit := aliasGenerationWindowValue()
+	if uint64(limit) > aliasCount {
+		limit = int(aliasCount)
+	}
+	result := make([]string, 0, limit)
+	// ponytail: history count is the generation cursor; store a dedicated cursor only if legacy alias holes become measurable.
+	for i := uint64(0); i < aliasCount && len(result) < limit; i++ {
+		mask := (offset + i) % aliasCount
+		if mask >= originalMask {
+			mask++
+		}
+		var alias strings.Builder
+		alias.Grow(len(local) + len(characters) + len(domainPart) + 1)
+		for i, character := range characters {
+			alias.WriteRune(character)
+			if i < len(characters)-1 && mask&(uint64(1)<<i) != 0 {
+				alias.WriteByte('.')
+			}
+		}
+		alias.WriteByte('@')
+		alias.WriteString(domainPart)
+		result = append(result, alias.String())
+	}
+	return result
+}
+
 func allocationUsageDate(value time.Time) string {
 	return value.UTC().Format("2006-01-02")
 }
@@ -2490,7 +2547,7 @@ func plusAliasVariants(email string, projectID uint, orderNo string) []string {
 	if !ok || local == "" {
 		return nil
 	}
-	base := strconv.FormatUint(uint64(projectID), 36) + strconv.FormatUint(hash64(orderNo)%46656, 36)
+	base := strconv.FormatUint(uint64(projectID), 36) + strconv.FormatUint(hash64(orderNo), 36)
 	window := aliasGenerationWindowValue()
 	result := make([]string, 0, window)
 	for i := 0; i < window; i++ {

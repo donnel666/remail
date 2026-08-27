@@ -9,10 +9,13 @@ import (
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
+const GmailVariantInventory int64 = 1_000_000_000
+
 const (
 	MicrosoftBucketCount        = coredomain.MicrosoftAllocationBucketCount
 	DomainBucketCount           = coredomain.DomainAllocationBucketCount
 	GmailBucketCount            = 2048
+	GmailDotMaxLocalCharacters  = 30
 	GeneratedMailboxBucketCount = coredomain.GeneratedMailboxBucketCount
 	DotAliasCapacityPerResource = 10
 	InventoryRefreshInterval    = 10 * time.Minute
@@ -452,6 +455,7 @@ type Repository interface {
 	AssertNoActiveAllocations(ctx context.Context, resourceIDs []uint) error
 
 	IsMicrosoftMailboxHistoricallyMatched(ctx context.Context, projectID uint, mailbox domain.MicrosoftMailbox, mailboxID uint) (bool, error)
+	CountGmailDotHistory(ctx context.Context, resourceID uint, projectID uint) (uint64, error)
 	IsGmailMailboxAvailable(ctx context.Context, resourceID uint, projectID uint, mailbox domain.GmailMailbox, email string) (bool, error)
 	IsDomainEmailHistoricallyAllocated(ctx context.Context, projectID uint, email string) (bool, error)
 	FindReusableExplicitAlias(ctx context.Context, projectID uint, resourceID uint, emailSuffix string) (*AliasCandidate, error)

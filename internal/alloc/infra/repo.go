@@ -1214,6 +1214,23 @@ SELECT EXISTS (
 	return matched, nil
 }
 
+func (r *Repo) CountGmailDotHistory(ctx context.Context, resourceID uint, projectID uint) (uint64, error) {
+	if resourceID == 0 || projectID == 0 {
+		return 0, domain.ErrInvalidAllocationRequest
+	}
+	var count uint64
+	if err := r.dbFor(ctx).Raw(`
+SELECT COUNT(*)
+FROM gmail_allocations
+WHERE source = ?
+  AND resource_id = ?
+  AND project_id = ?
+  AND mailbox = ?`, gmailLocalSource, resourceID, projectID, domain.GmailMailboxDot).Scan(&count).Error; err != nil {
+		return 0, fmt.Errorf("count Gmail dot mailbox history: %w", err)
+	}
+	return count, nil
+}
+
 func (r *Repo) IsGmailMailboxAvailable(ctx context.Context, resourceID uint, projectID uint, mailbox domain.GmailMailbox, email string) (bool, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	if resourceID == 0 || projectID == 0 || email == "" || !domain.IsValidGmailMailbox(mailbox) {
@@ -2229,7 +2246,9 @@ WHERE gr.status IN ('normal', 'available')
 			stats.Gmail.DotPublicAvailable = stats.Gmail.DotAvailable
 		}
 		if stats.Gmail.PlusEnabled {
-			stats.Gmail.PlusAvailable = stats.Gmail.EligibleResources
+			if stats.Gmail.EligibleResources > 0 {
+				stats.Gmail.PlusAvailable = allocapp.GmailVariantInventory
+			}
 			stats.Gmail.PlusPublicAvailable = stats.Gmail.PlusAvailable
 		}
 		stats.Gmail.TotalAvailable = stats.Gmail.MainAvailable + stats.Gmail.DotAvailable + stats.Gmail.PlusAvailable
@@ -2776,17 +2795,19 @@ WHERE history.source = 'local'
 			}
 			available += nonNegative(capacity - used)
 		case coredomain.ProductTypeGmailVariant:
-			var plusAvailable int64
+			var plusResources int64
 			if err := r.dbFor(ctx).Raw(`
 SELECT COUNT(*)
 FROM gmail_resources gr
 JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
 WHERE gr.status IN ('normal', 'available')
   AND gr.for_sale = FALSE
-  AND er.owner_user_id = ?`, buyerUserID).Scan(&plusAvailable).Error; err != nil {
+  AND er.owner_user_id = ?`, buyerUserID).Scan(&plusResources).Error; err != nil {
 				return nil, fmt.Errorf("private Gmail plus inventory: %w", err)
 			}
-			available += plusAvailable
+			if plusResources > 0 {
+				available = allocapp.GmailVariantInventory
+			}
 		}
 		if available > 0 {
 			result = append(result, allocapp.PrivateSingletonInventoryTotal{
@@ -3136,7 +3157,11 @@ func microsoftDotCapacityExpression(tableAlias string) string {
 }
 
 func gmailDotCapacityExpression(tableAlias string) string {
-	return dotCapacityExpression("SUBSTRING_INDEX(" + tableAlias + ".email, '@', 1)")
+	localPart := "REPLACE(SUBSTRING_INDEX(" + tableAlias + ".email, '@', 1), '.', '')"
+	return fmt.Sprintf(
+		"(CASE WHEN CHAR_LENGTH(%s) BETWEEN 2 AND %d THEN CAST(POWER(2, CHAR_LENGTH(%s) - 1) AS UNSIGNED) - 1 ELSE 0 END)",
+		localPart, allocapp.GmailDotMaxLocalCharacters, localPart,
+	)
 }
 
 func dotCapacityExpression(localPart string) string {

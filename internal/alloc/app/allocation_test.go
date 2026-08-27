@@ -671,6 +671,24 @@ func TestDotAliasVariantsSkipPositionsAdjacentToExistingDots(t *testing.T) {
 	}
 }
 
+func TestGmailDotAliasVariantsCoverEveryDotCombination(t *testing.T) {
+	want := map[string]bool{
+		"abc@gmail.com":   true,
+		"ab.c@gmail.com":  true,
+		"a.b.c@gmail.com": true,
+	}
+	got := gmailDotAliasVariants("a.bc@Gmail.com", 0)
+	if len(got) != len(want) {
+		t.Fatalf("gmailDotAliasVariants() returned %d aliases, want %d: %v", len(got), len(want), got)
+	}
+	for _, alias := range got {
+		if !want[alias] {
+			t.Fatalf("gmailDotAliasVariants() returned unexpected alias %q", alias)
+		}
+		delete(want, alias)
+	}
+}
+
 func TestGmailMailboxPreferencesAreFixedByProduct(t *testing.T) {
 	main := gmailMailboxPreferences(ProductAllocationConfig{
 		ProductType: coredomain.ProductTypeGmail, PlusWeight: 100,

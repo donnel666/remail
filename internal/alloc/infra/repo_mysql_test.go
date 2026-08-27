@@ -228,7 +228,7 @@ INSERT INTO project_products(
 		{ID: 1000, OwnerUserID: 1, Email: "firstname@gmail.com", ForSale: true},
 		{ID: 1001, OwnerUserID: 1, Email: "ab@gmail.com", ForSale: true},
 		{ID: 1002, OwnerUserID: 3, Email: "ignored@gmail.com", ForSale: true},
-		{ID: 1003, OwnerUserID: 2, Email: "xy@gmail.com", ForSale: false},
+		{ID: 1003, OwnerUserID: 2, Email: "phungvanvu00932@gmail.com", ForSale: false},
 	})
 
 	repo := NewRepo(db)
@@ -255,35 +255,35 @@ INSERT INTO project_products(
 		require.Equal(t, purchaseEnabled, stats.Gmail.PurchaseEnabled)
 		require.Equal(t, int64(2), stats.Gmail.EligibleResources)
 		require.Equal(t, int64(1), stats.Gmail.MainAvailable)
-		require.Equal(t, int64(8), stats.Gmail.DotAvailable)
-		require.Equal(t, int64(2), stats.Gmail.PlusAvailable)
-		require.Equal(t, int64(11), stats.Gmail.TotalAvailable)
-		require.Equal(t, int64(11), stats.TotalAvailable)
+		require.Equal(t, int64(255), stats.Gmail.DotAvailable)
+		require.Equal(t, allocapp.GmailVariantInventory, stats.Gmail.PlusAvailable)
+		require.Equal(t, int64(1_000_000_256), stats.Gmail.TotalAvailable)
+		require.Equal(t, int64(1_000_000_256), stats.TotalAvailable)
 
 		totals, err := repo.GetProductInventoryTotals(context.Background(), 10)
 		require.NoError(t, err)
 		require.Len(t, totals.Items, 2)
 		require.Equal(t, coredomain.ProductTypeGmail, totals.Items[0].ProductType)
-		require.Equal(t, int64(9), totals.Items[0].TotalAvailable)
+		require.Equal(t, int64(256), totals.Items[0].TotalAvailable)
 		require.Equal(t, coredomain.ProductTypeGmailVariant, totals.Items[1].ProductType)
-		require.Equal(t, int64(2), totals.Items[1].TotalAvailable)
+		require.Equal(t, allocapp.GmailVariantInventory, totals.Items[1].TotalAvailable)
 	}
 
 	assertInventory(true, false)
 	privateInventory, err := repo.ListPrivateGmailInventoryTotals(context.Background(), 10, 2)
 	require.NoError(t, err)
 	require.Equal(t, []allocapp.PrivateSingletonInventoryTotal{
-		{ProductID: 20, ProductType: coredomain.ProductTypeGmail, Available: 2},
-		{ProductID: 21, ProductType: coredomain.ProductTypeGmailVariant, Available: 1},
+		{ProductID: 20, ProductType: coredomain.ProductTypeGmail, Available: 16_384},
+		{ProductID: 21, ProductType: coredomain.ProductTypeGmailVariant, Available: allocapp.GmailVariantInventory},
 	}, privateInventory)
 	viewerTotals, err := uc.GetProductInventoryTotals(context.Background(), 10, 2)
 	require.NoError(t, err)
-	require.EqualValues(t, 14, viewerTotals.TotalAvailable)
-	require.EqualValues(t, 11, *viewerTotals.Items[0].CodeAvailable)
-	require.EqualValues(t, 11, *viewerTotals.Items[0].PurchaseAvailable)
-	require.EqualValues(t, 9, *viewerTotals.Items[0].CodePublicAvailable)
-	require.EqualValues(t, 3, *viewerTotals.Items[1].CodeAvailable)
-	require.EqualValues(t, 2, *viewerTotals.Items[1].CodePublicAvailable)
+	require.EqualValues(t, 1_000_016_640, viewerTotals.TotalAvailable)
+	require.EqualValues(t, 16_640, *viewerTotals.Items[0].CodeAvailable)
+	require.EqualValues(t, 16_640, *viewerTotals.Items[0].PurchaseAvailable)
+	require.EqualValues(t, 256, *viewerTotals.Items[0].CodePublicAvailable)
+	require.EqualValues(t, allocapp.GmailVariantInventory, *viewerTotals.Items[1].CodeAvailable)
+	require.EqualValues(t, allocapp.GmailVariantInventory, *viewerTotals.Items[1].CodePublicAvailable)
 	require.NoError(t, db.Table("project_products").Where("id = ?", 20).
 		Updates(map[string]any{"main_weight": 0, "dot_weight": 0, "plus_weight": 1}).Error)
 	active, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
