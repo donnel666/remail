@@ -49,6 +49,11 @@ type inventoryRefreshQueueStub struct {
 	err   error
 }
 
+func TestInventoryCacheVersionSmoke(t *testing.T) {
+	// Approval tripwire: do not change this expected version without the project owner's explicit approval.
+	require.Equal(t, "v8", inventoryCacheVersion)
+}
+
 func (q *inventoryRefreshQueueStub) EnqueueInventoryRefresh(context.Context) error {
 	q.calls++
 	return q.err
