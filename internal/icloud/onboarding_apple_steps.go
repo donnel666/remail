@@ -529,6 +529,11 @@ func (f *appleOnboardingFlow) fetchManage(request AppleOnboardingRequest) (Apple
 	if f.state.APIKey == "" {
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "api_key_missing", SafeMessage: "Apple Account profile did not return an API key.", Retryable: true}
 	}
+	if !request.SkipPrivateAlias {
+		if err := f.ensurePrivateAlias(); err != nil {
+			return AppleOnboardingResponse{}, err
+		}
+	}
 	_, lastTwo, _ := selectAppleOnboardingTrustedPhone(appleOnboardingTrustedPhones(data), request.PhoneNumber)
 	return AppleOnboardingResponse{Next: "ready", CountryCode: f.state.AccountCountry, TrustedPhoneLastTwo: lastTwo}, nil
 }
@@ -613,7 +618,10 @@ func (f *appleOnboardingFlow) verifyForward(request AppleOnboardingRequest) (App
 	}
 	vetted, present := appleOnboardingOptionalBool(appleOnboardingMap(data["vettingStatus"])["vetted"])
 	if f.state.Status != http.StatusOK || present && !vetted {
-		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "forward_code_rejected", SafeMessage: "Apple rejected the forwarding verification code."}
+		return AppleOnboardingResponse{}, &AppleOnboardingError{
+			Category: "forward_code_rejected", SafeMessage: "Apple rejected the forwarding verification code.",
+			ProviderMessage: safeICloudImportMessage(appleOnboardingServiceError(data)), HTTPStatus: f.state.Status,
+		}
 	}
 	if !present || !vetted {
 		retryAt := f.now().UTC().Add(iCloudOnboardingForwardRetry)

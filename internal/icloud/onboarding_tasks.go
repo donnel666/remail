@@ -968,7 +968,9 @@ func (s *Service) joinICloudOnboardingFamily(ctx context.Context, task *iCloudOn
 }
 
 func (s *Service) fetchICloudOnboardingManage(ctx context.Context, task *iCloudOnboardingTaskModel, secret iCloudOnboardingSecret) error {
-	response, err := s.executeICloudOnboardingApple(ctx, task, secret, AppleOnboardingRequest{Operation: appleOnboardingFetchManage})
+	response, err := s.executeICloudOnboardingApple(ctx, task, secret, AppleOnboardingRequest{
+		Operation: appleOnboardingFetchManage, SkipPrivateAlias: task.TaskKind == "refresh" || isICloudCookieRecoveryTask(task),
+	})
 	if err != nil {
 		return s.handleICloudOnboardingAppleError(ctx, task, err)
 	}

@@ -579,6 +579,25 @@ func TestAppleOnboardingReconcilesAppliedWritesBeforeMutation(t *testing.T) {
 			t.Fatalf("unconfirmed forward verification: err=%v", err)
 		}
 	})
+
+	t.Run("forward_verify_reports_provider_rejection", func(t *testing.T) {
+		session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{
+			{status: http.StatusOK, body: `{"account":{"person":{"reachableAtOptions":{"alternateEmailAddresses":[]}}}}`},
+			{status: http.StatusBadRequest, body: `{"serviceErrors":[{"message":"Verification context is invalid"}]}`},
+		}}
+		_, err := appleOnboardingTestClient(now, session).Execute(context.Background(), AppleOnboardingRequest{
+			Operation: appleOnboardingVerifyForward, ForwardToEmail: "relay@example.com", ForwardCode: "123456",
+			Session: appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+				state.APIKey = "api-key"
+				state.ForwardVerificationID = "verify-1"
+			}),
+		})
+		var providerErr *AppleOnboardingError
+		if !errors.As(err, &providerErr) || providerErr.Category != "forward_code_rejected" ||
+			providerErr.HTTPStatus != http.StatusBadRequest || providerErr.ProviderMessage != "Verification context is invalid" {
+			t.Fatalf("forward rejection error=%#v", err)
+		}
+	})
 }
 
 func TestAppleOnboardingAddsForwardBeforePrivateAliasExport(t *testing.T) {
@@ -687,12 +706,46 @@ func TestAppleOnboardingFetchManageDoesNotRepeatTrustedPhoneValidation(t *testin
 				{status: http.StatusOK, body: `{"apiKey":"api","countryCode":"US","security":{"trustedPhoneNumbers":` + test.phones + `}}`},
 			}}
 			response, err := appleOnboardingTestClient(now, session).Execute(context.Background(), AppleOnboardingRequest{
-				Operation: appleOnboardingFetchManage, PhoneNumber: test.boundNumber, Session: appleOnboardingTestState(t, nil),
+				Operation: appleOnboardingFetchManage, PhoneNumber: test.boundNumber, SkipPrivateAlias: true, Session: appleOnboardingTestState(t, nil),
 			})
 			if err != nil || response.TrustedPhoneLastTwo != test.wantLastTwo || response.CountryCode != "US" {
 				t.Fatalf("response=%+v err=%v", response, err)
 			}
 		})
+	}
+}
+
+func TestAppleOnboardingFetchManageCreatesPrivateAliasBeforeForwarding(t *testing.T) {
+	now := time.Date(2026, 8, 29, 10, 0, 0, 0, time.UTC)
+	session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{
+		{status: http.StatusOK, body: `{}`},
+		{status: http.StatusOK, body: `{"apiKey":"api","countryCode":"US"}`},
+		{status: http.StatusOK, body: `{"privateEmailList":[],"inactivePrivateEmailList":[],"maxLimitReached":false}`},
+		{status: http.StatusCreated, body: `{"emailAddress":"created@icloud.com"}`},
+		{status: http.StatusOK, body: `{"emailAddress":"created@icloud.com"}`},
+		{status: http.StatusOK, body: `{"privateEmailList":[{"emailAddress":"created@icloud.com"}],"inactivePrivateEmailList":[]}`},
+	}}
+	response, err := appleOnboardingTestClient(now, session).Execute(context.Background(), AppleOnboardingRequest{
+		Operation: appleOnboardingFetchManage, Session: appleOnboardingTestState(t, nil),
+	})
+	if err != nil || response.Next != "ready" {
+		t.Fatalf("fetch manage response=%+v err=%v", response, err)
+	}
+	var state appleOnboardingBrowserState
+	if err := json.Unmarshal(response.Session, &state); err != nil || !state.PrivateAliasReady {
+		t.Fatalf("private alias state=%+v err=%v", state, err)
+	}
+	wantPaths := []string{
+		"/account/manage/gs/ws/token", "/account/manage", appleAccountPrivateEmailPath,
+		appleAccountPrivateEmailAddPath, appleAccountPrivateEmailAddCompletePath, appleAccountPrivateEmailPath,
+	}
+	if len(session.requests) != len(wantPaths) {
+		t.Fatalf("requests=%v", session.requests)
+	}
+	for index, path := range wantPaths {
+		if !strings.Contains(session.requests[index], path) {
+			t.Fatalf("request[%d]=%q, want path %q", index, session.requests[index], path)
+		}
 	}
 }
 
