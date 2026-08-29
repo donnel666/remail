@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Button, TagInput, Toast } from "@douyinfe/semi-ui";
-import { Copy, ExternalLink, Github, MapPin, Save, ShieldAlert, UserPlus } from "lucide-react";
+import { Copy, ExternalLink, Github, Save, ShieldAlert, UserPlus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { LinuxDoIcon } from "@/components/auth/LinuxDoIcon";
+import { NodeLocIcon } from "@/components/auth/NodeLocIcon";
 import { copyText } from "@/lib/clipboard";
 import { parseOption } from "@/lib/system-settings-api";
 
@@ -176,7 +177,7 @@ export default function AuthSecuritySection({ options, onBulkSave, canSensitive 
     </SettingsSection>
 
     <SettingsSection title={<SettingsCardHeader
-      icon={<MapPin size={16} />}
+      icon={<NodeLocIcon className="size-4" />}
       title={t("NodeLoc third-party login")}
       description={t("Configure NodeLoc OAuth for verified account login and binding")}
       enabled={!!form.nodeloc_oauth_enabled}

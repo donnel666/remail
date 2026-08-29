@@ -20,7 +20,6 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import {
   BarChart2,
   Coins,
-  MapPin,
   ShieldCheck,
   UserPlus,
   Users,
@@ -31,6 +30,7 @@ import { useTranslation } from "react-i18next";
 import coverImage from "@/assets/cover-4.webp";
 import { GitHubVerificationModal } from "@/components/auth/GitHubVerificationModal";
 import { LinuxDoIcon } from "@/components/auth/LinuxDoIcon";
+import { NodeLocIcon } from "@/components/auth/NodeLocIcon";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { useAuth, type CurrentUser } from "@/context/auth-provider";
 import { LOGIN_NOTICE_KEY, clearLoginReturnTo } from "@/lib/auth-flow";
@@ -488,7 +488,7 @@ export default function Account() {
                           ? <span role="alert">{t("Could not load NodeLoc account status. Please try again later.")}</span>
                           : nodeLocBound ? t("Bound to NodeLoc") : t("Unbound")
                     }
-                    icon={<MapPin size={18} />}
+                    icon={<NodeLocIcon className="size-[18px]" />}
                     iconTone="violet"
                     title="NodeLoc"
                   />

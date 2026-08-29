@@ -1,12 +1,13 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { IconGithubLogo } from "@douyinfe/semi-icons";
-import { Loader2, MapPin } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { EmailOAuthSetupModal } from "@/components/auth/EmailOAuthSetupModal";
 import { TurnstileField } from "@/components/auth/TurnstileField";
 import { GitHubVerificationModal } from "@/components/auth/GitHubVerificationModal";
 import { LinuxDoIcon } from "@/components/auth/LinuxDoIcon";
+import { NodeLocIcon } from "@/components/auth/NodeLocIcon";
 import { useAuth } from "@/context/auth-provider";
 import { LOGIN_NOTICE_KEY, consumeLoginReturnTo } from "@/lib/auth-flow";
 import { getIamErrorMessage } from "@/lib/iam-errors";
@@ -205,7 +206,7 @@ export default function Login() {
                 onClick={() => window.location.assign(nodeLocLoginURL)}
                 className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface)] px-4 text-sm font-semibold text-[var(--ink-primary)] transition-colors duration-200 hover:bg-[var(--surface-sunken)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-start)] focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-70"
               >
-                {nodeLocConfigState === "loading" ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : <MapPin className="size-5" aria-hidden="true" />}
+                {nodeLocConfigState === "loading" ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : <NodeLocIcon className="size-5" />}
                 {t(nodeLocConfigState === "loading" ? "Loading NodeLoc login..." : "Continue with NodeLoc")}
               </button>
             ) : null}
