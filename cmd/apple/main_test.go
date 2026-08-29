@@ -123,10 +123,19 @@ func TestGeneratedChangesAreDifferentAndRecoverable(t *testing.T) {
 	require.Equal(t, accounts[0].NewBirthday, recovery[0].NewBirthday)
 
 	require.NoError(t, prunePendingChanges(path, pending, map[string]struct{}{accounts[0].Email: {}}))
-	remaining, err := loadPendingChanges(path, now)
+	remaining, err := loadPendingChanges(path)
 	require.NoError(t, err)
 	require.NotContains(t, remaining, accounts[0].Email)
 	require.Contains(t, remaining, accounts[1].Email)
+}
+
+func TestPendingChangesRemainRecoverableAfterAgeBoundary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "apple_ok.txt.pending")
+	require.NoError(t, os.WriteFile(path, []byte("edge@example.com----Abcd2345!Efgh678----1975-08-27\n"), 0o600))
+
+	pending, err := loadPendingChanges(path)
+	require.NoError(t, err)
+	require.Equal(t, "1975-08-27", pending["edge@example.com"].Birthday)
 }
 
 func TestSecurityQuestionAnswerAttemptsSupportInterruptedRuns(t *testing.T) {

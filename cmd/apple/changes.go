@@ -22,7 +22,7 @@ type pendingChange struct {
 }
 
 func prepareAccountChanges(accounts []accountInput, path string, now time.Time) (map[string]pendingChange, error) {
-	pending, err := loadPendingChanges(path, now)
+	pending, err := loadPendingChanges(path)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func prunePendingChanges(path string, pending map[string]pendingChange, complete
 	return writePendingChanges(path, pending)
 }
 
-func loadPendingChanges(path string, now time.Time) (map[string]pendingChange, error) {
+func loadPendingChanges(path string) (map[string]pendingChange, error) {
 	result := make(map[string]pendingChange)
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -100,7 +100,7 @@ func loadPendingChanges(path string, now time.Time) (map[string]pendingChange, e
 			return nil, fmt.Errorf("pending changes line %d has an invalid password", line)
 		}
 		birthday, parseErr := normalizeBirthday(change.Birthday)
-		if parseErr != nil || !birthdayWithinAgeRange(birthday, now) {
+		if parseErr != nil {
 			return nil, fmt.Errorf("pending changes line %d has an invalid birthday", line)
 		}
 		if _, exists := result[email]; exists {
