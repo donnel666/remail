@@ -1,10 +1,9 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Button, Modal, Radio, RadioGroup } from "@douyinfe/semi-ui";
 import { IconGithubLogo } from "@douyinfe/semi-icons";
-import { Loader2 } from "lucide-react";
+import { Loader2, MapPin } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { SendCodeField } from "@/components/auth/SendCodeField";
+import { EmailOAuthSetupModal } from "@/components/auth/EmailOAuthSetupModal";
 import { TurnstileField } from "@/components/auth/TurnstileField";
 import { GitHubVerificationModal } from "@/components/auth/GitHubVerificationModal";
 import { LinuxDoIcon } from "@/components/auth/LinuxDoIcon";
@@ -13,13 +12,15 @@ import { LOGIN_NOTICE_KEY, consumeLoginReturnTo } from "@/lib/auth-flow";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
   completeLinuxDO,
+  completeNodeLoc,
   getLinuxDOPending,
   getLoginConfig,
+  getNodeLocPending,
   githubLoginURL,
   linuxDOLoginURL,
+  nodeLocLoginURL,
   sendLinuxDOEmailCode,
-  type LinuxDOAccountMode,
-  type LinuxDOPendingResponse,
+  sendNodeLocEmailCode,
 } from "@/lib/iam-api";
 
 const linuxDOErrorKeys: Record<string, string> = {
@@ -48,18 +49,20 @@ const githubErrorKeys: Record<string, string> = {
   state: "GitHub login request expired. Please try again.",
 };
 
-type OAuthConfigState = "loading" | "enabled" | "disabled" | "error";
+const nodeLocErrorKeys: Record<string, string> = {
+  account: "NodeLoc account is unavailable.",
+  already_bound: "This NodeLoc account is already bound.",
+  cancelled: "NodeLoc authorization was cancelled.",
+  disabled: "NodeLoc login is unavailable.",
+  failed: "NodeLoc login failed.",
+  rate_limited: "Too many NodeLoc login attempts. Please try again later.",
+  registration_disabled: "Registration is disabled.",
+  session: "Your session expired. Please log in and try again.",
+  state: "NodeLoc login request expired. Please try again.",
+  trust_level: "Your NodeLoc trust level is too low.",
+};
 
-function removeSearchParam(name: string) {
-  const params = new URLSearchParams(window.location.search);
-  params.delete(name);
-  const search = params.toString();
-  window.history.replaceState(
-    {},
-    "",
-    window.location.pathname + (search ? `?${search}` : "") + window.location.hash
-  );
-}
+type OAuthConfigState = "loading" | "enabled" | "disabled" | "error";
 
 export default function Login() {
   const { t } = useTranslation();
@@ -74,15 +77,9 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
   const [linuxDOConfigState, setLinuxDOConfigState] = useState<OAuthConfigState>("loading");
   const [githubConfigState, setGitHubConfigState] = useState<OAuthConfigState>("loading");
+  const [nodeLocConfigState, setNodeLocConfigState] = useState<OAuthConfigState>("loading");
   const [githubSetupOpen, setGitHubSetupOpen] = useState(false);
-  const [linuxDOPending, setLinuxDOPending] = useState<LinuxDOPendingResponse | null>(null);
-  const [linuxDOPendingLoading, setLinuxDOPendingLoading] = useState(false);
-  const [linuxDOMode, setLinuxDOMode] = useState<LinuxDOAccountMode>("new");
-  const [linuxDOEmail, setLinuxDOEmail] = useState("");
-  const [linuxDOCode, setLinuxDOCode] = useState("");
-  const [linuxDOSetupError, setLinuxDOSetupError] = useState("");
-  const [linuxDOSetupNotice, setLinuxDOSetupNotice] = useState("");
-  const [linuxDOCompleting, setLinuxDOCompleting] = useState(false);
+  const [emailOAuthSetup, setEmailOAuthSetup] = useState<"linuxdo" | "nodeloc" | null>(null);
 
   useEffect(() => {
     const nextNotice = sessionStorage.getItem(LOGIN_NOTICE_KEY);
@@ -95,8 +92,8 @@ export default function Login() {
     const oauthError = params.get("oauth_error");
     if (oauthError) {
       const provider = params.get("oauth_provider");
-      const errorKeys = provider === "github" ? githubErrorKeys : linuxDOErrorKeys;
-      const fallback = provider === "github" ? "GitHub login failed." : "LinuxDO login failed.";
+      const errorKeys = provider === "github" ? githubErrorKeys : provider === "nodeloc" ? nodeLocErrorKeys : linuxDOErrorKeys;
+      const fallback = provider === "github" ? "GitHub login failed." : provider === "nodeloc" ? "NodeLoc login failed." : "LinuxDO login failed.";
       setError(t(Object.prototype.hasOwnProperty.call(errorKeys, oauthError) ? errorKeys[oauthError] : fallback));
       params.delete("oauth_error");
       params.delete("oauth_provider");
@@ -105,39 +102,8 @@ export default function Login() {
     }
 
     let cancelled = false;
-    if (params.get("oauth_setup") === "linuxdo") {
-      setLinuxDOPendingLoading(true);
-      void getLinuxDOPending()
-        .then((pending) => {
-          if (cancelled) return;
-          setLinuxDOPending(pending);
-          setLinuxDOMode(
-            pending.legacyAccount
-              ? "new"
-              : pending.suggestedEmailExists || !pending.registrationEnabled
-              ? "existing"
-              : "new"
-          );
-          setLinuxDOEmail(
-            pending.legacyAccount && pending.suggestedEmailExists
-              ? ""
-              : pending.suggestedEmail
-          );
-        })
-        .catch((nextError) => {
-          if (cancelled) return;
-          setError(
-            getIamErrorMessage(
-              t,
-              nextError,
-              "LinuxDO account setup expired. Please sign in with LinuxDO again."
-            )
-          );
-          removeSearchParam("oauth_setup");
-        })
-        .finally(() => {
-          if (!cancelled) setLinuxDOPendingLoading(false);
-        });
+    if (params.get("oauth_setup") === "linuxdo" || params.get("oauth_setup") === "nodeloc") {
+      setEmailOAuthSetup(params.get("oauth_setup") as "linuxdo" | "nodeloc");
     }
     if (params.get("oauth_setup") === "github") {
       setGitHubSetupOpen(true);
@@ -147,53 +113,18 @@ export default function Login() {
         if (cancelled) return;
         setLinuxDOConfigState(config.linuxdoOAuthEnabled ? "enabled" : "disabled");
         setGitHubConfigState(config.githubOAuthEnabled ? "enabled" : "disabled");
+        setNodeLocConfigState(config.nodelocOAuthEnabled ? "enabled" : "disabled");
       })
       .catch(() => {
         if (cancelled) return;
         setLinuxDOConfigState("error");
         setGitHubConfigState("error");
+        setNodeLocConfigState("error");
       });
     return () => {
       cancelled = true;
     };
   }, [t]);
-
-  const closeLinuxDOSetup = () => {
-    setLinuxDOPending(null);
-    setLinuxDOCode("");
-    setLinuxDOSetupError("");
-    setLinuxDOSetupNotice("");
-    removeSearchParam("oauth_setup");
-  };
-
-  const handleLinuxDOComplete = async () => {
-    if (!linuxDOEmail.trim()) {
-      setLinuxDOSetupError(t("Please enter your email."));
-      return;
-    }
-    if (!linuxDOCode.trim()) {
-      setLinuxDOSetupError(t("Please enter the verification code."));
-      return;
-    }
-    setLinuxDOCompleting(true);
-    setLinuxDOSetupError("");
-    setLinuxDOSetupNotice("");
-    try {
-      await completeLinuxDO({
-        mode: linuxDOMode,
-        email: linuxDOEmail.trim(),
-        code: linuxDOCode.trim(),
-      });
-      await refreshCurrentUser();
-      void navigate({ to: consumeLoginReturnTo() as never, replace: true });
-    } catch (nextError) {
-      setLinuxDOSetupError(
-        getIamErrorMessage(t, nextError, "LinuxDO account setup failed.")
-      );
-    } finally {
-      setLinuxDOCompleting(false);
-    }
-  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -235,18 +166,12 @@ export default function Login() {
             {t(notice)}
           </div>
         ) : null}
-        {linuxDOPendingLoading ? (
-          <div role="status" aria-live="polite" className="mb-4 flex items-center gap-2 rounded-lg border border-[var(--divider)] px-3 py-2 text-sm text-[var(--ink-muted)]">
-            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-            {t("Preparing LinuxDO account setup...")}
-          </div>
-        ) : null}
         {error ? (
           <div role="alert" aria-live="assertive" className="mb-4 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">
             {error}
           </div>
         ) : null}
-        {linuxDOConfigState === "enabled" || linuxDOConfigState === "loading" || githubConfigState === "enabled" || githubConfigState === "loading" ? (
+        {linuxDOConfigState === "enabled" || linuxDOConfigState === "loading" || githubConfigState === "enabled" || githubConfigState === "loading" || nodeLocConfigState === "enabled" || nodeLocConfigState === "loading" ? (
           <div className="mb-5 space-y-4">
             {linuxDOConfigState === "enabled" || linuxDOConfigState === "loading" ? (
               <button
@@ -272,6 +197,18 @@ export default function Login() {
                 {t(githubConfigState === "loading" ? "Loading GitHub login..." : "Continue with GitHub")}
               </button>
             ) : null}
+            {nodeLocConfigState === "enabled" || nodeLocConfigState === "loading" ? (
+              <button
+                type="button"
+                aria-busy={nodeLocConfigState === "loading"}
+                disabled={nodeLocConfigState === "loading"}
+                onClick={() => window.location.assign(nodeLocLoginURL)}
+                className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-[var(--divider)] bg-[var(--surface)] px-4 text-sm font-semibold text-[var(--ink-primary)] transition-colors duration-200 hover:bg-[var(--surface-sunken)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-start)] focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-70"
+              >
+                {nodeLocConfigState === "loading" ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : <MapPin className="size-5" aria-hidden="true" />}
+                {t(nodeLocConfigState === "loading" ? "Loading NodeLoc login..." : "Continue with NodeLoc")}
+              </button>
+            ) : null}
             <div className="flex items-center gap-3" aria-hidden="true">
               <span className="h-px flex-1 bg-[var(--divider)]" />
               <span className="text-xs uppercase tracking-wide text-[var(--ink-muted)]">{t("or")}</span>
@@ -284,6 +221,9 @@ export default function Login() {
         ) : null}
         {githubConfigState === "error" ? (
           <div role="alert" aria-live="polite" className="mb-5 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">{t("Could not load GitHub login settings. Please refresh and try again.")}</div>
+        ) : null}
+        {nodeLocConfigState === "error" ? (
+          <div role="alert" aria-live="polite" className="mb-5 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">{t("Could not load NodeLoc login settings. Please refresh and try again.")}</div>
         ) : null}
         <form className="space-y-4" onSubmit={handleSubmit}>
           <label htmlFor="login-email" className="sr-only">{t("Email")}</label>
@@ -334,114 +274,43 @@ export default function Login() {
         </div>
       </div>
 
-      <Modal
-        centered
-        footer={
-          <div className="flex justify-end gap-2">
-            <Button disabled={linuxDOCompleting} onClick={closeLinuxDOSetup} theme="light" type="tertiary">
-              {t("Cancel")}
-            </Button>
-            <Button loading={linuxDOCompleting} onClick={() => void handleLinuxDOComplete()} theme="solid" type="primary">
-              {t("Continue")}
-            </Button>
-          </div>
-        }
-        maskClosable={false}
-        onCancel={closeLinuxDOSetup}
-        title={t("Finish LinuxDO sign-in")}
-        visible={linuxDOPending !== null}
-        width="min(480px, calc(100vw - 32px))"
-      >
-        {linuxDOPending ? (
-          <div className="space-y-4 py-1">
-            <div className="rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-2 text-sm text-[var(--semi-color-text-1)]">
-              <div className="font-medium text-[var(--semi-color-text-0)]">
-                {linuxDOPending.username}
-              </div>
-              <div className="mt-0.5 text-xs">LinuxDO ID: {linuxDOPending.providerUserId}</div>
-            </div>
+      <EmailOAuthSetupModal
+        complete={completeLinuxDO}
+        expiredKey="LinuxDO account setup expired. Please sign in with LinuxDO again."
+        failedKey="LinuxDO account setup failed."
+        getPending={getLinuxDOPending}
+        onCancel={() => setEmailOAuthSetup(null)}
+        onComplete={async () => {
+          setEmailOAuthSetup(null);
+          await refreshCurrentUser();
+          void navigate({ to: consumeLoginReturnTo() as never, replace: true });
+        }}
+        open={emailOAuthSetup === "linuxdo"}
+        preparingKey="Preparing LinuxDO account setup..."
+        providerName="LinuxDO"
+        sendEmailCode={sendLinuxDOEmailCode}
+        titleKey="Finish LinuxDO sign-in"
+        turnstileAction="linuxdo_email_code"
+      />
 
-            <div>
-              <div className="mb-2 text-sm font-medium text-[var(--semi-color-text-0)]">
-                {t("Choose account ownership")}
-              </div>
-              <RadioGroup
-                type="button"
-                value={linuxDOMode}
-                onChange={(event) => {
-                  setLinuxDOMode(event.target.value as LinuxDOAccountMode);
-                  setLinuxDOCode("");
-                  setLinuxDOSetupError("");
-                  setLinuxDOSetupNotice("");
-                }}
-              >
-                <Radio disabled={linuxDOPending.legacyAccount} value="existing">
-                  {t("Bind existing account")}
-                </Radio>
-                <Radio
-                  disabled={!linuxDOPending.registrationEnabled && !linuxDOPending.legacyAccount}
-                  value="new"
-                >
-                  {t(linuxDOPending.legacyAccount ? "Upgrade current account" : "Create new account")}
-                </Radio>
-              </RadioGroup>
-              <p className="mt-2 text-xs leading-5 text-[var(--semi-color-text-2)]">
-                {t(
-                  linuxDOPending.legacyAccount
-                    ? "This legacy LinuxDO account already contains site data. Verify a new email to keep this account, balance, orders, and resources."
-                    : linuxDOMode === "existing"
-                    ? "Verify the email of your existing account. Its email and password will not be changed."
-                    : "Verify a receiving email to create an account. No password is set; use Forgot password later if needed."
-                )}
-              </p>
-            </div>
-
-            {linuxDOSetupNotice ? (
-              <div role="status" aria-live="polite" className="rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
-                {linuxDOSetupNotice}
-              </div>
-            ) : null}
-            {linuxDOSetupError ? (
-              <div role="alert" aria-live="assertive" className="rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">
-                {linuxDOSetupError}
-              </div>
-            ) : null}
-
-            <label htmlFor="linuxdo-account-email" className="block">
-              <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-                {t("Email")}
-              </span>
-              <input
-                id="linuxdo-account-email"
-                autoComplete="email"
-                className="input-antd h-11 w-full"
-                disabled={linuxDOCompleting}
-                onChange={(event) => {
-                  setLinuxDOEmail(event.target.value);
-                  setLinuxDOCode("");
-                }}
-                placeholder={t("Email")}
-                required
-                type="email"
-                value={linuxDOEmail}
-              />
-            </label>
-
-            <SendCodeField
-              code={linuxDOCode}
-              disabled={linuxDOCompleting}
-              email={linuxDOEmail}
-              onCodeChange={setLinuxDOCode}
-              onError={setLinuxDOSetupError}
-              onNotice={setLinuxDOSetupNotice}
-              send={(payload) =>
-                sendLinuxDOEmailCode({ ...payload, mode: linuxDOMode })
-              }
-              turnstileAction="linuxdo_email_code"
-            />
-          </div>
-        ) : null}
-      </Modal>
+      <EmailOAuthSetupModal
+        complete={completeNodeLoc}
+        expiredKey="NodeLoc account setup expired. Please sign in with NodeLoc again."
+        failedKey="NodeLoc account setup failed."
+        getPending={getNodeLocPending}
+        onCancel={() => setEmailOAuthSetup(null)}
+        onComplete={async () => {
+          setEmailOAuthSetup(null);
+          await refreshCurrentUser();
+          void navigate({ to: consumeLoginReturnTo() as never, replace: true });
+        }}
+        open={emailOAuthSetup === "nodeloc"}
+        preparingKey="Preparing NodeLoc account setup..."
+        providerName="NodeLoc"
+        sendEmailCode={sendNodeLocEmailCode}
+        titleKey="Finish NodeLoc sign-in"
+        turnstileAction="nodeloc_email_code"
+      />
 
       <GitHubVerificationModal
         onCancel={() => setGitHubSetupOpen(false)}

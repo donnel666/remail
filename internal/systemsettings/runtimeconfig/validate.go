@@ -35,6 +35,7 @@ var integerRanges = map[string]integerRange{
 	"email_code_ttl_seconds": positive(86400), "email_code_resend_gap_seconds": positive(3600), "email_code_digit_len": {min: 4, max: 10},
 	"bcrypt_cost": {min: 4, max: 16}, "session_max_age_seconds": {min: 300, max: 31_536_000},
 	"linuxdo_minimum_trust_level":         {min: 0, max: 4},
+	"nodeloc_minimum_trust_level":         {min: 0, max: 4},
 	"github_minimum_account_age_days":     {min: 0, max: 36500},
 	"rebate_expiry_days":                  {min: 0, max: 36500},
 	"max_pending_recharge_orders":         positive(100),
@@ -103,7 +104,7 @@ var removedKeys = map[string]struct{}{
 
 var booleanKeys = map[string]struct{}{
 	"register_enabled": {}, "captcha_enabled": {}, "announcement_enabled": {}, "faq_enabled": {}, "epay_enabled": {}, "epusdt_enabled": {},
-	"daily_checkin_enabled": {}, "leaderboard_reward_enabled": {}, "linuxdo_oauth_enabled": {}, "github_oauth_enabled": {},
+	"daily_checkin_enabled": {}, "leaderboard_reward_enabled": {}, "linuxdo_oauth_enabled": {}, "github_oauth_enabled": {}, "nodeloc_oauth_enabled": {},
 }
 
 func Validate(key, value string) error {
@@ -251,18 +252,21 @@ func Validate(key, value string) error {
 		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
 			return domain.ErrInvalidValue
 		}
-	case "linuxdo_callback_url", "github_callback_url":
+	case "linuxdo_callback_url", "github_callback_url", "nodeloc_callback_url":
 		if value == "" {
 			return nil
 		}
 		callbackPath := "/v1/oauth/linuxdo/callback"
-		if key == "github_callback_url" {
+		switch key {
+		case "github_callback_url":
 			callbackPath = "/v1/oauth/github/callback"
+		case "nodeloc_callback_url":
+			callbackPath = "/oauth/nodeloc"
 		}
 		if rawValue != value || !validOAuthCallbackURL(value, callbackPath) {
 			return domain.ErrInvalidValue
 		}
-	case "linuxdo_client_id", "linuxdo_client_secret", "github_client_id", "github_client_secret":
+	case "linuxdo_client_id", "linuxdo_client_secret", "github_client_id", "github_client_secret", "nodeloc_client_id", "nodeloc_client_secret":
 		if rawValue != value || len(value) > 512 || strings.ContainsAny(value, "\r\n\x00") {
 			return domain.ErrInvalidValue
 		}
@@ -469,6 +473,9 @@ func sanitizeRelationships(values map[string]string) {
 	if strings.TrimSpace(values["github_oauth_enabled"]) == "true" && len(invalidGitHubConfigFields(values)) > 0 {
 		values["github_oauth_enabled"] = "false"
 	}
+	if strings.TrimSpace(values["nodeloc_oauth_enabled"]) == "true" && len(invalidNodeLocConfigFields(values)) > 0 {
+		values["nodeloc_oauth_enabled"] = "false"
+	}
 	if strings.TrimSpace(values["daily_checkin_enabled"]) == "true" {
 		if rules, err := ParseCheckinRewardRules(values["daily_checkin_reward_rules"]); err != nil || len(rules) == 0 {
 			values["daily_checkin_enabled"] = "false"
@@ -527,6 +534,11 @@ func validateRelationships(values map[string]string) error {
 	}
 	if strings.TrimSpace(values["github_oauth_enabled"]) == "true" {
 		if fields := invalidGitHubConfigFields(values); len(fields) > 0 {
+			return &domain.InvalidValueFieldsError{Fields: fields}
+		}
+	}
+	if strings.TrimSpace(values["nodeloc_oauth_enabled"]) == "true" {
+		if fields := invalidNodeLocConfigFields(values); len(fields) > 0 {
 			return &domain.InvalidValueFieldsError{Fields: fields}
 		}
 	}
@@ -607,6 +619,18 @@ func invalidGitHubConfigFields(values map[string]string) map[string]string {
 	for _, key := range []string{"github_client_id", "github_client_secret", "github_callback_url"} {
 		if strings.TrimSpace(values[key]) == "" {
 			fields[key] = "Required when GitHub OAuth is enabled."
+		} else if Validate(key, values[key]) != nil {
+			fields[key] = "Invalid value."
+		}
+	}
+	return fields
+}
+
+func invalidNodeLocConfigFields(values map[string]string) map[string]string {
+	fields := make(map[string]string)
+	for _, key := range []string{"nodeloc_client_id", "nodeloc_client_secret", "nodeloc_callback_url"} {
+		if strings.TrimSpace(values[key]) == "" {
+			fields[key] = "Required when NodeLoc OAuth is enabled."
 		} else if Validate(key, values[key]) != nil {
 			fields[key] = "Invalid value."
 		}

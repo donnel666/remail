@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button, TagInput, Toast } from "@douyinfe/semi-ui";
-import { Copy, ExternalLink, Github, Save, ShieldAlert, UserPlus } from "lucide-react";
+import { Copy, ExternalLink, Github, MapPin, Save, ShieldAlert, UserPlus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { LinuxDoIcon } from "@/components/auth/LinuxDoIcon";
@@ -30,6 +30,11 @@ const D: Record<string, unknown> = {
   github_client_secret: "",
   github_callback_url: "",
   github_minimum_account_age_days: 0,
+  nodeloc_oauth_enabled: false,
+  nodeloc_client_id: "",
+  nodeloc_client_secret: "",
+  nodeloc_callback_url: "https://remail.aishop6.com/oauth/nodeloc",
+  nodeloc_minimum_trust_level: 0,
   login_email_limit: 10,
   login_ip_limit: 60,
   login_window_seconds: 900,
@@ -54,14 +59,18 @@ export default function AuthSecuritySection({ options, onBulkSave, canSensitive 
   const { t } = useTranslation();
   const linuxDOCallbackURL = typeof window === "undefined" ? "" : window.location.origin + "/v1/oauth/linuxdo/callback";
   const githubCallbackURL = typeof window === "undefined" ? "" : window.location.origin + "/v1/oauth/github/callback";
+  const nodeLocCallbackURL = "https://remail.aishop6.com/oauth/nodeloc";
   const [form, setForm] = useState(() => {
     const values = { ...(parseOption(options, D as any) as Record<string, unknown>) };
     values.linuxdo_client_id = "";
     values.linuxdo_client_secret = "";
     values.github_client_id = "";
     values.github_client_secret = "";
+    values.nodeloc_client_id = "";
+    values.nodeloc_client_secret = "";
     if (!canSensitive || !String(values.linuxdo_callback_url ?? "").trim()) values.linuxdo_callback_url = linuxDOCallbackURL;
     if (!canSensitive || !String(values.github_callback_url ?? "").trim()) values.github_callback_url = githubCallbackURL;
+    if (!canSensitive || !String(values.nodeloc_callback_url ?? "").trim()) values.nodeloc_callback_url = nodeLocCallbackURL;
     return values;
   });
   const [savingCard, setSavingCard] = useState<string | null>(null);
@@ -76,7 +85,7 @@ export default function AuthSecuritySection({ options, onBulkSave, canSensitive 
         const value = String(form[key] ?? "");
         return (key.endsWith("_client_id") || key.endsWith("_client_secret")) && !value.trim() ? [] : [{ key, value }];
       }));
-      if (card === "linuxdo" || card === "github") {
+      if (card === "linuxdo" || card === "github" || card === "nodeloc") {
         setForm((current) => ({
           ...current,
           [`${card}_client_id`]: "",
@@ -164,6 +173,42 @@ export default function AuthSecuritySection({ options, onBulkSave, canSensitive 
         </div>
       </SettingsFormGrid>
       <Button icon={<Save size={14} />} loading={savingCard === "linuxdo"} onClick={() => void saveCard("linuxdo", ["linuxdo_oauth_enabled", ...(canSensitive ? ["linuxdo_client_id", "linuxdo_client_secret", "linuxdo_callback_url"] : []), "linuxdo_minimum_trust_level"]).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
+    </SettingsSection>
+
+    <SettingsSection title={<SettingsCardHeader
+      icon={<MapPin size={16} />}
+      title={t("NodeLoc third-party login")}
+      description={t("Configure NodeLoc OAuth for verified account login and binding")}
+      enabled={!!form.nodeloc_oauth_enabled}
+      onToggle={(value) => update("nodeloc_oauth_enabled", value)}
+      statusText={form.nodeloc_oauth_enabled ? t("已启用") : t("已禁用")}
+    />}>
+      <SettingsFormGrid className={`${TWO_COLUMN_GRID} mt-4`}>
+        <div data-settings-form-span="full" className="rounded-lg border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-sm font-medium text-[var(--semi-color-text-0)]">{t("Setup guide")}</p>
+              <p className="mt-1 text-xs leading-5 text-[var(--semi-color-text-2)]">{t("Set this callback URL in your NodeLoc OAuth application and request email scope approval before enabling login.")}</p>
+            </div>
+            <a href="https://www.nodeloc.com/oauth-provider/applications" target="_blank" rel="noreferrer" className="inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-1 text-sm font-medium text-brand hover:text-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-start)]">
+              {t("Manage your NodeLoc OAuth app")}
+              <ExternalLink size={14} aria-hidden="true" />
+            </a>
+          </div>
+          <div className="mt-3 flex min-w-0 flex-col gap-2 rounded-md bg-[var(--semi-color-bg-0)] p-3 sm:flex-row sm:items-center">
+            <span className="shrink-0 text-xs text-[var(--semi-color-text-2)]">{t("Authorization callback URL")}</span>
+            <code className="min-w-0 flex-1 break-all text-xs text-[var(--semi-color-text-0)]">{String(form.nodeloc_callback_url)}</code>
+            <Button aria-label={t("Copy callback URL")} icon={<Copy size={14} />} onClick={() => void copyText(String(form.nodeloc_callback_url)).then(() => Toast.success(t("Copied"))).catch(() => Toast.error(t("Copy failed.")))} theme="borderless" type="tertiary" className="min-h-11 min-w-11" />
+          </div>
+        </div>
+        <SettingsTextField label="Client ID" value={String(form.nodeloc_client_id)} onChange={(value) => update("nodeloc_client_id", value)} disabled={!canSensitive} placeholder={canSensitive ? t("Saved client ID is not shown; leave blank to keep it unchanged") : t("需要敏感设置权限")} />
+        <SettingsTextField label="Client Secret" value={String(form.nodeloc_client_secret)} onChange={(value) => update("nodeloc_client_secret", value)} type="password" disabled={!canSensitive} placeholder={canSensitive ? t("Saved secret is not shown; leave blank to keep it unchanged") : t("需要敏感设置权限")} />
+        <SettingsNumberField label={t("Minimum Trust Level")} description={t("Minimum NodeLoc trust level required (0-4)")} value={number(form.nodeloc_minimum_trust_level)} onChange={(value) => update("nodeloc_minimum_trust_level", value)} min={0} max={4} />
+        <div data-settings-form-span="full">
+          <SettingsTextField label={t("Authorization callback URL")} value={String(form.nodeloc_callback_url)} onChange={(value) => update("nodeloc_callback_url", value)} disabled={!canSensitive} placeholder={nodeLocCallbackURL} />
+        </div>
+      </SettingsFormGrid>
+      <Button icon={<Save size={14} />} loading={savingCard === "nodeloc"} onClick={() => void saveCard("nodeloc", ["nodeloc_oauth_enabled", ...(canSensitive ? ["nodeloc_client_id", "nodeloc_client_secret", "nodeloc_callback_url"] : []), "nodeloc_minimum_trust_level"]).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
     </SettingsSection>
 
     <SettingsSection title={<SettingsCardHeader

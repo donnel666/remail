@@ -67,6 +67,17 @@ func (uc *EmailCodeUseCase) RequestLinuxDO(ctx context.Context, email, providerE
 	return uc.request(ctx, normalized, linuxDOEmailCodeKey(normalized))
 }
 
+func (uc *EmailCodeUseCase) RequestNodeLoc(ctx context.Context, email, providerEmail string, mode NodeLocAccountMode) (bool, error) {
+	normalized := normalizeEmail(email)
+	if err := validateLinuxDOEmail(normalized, providerEmail, mode); err != nil {
+		return false, err
+	}
+	if mode == LinuxDOAccountNew && !runtimeconfig.Bool("register_enabled", true) {
+		return false, domain.ErrRegistrationDisabled
+	}
+	return uc.request(ctx, normalized, nodeLocEmailCodeKey(normalized))
+}
+
 func (uc *EmailCodeUseCase) RequestGitHub(ctx context.Context, email, expectedEmail string) (bool, error) {
 	normalized := normalizeEmail(email)
 	if normalized != normalizeEmail(expectedEmail) || validateEmailAddress(normalized) != nil {
@@ -145,4 +156,8 @@ func linuxDOEmailCodeKey(email string) string {
 
 func githubEmailCodeKey(email string) string {
 	return "github:" + emailCodeKey(email)
+}
+
+func nodeLocEmailCodeKey(email string) string {
+	return "nodeloc:" + emailCodeKey(email)
 }

@@ -25,4 +25,9 @@ export const AUTH_SECURITY_KEYS = [
   "github_client_secret",
   "github_callback_url",
   "github_minimum_account_age_days",
+  "nodeloc_oauth_enabled",
+  "nodeloc_client_id",
+  "nodeloc_client_secret",
+  "nodeloc_callback_url",
+  "nodeloc_minimum_trust_level",
 ] as const;

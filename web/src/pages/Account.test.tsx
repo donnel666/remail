@@ -56,6 +56,7 @@ vi.mock("@/lib/iam-api", () => ({
   githubBindURL: "/v1/oauth/github/bind",
   getLoginConfig: mocks.getLoginConfig,
   linuxDOBindURL: "/v1/oauth/linuxdo/bind",
+  nodeLocBindURL: "/v1/oauth/nodeloc/bind",
 }));
 vi.mock("@/lib/openapi-credentials-api", () => ({ getAPIKeyUsage: mocks.getAPIKeyUsage }));
 vi.mock("@/lib/wallet-api", () => ({ getWallet: mocks.getWallet }));
@@ -111,7 +112,7 @@ describe("Account LinuxDO binding", () => {
     window.history.replaceState({}, "", "/account");
     mocks.currentUser.email = "linuxdo-42@oauth.invalid";
     mocks.currentUser.hasLocalPassword = false;
-    mocks.getLoginConfig.mockResolvedValue({ githubOAuthEnabled: false, githubBound: false, linuxdoOAuthEnabled: true, linuxdoBound: false });
+    mocks.getLoginConfig.mockResolvedValue({ githubOAuthEnabled: false, githubBound: false, linuxdoOAuthEnabled: true, linuxdoBound: false, nodelocOAuthEnabled: false, nodelocBound: false });
     mocks.getWallet.mockResolvedValue({ consumerBalance: "0", historicalSpend: "0" });
     mocks.getAPIKeyUsage.mockResolvedValue({ requestCount: 0 });
     mocks.refreshCurrentUser.mockResolvedValue(mocks.currentUser);
@@ -131,7 +132,7 @@ describe("Account LinuxDO binding", () => {
   });
 
   it("shows the bound state without an email-change action", async () => {
-    mocks.getLoginConfig.mockResolvedValue({ githubOAuthEnabled: false, githubBound: false, linuxdoOAuthEnabled: true, linuxdoBound: true });
+    mocks.getLoginConfig.mockResolvedValue({ githubOAuthEnabled: false, githubBound: false, linuxdoOAuthEnabled: true, linuxdoBound: true, nodelocOAuthEnabled: false, nodelocBound: false });
     render(<Account />);
 
     expect(await screen.findByRole("button", { name: "Bound" })).toBeDisabled();
@@ -153,7 +154,7 @@ describe("Account LinuxDO binding", () => {
     render(<Account />);
 
     expect(await screen.findByText("Could not load LinuxDO account status. Please try again later.")).toHaveAttribute("role", "alert");
-    expect(screen.getAllByRole("button", { name: "Unavailable" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Unavailable" })).toHaveLength(3);
   });
 
   it("keeps password management available for an account with a real email", async () => {
@@ -166,7 +167,7 @@ describe("Account LinuxDO binding", () => {
   });
 
   it("exposes the authenticated GitHub bind URL when enabled", async () => {
-    mocks.getLoginConfig.mockResolvedValue({ githubOAuthEnabled: true, githubBound: false, linuxdoOAuthEnabled: false, linuxdoBound: false });
+    mocks.getLoginConfig.mockResolvedValue({ githubOAuthEnabled: true, githubBound: false, linuxdoOAuthEnabled: false, linuxdoBound: false, nodelocOAuthEnabled: false, nodelocBound: false });
 
     render(<Account />);
 

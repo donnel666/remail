@@ -2591,6 +2591,21 @@ func (e MonitoringStatus) Valid() bool {
 	}
 }
 
+// Defines values for NodeLocPendingResponseProvider.
+const (
+	Nodeloc NodeLocPendingResponseProvider = "nodeloc"
+)
+
+// Valid indicates whether the value is a known member of the NodeLocPendingResponseProvider enum.
+func (e NodeLocPendingResponseProvider) Valid() bool {
+	switch e {
+	case Nodeloc:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OrderBatchItemErrorResponseCode.
 const (
 	OrderBatchItemErrorResponseCodeInsufficientBalance    OrderBatchItemErrorResponseCode = "insufficient_balance"
@@ -8710,6 +8725,8 @@ type LoginConfigResponse struct {
 	GithubOAuthEnabled  bool `json:"githubOAuthEnabled"`
 	LinuxdoBound        bool `json:"linuxdoBound"`
 	LinuxdoOAuthEnabled bool `json:"linuxdoOAuthEnabled"`
+	NodelocBound        bool `json:"nodelocBound"`
+	NodelocOAuthEnabled bool `json:"nodelocOAuthEnabled"`
 }
 
 // LoginRequest defines model for LoginRequest.
@@ -9027,6 +9044,19 @@ type MonitoringTaskStats struct {
 	Status            MonitoringStatus                `json:"status"`
 	WorkersReady      bool                            `json:"workersReady"`
 }
+
+// NodeLocPendingResponse defines model for NodeLocPendingResponse.
+type NodeLocPendingResponse struct {
+	Provider             NodeLocPendingResponseProvider `json:"provider"`
+	ProviderUserId       string                         `json:"providerUserId"`
+	RegistrationEnabled  bool                           `json:"registrationEnabled"`
+	SuggestedEmail       string                         `json:"suggestedEmail"`
+	SuggestedEmailExists bool                           `json:"suggestedEmailExists"`
+	Username             string                         `json:"username"`
+}
+
+// NodeLocPendingResponseProvider defines model for NodeLocPendingResponse.Provider.
+type NodeLocPendingResponseProvider string
 
 // NonNegativeLedgerAmount Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 type NonNegativeLedgerAmount = string
@@ -10698,6 +10728,13 @@ type cookieAuthContextKey string
 
 // systemKeyAuthContextKey is the context key for systemKeyAuth security scheme
 type systemKeyAuthContextKey string
+
+// GetNodeLocCallbackParams defines parameters for GetNodeLocCallback.
+type GetNodeLocCallbackParams struct {
+	Code  *string `form:"code,omitempty" json:"code,omitempty"`
+	State *string `form:"state,omitempty" json:"state,omitempty"`
+	Error *string `form:"error,omitempty" json:"error,omitempty"`
+}
 
 // GetAdminAllocationsParams defines parameters for GetAdminAllocations.
 type GetAdminAllocationsParams struct {
@@ -13491,6 +13528,12 @@ type PostLinuxDOCompleteJSONRequestBody = LinuxDOCompleteRequest
 // PostLinuxDOEmailCodeJSONRequestBody defines body for PostLinuxDOEmailCode for application/json ContentType.
 type PostLinuxDOEmailCodeJSONRequestBody = LinuxDOEmailCodeRequest
 
+// PostNodeLocCompleteJSONRequestBody defines body for PostNodeLocComplete for application/json ContentType.
+type PostNodeLocCompleteJSONRequestBody = LinuxDOCompleteRequest
+
+// PostNodeLocEmailCodeJSONRequestBody defines body for PostNodeLocEmailCode for application/json ContentType.
+type PostNodeLocEmailCodeJSONRequestBody = LinuxDOEmailCodeRequest
+
 // PostOrderJSONRequestBody defines body for PostOrder for application/json ContentType.
 type PostOrderJSONRequestBody = CreateOrderRequest
 
@@ -14304,6 +14347,9 @@ type ServerInterface interface {
 	// Liveness probe
 	// (GET /healthz)
 	Healthz(c *gin.Context)
+	// Complete NodeLoc OAuth login or binding
+	// (GET /oauth/nodeloc)
+	GetNodeLocCallback(c *gin.Context, params GetNodeLocCallbackParams)
 	// Readiness probe
 	// (GET /readyz)
 	Readyz(c *gin.Context)
@@ -15147,6 +15193,21 @@ type ServerInterface interface {
 	// Get the pending Linux DO account ownership choice
 	// (GET /v1/oauth/linuxdo/pending)
 	GetLinuxDOPending(c *gin.Context)
+	// Start NodeLoc OAuth login
+	// (GET /v1/oauth/nodeloc)
+	GetNodeLocAuthorize(c *gin.Context)
+	// Start NodeLoc binding for the current user
+	// (GET /v1/oauth/nodeloc/bind)
+	GetNodeLocBind(c *gin.Context)
+	// Verify email ownership and finish NodeLoc login
+	// (POST /v1/oauth/nodeloc/complete)
+	PostNodeLocComplete(c *gin.Context)
+	// Send the email verification code for NodeLoc account ownership
+	// (POST /v1/oauth/nodeloc/email/code)
+	PostNodeLocEmailCode(c *gin.Context)
+	// Get the pending NodeLoc account setup
+	// (GET /v1/oauth/nodeloc/pending)
+	GetNodeLocPending(c *gin.Context)
 	// Create a temporary iCloud forwarding email
 	// (POST /v1/open/icloud/forwarding-emails)
 	PostSystemICloudForwardingEmail(c *gin.Context)
@@ -15352,6 +15413,49 @@ func (siw *ServerInterfaceWrapper) Healthz(c *gin.Context) {
 	}
 
 	siw.Handler.Healthz(c)
+}
+
+// GetNodeLocCallback operation middleware
+func (siw *ServerInterfaceWrapper) GetNodeLocCallback(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetNodeLocCallbackParams
+
+	// ------------- Optional query parameter "code" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "code", c.Request.URL.Query(), &params.Code, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter code: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "state" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "state", c.Request.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter state: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "error" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "error", c.Request.URL.Query(), &params.Error, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter error: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetNodeLocCallback(c, params)
 }
 
 // Readyz operation middleware
@@ -30330,6 +30434,71 @@ func (siw *ServerInterfaceWrapper) GetLinuxDOPending(c *gin.Context) {
 	siw.Handler.GetLinuxDOPending(c)
 }
 
+// GetNodeLocAuthorize operation middleware
+func (siw *ServerInterfaceWrapper) GetNodeLocAuthorize(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetNodeLocAuthorize(c)
+}
+
+// GetNodeLocBind operation middleware
+func (siw *ServerInterfaceWrapper) GetNodeLocBind(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetNodeLocBind(c)
+}
+
+// PostNodeLocComplete operation middleware
+func (siw *ServerInterfaceWrapper) PostNodeLocComplete(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostNodeLocComplete(c)
+}
+
+// PostNodeLocEmailCode operation middleware
+func (siw *ServerInterfaceWrapper) PostNodeLocEmailCode(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostNodeLocEmailCode(c)
+}
+
+// GetNodeLocPending operation middleware
+func (siw *ServerInterfaceWrapper) GetNodeLocPending(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetNodeLocPending(c)
+}
+
 // PostSystemICloudForwardingEmail operation middleware
 func (siw *ServerInterfaceWrapper) PostSystemICloudForwardingEmail(c *gin.Context) {
 
@@ -33060,6 +33229,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	}
 
 	router.GET(options.BaseURL+"/healthz", wrapper.Healthz)
+	router.GET(options.BaseURL+"/oauth/nodeloc", wrapper.GetNodeLocCallback)
 	router.GET(options.BaseURL+"/readyz", wrapper.Readyz)
 	router.GET(options.BaseURL+"/v1/activation", wrapper.GetActivation)
 	router.POST(options.BaseURL+"/v1/activation", wrapper.PostActivation)
@@ -33341,6 +33511,11 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/oauth/linuxdo/complete", wrapper.PostLinuxDOComplete)
 	router.POST(options.BaseURL+"/v1/oauth/linuxdo/email/code", wrapper.PostLinuxDOEmailCode)
 	router.GET(options.BaseURL+"/v1/oauth/linuxdo/pending", wrapper.GetLinuxDOPending)
+	router.GET(options.BaseURL+"/v1/oauth/nodeloc", wrapper.GetNodeLocAuthorize)
+	router.GET(options.BaseURL+"/v1/oauth/nodeloc/bind", wrapper.GetNodeLocBind)
+	router.POST(options.BaseURL+"/v1/oauth/nodeloc/complete", wrapper.PostNodeLocComplete)
+	router.POST(options.BaseURL+"/v1/oauth/nodeloc/email/code", wrapper.PostNodeLocEmailCode)
+	router.GET(options.BaseURL+"/v1/oauth/nodeloc/pending", wrapper.GetNodeLocPending)
 	router.POST(options.BaseURL+"/v1/open/icloud/forwarding-emails", wrapper.PostSystemICloudForwardingEmail)
 	router.GET(options.BaseURL+"/v1/open/icloud/forwarding-emails/:preparationId", wrapper.GetSystemICloudForwardingEmail)
 	router.GET(options.BaseURL+"/v1/orders", wrapper.GetOrders)

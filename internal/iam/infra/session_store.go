@@ -19,6 +19,7 @@ const (
 	linuxDOFlowPrefix    = "linuxdo_oauth_flow:"
 	linuxDOPendingPrefix = "linuxdo_oauth_pending:"
 	githubPendingPrefix  = "github_oauth_pending:"
+	nodeLocPendingPrefix = "nodeloc_oauth_pending:"
 )
 
 var consumeOAuthFlowScript = redis.NewScript(`
@@ -62,6 +63,10 @@ func linuxDOPendingKey(token string) string {
 
 func githubPendingKey(token string) string {
 	return githubPendingPrefix + token
+}
+
+func nodeLocPendingKey(token string) string {
+	return nodeLocPendingPrefix + token
 }
 
 // sessionData is the JSON structure stored in Redis.
@@ -279,6 +284,48 @@ func (s *SessionStore) DeleteGitHubPending(ctx context.Context, token string) er
 	}
 	if err := s.rdb.Del(ctx, githubPendingKey(token)).Err(); err != nil {
 		return fmt.Errorf("redis github oauth pending verification delete: %w", err)
+	}
+	return nil
+}
+
+func (s *SessionStore) PutNodeLocPending(ctx context.Context, token string, pending app.NodeLocPending, ttl time.Duration) error {
+	if strings.TrimSpace(token) == "" || ttl <= 0 {
+		return fmt.Errorf("invalid nodeloc oauth pending setup")
+	}
+	data, err := json.Marshal(pending)
+	if err != nil {
+		return fmt.Errorf("marshal nodeloc oauth pending setup: %w", err)
+	}
+	if err := s.rdb.Set(ctx, nodeLocPendingKey(token), data, ttl).Err(); err != nil {
+		return fmt.Errorf("redis nodeloc oauth pending setup put: %w", err)
+	}
+	return nil
+}
+
+func (s *SessionStore) GetNodeLocPending(ctx context.Context, token string) (*app.NodeLocPending, error) {
+	if strings.TrimSpace(token) == "" {
+		return nil, nil
+	}
+	data, err := s.rdb.Get(ctx, nodeLocPendingKey(token)).Bytes()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("redis nodeloc oauth pending setup get: %w", err)
+	}
+	var pending app.NodeLocPending
+	if err := json.Unmarshal(data, &pending); err != nil {
+		return nil, fmt.Errorf("unmarshal nodeloc oauth pending setup: %w", err)
+	}
+	return &pending, nil
+}
+
+func (s *SessionStore) DeleteNodeLocPending(ctx context.Context, token string) error {
+	if strings.TrimSpace(token) == "" {
+		return nil
+	}
+	if err := s.rdb.Del(ctx, nodeLocPendingKey(token)).Err(); err != nil {
+		return fmt.Errorf("redis nodeloc oauth pending setup delete: %w", err)
 	}
 	return nil
 }

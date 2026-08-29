@@ -3,7 +3,8 @@ package runtimeconfig
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
 const (
-	DefaultSettingsCount                         = 261
+	DefaultSettingsCount                         = 266
+	NodeLocCallbackURL                           = "https://remail.aishop6.com/oauth/nodeloc"
 	SMSBowerNoCodeRefundTimeoutMinutesKey        = "smsbower_no_code_refund_timeout_minutes"
 	MicrosoftPriceMultiplierKey                  = "product_price_multiplier_microsoft"
 	GmailPriceMultiplierKey                      = "product_price_multiplier_gmail"
@@ -67,6 +68,11 @@ var defaultSettings = []domain.Setting{
 	{Key: "github_client_secret", Value: ""},
 	{Key: "github_callback_url", Value: ""},
 	{Key: "github_minimum_account_age_days", Value: "0"},
+	{Key: "nodeloc_oauth_enabled", Value: "false"},
+	{Key: "nodeloc_client_id", Value: ""},
+	{Key: "nodeloc_client_secret", Value: ""},
+	{Key: "nodeloc_callback_url", Value: NodeLocCallbackURL},
+	{Key: "nodeloc_minimum_trust_level", Value: "0"},
 	{Key: "announcement_enabled", Value: "true"},
 	{Key: "announcements", Value: "[]"},
 	{Key: "global_notice", Value: ""},

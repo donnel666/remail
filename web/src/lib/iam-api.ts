@@ -34,6 +34,10 @@ export type LinuxDOCompleteRequest = components["schemas"]["LinuxDOCompleteReque
 export type GitHubPendingResponse = components["schemas"]["GitHubPendingResponse"];
 export type GitHubEmailCodeRequest = components["schemas"]["GitHubEmailCodeRequest"];
 export type GitHubCompleteRequest = components["schemas"]["GitHubCompleteRequest"];
+export type NodeLocAccountMode = LinuxDOAccountMode;
+export type NodeLocPendingResponse = components["schemas"]["NodeLocPendingResponse"];
+export type NodeLocEmailCodeRequest = LinuxDOEmailCodeRequest;
+export type NodeLocCompleteRequest = LinuxDOCompleteRequest;
 export type AdminUserListResponse =
   components["schemas"]["AdminUserListResponse"];
 export type CurrentInviteResponse =
@@ -89,6 +93,8 @@ export const linuxDOLoginURL = "/v1/oauth/linuxdo";
 export const linuxDOBindURL = "/v1/oauth/linuxdo/bind";
 export const githubLoginURL = "/v1/oauth/github";
 export const githubBindURL = "/v1/oauth/github/bind";
+export const nodeLocLoginURL = "/v1/oauth/nodeloc";
+export const nodeLocBindURL = "/v1/oauth/nodeloc/bind";
 
 export async function getLinuxDOPending() {
   return unwrap<LinuxDOPendingResponse>(
@@ -127,6 +133,26 @@ export async function sendGitHubEmailCode(payload: GitHubEmailCodeRequest) {
 export async function completeGitHub(payload: GitHubCompleteRequest) {
   return unwrap<LoginResponse | undefined>(
     await client.POST("/v1/oauth/github/complete", { body: payload })
+  );
+}
+
+export async function getNodeLocPending() {
+  return unwrap<NodeLocPendingResponse>(
+    await client.GET("/v1/oauth/nodeloc/pending")
+  );
+}
+
+export async function sendNodeLocEmailCode(payload: NodeLocEmailCodeRequest) {
+  const result = await client.POST("/v1/oauth/nodeloc/email/code", {
+    body: payload,
+  });
+  await unwrap<void>(result);
+  return Number.parseInt(result.response.headers.get("Retry-After") ?? "", 10) || 0;
+}
+
+export async function completeNodeLoc(payload: NodeLocCompleteRequest) {
+  return unwrap<LoginResponse>(
+    await client.POST("/v1/oauth/nodeloc/complete", { body: payload })
   );
 }
 

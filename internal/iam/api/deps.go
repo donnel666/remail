@@ -59,12 +59,14 @@ type IAMModule struct {
 	SessionStore               app.SessionStore
 	LinuxDOPendingStore        app.LinuxDOPendingStore
 	GitHubPendingStore         app.GitHubPendingStore
+	NodeLocPendingStore        app.NodeLocPendingStore
 	EmailCodeStore             app.EmailCodeStore
 	AbuseLimiter               abuseLimiter
 	TurnstileVerifier          turnstileVerifier
 	TurnstileSiteKey           string
 	linuxDOClient              *linuxDOClient
 	githubClient               *githubClient
+	nodeLocClient              *nodeLocClient
 	AdminResourceOwners        coreapp.OwnerQueryPort
 	AdminUserSelectionResolver *AdminUserSelectionResolver
 }
@@ -106,12 +108,14 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.D
 		SessionStore:               sessionStore,
 		LinuxDOPendingStore:        sessionStore,
 		GitHubPendingStore:         sessionStore,
+		NodeLocPendingStore:        sessionStore,
 		EmailCodeStore:             emailCodeStore,
 		AbuseLimiter:               infra.NewAbuseLimiter(rdb),
 		TurnstileVerifier:          infra.NewTurnstileVerifier(turnstileSecretKey),
 		TurnstileSiteKey:           turnstileSiteKey,
 		linuxDOClient:              newLinuxDOClient(),
 		githubClient:               newGitHubClient(),
+		nodeLocClient:              newNodeLocClient(),
 		AdminResourceOwners:        NewAdminResourceOwnerAdapter(userRepo),
 		AdminUserSelectionResolver: NewAdminUserSelectionResolver(userRepo),
 	}, nil

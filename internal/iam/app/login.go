@@ -64,7 +64,10 @@ type LinuxDOProfile struct {
 	TrustLevel int
 }
 
-const githubIdentityProvider = "github"
+const (
+	githubIdentityProvider  = "github"
+	nodeLocIdentityProvider = "nodeloc"
+)
 
 type GitHubProfile struct {
 	ID        string
@@ -95,6 +98,22 @@ type LinuxDOPending struct {
 	SuggestedEmail       string         `json:"suggestedEmail,omitempty"`
 	SuggestedEmailExists bool           `json:"suggestedEmailExists"`
 }
+
+type NodeLocProfile struct {
+	ID         string
+	Username   string
+	Name       string
+	Email      string
+	TrustLevel int
+}
+
+type NodeLocPending struct {
+	Profile              NodeLocProfile `json:"profile"`
+	SuggestedEmail       string         `json:"suggestedEmail,omitempty"`
+	SuggestedEmailExists bool           `json:"suggestedEmailExists"`
+}
+
+type NodeLocAccountMode = LinuxDOAccountMode
 
 // Login authenticates a user by email and password after the API boundary has
 // validated the request's Turnstile token.
@@ -235,6 +254,164 @@ func (uc *LoginUseCase) LoginGitHub(ctx context.Context, profile GitHubProfile, 
 	grantRegistrationReward(ctx, uc.rewardWallet, user.ID)
 	result, err := uc.finishGitHubLogin(ctx, user, profile.ID, metadata...)
 	return result, nil, err
+}
+
+func (uc *LoginUseCase) LoginNodeLoc(ctx context.Context, profile NodeLocProfile, metadata ...LoginMeta) (*LoginResult, *NodeLocPending, error) {
+	profile, err := normalizeNodeLocProfile(profile)
+	if err != nil {
+		return nil, nil, err
+	}
+	user, err := uc.repo.FindByThirdPartyIdentity(ctx, nodeLocIdentityProvider, profile.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("nodeloc login find identity: %w", mapNodeLocIdentityError(err))
+	}
+	if user != nil {
+		if !user.IsActive() {
+			return nil, nil, domain.ErrNodeLocAccountUnavailable
+		}
+		user, err = uc.repo.RecordThirdPartyLogin(ctx, user.ID, nodeLocIdentityProvider, profile.ID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("nodeloc login update last login: %w", mapNodeLocIdentityError(err))
+		}
+		if user == nil {
+			return nil, nil, domain.ErrNodeLocAccountUnavailable
+		}
+		result, err := uc.finishLogin(ctx, user, true, metadata...)
+		return result, nil, err
+	}
+
+	pending := &NodeLocPending{Profile: profile, SuggestedEmail: trustedLinuxDOEmail(profile.Email)}
+	if pending.SuggestedEmail != "" {
+		existing, err := uc.repo.FindByEmail(ctx, pending.SuggestedEmail)
+		if err != nil {
+			return nil, nil, fmt.Errorf("nodeloc login inspect provider email: %w", err)
+		}
+		pending.SuggestedEmailExists = existing != nil
+	}
+	return nil, pending, nil
+}
+
+func (uc *LoginUseCase) CompleteNodeLoc(ctx context.Context, pending NodeLocPending, mode NodeLocAccountMode, email, code string, metadata ...LoginMeta) (*LoginResult, error) {
+	if uc.codeStore == nil {
+		return nil, errors.New("nodeloc email code store is not configured")
+	}
+	profile, err := normalizeNodeLocProfile(pending.Profile)
+	if err != nil {
+		return nil, err
+	}
+	mode = NodeLocAccountMode(strings.TrimSpace(string(mode)))
+	normalizedEmail := normalizeEmail(email)
+	if err := validateLinuxDOEmail(normalizedEmail, profile.Email, mode); err != nil {
+		return nil, err
+	}
+	if mode == LinuxDOAccountNew && !runtimeconfig.Bool("register_enabled", true) {
+		return nil, domain.ErrRegistrationDisabled
+	}
+
+	key := nodeLocEmailCodeKey(normalizedEmail)
+	code = strings.TrimSpace(code)
+	claimToken, err := newCryptoID()
+	if err != nil {
+		return nil, fmt.Errorf("nodeloc setup generate email claim: %w", err)
+	}
+	restore := func(cause error) error {
+		restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		if _, restoreErr := uc.codeStore.Restore(restoreCtx, key, claimToken, code); restoreErr != nil {
+			return fmt.Errorf("restore nodeloc email code after %v: %w", cause, restoreErr)
+		}
+		return cause
+	}
+	claimed, err := uc.codeStore.Claim(ctx, key, code, claimToken)
+	if err != nil {
+		return nil, restore(fmt.Errorf("nodeloc setup claim email code: %w", err))
+	}
+	if !claimed {
+		return nil, domain.ErrVerificationCodeIncorrect
+	}
+
+	var user *domain.User
+	created := false
+	switch mode {
+	case LinuxDOAccountExisting:
+		user, err = uc.repo.FindByEmail(ctx, normalizedEmail)
+		if err != nil {
+			return nil, restore(fmt.Errorf("nodeloc setup find existing account: %w", err))
+		}
+		if user == nil {
+			return nil, restore(domain.ErrLinuxDOExistingAccountNotFound)
+		}
+		if !user.IsActive() {
+			return nil, restore(domain.ErrNodeLocAccountUnavailable)
+		}
+		if err := uc.repo.BindThirdPartyIdentity(ctx, user.ID, nodeLocIdentityProvider, profile.ID); err != nil {
+			err = mapNodeLocIdentityError(err)
+			return nil, restore(fmt.Errorf("nodeloc setup bind existing account: %w", err))
+		}
+
+	case LinuxDOAccountNew:
+		existing, findErr := uc.repo.FindByEmail(ctx, normalizedEmail)
+		if findErr != nil {
+			return nil, restore(fmt.Errorf("nodeloc setup check new email: %w", findErr))
+		}
+		if existing != nil {
+			bound, boundErr := uc.repo.FindByThirdPartyIdentity(ctx, nodeLocIdentityProvider, profile.ID)
+			if boundErr != nil {
+				return nil, restore(fmt.Errorf("nodeloc setup resolve existing binding: %w", mapNodeLocIdentityError(boundErr)))
+			}
+			if bound == nil || bound.ID != existing.ID {
+				return nil, restore(domain.ErrLinuxDONewEmailAlreadyExists)
+			}
+			user = existing
+			break
+		}
+		passwordMarker, markerErr := newOAuthPasswordMarker()
+		if markerErr != nil {
+			return nil, restore(fmt.Errorf("nodeloc setup generate password marker: %w", markerErr))
+		}
+		user = &domain.User{
+			Email:        normalizedEmail,
+			PasswordHash: passwordMarker,
+			Nickname:     nodeLocNickname(profile),
+			Status:       domain.UserStatusActive,
+			Role:         domain.RoleUser,
+			UserGroupID:  1,
+		}
+		if err := uc.repo.CreateWithThirdPartyIdentity(ctx, user, nodeLocIdentityProvider, profile.ID); err != nil {
+			switch {
+			case errors.Is(err, domain.ErrEmailAlreadyExists):
+				err = domain.ErrLinuxDONewEmailAlreadyExists
+			default:
+				err = mapNodeLocIdentityError(err)
+			}
+			return nil, restore(fmt.Errorf("nodeloc setup create account: %w", err))
+		}
+		created = true
+
+	default:
+		return nil, restore(domain.ErrLinuxDOAccountModeInvalid)
+	}
+
+	user, err = uc.repo.RecordThirdPartyLogin(ctx, user.ID, nodeLocIdentityProvider, profile.ID)
+	if err != nil {
+		return nil, restore(fmt.Errorf("nodeloc setup update last login: %w", mapNodeLocIdentityError(err)))
+	}
+	if user == nil {
+		return nil, restore(domain.ErrNodeLocAccountUnavailable)
+	}
+	if created {
+		grantRegistrationReward(ctx, uc.rewardWallet, user.ID)
+	}
+	result, err := uc.finishLogin(ctx, user, true, metadata...)
+	if err != nil {
+		return nil, restore(fmt.Errorf("nodeloc setup finish login: %w", err))
+	}
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if committed, commitErr := uc.codeStore.Commit(commitCtx, key, claimToken); commitErr != nil || !committed {
+		slog.Warn("commit nodeloc email code", "error", commitErr, "committed", committed)
+	}
+	return result, nil
 }
 
 func (uc *LoginUseCase) NewGitHubBindPending(ctx context.Context, userID uint, sessionID string, profile GitHubProfile) (*GitHubPending, error) {
@@ -574,6 +751,63 @@ func (uc *LoginUseCase) HasLinuxDOIdentity(ctx context.Context, userID uint) (bo
 		return false, fmt.Errorf("has linuxdo identity: %w", err)
 	}
 	return bound, nil
+}
+
+func (uc *LoginUseCase) BindNodeLoc(ctx context.Context, userID uint, profile NodeLocProfile) error {
+	profile, err := normalizeNodeLocProfile(profile)
+	if err != nil {
+		return err
+	}
+	if err := uc.repo.BindThirdPartyIdentity(ctx, userID, nodeLocIdentityProvider, profile.ID); err != nil {
+		return fmt.Errorf("bind nodeloc identity: %w", mapNodeLocIdentityError(err))
+	}
+	return nil
+}
+
+func (uc *LoginUseCase) HasNodeLocIdentity(ctx context.Context, userID uint) (bool, error) {
+	bound, err := uc.repo.HasThirdPartyIdentity(ctx, userID, nodeLocIdentityProvider)
+	if err != nil {
+		return false, fmt.Errorf("has nodeloc identity: %w", mapNodeLocIdentityError(err))
+	}
+	return bound, nil
+}
+
+func normalizeNodeLocProfile(profile NodeLocProfile) (NodeLocProfile, error) {
+	profile.ID = strings.TrimSpace(profile.ID)
+	id, err := strconv.ParseUint(profile.ID, 10, 64)
+	if err != nil || id == 0 || strconv.FormatUint(id, 10) != profile.ID {
+		return NodeLocProfile{}, domain.ErrNodeLocAccountUnavailable
+	}
+	if profile.TrustLevel < runtimeconfig.Int("nodeloc_minimum_trust_level", 0, 0) {
+		return NodeLocProfile{}, domain.ErrNodeLocTrustLevelTooLow
+	}
+	profile.Email = trustedLinuxDOEmail(profile.Email)
+	return profile, nil
+}
+
+func mapNodeLocIdentityError(err error) error {
+	switch {
+	case errors.Is(err, domain.ErrThirdPartyIdentityUnavailable):
+		return domain.ErrNodeLocAccountUnavailable
+	case errors.Is(err, domain.ErrThirdPartyIdentityAlreadyBound):
+		return domain.ErrNodeLocIdentityAlreadyBound
+	default:
+		return err
+	}
+}
+
+func nodeLocNickname(profile NodeLocProfile) string {
+	nickname := strings.TrimSpace(profile.Name)
+	if nickname == "" {
+		nickname = strings.TrimSpace(profile.Username)
+	}
+	if nickname == "" {
+		nickname = "NodeLoc User"
+	}
+	if runes := []rune(nickname); len(runes) > 100 {
+		nickname = string(runes[:100])
+	}
+	return nickname
 }
 
 func normalizeLinuxDOProfile(profile LinuxDOProfile) (LinuxDOProfile, error) {

@@ -82,6 +82,11 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionSecure bool) 
 	rg.GET("/oauth/github/pending", middleware.LoadSession(fetcher), h.GetGitHubPending)
 	rg.POST("/oauth/github/email/code", middleware.LoadSession(fetcher), h.PostGitHubEmailCode)
 	rg.POST("/oauth/github/complete", middleware.LoadSession(fetcher), h.PostGitHubComplete)
+	rg.GET("/oauth/nodeloc", h.GetNodeLocAuthorize)
+	rg.GET("/oauth/nodeloc/bind", middleware.LoadSession(fetcher), h.GetNodeLocBind)
+	rg.GET("/oauth/nodeloc/pending", h.GetNodeLocPending)
+	rg.POST("/oauth/nodeloc/email/code", h.PostNodeLocEmailCode)
+	rg.POST("/oauth/nodeloc/complete", h.PostNodeLocComplete)
 	rg.POST("/email/code", h.PostEmailCode)
 	rg.POST("/users", h.PostRegister)
 	rg.POST("/login", h.PostLogin)
@@ -134,4 +139,11 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionSecure bool) 
 		admin.GET("/invites/:code/uses", middleware.PermissionRequired(mod.PermissionChecker, "iam:invite", "read"), h.GetAdminInviteUses)
 		admin.PATCH("/invites/:code", middleware.PermissionRequired(mod.PermissionChecker, "iam:invite", "operate"), h.PatchAdminInvite)
 	}
+}
+
+// RegisterNodeLocCallback exposes the callback URL registered with NodeLoc.
+func RegisterNodeLocCallback(routes gin.IRoutes, mod *IAMModule, sessionSecure bool) {
+	h := NewIAMHandler(mod, sessionSecure)
+	fetcher := NewSessionFetcher(mod.SessionStore, mod.UserRepo)
+	routes.GET(nodeLocCallbackPath, middleware.LoadSession(fetcher), h.GetNodeLocCallback)
 }

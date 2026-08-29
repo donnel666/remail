@@ -60,6 +60,18 @@ type GitHubCompleteRequest struct {
 	Code string `json:"code" binding:"required"`
 }
 
+type NodeLocEmailCodeRequest struct {
+	Mode           app.NodeLocAccountMode `json:"mode" binding:"required,oneof=existing new"`
+	Email          string                 `json:"email" binding:"required,email"`
+	TurnstileToken string                 `json:"turnstileToken" binding:"max=2048"`
+}
+
+type NodeLocCompleteRequest struct {
+	Mode  app.NodeLocAccountMode `json:"mode" binding:"required,oneof=existing new"`
+	Email string                 `json:"email" binding:"required,email"`
+	Code  string                 `json:"code" binding:"required"`
+}
+
 // ChangePasswordRequest is the request body for PATCH /v1/password.
 type ChangePasswordRequest struct {
 	OldPassword string `json:"oldPassword" binding:"required"`
@@ -208,6 +220,8 @@ type LoginConfigResponse struct {
 	LinuxDOBound        bool `json:"linuxdoBound"`
 	GitHubOAuthEnabled  bool `json:"githubOAuthEnabled"`
 	GitHubBound         bool `json:"githubBound"`
+	NodeLocOAuthEnabled bool `json:"nodelocOAuthEnabled"`
+	NodeLocBound        bool `json:"nodelocBound"`
 }
 
 type LinuxDOPendingResponse struct {
@@ -226,6 +240,15 @@ type GitHubPendingResponse struct {
 	Username       string `json:"username"`
 	Email          string `json:"email"`
 	Intent         string `json:"intent"`
+}
+
+type NodeLocPendingResponse struct {
+	Provider             string `json:"provider"`
+	ProviderUserID       string `json:"providerUserId"`
+	Username             string `json:"username"`
+	SuggestedEmail       string `json:"suggestedEmail"`
+	SuggestedEmailExists bool   `json:"suggestedEmailExists"`
+	RegistrationEnabled  bool   `json:"registrationEnabled"`
 }
 
 // TurnstileConfigResponse exposes the runtime switch and public widget site key.

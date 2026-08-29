@@ -75,6 +75,7 @@ const (
 	turnstileActionPasswordReset = "password_reset_code"
 	turnstileActionLinuxDOEmail  = "linuxdo_email_code"
 	turnstileActionGitHubEmail   = "github_email_code"
+	turnstileActionNodeLocEmail  = "nodeloc_email_code"
 )
 
 // GET /v1/turnstile/config
@@ -1414,6 +1415,26 @@ func writeError(c *gin.Context, err error) {
 	case errors.Is(err, domain.ErrGitHubPendingExpired):
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"message":   "GitHub account verification expired. Please sign in with GitHub again.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrNodeLocPendingExpired):
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"message":   "NodeLoc account setup expired. Please sign in with NodeLoc again.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrNodeLocIdentityAlreadyBound):
+		c.JSON(http.StatusConflict, gin.H{
+			"message":   "This NodeLoc account is already bound to another account.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrNodeLocAccountUnavailable):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message":   "NodeLoc account is unavailable.",
+			"requestId": rid,
+		})
+	case errors.Is(err, domain.ErrNodeLocTrustLevelTooLow):
+		c.JSON(http.StatusForbidden, gin.H{
+			"message":   "Your NodeLoc trust level is too low.",
 			"requestId": rid,
 		})
 	case errors.Is(err, domain.ErrThirdPartyIdentityAlreadyBound):

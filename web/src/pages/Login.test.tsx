@@ -7,12 +7,15 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   completeLinuxDO: vi.fn(),
+  completeNodeLoc: vi.fn(),
   getLinuxDOPending: vi.fn(),
   getLoginConfig: vi.fn(),
+  getNodeLocPending: vi.fn(),
   login: vi.fn(),
   navigate: vi.fn(),
   refreshCurrentUser: vi.fn(),
   sendLinuxDOEmailCode: vi.fn(),
+  sendNodeLocEmailCode: vi.fn(),
   t: (key: string) => key,
 }));
 
@@ -49,17 +52,21 @@ vi.mock("@/context/auth-provider", () => ({
 vi.mock("@/lib/iam-errors", () => ({ getIamErrorMessage: (_t: unknown, _error: unknown, fallback: string) => fallback }));
 vi.mock("@/lib/iam-api", () => ({
   completeLinuxDO: mocks.completeLinuxDO,
+  completeNodeLoc: mocks.completeNodeLoc,
   getLinuxDOPending: mocks.getLinuxDOPending,
   getLoginConfig: mocks.getLoginConfig,
+  getNodeLocPending: mocks.getNodeLocPending,
   githubLoginURL: "/v1/oauth/github",
   linuxDOLoginURL: "/v1/oauth/linuxdo",
+  nodeLocLoginURL: "/v1/oauth/nodeloc",
   sendLinuxDOEmailCode: mocks.sendLinuxDOEmailCode,
+  sendNodeLocEmailCode: mocks.sendNodeLocEmailCode,
 }));
 
 import Login from "./Login";
 
 beforeEach(() => {
-  mocks.getLoginConfig.mockResolvedValue({ githubOAuthEnabled: false, linuxdoOAuthEnabled: true });
+  mocks.getLoginConfig.mockResolvedValue({ githubOAuthEnabled: false, linuxdoOAuthEnabled: true, nodelocOAuthEnabled: false });
   mocks.getLinuxDOPending.mockResolvedValue({
     provider: "linuxdo",
     providerUserId: "42",
@@ -89,7 +96,7 @@ it("shows LinuxDO before the password form and consumes callback errors", async 
 });
 
 it("shows GitHub login when enabled", async () => {
-  mocks.getLoginConfig.mockResolvedValue({ githubOAuthEnabled: true, linuxdoOAuthEnabled: false });
+  mocks.getLoginConfig.mockResolvedValue({ githubOAuthEnabled: true, linuxdoOAuthEnabled: false, nodelocOAuthEnabled: false });
   window.history.replaceState({}, "", "/login");
 
   render(<Login />);
@@ -104,6 +111,15 @@ it("uses GitHub callback errors when the provider is GitHub", async () => {
   render(<Login />);
 
   expect(await screen.findByRole("alert")).toHaveTextContent("Your GitHub account has no verified email.");
+  expect(window.location.search).toBe("");
+});
+
+it("uses NodeLoc trust-level callback errors when the provider is NodeLoc", async () => {
+  window.history.replaceState({}, "", "/login?oauth_error=trust_level&oauth_provider=nodeloc");
+
+  render(<Login />);
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Your NodeLoc trust level is too low.");
   expect(window.location.search).toBe("");
 });
 

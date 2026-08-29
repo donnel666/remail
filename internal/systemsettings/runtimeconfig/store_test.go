@@ -103,6 +103,11 @@ func TestValidateAuthSecuritySettings(t *testing.T) {
 	require.ErrorIs(t, Validate("github_callback_url", "https://mail.example.com/v1/oauth/linuxdo/callback"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("github_minimum_account_age_days", "365"))
 	require.ErrorIs(t, Validate("github_minimum_account_age_days", "-1"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("nodeloc_minimum_trust_level", "4"))
+	require.ErrorIs(t, Validate("nodeloc_minimum_trust_level", "5"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("nodeloc_callback_url", NodeLocCallbackURL))
+	require.NoError(t, Validate("nodeloc_callback_url", "https://mail.example.com/oauth/nodeloc"))
+	require.ErrorIs(t, Validate("nodeloc_callback_url", "https://mail.example.com/v1/oauth/nodeloc/callback"), domain.ErrInvalidValue)
 
 	missingSecret := ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
 		{Key: "linuxdo_oauth_enabled", Value: "true"},

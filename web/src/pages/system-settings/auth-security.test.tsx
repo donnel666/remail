@@ -103,3 +103,36 @@ it("configures GitHub minimum account age as whole days", () => {
   expect(screen.getByLabelText("Minimum GitHub account age (days)")).toHaveAttribute("data-precision", "0");
   expect(screen.getByLabelText("Minimum GitHub account age (days)")).toHaveAttribute("step", "1");
 });
+
+it("exposes the full NodeLoc OAuth settings with the configured default callback", async () => {
+  const onBulkSave = vi.fn().mockResolvedValue(undefined);
+  render(<AuthSecuritySection
+    canReadUserGroups
+    canSensitive
+    canWrite
+    canWriteUserGroups
+    loading={false}
+    onBulkSave={onBulkSave}
+    onSave={vi.fn()}
+    options={[
+      { key: "nodeloc_client_id", value: "must-not-render" },
+      { key: "nodeloc_client_secret", value: "must-not-render" },
+      { key: "nodeloc_minimum_trust_level", value: "2" },
+    ]}
+  />);
+
+  const section = screen.getByRole("heading", { name: "NodeLoc third-party login" }).closest("section");
+  expect(section).not.toBeNull();
+  expect(within(section as HTMLElement).getByLabelText("Client ID")).toHaveValue("");
+  expect(within(section as HTMLElement).getByLabelText("Client Secret")).toHaveValue("");
+  expect(within(section as HTMLElement).getByLabelText("Minimum Trust Level")).toHaveValue(2);
+  expect(within(section as HTMLElement).getByLabelText("Authorization callback URL")).toHaveValue("https://remail.aishop6.com/oauth/nodeloc");
+  expect(within(section as HTMLElement).getByLabelText("Authorization callback URL")).toBeEnabled();
+
+  fireEvent.click(within(section as HTMLElement).getByRole("button", { name: "保存设置" }));
+  await waitFor(() => expect(onBulkSave).toHaveBeenCalledWith([
+    { key: "nodeloc_oauth_enabled", value: "false" },
+    { key: "nodeloc_callback_url", value: "https://remail.aishop6.com/oauth/nodeloc" },
+    { key: "nodeloc_minimum_trust_level", value: "2" },
+  ]));
+});

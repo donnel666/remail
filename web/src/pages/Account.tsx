@@ -20,6 +20,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import {
   BarChart2,
   Coins,
+  MapPin,
   ShieldCheck,
   UserPlus,
   Users,
@@ -38,6 +39,7 @@ import {
   githubBindURL,
   getLoginConfig,
   linuxDOBindURL,
+  nodeLocBindURL,
 } from "@/lib/iam-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { formatPriceMultiplier } from "@/lib/membership";
@@ -54,6 +56,7 @@ const { Text } = Typography;
 const oauthNoticeKeys: Record<string, string> = {
   github_bound: "GitHub account bound successfully.",
   linuxdo_bound: "LinuxDO account bound successfully.",
+  nodeloc_bound: "NodeLoc account bound successfully.",
 };
 
 const oauthErrorKeys: Record<string, string> = {
@@ -79,6 +82,18 @@ const githubOAuthErrorKeys: Record<string, string> = {
   rate_limited: "Too many GitHub login attempts. Please try again later.",
   session: "Your session expired. Please log in and try again.",
   state: "GitHub login request expired. Please try again.",
+};
+
+const nodeLocOAuthErrorKeys: Record<string, string> = {
+  account: "NodeLoc account is unavailable.",
+  already_bound: "This NodeLoc account is already bound.",
+  cancelled: "NodeLoc authorization was cancelled.",
+  disabled: "NodeLoc login is unavailable.",
+  failed: "NodeLoc login failed.",
+  rate_limited: "Too many NodeLoc login attempts. Please try again later.",
+  session: "Your session expired. Please log in and try again.",
+  state: "NodeLoc login request expired. Please try again.",
+  trust_level: "Your NodeLoc trust level is too low.",
 };
 
 type OAuthConfigState = "loading" | "enabled" | "disabled" | "error";
@@ -116,6 +131,8 @@ export default function Account() {
   const [linuxDOBound, setLinuxDOBound] = useState(false);
   const [githubConfigState, setGitHubConfigState] = useState<OAuthConfigState>("loading");
   const [githubBound, setGitHubBound] = useState(false);
+  const [nodeLocConfigState, setNodeLocConfigState] = useState<OAuthConfigState>("loading");
+  const [nodeLocBound, setNodeLocBound] = useState(false);
   const [githubSetupOpen, setGitHubSetupOpen] = useState(false);
   const [oauthNotice, setOAuthNotice] = useState("");
   const [oauthError, setOAuthError] = useState("");
@@ -178,11 +195,14 @@ export default function Account() {
         setLinuxDOBound(config.linuxdoBound);
         setGitHubConfigState(config.githubOAuthEnabled ? "enabled" : "disabled");
         setGitHubBound(config.githubBound);
+        setNodeLocConfigState(config.nodelocOAuthEnabled ? "enabled" : "disabled");
+        setNodeLocBound(config.nodelocBound);
       })
       .catch(() => {
         if (cancelled) return;
         setLinuxDOConfigState("error");
         setGitHubConfigState("error");
+        setNodeLocConfigState("error");
       });
     return () => {
       cancelled = true;
@@ -197,8 +217,8 @@ export default function Account() {
     if (params.get("oauth_setup") === "github") setGitHubSetupOpen(true);
     if (notice && Object.prototype.hasOwnProperty.call(oauthNoticeKeys, notice)) setOAuthNotice(t(oauthNoticeKeys[notice]));
     if (errorCode) {
-      const errorKeys = provider === "github" ? githubOAuthErrorKeys : oauthErrorKeys;
-      const fallback = provider === "github" ? "GitHub login failed." : "LinuxDO login failed.";
+      const errorKeys = provider === "github" ? githubOAuthErrorKeys : provider === "nodeloc" ? nodeLocOAuthErrorKeys : oauthErrorKeys;
+      const fallback = provider === "github" ? "GitHub login failed." : provider === "nodeloc" ? "NodeLoc login failed." : "LinuxDO login failed.";
       setOAuthError(t(Object.prototype.hasOwnProperty.call(errorKeys, errorCode) ? errorKeys[errorCode] : fallback));
     }
     if (!notice && !errorCode) return;
@@ -448,6 +468,29 @@ export default function Account() {
                     }
                     icon={<IconGithubLogo />}
                     title="GitHub"
+                  />
+                  <SettingItem
+                    action={
+                      nodeLocConfigState === "loading" ? (
+                        <Button className="min-h-11" disabled loading size="small" theme="outline" type="tertiary">{t("Loading...")}</Button>
+                      ) : nodeLocConfigState === "error" ? (
+                        <Button className="min-h-11" disabled size="small" theme="outline" type="tertiary">{t("Unavailable")}</Button>
+                      ) : nodeLocConfigState === "enabled" && !nodeLocBound ? (
+                        <a className="inline-flex min-h-11 items-center justify-center rounded-lg border border-[var(--semi-color-primary)] px-4 text-sm font-medium text-[var(--semi-color-primary)] transition-colors hover:bg-[var(--semi-color-primary-light-default)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--semi-color-primary)] focus-visible:ring-offset-2" href={nodeLocBindURL}>{t("Bind")}</a>
+                      ) : (
+                        <Button className="min-h-11" disabled size="small" theme="outline" type="tertiary">{nodeLocBound ? t("Bound") : t("Not enabled")}</Button>
+                      )
+                    }
+                    description={
+                      nodeLocConfigState === "loading"
+                        ? t("Loading NodeLoc account status...")
+                        : nodeLocConfigState === "error"
+                          ? <span role="alert">{t("Could not load NodeLoc account status. Please try again later.")}</span>
+                          : nodeLocBound ? t("Bound to NodeLoc") : t("Unbound")
+                    }
+                    icon={<MapPin size={18} />}
+                    iconTone="violet"
+                    title="NodeLoc"
                   />
                 </div>
               </div>

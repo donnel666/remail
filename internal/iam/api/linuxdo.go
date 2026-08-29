@@ -59,8 +59,10 @@ func (h *IAMHandler) GetLoginConfig(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	_, linuxDOEnabled := currentLinuxDOSettings()
 	_, githubEnabled := currentGitHubSettings()
+	_, nodeLocEnabled := currentNodeLocSettings()
 	linuxDOBound := false
 	githubBound := false
+	nodeLocBound := false
 	if userID, ok := middleware.GetCurrentUserID(c); ok && h.module != nil && h.module.LoginUseCase != nil {
 		var err error
 		linuxDOBound, err = h.module.LoginUseCase.HasLinuxDOIdentity(c.Request.Context(), userID)
@@ -73,12 +75,19 @@ func (h *IAMHandler) GetLoginConfig(c *gin.Context) {
 			writeError(c, err)
 			return
 		}
+		nodeLocBound, err = h.module.LoginUseCase.HasNodeLocIdentity(c.Request.Context(), userID)
+		if err != nil {
+			writeError(c, err)
+			return
+		}
 	}
 	c.JSON(http.StatusOK, LoginConfigResponse{
 		LinuxDOOAuthEnabled: linuxDOEnabled,
 		LinuxDOBound:        linuxDOBound,
 		GitHubOAuthEnabled:  githubEnabled,
 		GitHubBound:         githubBound,
+		NodeLocOAuthEnabled: nodeLocEnabled,
+		NodeLocBound:        nodeLocBound,
 	})
 }
 

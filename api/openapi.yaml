@@ -506,6 +506,202 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/oauth/nodeloc:
+    get:
+      operationId: getNodeLocAuthorize
+      summary: Start NodeLoc OAuth login
+      tags:
+        - IAM
+      responses:
+        "302":
+          description: Redirect to NodeLoc authorization
+          headers:
+            Location:
+              schema:
+                type: string
+        "303":
+          description: Redirect back to login when NodeLoc OAuth is unavailable
+          headers:
+            Location:
+              schema:
+                type: string
+
+  /v1/oauth/nodeloc/bind:
+    get:
+      operationId: getNodeLocBind
+      summary: Start NodeLoc binding for the current user
+      tags:
+        - IAM
+      responses:
+        "302":
+          description: Redirect to NodeLoc authorization
+          headers:
+            Location:
+              schema:
+                type: string
+        "303":
+          description: Redirect back to login or account when binding cannot start
+          headers:
+            Location:
+              schema:
+                type: string
+
+  /oauth/nodeloc:
+    get:
+      operationId: getNodeLocCallback
+      summary: Complete NodeLoc OAuth login or binding
+      tags:
+        - IAM
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "303":
+          description: Redirect to login or account with the OAuth result
+          headers:
+            Location:
+              schema:
+                type: string
+
+  /v1/oauth/nodeloc/pending:
+    get:
+      operationId: getNodeLocPending
+      summary: Get the pending NodeLoc account setup
+      tags:
+        - IAM
+      responses:
+        "200":
+          description: Pending NodeLoc profile and suggested account choice
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeLocPendingResponse"
+        "401":
+          description: Pending setup expired or is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Pending setup could not be loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/oauth/nodeloc/email/code:
+    post:
+      operationId: postNodeLocEmailCode
+      summary: Send the email verification code for NodeLoc account ownership
+      tags:
+        - IAM
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinuxDOEmailCodeRequest"
+      responses:
+        "204":
+          description: Verification code sent
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Pending setup expired or is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid email, account choice, or human verification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Verification code request throttled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/oauth/nodeloc/complete:
+    post:
+      operationId: postNodeLocComplete
+      summary: Verify email ownership and finish NodeLoc login
+      tags:
+        - IAM
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinuxDOCompleteRequest"
+      responses:
+        "200":
+          description: NodeLoc account ownership completed and session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Pending setup expired or is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: New registration is disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Email or NodeLoc identity is already owned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Email, account choice, account state, or verification code is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Too many verification attempts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/oauth/github:
     get:
       operationId: getGitHubAuthorize
@@ -17553,6 +17749,8 @@ components:
         - githubBound
         - linuxdoOAuthEnabled
         - linuxdoBound
+        - nodelocOAuthEnabled
+        - nodelocBound
       properties:
         githubOAuthEnabled:
           type: boolean
@@ -17561,6 +17759,10 @@ components:
         linuxdoOAuthEnabled:
           type: boolean
         linuxdoBound:
+          type: boolean
+        nodelocOAuthEnabled:
+          type: boolean
+        nodelocBound:
           type: boolean
       additionalProperties: false
 
@@ -17614,6 +17816,32 @@ components:
           type: string
           maxLength: 2048
           description: Required when runtime human verification is enabled
+      additionalProperties: false
+
+    NodeLocPendingResponse:
+      type: object
+      required:
+        - provider
+        - providerUserId
+        - username
+        - suggestedEmail
+        - suggestedEmailExists
+        - registrationEnabled
+      properties:
+        provider:
+          type: string
+          enum:
+            - nodeloc
+        providerUserId:
+          type: string
+        username:
+          type: string
+        suggestedEmail:
+          type: string
+        suggestedEmailExists:
+          type: boolean
+        registrationEnabled:
+          type: boolean
       additionalProperties: false
 
     LinuxDOCompleteRequest:

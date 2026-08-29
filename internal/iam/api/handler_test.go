@@ -1049,6 +1049,7 @@ type mockSessionStore struct {
 	oauthFlows        map[string]app.OAuthFlow
 	linuxDOPending    map[string]app.LinuxDOPending
 	githubPending     map[string]app.GitHubPending
+	nodeLocPending    map[string]app.NodeLocPending
 	getErr            error
 	deleteErr         error
 	deleteByUserIDErr error
@@ -1061,6 +1062,7 @@ func newMockSessionStore() *mockSessionStore {
 		oauthFlows:     make(map[string]app.OAuthFlow),
 		linuxDOPending: make(map[string]app.LinuxDOPending),
 		githubPending:  make(map[string]app.GitHubPending),
+		nodeLocPending: make(map[string]app.NodeLocPending),
 	}
 }
 
@@ -1185,6 +1187,30 @@ func (s *mockSessionStore) DeleteGitHubPending(_ context.Context, token string) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.githubPending, token)
+	return nil
+}
+
+func (s *mockSessionStore) PutNodeLocPending(_ context.Context, token string, pending app.NodeLocPending, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nodeLocPending[token] = pending
+	return nil
+}
+
+func (s *mockSessionStore) GetNodeLocPending(_ context.Context, token string) (*app.NodeLocPending, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending, ok := s.nodeLocPending[token]
+	if !ok {
+		return nil, nil
+	}
+	return &pending, nil
+}
+
+func (s *mockSessionStore) DeleteNodeLocPending(_ context.Context, token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.nodeLocPending, token)
 	return nil
 }
 
@@ -1378,6 +1404,7 @@ func newTestHandler() *IAMHandler {
 		SessionStore:          sessionStore,
 		LinuxDOPendingStore:   sessionStore,
 		GitHubPendingStore:    sessionStore,
+		NodeLocPendingStore:   sessionStore,
 		EmailCodeStore:        emailCodeStore,
 		TurnstileVerifier:     &mockTurnstileVerifier{},
 		TurnstileSiteKey:      "test-site-key",
@@ -1392,6 +1419,7 @@ func setupTestRouterWithHandler(h *IAMHandler) *gin.Engine {
 	r.Use(middleware.RequestID())
 	v1 := r.Group("/v1")
 	RegisterIAMRoutes(v1, h.module, false)
+	RegisterNodeLocCallback(r, h.module, false)
 	return r
 }
 

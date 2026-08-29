@@ -164,6 +164,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		systemSettingsMod.Settings.SetAnnouncementPublisher(announcementMail)
 		registerSystemEmailTaskHandlers(taskMux, announcementMail)
 		iamapi.RegisterIAMRoutes(v1, iamMod, p.SessionSecure)
+		iamapi.RegisterNodeLocCallback(r, iamMod, p.SessionSecure)
 
 		// Generic administrator-managed system settings.
 		iamSessionFetcher := iamapi.NewSessionFetcher(iamMod.SessionStore, iamMod.UserRepo)

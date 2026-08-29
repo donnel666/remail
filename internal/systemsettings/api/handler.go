@@ -287,6 +287,7 @@ func isSensitiveKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
 	case "github_client_id", "github_client_secret", "github_callback_url",
 		"linuxdo_client_id", "linuxdo_client_secret", "linuxdo_callback_url",
+		"nodeloc_client_id", "nodeloc_client_secret", "nodeloc_callback_url",
 		"epay_enabled", "epay_version", "epay_gateway_url", "epay_merchant_id", "epay_merchant_key", "epay_private_key", "epay_platform_public_key", "epay_notify_url", "epay_return_url",
 		"epusdt_enabled", "epusdt_gateway_url", "epusdt_pid", "epusdt_api_key", "epusdt_api_secret", "epusdt_token", "epusdt_network", "epusdt_notify_url", "epusdt_return_url", "epusdt_allowed_hosts":
 		return true
@@ -297,7 +298,7 @@ func isSensitiveKey(key string) bool {
 
 func isWriteOnlyKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "epay_merchant_key", "epay_private_key", "epusdt_api_key", "epusdt_api_secret", "github_client_id", "github_client_secret", "linuxdo_client_id", "linuxdo_client_secret", "points_unit_migration_v1":
+	case "epay_merchant_key", "epay_private_key", "epusdt_api_key", "epusdt_api_secret", "github_client_id", "github_client_secret", "linuxdo_client_id", "linuxdo_client_secret", "nodeloc_client_id", "nodeloc_client_secret", "points_unit_migration_v1":
 		return true
 	default:
 		return false
@@ -306,7 +307,7 @@ func isWriteOnlyKey(key string) bool {
 
 func isSensitiveMutationKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "github_client_id", "github_callback_url", "linuxdo_client_id", "linuxdo_callback_url":
+	case "github_client_id", "github_callback_url", "linuxdo_client_id", "linuxdo_callback_url", "nodeloc_client_id", "nodeloc_callback_url":
 		return true
 	default:
 		return isSensitiveKey(key)

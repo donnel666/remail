@@ -202,6 +202,12 @@ type GitHubPendingStore interface {
 	DeleteGitHubPending(ctx context.Context, token string) error
 }
 
+type NodeLocPendingStore interface {
+	PutNodeLocPending(ctx context.Context, token string, pending NodeLocPending, ttl time.Duration) error
+	GetNodeLocPending(ctx context.Context, token string) (*NodeLocPending, error)
+	DeleteNodeLocPending(ctx context.Context, token string) error
+}
+
 // EmailCodeStore defines storage for email verification codes.
 type EmailCodeStore interface {
 	// StartCooldown records a send for the key and reports whether a new
