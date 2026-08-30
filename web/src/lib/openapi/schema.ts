@@ -3775,7 +3775,7 @@ export interface paths {
         put?: never;
         /**
          * Start Apple account onboarding for iCloud resources
-         * @description Requires `core:resource/operate` and `governance:task/read`, so every operator who starts onboarding can recover its durable task after closing the dialog. Accepts up to 1,000 UTF-8 account lines with exactly 10 fields in `region----iCloud opened----Apple ID----password----security answer 1----security answer 2----security answer 3----birthday----phone----family invitation URL` format. Every entry is stored as a child account, the supplied phone becomes its permanent binding, and the supplied invitation is used directly without creating or selecting a primary account. Historical primary-account fields remain readable for old resources but are not used by new onboarding. Apple passwords, security answers, browser session payloads, Cookie values, submitted verification codes, and uploaded source text remain write-only.
+         * @description Requires `core:resource/operate` and `governance:task/read`, so every operator who starts onboarding can recover its durable task after closing the dialog. Accepts up to 1,000 UTF-8 account lines with 9 or 10 fields in `region----iCloud opened----Apple ID----password----security answer 1----security answer 2----security answer 3----birthday----phone[----family invitation URL]` format. A 9-field entry is stored as a primary account and skips family onboarding; a 10-field entry is stored as a child account and joins the supplied invitation before pausing for manual family-sharing confirmation. The supplied phone becomes the permanent binding. Apple passwords, security answers, browser session payloads, Cookie values, submitted verification codes, and uploaded source text remain write-only.
          */
         post: operations["postAdminICloudOnboardingImport"];
         delete?: never;
@@ -3868,8 +3868,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Retry onboarding after family membership was confirmed
-         * @description Requeues the same durable task from its recoverable post-family stage without selecting or joining another family.
+         * Retry onboarding after durable prerequisites completed
+         * @description Requeues the same durable task from a recoverable stage after a child joined its family or a primary account entered management setup, without repeating completed prerequisite stages.
          */
         post: operations["postAdminICloudOnboardingTaskRetry"];
         delete?: never;

@@ -2703,7 +2703,7 @@
   "No active onboarding tasks": "暂无活动中的自动开通任务",
   "{{processed}} of {{total}} processed": "已处理 {{processed}} / {{total}}",
   "Please select a non-empty TXT file.": "请选择非空 TXT 文件。",
-  "Region----iCloud opened----Apple ID----Password----Security answer 1----Security answer 2----Security answer 3----Birthday[----Phone][----Invitation URL]": "地区----是否开通iCloud----Apple ID----密码----密保1----密保2----密保3----生日[----手机号][----邀请链接]",
+  "Region----iCloud opened----Apple ID----Password----Security answer 1----Security answer 2----Security answer 3----Birthday[----Phone][----Invitation URL]": "母号：地区----是否开通iCloud----Apple ID----密码----密保1----密保2----密保3----生日----手机号；子号：末尾再加----邀请链接",
   "Apple account onboarding started.": "Apple 账号自动开通已开始。",
   "Apple account onboarding failed.": "Apple 账号自动开通失败。",
   "Apple ID": "Apple ID",

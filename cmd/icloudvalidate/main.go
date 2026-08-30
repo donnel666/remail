@@ -398,8 +398,8 @@ func parseLine(raw string) (accountInput, error) {
 		return accountInput{}, errors.New("input line is empty or invalid UTF-8")
 	}
 	parts := strings.Split(raw, separator)
-	if len(parts) < 8 || len(parts) > 10 {
-		return accountInput{}, errors.New("apple input must contain 8 to 10 fields separated by ----")
+	if len(parts) != 9 && len(parts) != 10 {
+		return accountInput{}, errors.New("apple input must contain 9 or 10 fields separated by ----")
 	}
 	for index := range parts {
 		parts[index] = strings.TrimSpace(parts[index])
@@ -434,24 +434,18 @@ func parseLine(raw string) (accountInput, error) {
 		return accountInput{}, errors.New("birthday is invalid")
 	}
 
-	phone, invite := "", ""
-	if len(parts) == 9 {
-		if looksLikeInvite(parts[8]) {
-			invite = parts[8]
-		} else {
-			phone = parts[8]
-		}
-	}
+	phone, invite := parts[8], ""
 	if len(parts) == 10 {
-		phone, invite = parts[8], parts[9]
+		invite = parts[9]
 	}
-	if phone != "" {
-		phone = digits(phone)
-		if len(phone) < 7 || len(phone) > 20 {
-			return accountInput{}, errors.New("phone number is invalid")
-		}
+	phoneShaped := phone != "" && strings.IndexFunc(phone, func(char rune) bool {
+		return (char < '0' || char > '9') && !strings.ContainsRune("+ -().", char)
+	}) == -1
+	phone = digits(phone)
+	if !phoneShaped || len(phone) < 7 || len(phone) > 20 {
+		return accountInput{}, errors.New("phone number is invalid")
 	}
-	if invite != "" && !validInvite(invite) {
+	if len(parts) == 10 && !validInvite(invite) {
 		return accountInput{}, errors.New("family invitation is invalid")
 	}
 	return accountInput{
@@ -483,10 +477,6 @@ func parseAnswer(value string) (icloud.AppleSecurityAnswer, bool) {
 		return icloud.AppleSecurityAnswer{}, false
 	}
 	return icloud.AppleSecurityAnswer{Question: question, Answer: answer}, true
-}
-
-func looksLikeInvite(value string) bool {
-	return strings.Contains(value, "://") || strings.HasPrefix(value, "EFI_")
 }
 
 func validInvite(value string) bool {
@@ -1524,10 +1514,10 @@ func redactDebugMessage(value string, request icloud.AppleOnboardingRequest) str
 	return value
 }
 
-func accountRoleForInput(_ accountInput) string {
-	// Every interactive import is a normal account. The invitation URL is
-	// supplied by the operator for this account; it no longer denotes a
-	// primary/organizer resource.
+func accountRoleForInput(input accountInput) string {
+	if strings.TrimSpace(input.FamilyInviteURL) == "" {
+		return "primary"
+	}
 	return "child"
 }
 

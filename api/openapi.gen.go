@@ -14572,7 +14572,7 @@ type ServerInterface interface {
 	// Confirm manual iCloud activation
 	// (POST /v1/admin/icloud/resources/onboarding-tasks/{taskId}/icloud-activation)
 	PostAdminICloudOnboardingTaskICloudActivation(c *gin.Context, taskId int, params PostAdminICloudOnboardingTaskICloudActivationParams)
-	// Retry onboarding after family membership was confirmed
+	// Retry onboarding after durable prerequisites completed
 	// (POST /v1/admin/icloud/resources/onboarding-tasks/{taskId}/retry)
 	PostAdminICloudOnboardingTaskRetry(c *gin.Context, taskId int, params PostAdminICloudOnboardingTaskRetryParams)
 	// Submit a manually received Apple SMS code

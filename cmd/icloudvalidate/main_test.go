@@ -20,7 +20,7 @@ func TestParseLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if input.Email != "example@example.com" || input.ICloudOpened || input.CountryCode != "US" || input.PhoneNumber != "15488768536" {
+	if input.Email != "example@example.com" || input.ICloudOpened || input.CountryCode != "US" || input.PhoneNumber != "15488768536" || accountRoleForInput(input) != "child" {
 		t.Fatalf("unexpected parsed account: %+v", input)
 	}
 	if input.FamilyInviteURL == "" || input.Secret.SecurityAnswers[0].Answer != "remail1" {
@@ -29,9 +29,13 @@ func TestParseLine(t *testing.T) {
 }
 
 func TestParseLineRejectsInviteWithoutToken(t *testing.T) {
-	line := "美国区----否----example@example.com----password----q1(a1)----q2(a2)----q3(a3)----1981-10-06----https://setup.icloud.com/family/messages"
-	if _, err := parseLine(line); err == nil {
-		t.Fatal("expected invalid family invitation")
+	for _, line := range []string{
+		"美国区----否----example@example.com----password----q1(a1)----q2(a2)----q3(a3)----1981-10-06----https://setup.icloud.com/family/messages",
+		"美国区----否----example@example.com----password----q1(a1)----q2(a2)----q3(a3)----1981-10-06----14155550001----",
+	} {
+		if _, err := parseLine(line); err == nil {
+			t.Fatalf("invalid family invitation accepted: %q", line)
+		}
 	}
 }
 
@@ -39,6 +43,9 @@ func TestSpecifiedPhoneDoesNotSkipEnrollment(t *testing.T) {
 	input, err := parseLine("美国区----否----example@example.com----password----q1(a1)----q2(a2)----q3(a3)----1981-10-06----4385548384")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if accountRoleForInput(input) != "primary" {
+		t.Fatalf("account role = %q, want primary", accountRoleForInput(input))
 	}
 	input.PhoneCountryCode = "CA"
 	provider := &recordingAppleProvider{}

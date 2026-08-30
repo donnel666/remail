@@ -277,8 +277,8 @@ func parseICloudOnboardingImport(content []byte) ([]iCloudOnboardingLine, error)
 
 func parseICloudOnboardingLine(lineNumber int, raw string) (iCloudOnboardingLine, error) {
 	parts := strings.Split(raw, "----")
-	if len(parts) != 10 {
-		return iCloudOnboardingLine{}, fmt.Errorf("%w: line %d must contain exactly 10 fields", ErrICloudOnboardingInvalid, lineNumber)
+	if len(parts) != 9 && len(parts) != 10 {
+		return iCloudOnboardingLine{}, fmt.Errorf("%w: line %d must contain 9 or 10 fields", ErrICloudOnboardingInvalid, lineNumber)
 	}
 	for index := range parts {
 		parts[index] = strings.TrimSpace(parts[index])
@@ -319,14 +319,19 @@ func parseICloudOnboardingLine(lineNumber int, raw string) (iCloudOnboardingLine
 	if !phoneShaped || len(phone) < 7 || len(phone) > 20 {
 		return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid phone number on line %d", ErrICloudOnboardingInvalid, lineNumber)
 	}
-	invite := parts[9]
-	if !validICloudFamilyInvite(invite) {
-		return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid family invitation on line %d", ErrICloudOnboardingInvalid, lineNumber)
+	invite := ""
+	role := "primary"
+	if len(parts) == 10 {
+		invite = parts[9]
+		if !validICloudFamilyInvite(invite) {
+			return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid family invitation on line %d", ErrICloudOnboardingInvalid, lineNumber)
+		}
+		role = "child"
 	}
 	return iCloudOnboardingLine{
 		LineNumber: lineNumber, Region: region, CountryCode: countryCodeFromICloudRegion(region),
 		ICloudOpened: opened, PrimaryEmail: emailValue, PhoneNumber: phone,
-		FamilyInviteURL: invite, AccountRole: "child",
+		FamilyInviteURL: invite, AccountRole: role,
 		Secret: iCloudOnboardingSecret{Password: password, SecurityAnswers: answers, Birthday: birthday.Format("2006-01-02")},
 	}, nil
 }
