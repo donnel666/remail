@@ -147,6 +147,10 @@
       "ErrorResponse": {
         "type": "object",
         "properties": {
+          "code": {
+            "type": "string",
+            "description": "稳定业务错误码，可选。"
+          },
           "message": {
             "type": "string",
             "example": "Invalid request parameters."
@@ -156,24 +160,18 @@
             "example": "8f7a2f9c-0d4f-4a9c-8e47-9af7a2d6c931"
           },
           "fields": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "field": {
-                  "type": "string"
-                },
-                "message": {
-                  "type": "string"
-                }
-              }
+            "type": "object",
+            "description": "字段级校验错误，可选。",
+            "additionalProperties": {
+              "type": "string"
             }
           }
         },
         "required": [
           "message",
           "requestId"
-        ]
+        ],
+        "additionalProperties": false
       },
       "APIKeyProfileResponse": {
         "type": "object",
@@ -347,6 +345,11 @@
               "reviewing",
               "listed",
               "delisted"
+            ],
+            "x-enum-varnames": [
+              "Reviewing",
+              "Listed",
+              "Delisted"
             ]
           },
           "accessType": {
@@ -354,6 +357,10 @@
             "enum": [
               "public",
               "private"
+            ],
+            "x-enum-varnames": [
+              "Public",
+              "Private"
             ]
           },
           "owner": {
@@ -432,7 +439,19 @@
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "user",
+              "supplier",
+              "admin",
+              "super_admin"
+            ],
+            "x-enum-varnames": [
+              "User",
+              "Supplier",
+              "Admin",
+              "SuperAdmin"
+            ]
           },
           "enabled": {
             "type": "boolean"
@@ -455,6 +474,13 @@
               "gmail",
               "gmail_variant",
               "icloud"
+            ],
+            "x-enum-varnames": [
+              "Microsoft",
+              "Domain",
+              "Gmail",
+              "GmailVariant",
+              "ICloud"
             ]
           },
           "status": {
@@ -462,6 +488,10 @@
             "enum": [
               "enabled",
               "disabled"
+            ],
+            "x-enum-varnames": [
+              "Enabled",
+              "Disabled"
             ]
           },
           "codeEnabled": {
@@ -618,6 +648,12 @@
               "recipient",
               "subject",
               "body"
+            ],
+            "x-enum-varnames": [
+              "Sender",
+              "Recipient",
+              "Subject",
+              "Body"
             ]
           },
           "pattern": {
@@ -745,6 +781,14 @@
               "upstream_unavailable",
               "idempotency_conflict",
               "temporarily_unavailable"
+            ],
+            "x-enum-varnames": [
+              "InsufficientBalance",
+              "InsufficientInventory",
+              "UpstreamPriceProtected",
+              "UpstreamUnavailable",
+              "IdempotencyConflict",
+              "TemporarilyUnavailable"
             ]
           },
           "message": {
@@ -769,6 +813,10 @@
             "enum": [
               "succeeded",
               "failed"
+            ],
+            "x-enum-varnames": [
+              "Succeeded",
+              "Failed"
             ]
           },
           "order": {
@@ -870,6 +918,14 @@
               "gmail",
               "gmail_variant",
               "icloud"
+            ],
+            "x-enum-varnames": [
+              "Microsoft",
+              "Domain",
+              "Random",
+              "Gmail",
+              "GmailVariant",
+              "ICloud"
             ]
           },
           "serviceMode": {
@@ -877,6 +933,10 @@
             "enum": [
               "code",
               "purchase"
+            ],
+            "x-enum-varnames": [
+              "Code",
+              "Purchase"
             ]
           },
           "supplyPolicy": {
@@ -884,6 +944,10 @@
             "enum": [
               "private_first",
               "public_only"
+            ],
+            "x-enum-varnames": [
+              "PrivateFirst",
+              "PublicOnly"
             ]
           },
           "status": {
@@ -896,6 +960,15 @@
               "refunded",
               "failed",
               "closed"
+            ],
+            "x-enum-varnames": [
+              "PendingPayment",
+              "Paid",
+              "Active",
+              "Completed",
+              "Refunded",
+              "Failed",
+              "Closed"
             ]
           },
           "failureCode": {
@@ -907,6 +980,14 @@
               "allocation_failed",
               "service_token_failed",
               "activation_failed"
+            ],
+            "x-enum-varnames": [
+              "Unknown",
+              "InsufficientInventory",
+              "InsufficientBalance",
+              "AllocationFailed",
+              "ServiceTokenFailed",
+              "ActivationFailed"
             ]
           },
           "payAmount": {
@@ -919,7 +1000,18 @@
           },
           "allocationType": {
             "type": "string",
-            "example": "microsoft"
+            "enum": [
+              "microsoft",
+              "domain",
+              "gmail",
+              "icloud"
+            ],
+            "x-enum-varnames": [
+              "Microsoft",
+              "Domain",
+              "Gmail",
+              "ICloud"
+            ]
           },
           "allocationId": {
             "type": "integer",
@@ -952,7 +1044,14 @@
           },
           "clientChannel": {
             "type": "string",
-            "example": "api_key"
+            "enum": [
+              "console",
+              "api_key"
+            ],
+            "x-enum-varnames": [
+              "Console",
+              "APIKey"
+            ]
           },
           "apiKeyId": {
             "type": "integer",
@@ -965,6 +1064,11 @@
               "none",
               "succeeded",
               "partial_failure"
+            ],
+            "x-enum-varnames": [
+              "None",
+              "Succeeded",
+              "PartialFailure"
             ]
           },
           "serviceToken": {
@@ -1092,6 +1196,13 @@
               "order_unavailable",
               "service_unavailable",
               "internal_error"
+            ],
+            "x-enum-varnames": [
+              "InvalidRequest",
+              "CredentialInvalid",
+              "OrderUnavailable",
+              "ServiceUnavailable",
+              "InternalError"
             ]
           },
           "message": {
@@ -1116,6 +1227,10 @@
             "enum": [
               "succeeded",
               "failed"
+            ],
+            "x-enum-varnames": [
+              "Succeeded",
+              "Failed"
             ]
           },
           "data": {
@@ -1211,7 +1326,18 @@
           },
           "lastStatus": {
             "type": "string",
-            "example": "succeeded"
+            "enum": [
+              "pending",
+              "processing",
+              "normal",
+              "abnormal"
+            ],
+            "x-enum-varnames": [
+              "Pending",
+              "Processing",
+              "Normal",
+              "Abnormal"
+            ]
           },
           "lastSubmittedAt": {
             "type": "string",
@@ -1345,17 +1471,51 @@
           },
           "transactionType": {
             "type": "string",
-            "example": "order_payment"
+            "enum": [
+              "recharge",
+              "debit",
+              "refund",
+              "freeze",
+              "credit",
+              "withdrawal",
+              "manual_adjustment",
+              "card_redeem",
+              "transfer"
+            ],
+            "x-enum-varnames": [
+              "Recharge",
+              "Debit",
+              "Refund",
+              "Freeze",
+              "Credit",
+              "Withdrawal",
+              "ManualAdjustment",
+              "CardRedeem",
+              "Transfer"
+            ]
           },
           "balanceBucket": {
             "type": "string",
-            "example": "consumer"
+            "enum": [
+              "consumer",
+              "supplier_available",
+              "supplier_frozen"
+            ],
+            "x-enum-varnames": [
+              "Consumer",
+              "SupplierAvailable",
+              "SupplierFrozen"
+            ]
           },
           "direction": {
             "type": "string",
             "enum": [
-              "credit",
-              "debit"
+              "in",
+              "out"
+            ],
+            "x-enum-varnames": [
+              "Incoming",
+              "Outgoing"
             ]
           },
           "amount": {
@@ -1442,7 +1602,14 @@
           },
           "paymentMethod": {
             "type": "string",
-            "example": "card"
+            "enum": [
+              "alipay",
+              "epusdt_usdt_tron"
+            ],
+            "x-enum-varnames": [
+              "Alipay",
+              "EPUSDTUSDTTRON"
+            ]
           },
           "creditedPoints": {
             "type": "string",
@@ -1450,7 +1617,20 @@
           },
           "status": {
             "type": "string",
-            "example": "succeeded"
+            "enum": [
+              "paying",
+              "callback",
+              "reconciled",
+              "credited",
+              "failed"
+            ],
+            "x-enum-varnames": [
+              "Paying",
+              "Callback",
+              "Reconciled",
+              "Credited",
+              "Failed"
+            ]
           },
           "gatewayTradeNo": {
             "type": "string"
@@ -1537,7 +1717,15 @@
             "type": "string"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled"
+            ],
+            "x-enum-varnames": [
+              "Enabled",
+              "Disabled"
+            ]
           },
           "maxRedemptions": {
             "type": "integer"
@@ -1744,6 +1932,10 @@
             "enum": [
               "microsoft",
               "domain"
+            ],
+            "x-enum-varnames": [
+              "Microsoft",
+              "Domain"
             ]
           },
           "ownerId": {
@@ -1752,7 +1944,24 @@
           },
           "status": {
             "type": "string",
-            "example": "valid"
+            "enum": [
+              "pending",
+              "validating",
+              "identifying",
+              "normal",
+              "abnormal",
+              "disabled",
+              "deleted"
+            ],
+            "x-enum-varnames": [
+              "Pending",
+              "Validating",
+              "Identifying",
+              "Normal",
+              "Abnormal",
+              "Disabled",
+              "Deleted"
+            ]
           },
           "forSale": {
             "type": "boolean",
@@ -1787,7 +1996,16 @@
           },
           "purpose": {
             "type": "string",
-            "example": "not_sale"
+            "enum": [
+              "not_sale",
+              "sale",
+              "binding"
+            ],
+            "x-enum-varnames": [
+              "NotSale",
+              "Sale",
+              "Binding"
+            ]
           },
           "mailboxCount": {
             "type": "integer",
@@ -1839,6 +2057,10 @@
             "enum": [
               "microsoft",
               "domain"
+            ],
+            "x-enum-varnames": [
+              "Microsoft",
+              "Domain"
             ]
           },
           "emailAddress": {
@@ -1869,13 +2091,36 @@
               "not_sale",
               "sale",
               "binding"
+            ],
+            "x-enum-varnames": [
+              "NotSale",
+              "Sale",
+              "Binding"
             ]
           },
           "allowNewBindings": {
             "type": "boolean"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "pending",
+              "validating",
+              "identifying",
+              "normal",
+              "abnormal",
+              "disabled",
+              "deleted"
+            ],
+            "x-enum-varnames": [
+              "Pending",
+              "Validating",
+              "Identifying",
+              "Normal",
+              "Abnormal",
+              "Disabled",
+              "Deleted"
+            ]
           },
           "lastSafeError": {
             "type": "string"
@@ -1909,6 +2154,9 @@
             "type": "string",
             "enum": [
               "microsoft"
+            ],
+            "x-enum-varnames": [
+              "Microsoft"
             ]
           },
           "emailAddress": {
@@ -1924,7 +2172,25 @@
             "type": "boolean"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "pending",
+              "validating",
+              "identifying",
+              "normal",
+              "abnormal",
+              "disabled",
+              "deleted"
+            ],
+            "x-enum-varnames": [
+              "Pending",
+              "Validating",
+              "Identifying",
+              "Normal",
+              "Abnormal",
+              "Disabled",
+              "Deleted"
+            ]
           },
           "qualityScore": {
             "type": "integer"
@@ -1966,6 +2232,9 @@
             "type": "string",
             "enum": [
               "domain"
+            ],
+            "x-enum-varnames": [
+              "Domain"
             ]
           },
           "domain": {
@@ -1981,13 +2250,34 @@
               "not_sale",
               "sale",
               "binding"
+            ],
+            "x-enum-varnames": [
+              "NotSale",
+              "Sale",
+              "Binding"
             ]
           },
           "allowNewBindings": {
             "type": "boolean"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "pending",
+              "validating",
+              "normal",
+              "abnormal",
+              "disabled",
+              "deleted"
+            ],
+            "x-enum-varnames": [
+              "Pending",
+              "Validating",
+              "Normal",
+              "Abnormal",
+              "Disabled",
+              "Deleted"
+            ]
           },
           "lastSafeError": {
             "type": "string"
@@ -2039,7 +2329,16 @@
           },
           "status": {
             "type": "string",
-            "example": "processing"
+            "enum": [
+              "processing",
+              "imported",
+              "failed"
+            ],
+            "x-enum-varnames": [
+              "Processing",
+              "Imported",
+              "Failed"
+            ]
           },
           "imported": {
             "type": "integer"
@@ -2098,6 +2397,10 @@
             "enum": [
               "ids",
               "filter"
+            ],
+            "x-enum-varnames": [
+              "IDs",
+              "Filter"
             ]
           },
           "resourceIds": {
@@ -2116,13 +2419,36 @@
                   "all",
                   "microsoft",
                   "domain"
+                ],
+                "x-enum-varnames": [
+                  "All",
+                  "Microsoft",
+                  "Domain"
                 ]
               },
               "search": {
                 "type": "string"
               },
               "status": {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "validating",
+                  "identifying",
+                  "normal",
+                  "abnormal",
+                  "disabled",
+                  "deleted"
+                ],
+                "x-enum-varnames": [
+                  "Pending",
+                  "Validating",
+                  "Identifying",
+                  "Normal",
+                  "Abnormal",
+                  "Disabled",
+                  "Deleted"
+                ]
               },
               "forSale": {
                 "type": "boolean",
@@ -2184,7 +2510,17 @@
             "type": "string"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "online",
+              "offline",
+              "disabled"
+            ],
+            "x-enum-varnames": [
+              "Online",
+              "Offline",
+              "Disabled"
+            ]
           },
           "createdAt": {
             "type": "string",
@@ -2245,7 +2581,12 @@
           },
           "purpose": {
             "type": "string",
-            "example": "not_sale"
+            "enum": [
+              "not_sale"
+            ],
+            "x-enum-varnames": [
+              "NotSale"
+            ]
           }
         },
         "required": [
@@ -2290,7 +2631,15 @@
             "type": "string"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "normal",
+              "disabled"
+            ],
+            "x-enum-varnames": [
+              "Normal",
+              "Disabled"
+            ]
           },
           "lastAllocatedAt": {
             "type": "string",
@@ -2410,6 +2759,10 @@
               "enum": [
                 "visible",
                 "mine"
+              ],
+              "x-enum-varnames": [
+                "Visible",
+                "Mine"
               ]
             }
           },
@@ -2417,7 +2770,17 @@
             "name": "status",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "reviewing",
+                "listed",
+                "delisted"
+              ],
+              "x-enum-varnames": [
+                "Reviewing",
+                "Listed",
+                "Delisted"
+              ]
             }
           },
           {
@@ -2428,6 +2791,10 @@
               "enum": [
                 "public",
                 "private"
+              ],
+              "x-enum-varnames": [
+                "Public",
+                "Private"
               ]
             }
           },
@@ -2442,6 +2809,13 @@
                 "gmail",
                 "gmail_variant",
                 "icloud"
+              ],
+              "x-enum-varnames": [
+                "Microsoft",
+                "Domain",
+                "Gmail",
+                "GmailVariant",
+                "ICloud"
               ]
             }
           },
@@ -2591,6 +2965,10 @@
               "enum": [
                 "purchase",
                 "code"
+              ],
+              "x-enum-varnames": [
+                "Purchase",
+                "Code"
               ]
             },
             "description": "purchase 为长效购买，code 为短效接码。"
@@ -2603,6 +2981,10 @@
               "enum": [
                 "private_first",
                 "public_only"
+              ],
+              "x-enum-varnames": [
+                "PrivateFirst",
+                "PublicOnly"
               ]
             },
             "description": "默认 private_first。"
@@ -2708,7 +3090,25 @@
             "name": "status",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "pending_payment",
+                "paid",
+                "active",
+                "completed",
+                "refunded",
+                "failed",
+                "closed"
+              ],
+              "x-enum-varnames": [
+                "PendingPayment",
+                "Paid",
+                "Active",
+                "Completed",
+                "Refunded",
+                "Failed",
+                "Closed"
+              ]
             }
           },
           {
@@ -2719,6 +3119,10 @@
               "enum": [
                 "purchase",
                 "code"
+              ],
+              "x-enum-varnames": [
+                "Purchase",
+                "Code"
               ]
             }
           },
@@ -2804,6 +3208,10 @@
               "enum": [
                 "purchase",
                 "code"
+              ],
+              "x-enum-varnames": [
+                "Purchase",
+                "Code"
               ]
             },
             "description": "purchase 为长效购买，code 为短效接码。"
@@ -2816,6 +3224,10 @@
               "enum": [
                 "private_first",
                 "public_only"
+              ],
+              "x-enum-varnames": [
+                "PrivateFirst",
+                "PublicOnly"
               ]
             },
             "description": "默认 private_first。"
@@ -3314,7 +3726,21 @@
             "name": "status",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "paying",
+                "callback",
+                "reconciled",
+                "credited",
+                "failed"
+              ],
+              "x-enum-varnames": [
+                "Paying",
+                "Callback",
+                "Reconciled",
+                "Credited",
+                "Failed"
+              ]
             }
           },
           {
@@ -3483,6 +3909,9 @@
               "type": "string",
               "enum": [
                 "owned"
+              ],
+              "x-enum-varnames": [
+                "Owned"
               ]
             }
           },
@@ -3495,6 +3924,11 @@
                 "all",
                 "microsoft",
                 "domain"
+              ],
+              "x-enum-varnames": [
+                "All",
+                "Microsoft",
+                "Domain"
               ]
             }
           }
@@ -3755,6 +4189,10 @@
                     "enum": [
                       "skip",
                       "abort"
+                    ],
+                    "x-enum-varnames": [
+                      "Skip",
+                      "Abort"
                     ]
                   }
                 },
@@ -3976,6 +4414,9 @@
               "type": "string",
               "enum": [
                 "owned"
+              ],
+              "x-enum-varnames": [
+                "Owned"
               ]
             }
           }

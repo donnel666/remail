@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -84,7 +85,10 @@ func publicOpenAPIEntries(t *testing.T) []string {
 func TestPublicOpenAPISchemaUsesBackendEnums(t *testing.T) {
 	spec := publicOpenAPISpec(t)
 	assertSchemaEnum(t, spec, "Project", "status", []string{"reviewing", "listed", "delisted"})
+	assertSchemaEnum(t, spec, "ProjectOwner", "role", []string{"user", "supplier", "admin", "super_admin"})
 	assertSchemaEnum(t, spec, "ProjectMailRule", "ruleType", []string{"sender", "recipient", "subject", "body"})
+	assertSchemaEnum(t, spec, "Order", "allocationType", []string{"microsoft", "domain", "gmail", "icloud"})
+	assertSchemaEnum(t, spec, "Order", "clientChannel", []string{"console", "api_key"})
 	assertSchemaEnum(t, spec, "Order", "serviceCleanupStatus", []string{"none", "succeeded", "partial_failure"})
 	assertSchemaEnum(t, spec, "Order", "failureCode", []string{
 		"unknown",
@@ -94,6 +98,20 @@ func TestPublicOpenAPISchemaUsesBackendEnums(t *testing.T) {
 		"service_token_failed",
 		"activation_failed",
 	})
+	assertSchemaEnum(t, spec, "FetchState", "lastStatus", []string{"pending", "processing", "normal", "abnormal"})
+	assertSchemaEnum(t, spec, "Transaction", "transactionType", []string{"recharge", "debit", "refund", "freeze", "credit", "withdrawal", "manual_adjustment", "card_redeem", "transfer"})
+	assertSchemaEnum(t, spec, "Transaction", "balanceBucket", []string{"consumer", "supplier_available", "supplier_frozen"})
+	assertSchemaEnum(t, spec, "Transaction", "direction", []string{"in", "out"})
+	assertSchemaEnum(t, spec, "Recharge", "paymentMethod", []string{"alipay", "epusdt_usdt_tron"})
+	assertSchemaEnum(t, spec, "Recharge", "status", []string{"paying", "callback", "reconciled", "credited", "failed"})
+	assertSchemaEnum(t, spec, "CardKey", "status", []string{"enabled", "disabled"})
+	assertSchemaEnum(t, spec, "Resource", "purpose", []string{"not_sale", "sale", "binding"})
+	assertSchemaEnum(t, spec, "MicrosoftResourceDetail", "status", []string{"pending", "validating", "identifying", "normal", "abnormal", "disabled", "deleted"})
+	assertSchemaEnum(t, spec, "DomainResourceDetail", "status", []string{"pending", "validating", "normal", "abnormal", "disabled", "deleted"})
+	assertSchemaEnum(t, spec, "ImportStatusResponse", "status", []string{"processing", "imported", "failed"})
+	assertSchemaEnum(t, spec, "MailServer", "status", []string{"online", "offline", "disabled"})
+	assertSchemaEnum(t, spec, "Mailbox", "status", []string{"normal", "disabled"})
+	assertSchemaEnum(t, spec, "CreateDomainRequest", "purpose", []string{"not_sale"})
 }
 
 func TestPublicOpenAPISDKContract(t *testing.T) {
@@ -107,6 +125,15 @@ func TestPublicOpenAPISDKContract(t *testing.T) {
 	}
 
 	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	errorProperties := schemas["ErrorResponse"].(map[string]any)["properties"].(map[string]any)
+	if _, ok := errorProperties["code"]; !ok {
+		t.Fatal("ErrorResponse must expose the optional business code")
+	}
+	fields := errorProperties["fields"].(map[string]any)
+	additional, ok := fields["additionalProperties"].(map[string]any)
+	if fields["type"] != "object" || !ok || additional["type"] != "string" {
+		t.Fatalf("ErrorResponse.fields must be a string map: %v", fields)
+	}
 	pickup := schemas["PickupMailResponse"].(map[string]any)
 	pickupProperties := pickup["properties"].(map[string]any)
 	if len(pickupProperties) != 2 || pickupProperties["items"] == nil || pickupProperties["fetch"] == nil {
@@ -168,6 +195,35 @@ func TestPublicOpenAPISDKContract(t *testing.T) {
 					t.Fatalf("%s %s parameter %s must use int64", method, path, name)
 				}
 			}
+		}
+	}
+	assertStableEnumNames(t, "$", spec)
+}
+
+func assertStableEnumNames(t *testing.T, path string, value any) {
+	t.Helper()
+	switch current := value.(type) {
+	case map[string]any:
+		if values, ok := current["enum"].([]any); ok {
+			names, ok := current["x-enum-varnames"].([]any)
+			if !ok || len(names) != len(values) {
+				t.Fatalf("enum %s must define one stable x-enum-varnames entry per value", path)
+			}
+			seen := make(map[string]bool, len(names))
+			for _, rawName := range names {
+				name, ok := rawName.(string)
+				if !ok || name == "" || seen[name] {
+					t.Fatalf("enum %s has an invalid or duplicate stable name %v", path, rawName)
+				}
+				seen[name] = true
+			}
+		}
+		for key, child := range current {
+			assertStableEnumNames(t, path+"."+key, child)
+		}
+	case []any:
+		for index, child := range current {
+			assertStableEnumNames(t, fmt.Sprintf("%s[%d]", path, index), child)
 		}
 	}
 }
