@@ -11,6 +11,7 @@ import (
 	"github.com/donnel666/remail/internal/gmail"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	mailmatchapi "github.com/donnel666/remail/internal/mailmatch/api"
+	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	mailmatchdomain "github.com/donnel666/remail/internal/mailmatch/domain"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	openapidomain "github.com/donnel666/remail/internal/openapi/domain"
@@ -133,6 +134,25 @@ type gmailPickupAdapter struct {
 	service   gmailPickupReader
 	upstreams *upstream.Router
 	tokens    gmailOrderTokenReader
+}
+
+type botCodeDiagnosisRefreshAdapter struct {
+	local     *mailmatchapp.UseCase
+	upstreams *upstream.Router
+}
+
+func (a botCodeDiagnosisRefreshAdapter) RefreshCodeDiagnosis(ctx context.Context, orderNo, email string, emailResourceID uint) error {
+	if emailResourceID > 0 {
+		if a.local == nil {
+			return nil
+		}
+		return a.local.RefreshCodeDiagnosis(ctx, orderNo, email, emailResourceID)
+	}
+	if a.upstreams == nil {
+		return nil
+	}
+	_, _, err := a.upstreams.Pickup(ctx, upstream.PickupRequest{OrderNo: orderNo, Email: email})
+	return err
 }
 
 func (a gmailPickupAdapter) ReadCodeOnlyPickup(ctx context.Context, email, tokenPlain string) (*mailmatchapi.CodeOnlyPickupResult, bool, error) {

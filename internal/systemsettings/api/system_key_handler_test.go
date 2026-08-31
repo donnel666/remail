@@ -70,3 +70,35 @@ func TestAdminSystemKeyCreationRequiresSensitivePermission(t *testing.T) {
 	require.NoError(t, db.Model(&settingsinfra.SystemKeyModel{}).Count(&count).Error)
 	require.Zero(t, count)
 }
+
+func TestAdminBotSystemKeyRequiresAndListsScope(t *testing.T) {
+	router, _ := systemKeyAdminRouter(t, permissionCheckerFunc(func(context.Context, uint, iamdomain.Role, string, string) (bool, error) {
+		return true, nil
+	}))
+
+	invalid := httptest.NewRecorder()
+	router.ServeHTTP(invalid, requestWithSession(http.MethodPost, "/v1/admin/system-keys", `{"name":"Bot","purpose":"bot"}`))
+	require.Equal(t, http.StatusBadRequest, invalid.Code)
+
+	createdResponse := httptest.NewRecorder()
+	router.ServeHTTP(createdResponse, requestWithSession(http.MethodPost, "/v1/admin/system-keys", `{"name":"QQ main","purpose":"bot","platform":"qq_official","subjectNamespace":"qq:main","allowedGroupIds":["123456","234567"]}`))
+	require.Equal(t, http.StatusCreated, createdResponse.Code)
+	var created systemKeyDTO
+	require.NoError(t, json.Unmarshal(createdResponse.Body.Bytes(), &created))
+	require.Equal(t, "bot", created.Purpose)
+	require.Equal(t, "qq_official", created.Platform)
+	require.Equal(t, "qq:main", created.SubjectNamespace)
+	require.Equal(t, []string{"123456", "234567"}, created.AllowedGroupIDs)
+	require.NotEmpty(t, created.KeyPlain)
+
+	listedResponse := httptest.NewRecorder()
+	router.ServeHTTP(listedResponse, requestWithSession(http.MethodGet, "/v1/admin/system-keys", ""))
+	var listed struct {
+		Items []systemKeyDTO `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(listedResponse.Body.Bytes(), &listed))
+	require.Len(t, listed.Items, 1)
+	require.Equal(t, "qq:main", listed.Items[0].SubjectNamespace)
+	require.Equal(t, []string{"123456", "234567"}, listed.Items[0].AllowedGroupIDs)
+	require.Empty(t, listed.Items[0].KeyPlain)
+}

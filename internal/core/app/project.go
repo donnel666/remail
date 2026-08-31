@@ -512,11 +512,37 @@ func (uc *ProjectUseCase) AdminUpdate(ctx context.Context, operatorUserID, proje
 		Accesses:                 accesses,
 		MicrosoftSuffixBlacklist: suffixBlacklist,
 	}
-	log := projectOperationLog(operatorUserID, requestID, path, "core.project.update", "project", strconv.FormatUint(uint64(projectID), 10), "success", "Project updated.")
+	operationType, summary := "core.project.update", "Project updated."
+	previous, err := uc.projects.FindDetail(ctx, projectID, operatorUserID, true)
+	if err != nil {
+		return nil, err
+	}
+	if previous != nil && projectPublicPricingChanged(previous.Products, products) {
+		operationType, summary = "core.project.price_updated", "Project prices updated."
+	}
+	log := projectOperationLog(operatorUserID, requestID, path, operationType, "project", strconv.FormatUint(uint64(projectID), 10), "success", summary)
 	if err := uc.projects.UpdateWithLog(ctx, detail, log); err != nil {
 		return nil, err
 	}
 	return detail, nil
+}
+
+func projectPublicPricingChanged(previous, next []domain.Product) bool {
+	prices := make(map[domain.ProductType]domain.Product, len(previous))
+	for _, product := range previous {
+		prices[product.Type] = product
+	}
+	if len(prices) != len(next) {
+		return true
+	}
+	for _, product := range next {
+		old, ok := prices[product.Type]
+		if !ok || old.Status != product.Status || old.CodeEnabled != product.CodeEnabled || old.PurchaseEnabled != product.PurchaseEnabled ||
+			old.CodePrice != product.CodePrice || old.PurchasePrice != product.PurchasePrice {
+			return true
+		}
+	}
+	return false
 }
 
 func (uc *ProjectUseCase) AdminApprove(ctx context.Context, operatorUserID, projectID uint, requestID, path string) (*domain.ProjectDetail, error) {

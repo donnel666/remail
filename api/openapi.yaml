@@ -2099,7 +2099,7 @@ paths:
     post:
       operationId: postAdminSystemKey
       summary: Create a system key
-      description: Requires system settings write and sensitive permissions. The plain key is returned only in this response.
+      description: Requires system settings write and sensitive permissions. The plain key is returned only in this response. A Bot key must include at least one allowed group id.
       tags: [SystemSettings]
       security:
         - cookieAuth: []
@@ -2155,6 +2155,441 @@ paths:
           $ref: "#/components/responses/NotFound"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+
+  # --- Bot integration ---
+  /v1/bot/ws:
+    get:
+      operationId: connectBotWebSocket
+      summary: Open the persistent Bot WebSocket transport
+      description: |
+        Authenticates one Bot System Key during the HTTP upgrade. The connection carries heartbeat,
+        request/response multiplexing for the allowlisted `/v1/bot/**` operations, and resumable
+        events for `project.launched`, `leaderboard.settled`, `system.notice.updated`,
+        `system.announcement.updated`, `email.discount.updated`, and `project.price.updated`.
+        A subscribe frame may send a `topics` array; legacy `topic: project.launched` remains valid.
+        All selected topics share one server-issued `(after, afterId)` cursor, and each event frame
+        contains only its documented safe projection. WebSocket `afterId` is emitted as a decimal
+        string to preserve uint64 precision; numeric legacy cursors are still accepted. Platform subjects still come from the trusted
+        bot event in each request frame and are never accepted from an end-user argument.
+
+        A request frame carries `subject`, `scene`, and, only when `scene` is `group`, `groupId`.
+        `groupId` is required for a group frame and must be present in the authenticated System Key's
+        `allowedGroupIds`; it must be omitted for a private frame. The server revalidates these fields
+        for every tunneled request. Missing, malformed, or unauthorized context receives the same 401
+        response and does not reveal key scope or binding information.
+      externalDocs:
+        description: Versioned JSON-frame protocol, cursor semantics and proxy configuration
+        url: https://github.com/donnel666/remail/blob/main/docs/22-bot-websocket-integration.md
+      tags: [Bot]
+      security:
+        - systemKeyAuth: []
+      responses:
+        "101":
+          description: WebSocket connection established
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/bot/context:
+    get:
+      operationId: getBotContext
+      summary: Verify the current trusted bot event context
+      description: |
+        Returns only an authorization acknowledgement. In a private scene, send the trusted subject
+        and `X-Bot-Scene: private` without a group header. In a group scene, `X-Bot-Group` is required
+        and must match one of the authenticated Bot System Key's `allowedGroupIds`. Missing or invalid
+        keys, subjects, scenes, group ids, and non-whitelisted groups all receive the same 401 response;
+        this endpoint never returns platform scope, namespace, binding, or account information.
+      tags: [Bot]
+      security:
+        - systemKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BotSubject"
+        - $ref: "#/components/parameters/BotScene"
+        - $ref: "#/components/parameters/BotGroup"
+      responses:
+        "200":
+          description: The Bot System Key and trusted event context are authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotContextResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/bot/bindings:
+    post:
+      operationId: postBotBinding
+      summary: Bind the current bot-platform identity to a remail account
+      description: The platform subject is accepted only from the authenticated bot adapter header. No session is created and the password is never returned or logged.
+      tags: [Bot]
+      security:
+        - systemKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BotSubject"
+        - $ref: "#/components/parameters/BotPrivateScene"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BotBindingRequest"
+      responses:
+        "200":
+          description: Bot identity bound
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotBindingResponse"
+        "400":
+          description: Invalid binding request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotBindingResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: Bot identity or remail account already has another binding
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotBindingResponse"
+        "422":
+          description: Account credential is incorrect
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotBindingResponse"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          description: Bot binding or an authentication dependency is unavailable
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/BotBindingResponse"
+                  - $ref: "#/components/schemas/Error"
+
+  /v1/bot/binding:
+    get:
+      operationId: getBotBinding
+      summary: Read the current bot-platform identity binding
+      tags: [Bot]
+      security:
+        - systemKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BotSubject"
+        - $ref: "#/components/parameters/BotPrivateScene"
+      responses:
+        "200":
+          description: Safe binding status; the account email is masked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotBindingResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          description: Bot binding or an authentication dependency is unavailable
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/BotBindingResponse"
+                  - $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteBotBinding
+      summary: Remove the current bot-platform identity binding
+      tags: [Bot]
+      security:
+        - systemKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BotSubject"
+        - $ref: "#/components/parameters/BotPrivateScene"
+      responses:
+        "204":
+          description: Binding removed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          description: Bot binding or an authentication dependency is unavailable
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/BotBindingResponse"
+                  - $ref: "#/components/schemas/Error"
+
+  /v1/bot/projects:
+    get:
+      operationId: getBotProjects
+      summary: List the same safe projects, prices and inventory shown by the workbench
+      description: In a private scene, a bound bot identity receives that user's visible public and private projects. Group scenes and unbound identities receive public listed projects only. Administrator-only fields are never returned.
+      tags: [Bot]
+      security:
+        - systemKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BotSubject"
+        - $ref: "#/components/parameters/BotScene"
+        - $ref: "#/components/parameters/BotGroup"
+        - name: scope
+          in: query
+          schema:
+            type: string
+            enum: [visible]
+            default: visible
+        - name: status
+          in: query
+          description: Accepted for workbench compatibility; bot results are always constrained to listed projects.
+          schema:
+            type: string
+            enum: [reviewing, listed, delisted]
+        - name: accessType
+          in: query
+          schema:
+            type: string
+            enum: [public, private]
+        - name: looseMatch
+          in: query
+          schema:
+            type: boolean
+        - name: productType
+          in: query
+          schema:
+            type: string
+            enum: [microsoft, domain, gmail, gmail_variant, icloud]
+        - name: search
+          in: query
+          schema:
+            type: string
+            maxLength: 120
+        - name: targetPlatform
+          in: query
+          schema:
+            type: string
+            maxLength: 120
+        - $ref: "#/components/parameters/CreatedFromQuery"
+        - $ref: "#/components/parameters/CreatedToQuery"
+        - $ref: "#/components/parameters/OffsetQuery"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Workbench-compatible project list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/bot/projects/{projectId}:
+    get:
+      operationId: getBotProject
+      summary: Read the workbench-compatible safe project detail
+      tags: [Bot]
+      security:
+        - systemKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BotSubject"
+        - $ref: "#/components/parameters/BotScene"
+        - $ref: "#/components/parameters/BotGroup"
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Safe project detail with current price and inventory fields
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDetailResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/bot/projects/{projectId}/inventory:
+    get:
+      operationId: getBotProjectInventory
+      summary: Read the same user-safe inventory totals used by the workbench
+      tags: [Bot]
+      security:
+        - systemKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BotSubject"
+        - $ref: "#/components/parameters/BotScene"
+        - $ref: "#/components/parameters/BotGroup"
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Current project product inventory totals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectInventoryTotalResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/bot/rankings/orders:
+    get:
+      operationId: getBotOrderRankings
+      summary: Read today's and all-time successful-order rankings
+      description: Successful orders are delivered code orders plus activated purchase orders, excluding refunded, failed and historical-import orders. User ids and email addresses are never returned.
+      tags: [Bot]
+      security:
+        - systemKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BotSubject"
+        - $ref: "#/components/parameters/BotScene"
+        - $ref: "#/components/parameters/BotGroup"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        "200":
+          description: Today and all-time successful-order rankings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotOrderRankingsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/bot/rankings/rewards/latest:
+    get:
+      operationId: getBotLatestLeaderboardRewards
+      summary: Read the latest completed leaderboard reward list
+      tags: [Bot]
+      security:
+        - systemKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BotSubject"
+        - $ref: "#/components/parameters/BotScene"
+        - $ref: "#/components/parameters/BotGroup"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+      responses:
+        "200":
+          description: Latest settlement and safe winner display names, or available=false when no settlement exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotLeaderboardRewardsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/bot/diagnoses/code:
+    post:
+      operationId: postBotCodeDiagnosis
+      summary: Diagnose why a bound user's project email has not delivered a code
+      description: Resolves the order from the authenticated bot identity, delivery email and project. It first reuses the normal local pickup cache and, when no matching mail is cached, performs one fetch through the resource's existing Domain, Gmail, Microsoft, or iCloud pickup path. It returns only safe reason text and never returns an order number, message, mailbox credential or verification code.
+      tags: [Bot]
+      security:
+        - systemKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BotSubject"
+        - $ref: "#/components/parameters/BotPrivateScene"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BotCodeDiagnosisRequest"
+      responses:
+        "200":
+          description: Safe diagnosis result, reason and recommended action
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotDiagnosisResponse"
+        "400":
+          description: Invalid diagnosis request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotDiagnosisResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          description: Diagnosis or an authentication dependency is unavailable
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/BotDiagnosisResponse"
+                  - $ref: "#/components/schemas/Error"
 
   /v1/admin/users/{userId}/dashboard:
     get:
@@ -14595,6 +15030,40 @@ components:
       schema:
         type: integer
         default: 20
+    BotSubject:
+      name: X-Bot-Subject
+      in: header
+      required: true
+      description: Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+    BotScene:
+      name: X-Bot-Scene
+      in: header
+      required: true
+      description: Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only.
+      schema:
+        type: string
+        enum: [private, group]
+    BotGroup:
+      name: X-Bot-Group
+      in: header
+      required: false
+      description: Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    BotPrivateScene:
+      name: X-Bot-Scene
+      in: header
+      required: true
+      description: Credential and account-specific operations are private-chat only; X-Bot-Group must be omitted.
+      schema:
+        type: string
+        enum: [private]
     CsrfToken:
       name: X-CSRF-Token
       in: header
@@ -14686,7 +15155,7 @@ components:
       type: apiKey
       in: header
       name: X-System-Key
-      description: Server-side third-party application key created in administrator system settings. It is accepted only by the iCloud forwarding-email endpoints.
+      description: Server-side integration key created in administrator system settings. Its immutable purpose and scope restrict it to iCloud forwarding, SMTP submission, or one Bot platform namespace.
 
   responses:
     BadRequest:
@@ -18344,9 +18813,26 @@ components:
           maxLength: 120
         purpose:
           type: string
-          enum: [icloud_forwarding, smtp_submission]
+          enum: [icloud_forwarding, smtp_submission, bot]
           default: icloud_forwarding
-          description: Limits the key to either the iCloud forwarding API or SMTP submission.
+          description: Limits the key to iCloud forwarding, SMTP submission, or the Bot integration API.
+        platform:
+          type: string
+          maxLength: 32
+          description: Required only for purpose=bot; normalized platform scope such as qq or telegram. It does not tell ReMail how the bot resolved the trusted platform identity.
+        subjectNamespace:
+          type: string
+          maxLength: 50
+          description: Required only for purpose=bot; stable identity namespace such as qq:appid or telegram:botid. Key rotation reuses this value.
+        allowedGroupIds:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: Required only for purpose=bot. Trusted platform group ids allowed to use this integration; QQ values are normalized positive decimal group numbers.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
       additionalProperties: false
 
     AdminSystemKey:
@@ -18360,7 +18846,16 @@ components:
           type: string
         purpose:
           type: string
-          enum: [icloud_forwarding, smtp_submission]
+          enum: [icloud_forwarding, smtp_submission, bot]
+        platform:
+          type: string
+        subjectNamespace:
+          type: string
+        allowedGroupIds:
+          type: array
+          description: Normalized group whitelist for a Bot System Key. Omitted for non-Bot keys.
+          items:
+            type: string
         keyPrefix:
           type: string
         keyPlain:
@@ -18383,6 +18878,164 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AdminSystemKey"
+      additionalProperties: false
+
+    BotContextResponse:
+      type: object
+      required: [authorized]
+      properties:
+        authorized:
+          type: boolean
+          enum: [true]
+          description: Always true. Unauthorized contexts receive 401 instead of a response body with scope details.
+      additionalProperties: false
+
+    BotBindingRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 320
+        password:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          writeOnly: true
+      additionalProperties: false
+
+    BotBindingResponse:
+      type: object
+      required: [result, reason, requestId]
+      properties:
+        result:
+          type: string
+          enum: [bound, unbound, account_unavailable, credential_incorrect, binding_conflict, invalid_request, bot_identity_required, service_unavailable]
+        reason:
+          type: string
+        accountDisplay:
+          type: string
+          description: Masked remail account display; never a complete email address.
+        requestId:
+          type: string
+      additionalProperties: false
+
+    BotLeaderboardItem:
+      type: object
+      required: [rank, name, successCount]
+      properties:
+        rank:
+          type: integer
+          minimum: 1
+        name:
+          type: string
+          description: Safe user nickname or an anonymous label; never an email or user id.
+        successCount:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+
+    BotOrderRankingsResponse:
+      type: object
+      required: [businessDate, timezone, today, historical]
+      properties:
+        businessDate:
+          type: string
+          format: date
+        timezone:
+          type: string
+          enum: [Asia/Shanghai]
+        today:
+          type: array
+          items:
+            $ref: "#/components/schemas/BotLeaderboardItem"
+        historical:
+          type: array
+          items:
+            $ref: "#/components/schemas/BotLeaderboardItem"
+      additionalProperties: false
+
+    BotLeaderboardRewardItem:
+      type: object
+      required: [rank, name, successCount, rewardAmount]
+      properties:
+        rank:
+          type: integer
+          minimum: 1
+        name:
+          type: string
+          description: Safe user nickname or an anonymous label; never an email or user id.
+        successCount:
+          type: integer
+          minimum: 1
+        rewardAmount:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+      additionalProperties: false
+
+    BotLeaderboardRewardsResponse:
+      type: object
+      required: [available, businessDate, periodStart, periodEnd, settledAt, items]
+      properties:
+        available:
+          type: boolean
+        businessDate:
+          type: string
+          format: date
+          nullable: true
+        periodStart:
+          type: string
+          format: date-time
+          nullable: true
+        periodEnd:
+          type: string
+          format: date-time
+          nullable: true
+        settledAt:
+          type: string
+          format: date-time
+          nullable: true
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BotLeaderboardRewardItem"
+      additionalProperties: false
+
+    BotCodeDiagnosisRequest:
+      type: object
+      required: [email, projectId]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        projectId:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+
+    BotDiagnosisResponse:
+      type: object
+      required: [result, reason, action, requestId]
+      properties:
+        result:
+          type: string
+          enum:
+            - binding_required
+            - invalid_request
+            - order_not_found
+            - project_mismatch
+            - pickup_not_requested
+            - resource_abnormal_refunded
+            - pickup_grace_period
+            - cause_not_confirmed
+            - manual_support_required
+        reason:
+          type: string
+        action:
+          type: string
+        requestId:
+          type: string
       additionalProperties: false
 
     AdminUpdateUserRequest:
@@ -19728,6 +20381,12 @@ components:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
         purchasePrice:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        effectiveCodePrice:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+          description: Final code price after applying the lower of the product and bound-user group multipliers; populated by Bot project responses.
+        effectivePurchasePrice:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+          description: Final purchase price after applying the lower of the product and bound-user group multipliers; populated by Bot project responses.
         priceMultiplier:
           $ref: "#/components/schemas/UserGroupDiscountRatio"
           description: Global multiplier for this product type. Clients apply the lower of this value and the current user's group multiplier.
@@ -19814,6 +20473,12 @@ components:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
         purchasePrice:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        effectiveCodePrice:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+          description: Final code price after applying the lower of the product and bound-user group multipliers; populated by Bot project responses.
+        effectivePurchasePrice:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+          description: Final purchase price after applying the lower of the product and bound-user group multipliers; populated by Bot project responses.
         priceMultiplier:
           $ref: "#/components/schemas/UserGroupDiscountRatio"
           description: Global multiplier for this product type. Clients apply the lower of this value and the current user's group multiplier.

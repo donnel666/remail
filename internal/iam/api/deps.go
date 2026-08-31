@@ -44,6 +44,7 @@ type IAMModule struct {
 	ActivationUseCase     *app.ActivationUseCase
 	RegistrationUseCase   *app.RegistrationUseCase
 	LoginUseCase          *app.LoginUseCase
+	BotBindingUseCase     *app.BotBindingUseCase
 	SessionUseCase        *app.SessionUseCase
 	ChangePasswordUseCase *app.ChangePasswordUseCase
 	PasswordResetUseCase  *app.PasswordResetUseCase
@@ -95,6 +96,7 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.D
 		ActivationUseCase:          app.NewActivationUseCase(userRepo, hasher),
 		RegistrationUseCase:        app.NewRegistrationUseCase(userRepo, hasher, emailCodeStore),
 		LoginUseCase:               loginUseCase,
+		BotBindingUseCase:          app.NewBotBindingUseCase(userRepo, hasher),
 		SessionUseCase:             app.NewSessionUseCase(sessionStore, userRepo),
 		ChangePasswordUseCase:      app.NewChangePasswordUseCase(userRepo, hasher, sessionStore),
 		PasswordResetUseCase:       app.NewPasswordResetUseCase(userRepo, hasher, sessionStore, emailCodeStore, emailCodeUseCase),

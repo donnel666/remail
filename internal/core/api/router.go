@@ -5,6 +5,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// RegisterBotProjectRoutes registers platform-neutral project reads on an
+// already system-key-authenticated router group.
+func RegisterBotProjectRoutes(rg *gin.RouterGroup, mod *CoreModule, resolveUser BotProjectUserResolver, identityMiddleware ...gin.HandlerFunc) {
+	h := NewBotProjectHandler(mod, resolveUser)
+	identity := rg.Group("")
+	identity.Use(identityMiddleware...)
+	identity.GET("/projects", h.GetProjects)
+	identity.GET("/projects/:projectId", h.GetProject)
+	identity.GET("/projects/:projectId/inventory", h.GetProjectInventory)
+}
+
 // RegisterCoreRoutes registers all Core (resource) routes on the given router group.
 // P1-I2: supplier resource upload, list, detail, plus administrator resource operations.
 // The fetcher is used by LoadSession middleware to authenticate users.

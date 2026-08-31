@@ -88,3 +88,38 @@ func TestSystemKeyAuthenticationRejectsMalformedCredentials(t *testing.T) {
 		require.ErrorIs(t, err, settingsdomain.ErrInvalidSystemKey, plain)
 	}
 }
+
+func TestBotSystemKeyRequiresAndReturnsStableScope(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:bot-system-key?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&settingsinfra.SystemKeyModel{}, &governanceinfra.OperationLogModel{}))
+	useCase := settingsapp.NewSystemKeyUseCase(settingsinfra.NewRepository(db), governanceinfra.NewOperationLogRepo(db))
+	meta := settingsapp.MutationMeta{OperatorUserID: 7}
+
+	for _, scope := range [][2]string{{"", "qq:main"}, {"qq_official", ""}, {"QQ 官方", "qq:main"}} {
+		_, err := useCase.CreateWithScope(context.Background(), "bad bot", settingsdomain.SystemKeyPurposeBot, scope[0], scope[1], meta)
+		require.ErrorIs(t, err, settingsdomain.ErrInvalidSystemKey)
+	}
+	_, err = useCase.CreateWithScope(context.Background(), "bad smtp", settingsdomain.SystemKeyPurposeSMTPSubmission, "telegram", "telegram:main", meta)
+	require.ErrorIs(t, err, settingsdomain.ErrInvalidSystemKey)
+
+	created, err := useCase.CreateWithScope(
+		context.Background(), "QQ main", settingsdomain.SystemKeyPurposeBot,
+		" QQ_OFFICIAL ", " QQ:MAIN ", meta, " 456 ", "123", "123",
+	)
+	require.NoError(t, err)
+	require.Equal(t, "qq_official", created.Platform)
+	require.Equal(t, "qq:main", created.SubjectNamespace)
+	require.Equal(t, []string{"123", "456"}, created.AllowedGroupIDs)
+
+	authenticated, err := useCase.AuthenticateBotSystemKey(context.Background(), created.KeyPlain)
+	require.NoError(t, err)
+	require.Equal(t, created.ID, authenticated.ID)
+	require.Equal(t, "qq_official", authenticated.Platform)
+	require.Equal(t, "qq:main", authenticated.SubjectNamespace)
+	require.Equal(t, []string{"123", "456"}, authenticated.AllowedGroupIDs)
+	require.Empty(t, authenticated.KeyPlain)
+
+	_, err = useCase.AuthenticateSystemKey(context.Background(), created.KeyPlain)
+	require.ErrorIs(t, err, settingsdomain.ErrInvalidSystemKey)
+}

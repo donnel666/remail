@@ -403,6 +403,8 @@ type ProjectProductResponse struct {
 	PurchaseEnabled         bool                                    `json:"purchaseEnabled"`
 	CodePrice               string                                  `json:"codePrice"`
 	PurchasePrice           string                                  `json:"purchasePrice"`
+	EffectiveCodePrice      string                                  `json:"effectiveCodePrice,omitempty"`
+	EffectivePurchasePrice  string                                  `json:"effectivePurchasePrice,omitempty"`
 	PriceMultiplier         string                                  `json:"priceMultiplier"`
 	CodeSupplierPrice       string                                  `json:"codeSupplierPrice,omitempty"`
 	PurchaseSupplierPrice   string                                  `json:"purchaseSupplierPrice,omitempty"`
@@ -431,6 +433,8 @@ type ProjectProductSummaryResponse struct {
 	PurchaseEnabled         bool                                    `json:"purchaseEnabled"`
 	CodePrice               string                                  `json:"codePrice"`
 	PurchasePrice           string                                  `json:"purchasePrice"`
+	EffectiveCodePrice      string                                  `json:"effectiveCodePrice,omitempty"`
+	EffectivePurchasePrice  string                                  `json:"effectivePurchasePrice,omitempty"`
 	PriceMultiplier         string                                  `json:"priceMultiplier"`
 	CodeWindowMinutes       int                                     `json:"codeWindowMinutes"`
 	ActivationWindowMinutes int                                     `json:"activationWindowMinutes"`

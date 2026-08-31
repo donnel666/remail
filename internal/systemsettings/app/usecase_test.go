@@ -334,6 +334,39 @@ func TestBulkUpsertSkipsUnchangedInvalidLegacyValue(t *testing.T) {
 	require.Equal(t, "global_candidate_window", repo.upsertKey)
 }
 
+func TestBulkUpsertWritesFactsOnlyForChangedPushSettings(t *testing.T) {
+	repo := &persistedSnapshotRepository{
+		fakeRepository: &fakeRepository{},
+		persisted: []domain.Setting{
+			{Key: "global_notice", Value: "old"},
+			{Key: runtimeconfig.GmailPriceMultiplierKey, Value: "0.8"},
+		},
+	}
+	logs := &fakeOperationLogs{}
+	uc := NewSystemSettingsUseCase(repo, logs)
+	t.Cleanup(func() {
+		runtimeconfig.Delete("global_notice")
+		runtimeconfig.Delete(runtimeconfig.GmailPriceMultiplierKey)
+		runtimeconfig.Delete("unrelated_setting")
+	})
+
+	_, err := uc.BulkUpsert(context.Background(), []domain.Setting{
+		{Key: "global_notice", Value: "new"},
+		{Key: runtimeconfig.GmailPriceMultiplierKey, Value: "0.8"},
+		{Key: "unrelated_setting", Value: "private-value"},
+	}, MutationMeta{OperatorUserID: 7, RequestID: "request-bulk", Path: "/v1/admin/settings"})
+	require.NoError(t, err)
+	require.Len(t, logs.items, 2)
+	require.Equal(t, "system_settings.upsert", logs.items[0].OperationType)
+	require.Equal(t, "global_notice", logs.items[0].ResourceID)
+	require.Equal(t, "system_settings.bulk_upsert", logs.items[1].OperationType)
+	require.Equal(t, "bulk", logs.items[1].ResourceID)
+	for _, log := range logs.items {
+		require.NotContains(t, log.SafeSummary, "new")
+		require.NotContains(t, log.SafeSummary, "private-value")
+	}
+}
+
 func TestMutationAndSafeAuditShareTransaction(t *testing.T) {
 	repo := &fakeRepository{setting: &domain.Setting{Key: "github_client_secret", Value: "old"}}
 	logs := &fakeOperationLogs{err: errors.New("audit unavailable")}

@@ -12,19 +12,21 @@ import (
 )
 
 const (
-	turnstileLimit      = 30
-	turnstileWindow     = 60
-	oauthLimit          = 30
-	oauthWindow         = 60
-	oauthStartLimit     = 30
-	oauthStartWindow    = 60
-	loginEmailLimit     = 10
-	loginIPLimit        = 60
-	loginWindow         = 15 * 60
-	emailCodeEmailLimit = 5
-	emailCodeIPLimit    = 30
-	emailCodeWindow     = 10 * 60
-	abuseKeyPrefix      = "iam_abuse:"
+	turnstileLimit       = 30
+	turnstileWindow      = 60
+	oauthLimit           = 30
+	oauthWindow          = 60
+	oauthStartLimit      = 30
+	oauthStartWindow     = 60
+	loginEmailLimit      = 10
+	loginIPLimit         = 60
+	loginWindow          = 15 * 60
+	botBindingEmailLimit = 10
+	botBindingWindow     = 15 * 60
+	emailCodeEmailLimit  = 5
+	emailCodeIPLimit     = 30
+	emailCodeWindow      = 10 * 60
+	abuseKeyPrefix       = "iam_abuse:"
 )
 
 var abuseHitScript = redis.NewScript(`
@@ -142,6 +144,25 @@ func (l *AbuseLimiter) CancelLogin(ctx context.Context, email, ip string) error 
 
 func (l *AbuseLimiter) CompleteLogin(ctx context.Context, email, ip string) error {
 	return l.complete(ctx, abuseEmailKey("login_email", email), abuseIPKey("login_ip", ip), "login")
+}
+
+func (l *AbuseLimiter) TakeBotBinding(ctx context.Context, email string) (int, error) {
+	return l.take(ctx,
+		[]string{abuseEmailKey("bot_binding_email", email)},
+		[]any{botBindingEmailLimit, botBindingWindow},
+		"bot binding",
+	)
+}
+
+func (l *AbuseLimiter) CancelBotBinding(ctx context.Context, email string) error {
+	return l.cancel(ctx, []string{abuseEmailKey("bot_binding_email", email)}, "bot binding")
+}
+
+func (l *AbuseLimiter) CompleteBotBinding(ctx context.Context, email string) error {
+	if err := l.rdb.Del(ctx, abuseEmailKey("bot_binding_email", email)).Err(); err != nil {
+		return fmt.Errorf("redis bot binding abuse complete: %w", err)
+	}
+	return nil
 }
 
 func (l *AbuseLimiter) TakePasswordReset(ctx context.Context, email, ip string) (int, error) {

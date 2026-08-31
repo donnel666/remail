@@ -197,6 +197,10 @@ type GmailPurchaseFetchPort interface {
 	FetchLocalPurchaseMail(ctx context.Context, orderNo string) error
 }
 
+type GmailCodeDiagnosisFetchPort interface {
+	FetchLocalCodeMail(ctx context.Context, orderNo string) error
+}
+
 type ICloudMailFetchPort interface {
 	FetchICloudMessages(context.Context, FetchMessagesRequest) (*FetchMessagesResult, error)
 }
@@ -675,6 +679,43 @@ func (uc *UseCase) applyPickupMessageCache(ctx context.Context, emailResourceID 
 		return pickupMessageCacheMatch{}
 	}
 	return uc.applyLoadedPickupMessageCache(ctx, emailResourceID, scopes, messages, true)
+}
+
+// RefreshCodeDiagnosis reuses the normal pickup cache and fetch lease. It does
+// not create a second observation store just for the Bot diagnostic path.
+func (uc *UseCase) RefreshCodeDiagnosis(ctx context.Context, orderNo, _ string, emailResourceID uint) error {
+	orderNo = strings.TrimSpace(orderNo)
+	if uc == nil || uc.repo == nil || orderNo == "" || emailResourceID == 0 {
+		return nil
+	}
+	scope, err := uc.repo.LoadOrderScopeForServiceToken(ctx, orderNo)
+	if err != nil {
+		return err
+	}
+	if scope == nil || scope.ServiceMode != "code" || scope.EmailResourceID != emailResourceID || !scopeReadable(*scope, uc.now) {
+		return nil
+	}
+	if scope.AllocationType == domain.ResourceTypeDomain {
+		_, err = uc.syncDomainMailbox(ctx, *scope)
+		return err
+	}
+	if scope.AllocationType == domain.ResourceTypeGmail {
+		fetch, ok := uc.gmailPurchase.(GmailCodeDiagnosisFetchPort)
+		if !ok {
+			return nil
+		}
+		return fetch.FetchLocalCodeMail(ctx, scope.OrderNo)
+	}
+	if !scopeFetchable(*scope, uc.now) {
+		return nil
+	}
+	if uc.applyPickupMessageCache(ctx, emailResourceID, []OrderScope{*scope}).satisfied {
+		return nil
+	}
+	_, err = uc.processPickupRequestScope(ctx, uc.now(), PickupRequestFetchScope{
+		OrderNo: orderNo, OrderNos: []string{orderNo}, EmailResourceID: emailResourceID,
+	}, configuredPickupFetchTiming())
+	return err
 }
 
 func (uc *UseCase) applyLoadedPickupMessageCache(ctx context.Context, emailResourceID uint, scopes []OrderScope, messages []FetchedMessage, found bool) pickupMessageCacheMatch {

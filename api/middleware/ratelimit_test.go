@@ -106,3 +106,60 @@ func TestRateLimitPerSystemKeyCountsEachApplicationSeparately(t *testing.T) {
 	require.Equal(t, "60", blocked.Header().Get("Retry-After"))
 	require.Equal(t, http.StatusOK, getCode(systemKeyRateLimitRouter(rdb, 8)).Code)
 }
+
+func botSubjectRateLimitRouter(rdb redis.UniversalClient, keyID uint, namespace, subject string) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/redeem",
+		func(c *gin.Context) {
+			c.Set(contextKeySystemKeyID, keyID)
+			c.Set(contextKeyBotIdentity, BotIdentity{
+				BotIntegration: BotIntegration{SystemKeyID: keyID, Platform: "qq_official", SubjectNamespace: namespace},
+				Subject:        subject, Scene: BotScenePrivate,
+			})
+			c.Next()
+		},
+		RateLimitPerBotSubject(rdb, "binding", 1, 60),
+		func(c *gin.Context) { c.Status(http.StatusOK) },
+	)
+	return router
+}
+
+func TestRateLimitPerBotSubjectSurvivesKeyRotationAndHidesSubject(t *testing.T) {
+	server := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	require.Equal(t, http.StatusOK, postRedeem(botSubjectRateLimitRouter(rdb, 7, "qq:main", "secret-openid")).Code)
+	require.Equal(t, http.StatusTooManyRequests, postRedeem(botSubjectRateLimitRouter(rdb, 8, "qq:main", "secret-openid")).Code)
+	require.Equal(t, http.StatusOK, postRedeem(botSubjectRateLimitRouter(rdb, 8, "qq:main", "another-openid")).Code)
+	for _, key := range server.Keys() {
+		require.NotContains(t, key, "secret-openid")
+		require.NotContains(t, key, "another-openid")
+	}
+}
+
+func TestRateLimitPerClientIPStopsWorkBeforeAuthentication(t *testing.T) {
+	server := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	gin.SetMode(gin.TestMode)
+	authCalls := 0
+	router := gin.New()
+	router.GET("/bot",
+		RateLimitPerClientIP(rdb, "bot_auth_test", 1, 60),
+		func(c *gin.Context) { authCalls++; c.Status(http.StatusUnauthorized) },
+	)
+
+	first := httptest.NewRecorder()
+	router.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/bot", nil))
+	second := httptest.NewRecorder()
+	router.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/bot", nil))
+	third := httptest.NewRecorder()
+	router.ServeHTTP(third, WithTrustedBotDispatch(httptest.NewRequest(http.MethodGet, "/bot", nil)))
+
+	require.Equal(t, http.StatusUnauthorized, first.Code)
+	require.Equal(t, http.StatusTooManyRequests, second.Code)
+	require.Equal(t, http.StatusUnauthorized, third.Code)
+	require.Equal(t, 2, authCalls)
+}

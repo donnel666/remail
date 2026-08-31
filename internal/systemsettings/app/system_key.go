@@ -7,8 +7,11 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
@@ -42,8 +45,13 @@ func NewSystemKeyUseCase(repo SystemKeyRepository, logs governanceapp.OperationL
 }
 
 func (uc *SystemKeyUseCase) Create(ctx context.Context, name string, purpose domain.SystemKeyPurpose, meta MutationMeta) (*domain.SystemKey, error) {
+	return uc.CreateWithScope(ctx, name, purpose, "", "", meta)
+}
+
+func (uc *SystemKeyUseCase) CreateWithScope(ctx context.Context, name string, purpose domain.SystemKeyPurpose, platform, subjectNamespace string, meta MutationMeta, allowedGroupIDs ...string) (*domain.SystemKey, error) {
 	name = strings.TrimSpace(name)
-	if uc == nil || uc.repo == nil || uc.logs == nil || meta.OperatorUserID == 0 || name == "" || utf8.RuneCountInString(name) > 120 || !validSystemKeyPurpose(purpose) {
+	platform, subjectNamespace, allowedGroupIDs, scopeOK := normalizeSystemKeyScope(purpose, platform, subjectNamespace, allowedGroupIDs)
+	if uc == nil || uc.repo == nil || uc.logs == nil || meta.OperatorUserID == 0 || name == "" || utf8.RuneCountInString(name) > 120 || !validSystemKeyPurpose(purpose) || !scopeOK {
 		return nil, domain.ErrInvalidSystemKey
 	}
 	plain, hash, err := newSystemKeyCredential()
@@ -51,7 +59,9 @@ func (uc *SystemKeyUseCase) Create(ctx context.Context, name string, purpose dom
 		return nil, fmt.Errorf("generate system key: %w", err)
 	}
 	key := domain.SystemKey{
-		Name: name, Purpose: purpose, KeyPrefix: credentialPrefix(plain), KeyPlain: plain,
+		Name: name, Purpose: purpose, Platform: platform, SubjectNamespace: subjectNamespace,
+		AllowedGroupIDs: allowedGroupIDs,
+		KeyPrefix:       credentialPrefix(plain), KeyPlain: plain,
 		CreatedAt: uc.now(),
 	}
 	var created *domain.SystemKey
@@ -104,36 +114,113 @@ func (uc *SystemKeyUseCase) Delete(ctx context.Context, keyID uint, meta Mutatio
 }
 
 func (uc *SystemKeyUseCase) AuthenticateSystemKey(ctx context.Context, plain string) (uint, error) {
-	return uc.authenticateSystemKey(ctx, plain, domain.SystemKeyPurposeICloudForwarding)
-}
-
-func (uc *SystemKeyUseCase) AuthenticateSMTPSubmissionKey(ctx context.Context, plain string) (uint, error) {
-	return uc.authenticateSystemKey(ctx, plain, domain.SystemKeyPurposeSMTPSubmission)
-}
-
-func (uc *SystemKeyUseCase) authenticateSystemKey(ctx context.Context, plain string, purpose domain.SystemKeyPurpose) (uint, error) {
-	plain = strings.TrimSpace(plain)
-	if uc == nil || uc.repo == nil || !validSystemKeyCredential(plain) || !validSystemKeyPurpose(purpose) {
-		return 0, domain.ErrInvalidSystemKey
-	}
-	key, err := uc.repo.FindSystemKeyByHash(ctx, systemKeyHash(plain))
+	key, err := uc.authenticateSystemKey(ctx, plain, domain.SystemKeyPurposeICloudForwarding)
 	if err != nil {
 		return 0, err
-	}
-	if key == nil || key.ID == 0 || key.Purpose != purpose {
-		return 0, domain.ErrInvalidSystemKey
-	}
-	now := uc.now()
-	if key.LastUsedAt == nil || now.Sub(*key.LastUsedAt) >= systemKeyLastUsedTouchInterval {
-		if err := uc.repo.TouchSystemKey(ctx, key.ID, now); err != nil {
-			return 0, err
-		}
 	}
 	return key.ID, nil
 }
 
+func (uc *SystemKeyUseCase) AuthenticateSMTPSubmissionKey(ctx context.Context, plain string) (uint, error) {
+	key, err := uc.authenticateSystemKey(ctx, plain, domain.SystemKeyPurposeSMTPSubmission)
+	if err != nil {
+		return 0, err
+	}
+	return key.ID, nil
+}
+
+// AuthenticateBotSystemKey validates a bot-scoped key and returns only its
+// safe integration metadata. The plaintext and stored hash are never present
+// on a loaded SystemKey.
+func (uc *SystemKeyUseCase) AuthenticateBotSystemKey(ctx context.Context, plain string) (*domain.SystemKey, error) {
+	return uc.authenticateSystemKey(ctx, plain, domain.SystemKeyPurposeBot)
+}
+
+func (uc *SystemKeyUseCase) authenticateSystemKey(ctx context.Context, plain string, purpose domain.SystemKeyPurpose) (*domain.SystemKey, error) {
+	plain = strings.TrimSpace(plain)
+	if uc == nil || uc.repo == nil || !validSystemKeyCredential(plain) || !validSystemKeyPurpose(purpose) {
+		return nil, domain.ErrInvalidSystemKey
+	}
+	key, err := uc.repo.FindSystemKeyByHash(ctx, systemKeyHash(plain))
+	if err != nil {
+		return nil, err
+	}
+	if key == nil || key.ID == 0 || key.Purpose != purpose {
+		return nil, domain.ErrInvalidSystemKey
+	}
+	platform, subjectNamespace, allowedGroupIDs, ok := normalizeSystemKeyScope(key.Purpose, key.Platform, key.SubjectNamespace, key.AllowedGroupIDs)
+	if !ok {
+		return nil, domain.ErrInvalidSystemKey
+	}
+	key.Platform, key.SubjectNamespace, key.AllowedGroupIDs = platform, subjectNamespace, allowedGroupIDs
+	now := uc.now()
+	if key.LastUsedAt == nil || now.Sub(*key.LastUsedAt) >= systemKeyLastUsedTouchInterval {
+		if err := uc.repo.TouchSystemKey(ctx, key.ID, now); err != nil {
+			return nil, err
+		}
+	}
+	return key, nil
+}
+
 func validSystemKeyPurpose(purpose domain.SystemKeyPurpose) bool {
-	return purpose == domain.SystemKeyPurposeICloudForwarding || purpose == domain.SystemKeyPurposeSMTPSubmission
+	return purpose == domain.SystemKeyPurposeICloudForwarding || purpose == domain.SystemKeyPurposeSMTPSubmission || purpose == domain.SystemKeyPurposeBot
+}
+
+func normalizeSystemKeyScope(purpose domain.SystemKeyPurpose, platform, subjectNamespace string, allowedGroupIDs []string) (string, string, []string, bool) {
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	subjectNamespace = strings.ToLower(strings.TrimSpace(subjectNamespace))
+	if purpose != domain.SystemKeyPurposeBot {
+		return platform, subjectNamespace, nil, platform == "" && subjectNamespace == "" && len(allowedGroupIDs) == 0
+	}
+	groups, groupsOK := normalizeBotGroupIDs(subjectNamespace, allowedGroupIDs)
+	return platform, subjectNamespace, groups,
+		validScopeToken(platform, 32, false) && validScopeToken(subjectNamespace, 50, true) && groupsOK
+}
+
+func normalizeBotGroupIDs(namespace string, values []string) ([]string, bool) {
+	if len(values) == 0 || len(values) > 100 {
+		return nil, false
+	}
+	groups := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	qq := namespace == "qq" || strings.HasPrefix(namespace, "qq:")
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || len(value) > 128 || !utf8.ValidString(value) {
+			return nil, false
+		}
+		for _, char := range value {
+			if unicode.IsControl(char) {
+				return nil, false
+			}
+		}
+		if qq {
+			parsed, err := strconv.ParseUint(value, 10, 64)
+			if err != nil || parsed == 0 {
+				return nil, false
+			}
+			value = strconv.FormatUint(parsed, 10)
+		}
+		if _, exists := seen[value]; !exists {
+			seen[value] = struct{}{}
+			groups = append(groups, value)
+		}
+	}
+	sort.Strings(groups)
+	return groups, len(groups) > 0
+}
+
+func validScopeToken(value string, maxLength int, allowColon bool) bool {
+	if value == "" || len(value) > maxLength {
+		return false
+	}
+	for i, char := range value {
+		if char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || i > 0 && (char == '_' || char == '-' || char == '.' || allowColon && char == ':') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func newSystemKeyCredential() (plain, hash string, err error) {

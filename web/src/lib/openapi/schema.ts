@@ -883,7 +883,7 @@ export interface paths {
         put?: never;
         /**
          * Create a system key
-         * @description Requires system settings write and sensitive permissions. The plain key is returned only in this response.
+         * @description Requires system settings write and sensitive permissions. The plain key is returned only in this response. A Bot key must include at least one allowed group id.
          */
         post: operations["postAdminSystemKey"];
         delete?: never;
@@ -904,6 +904,213 @@ export interface paths {
         post?: never;
         /** Revoke a system key */
         delete: operations["deleteAdminSystemKey"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bot/ws": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open the persistent Bot WebSocket transport
+         * @description Authenticates one Bot System Key during the HTTP upgrade. The connection carries heartbeat,
+         *     request/response multiplexing for the allowlisted `/v1/bot/**` operations, and resumable
+         *     events for `project.launched`, `leaderboard.settled`, `system.notice.updated`,
+         *     `system.announcement.updated`, `email.discount.updated`, and `project.price.updated`.
+         *     A subscribe frame may send a `topics` array; legacy `topic: project.launched` remains valid.
+         *     All selected topics share one server-issued `(after, afterId)` cursor, and each event frame
+         *     contains only its documented safe projection. WebSocket `afterId` is emitted as a decimal
+         *     string to preserve uint64 precision; numeric legacy cursors are still accepted. Platform subjects still come from the trusted
+         *     bot event in each request frame and are never accepted from an end-user argument.
+         *
+         *     A request frame carries `subject`, `scene`, and, only when `scene` is `group`, `groupId`.
+         *     `groupId` is required for a group frame and must be present in the authenticated System Key's
+         *     `allowedGroupIds`; it must be omitted for a private frame. The server revalidates these fields
+         *     for every tunneled request. Missing, malformed, or unauthorized context receives the same 401
+         *     response and does not reveal key scope or binding information.
+         */
+        get: operations["connectBotWebSocket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bot/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Verify the current trusted bot event context
+         * @description Returns only an authorization acknowledgement. In a private scene, send the trusted subject
+         *     and `X-Bot-Scene: private` without a group header. In a group scene, `X-Bot-Group` is required
+         *     and must match one of the authenticated Bot System Key's `allowedGroupIds`. Missing or invalid
+         *     keys, subjects, scenes, group ids, and non-whitelisted groups all receive the same 401 response;
+         *     this endpoint never returns platform scope, namespace, binding, or account information.
+         */
+        get: operations["getBotContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bot/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bind the current bot-platform identity to a remail account
+         * @description The platform subject is accepted only from the authenticated bot adapter header. No session is created and the password is never returned or logged.
+         */
+        post: operations["postBotBinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bot/binding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the current bot-platform identity binding */
+        get: operations["getBotBinding"];
+        put?: never;
+        post?: never;
+        /** Remove the current bot-platform identity binding */
+        delete: operations["deleteBotBinding"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bot/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the same safe projects, prices and inventory shown by the workbench
+         * @description In a private scene, a bound bot identity receives that user's visible public and private projects. Group scenes and unbound identities receive public listed projects only. Administrator-only fields are never returned.
+         */
+        get: operations["getBotProjects"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bot/projects/{projectId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the workbench-compatible safe project detail */
+        get: operations["getBotProject"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bot/projects/{projectId}/inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the same user-safe inventory totals used by the workbench */
+        get: operations["getBotProjectInventory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bot/rankings/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read today's and all-time successful-order rankings
+         * @description Successful orders are delivered code orders plus activated purchase orders, excluding refunded, failed and historical-import orders. User ids and email addresses are never returned.
+         */
+        get: operations["getBotOrderRankings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bot/rankings/rewards/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the latest completed leaderboard reward list */
+        get: operations["getBotLatestLeaderboardRewards"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bot/diagnoses/code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Diagnose why a bound user's project email has not delivered a code
+         * @description Resolves the order from the authenticated bot identity, delivery email and project. It first reuses the normal local pickup cache and, when no matching mail is cached, performs one fetch through the resource's existing Domain, Gmail, Microsoft, or iCloud pickup path. It returns only safe reason text and never returns an order number, message, mailbox credential or verification code.
+         */
+        post: operations["postBotCodeDiagnosis"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -6947,17 +7154,27 @@ export interface components {
         AdminSystemKeyCreateRequest: {
             name: string;
             /**
-             * @description Limits the key to either the iCloud forwarding API or SMTP submission.
+             * @description Limits the key to iCloud forwarding, SMTP submission, or the Bot integration API.
              * @default icloud_forwarding
              * @enum {string}
              */
-            purpose: "icloud_forwarding" | "smtp_submission";
+            purpose: "icloud_forwarding" | "smtp_submission" | "bot";
+            /** @description Required only for purpose=bot; normalized platform scope such as qq or telegram. It does not tell ReMail how the bot resolved the trusted platform identity. */
+            platform?: string;
+            /** @description Required only for purpose=bot; stable identity namespace such as qq:appid or telegram:botid. Key rotation reuses this value. */
+            subjectNamespace?: string;
+            /** @description Required only for purpose=bot. Trusted platform group ids allowed to use this integration; QQ values are normalized positive decimal group numbers. */
+            allowedGroupIds?: string[];
         };
         AdminSystemKey: {
             id: number;
             name: string;
             /** @enum {string} */
-            purpose: "icloud_forwarding" | "smtp_submission";
+            purpose: "icloud_forwarding" | "smtp_submission" | "bot";
+            platform?: string;
+            subjectNamespace?: string;
+            /** @description Normalized group whitelist for a Bot System Key. Omitted for non-Bot keys. */
+            allowedGroupIds?: string[];
             keyPrefix: string;
             /** @description Plain system key returned only by the create endpoint. */
             keyPlain?: string;
@@ -6968,6 +7185,71 @@ export interface components {
         };
         AdminSystemKeyList: {
             items: components["schemas"]["AdminSystemKey"][];
+        };
+        BotContextResponse: {
+            /**
+             * @description Always true. Unauthorized contexts receive 401 instead of a response body with scope details.
+             * @enum {boolean}
+             */
+            authorized: true;
+        };
+        BotBindingRequest: {
+            /** Format: email */
+            email: string;
+            password: string;
+        };
+        BotBindingResponse: {
+            /** @enum {string} */
+            result: "bound" | "unbound" | "account_unavailable" | "credential_incorrect" | "binding_conflict" | "invalid_request" | "bot_identity_required" | "service_unavailable";
+            reason: string;
+            /** @description Masked remail account display; never a complete email address. */
+            accountDisplay?: string;
+            requestId: string;
+        };
+        BotLeaderboardItem: {
+            rank: number;
+            /** @description Safe user nickname or an anonymous label; never an email or user id. */
+            name: string;
+            successCount: number;
+        };
+        BotOrderRankingsResponse: {
+            /** Format: date */
+            businessDate: string;
+            /** @enum {string} */
+            timezone: "Asia/Shanghai";
+            today: components["schemas"]["BotLeaderboardItem"][];
+            historical: components["schemas"]["BotLeaderboardItem"][];
+        };
+        BotLeaderboardRewardItem: {
+            rank: number;
+            /** @description Safe user nickname or an anonymous label; never an email or user id. */
+            name: string;
+            successCount: number;
+            rewardAmount: components["schemas"]["NonNegativeLedgerAmountResponse"];
+        };
+        BotLeaderboardRewardsResponse: {
+            available: boolean;
+            /** Format: date */
+            businessDate: string | null;
+            /** Format: date-time */
+            periodStart: string | null;
+            /** Format: date-time */
+            periodEnd: string | null;
+            /** Format: date-time */
+            settledAt: string | null;
+            items: components["schemas"]["BotLeaderboardRewardItem"][];
+        };
+        BotCodeDiagnosisRequest: {
+            /** Format: email */
+            email: string;
+            projectId: number;
+        };
+        BotDiagnosisResponse: {
+            /** @enum {string} */
+            result: "binding_required" | "invalid_request" | "order_not_found" | "project_mismatch" | "pickup_not_requested" | "resource_abnormal_refunded" | "pickup_grace_period" | "cause_not_confirmed" | "manual_support_required";
+            reason: string;
+            action: string;
+            requestId: string;
         };
         AdminUpdateUserRequest: {
             enabled?: boolean;
@@ -7480,6 +7762,10 @@ export interface components {
             purchaseEnabled: boolean;
             codePrice: components["schemas"]["NonNegativeLedgerAmount"];
             purchasePrice: components["schemas"]["NonNegativeLedgerAmount"];
+            /** @description Final code price after applying the lower of the product and bound-user group multipliers; populated by Bot project responses. */
+            effectiveCodePrice?: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            /** @description Final purchase price after applying the lower of the product and bound-user group multipliers; populated by Bot project responses. */
+            effectivePurchasePrice?: components["schemas"]["NonNegativeLedgerAmountResponse"];
             /** @description Global multiplier for this product type. Clients apply the lower of this value and the current user's group multiplier. */
             priceMultiplier: components["schemas"]["UserGroupDiscountRatio"];
             codeWindowMinutes: number;
@@ -7523,6 +7809,10 @@ export interface components {
             purchaseEnabled: boolean;
             codePrice: components["schemas"]["NonNegativeLedgerAmount"];
             purchasePrice: components["schemas"]["NonNegativeLedgerAmount"];
+            /** @description Final code price after applying the lower of the product and bound-user group multipliers; populated by Bot project responses. */
+            effectiveCodePrice?: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            /** @description Final purchase price after applying the lower of the product and bound-user group multipliers; populated by Bot project responses. */
+            effectivePurchasePrice?: components["schemas"]["NonNegativeLedgerAmountResponse"];
             /** @description Global multiplier for this product type. Clients apply the lower of this value and the current user's group multiplier. */
             priceMultiplier: components["schemas"]["UserGroupDiscountRatio"];
             codeSupplierPrice?: components["schemas"]["NonNegativeLedgerAmount"];
@@ -9935,6 +10225,14 @@ export interface components {
         /** @description Last ticket id from the previous page. */
         AfterIdQuery: number;
         LimitQuery: number;
+        /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+        BotSubject: string;
+        /** @description Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only. */
+        BotScene: "private" | "group";
+        /** @description Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+        BotGroup: string;
+        /** @description Credential and account-specific operations are private-chat only; X-Bot-Group must be omitted. */
+        BotPrivateScene: "private";
         /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
         CsrfToken: string;
         /** @description CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests. */
@@ -12647,6 +12945,423 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    connectBotWebSocket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description WebSocket connection established */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getBotContext: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                "X-Bot-Subject": components["parameters"]["BotSubject"];
+                /** @description Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only. */
+                "X-Bot-Scene": components["parameters"]["BotScene"];
+                /** @description Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+                "X-Bot-Group"?: components["parameters"]["BotGroup"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Bot System Key and trusted event context are authorized */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotContextResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postBotBinding: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                "X-Bot-Subject": components["parameters"]["BotSubject"];
+                /** @description Credential and account-specific operations are private-chat only; X-Bot-Group must be omitted. */
+                "X-Bot-Scene": components["parameters"]["BotPrivateScene"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BotBindingRequest"];
+            };
+        };
+        responses: {
+            /** @description Bot identity bound */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotBindingResponse"];
+                };
+            };
+            /** @description Invalid binding request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotBindingResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Bot identity or remail account already has another binding */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotBindingResponse"];
+                };
+            };
+            /** @description Account credential is incorrect */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotBindingResponse"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            /** @description Bot binding or an authentication dependency is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotBindingResponse"] | components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getBotBinding: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                "X-Bot-Subject": components["parameters"]["BotSubject"];
+                /** @description Credential and account-specific operations are private-chat only; X-Bot-Group must be omitted. */
+                "X-Bot-Scene": components["parameters"]["BotPrivateScene"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe binding status; the account email is masked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotBindingResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
+            /** @description Bot binding or an authentication dependency is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotBindingResponse"] | components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteBotBinding: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                "X-Bot-Subject": components["parameters"]["BotSubject"];
+                /** @description Credential and account-specific operations are private-chat only; X-Bot-Group must be omitted. */
+                "X-Bot-Scene": components["parameters"]["BotPrivateScene"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Binding removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
+            /** @description Bot binding or an authentication dependency is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotBindingResponse"] | components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getBotProjects: {
+        parameters: {
+            query?: {
+                scope?: "visible";
+                /** @description Accepted for workbench compatibility; bot results are always constrained to listed projects. */
+                status?: "reviewing" | "listed" | "delisted";
+                accessType?: "public" | "private";
+                looseMatch?: boolean;
+                productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud";
+                search?: string;
+                targetPlatform?: string;
+                createdFrom?: components["parameters"]["CreatedFromQuery"];
+                createdTo?: components["parameters"]["CreatedToQuery"];
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: number;
+            };
+            header: {
+                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                "X-Bot-Subject": components["parameters"]["BotSubject"];
+                /** @description Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only. */
+                "X-Bot-Scene": components["parameters"]["BotScene"];
+                /** @description Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+                "X-Bot-Group"?: components["parameters"]["BotGroup"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Workbench-compatible project list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getBotProject: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                "X-Bot-Subject": components["parameters"]["BotSubject"];
+                /** @description Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only. */
+                "X-Bot-Scene": components["parameters"]["BotScene"];
+                /** @description Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+                "X-Bot-Group"?: components["parameters"]["BotGroup"];
+            };
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe project detail with current price and inventory fields */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectDetailResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getBotProjectInventory: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                "X-Bot-Subject": components["parameters"]["BotSubject"];
+                /** @description Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only. */
+                "X-Bot-Scene": components["parameters"]["BotScene"];
+                /** @description Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+                "X-Bot-Group"?: components["parameters"]["BotGroup"];
+            };
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current project product inventory totals */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectInventoryTotalResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getBotOrderRankings: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header: {
+                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                "X-Bot-Subject": components["parameters"]["BotSubject"];
+                /** @description Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only. */
+                "X-Bot-Scene": components["parameters"]["BotScene"];
+                /** @description Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+                "X-Bot-Group"?: components["parameters"]["BotGroup"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Today and all-time successful-order rankings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotOrderRankingsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getBotLatestLeaderboardRewards: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header: {
+                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                "X-Bot-Subject": components["parameters"]["BotSubject"];
+                /** @description Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only. */
+                "X-Bot-Scene": components["parameters"]["BotScene"];
+                /** @description Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+                "X-Bot-Group"?: components["parameters"]["BotGroup"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Latest settlement and safe winner display names, or available=false when no settlement exists */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotLeaderboardRewardsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postBotCodeDiagnosis: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                "X-Bot-Subject": components["parameters"]["BotSubject"];
+                /** @description Credential and account-specific operations are private-chat only; X-Bot-Group must be omitted. */
+                "X-Bot-Scene": components["parameters"]["BotPrivateScene"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BotCodeDiagnosisRequest"];
+            };
+        };
+        responses: {
+            /** @description Safe diagnosis result, reason and recommended action */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotDiagnosisResponse"];
+                };
+            };
+            /** @description Invalid diagnosis request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotDiagnosisResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
+            /** @description Diagnosis or an authentication dependency is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotDiagnosisResponse"] | components["schemas"]["Error"];
+                };
+            };
         };
     };
     getAdminUserDashboard: {

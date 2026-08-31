@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useState } from "react";
-import { Button, Empty, Input, Modal, Radio, RadioGroup, Table, Tag, Toast, Tooltip, Typography } from "@douyinfe/semi-ui";
+import { Button, Empty, Input, Modal, Radio, RadioGroup, Table, Tag, TextArea, Toast, Tooltip, Typography } from "@douyinfe/semi-ui";
 import { KeyRound, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -24,9 +24,16 @@ function formatDateTime(value?: string | null) {
   return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString();
 }
 
+function parseAllowedGroupIds(value: string) {
+  return [...new Set(value.split(/[\s,，、]+/).map((item) => item.trim()).filter(Boolean))];
+}
+
 export default function SystemKeysSection({ canSensitive, canWrite }: SectionProps) {
   const { t } = useTranslation();
   const nameInputId = useId();
+  const platformInputId = useId();
+  const namespaceInputId = useId();
+  const allowedGroupsInputId = useId();
   const purposeLabelId = useId();
   const [keys, setKeys] = useState<AdminSystemKey[]>([]);
   const [loading, setLoading] = useState(false);
@@ -35,6 +42,9 @@ export default function SystemKeysSection({ canSensitive, canWrite }: SectionPro
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [purpose, setPurpose] = useState<SystemKeyPurpose>("smtp_submission");
+  const [platform, setPlatform] = useState("");
+  const [subjectNamespace, setSubjectNamespace] = useState("");
+  const [allowedGroups, setAllowedGroups] = useState("");
   const [createdKey, setCreatedKey] = useState<AdminSystemKey | null>(null);
 
   const load = useCallback(async () => {
@@ -60,14 +70,30 @@ export default function SystemKeysSection({ canSensitive, canWrite }: SectionPro
       Toast.warning(t("Please enter system key name."));
       return;
     }
+    const nextPlatform = platform.trim();
+    const nextNamespace = subjectNamespace.trim();
+    const allowedGroupIds = parseAllowedGroupIds(allowedGroups);
+    if (purpose === "bot" && (!nextPlatform || !nextNamespace)) {
+      Toast.warning(t("Please enter bot platform and subject namespace."));
+      return;
+    }
+    if (purpose === "bot" && allowedGroupIds.length === 0) {
+      Toast.warning(t("Please enter at least one allowed group ID."));
+      return;
+    }
     setCreating(true);
     try {
-      const result = await createSystemKey(nextName, purpose);
+      const result = purpose === "bot"
+        ? await createSystemKey(nextName, purpose, { platform: nextPlatform, subjectNamespace: nextNamespace, allowedGroupIds })
+        : await createSystemKey(nextName, purpose);
       if (!result.keyPlain) throw new Error("System key plaintext was not returned.");
       setKeys((current) => [{ ...result, keyPlain: undefined }, ...current]);
       setCreateOpen(false);
       setName("");
       setPurpose("smtp_submission");
+      setPlatform("");
+      setSubjectNamespace("");
+      setAllowedGroups("");
       setCreatedKey(result);
       Toast.success(t("System key created."));
     } catch (error) {
@@ -122,10 +148,24 @@ export default function SystemKeysSection({ canSensitive, canWrite }: SectionPro
       dataIndex: "purpose",
       width: 180,
       render: (value: SystemKeyPurpose) => (
-        <Tag color={value === "smtp_submission" ? "blue" : "green"}>
-          {t(value === "smtp_submission" ? "SMTP submission" : "iCloud forwarding")}
+        <Tag color={value === "smtp_submission" ? "blue" : value === "bot" ? "violet" : "green"}>
+          {t(value === "smtp_submission" ? "SMTP submission" : value === "bot" ? "Bot integration" : "iCloud forwarding")}
         </Tag>
       ),
+    },
+    {
+      title: t("Bot scope"),
+      width: 240,
+      render: (_value: unknown, item: AdminSystemKey) => item.purpose === "bot"
+        ? <Text className="font-mono-data" type="secondary">{item.platform} / {item.subjectNamespace}</Text>
+        : <Text type="tertiary">-</Text>,
+    },
+    {
+      title: t("Allowed groups"),
+      width: 260,
+      render: (_value: unknown, item: AdminSystemKey) => item.purpose === "bot" && item.allowedGroupIds?.length
+        ? <Text className="font-mono-data" type="secondary">{item.allowedGroupIds.join(", ")}</Text>
+        : <Text type="tertiary">-</Text>,
     },
     {
       title: t("Created At"),
@@ -182,7 +222,7 @@ export default function SystemKeysSection({ canSensitive, canWrite }: SectionPro
         loading={loading}
         pagination={false}
         rowKey="id"
-        scroll={{ x: 1090 }}
+        scroll={{ x: 1590 }}
         size="middle"
       />
     </SettingsSection>
@@ -208,8 +248,45 @@ export default function SystemKeysSection({ canSensitive, canWrite }: SectionPro
         >
           <Radio value="smtp_submission">{t("SMTP submission")}</Radio>
           <Radio value="icloud_forwarding">{t("iCloud forwarding")}</Radio>
+          <Radio value="bot">{t("Bot integration")}</Radio>
         </RadioGroup>
       </div>
+      {purpose === "bot" ? <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="block" htmlFor={platformInputId}>
+          <span className="mb-1.5 block text-sm font-medium">{t("Bot platform")}</span>
+          <Input
+            id={platformInputId}
+            maxLength={32}
+            onChange={setPlatform}
+            placeholder="aiocqhttp"
+            showClear
+            value={platform}
+          />
+        </label>
+        <label className="block" htmlFor={namespaceInputId}>
+          <span className="mb-1.5 block text-sm font-medium">{t("Subject namespace")}</span>
+          <Input
+            id={namespaceInputId}
+            maxLength={50}
+            onChange={setSubjectNamespace}
+            placeholder="qq:main"
+            showClear
+            value={subjectNamespace}
+          />
+        </label>
+        <label className="block sm:col-span-2" htmlFor={allowedGroupsInputId}>
+          <span className="mb-1.5 block text-sm font-medium">{t("Allowed group IDs")}</span>
+          <TextArea
+            aria-label={t("Allowed group IDs")}
+            autosize={{ minRows: 2, maxRows: 4 }}
+            id={allowedGroupsInputId}
+            onChange={setAllowedGroups}
+            placeholder={t("Allowed group IDs placeholder")}
+            value={allowedGroups}
+          />
+          <Text className="mt-1 block" size="small" type="tertiary">{t("Allowed group IDs hint")}</Text>
+        </label>
+      </div> : null}
       <label className="block" htmlFor={nameInputId}>
         <span className="mb-1.5 block text-sm font-medium">{t("System key name")}</span>
         <Input

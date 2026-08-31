@@ -100,19 +100,21 @@ func TestPublicOpenAPIDoesNotExposeSystemKeySurface(t *testing.T) {
 	spec := publicOpenAPISpec(t)
 	paths := spec["paths"].(map[string]any)
 	for path := range paths {
-		if strings.HasPrefix(path, "/v1/open/icloud/") {
+		if strings.HasPrefix(path, "/v1/open/icloud/") || strings.HasPrefix(path, "/v1/bot/") {
 			t.Fatalf("public openapi exposes system-key route %s", path)
 		}
 	}
 
 	components := spec["components"].(map[string]any)
 	securitySchemes := components["securitySchemes"].(map[string]any)
-	if _, ok := securitySchemes["remailSystemKey"]; ok {
-		t.Fatal("public openapi exposes the system-key security scheme")
+	for _, name := range []string{"remailSystemKey", "systemKeyAuth"} {
+		if _, ok := securitySchemes[name]; ok {
+			t.Fatal("public openapi exposes the system-key security scheme")
+		}
 	}
 	for _, rawTag := range spec["tags"].([]any) {
-		if rawTag.(map[string]any)["name"] == "iCloud" {
-			t.Fatal("public openapi exposes the iCloud tag")
+		if name := rawTag.(map[string]any)["name"]; name == "iCloud" || name == "Bot" {
+			t.Fatalf("public openapi exposes internal tag %s", name)
 		}
 	}
 }

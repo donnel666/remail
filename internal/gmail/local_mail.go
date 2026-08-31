@@ -472,6 +472,20 @@ func (s *Service) pollLocalSession(ctx context.Context, session sessionModel) er
 	}).Error
 }
 
+// FetchLocalCodeMail reuses the ordinary local Gmail session poll for Bot
+// diagnosis. An upstream-backed order has no local session and remains a no-op.
+func (s *Service) FetchLocalCodeMail(ctx context.Context, orderNo string) error {
+	var session sessionModel
+	err := s.dbFor(ctx).Where("order_no = ? AND source = ?", strings.TrimSpace(orderNo), SourceLocal).Take(&session).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("load Gmail code diagnosis session: %w", err)
+	}
+	return s.pollLocalSession(ctx, session)
+}
+
 type localCodeResource struct {
 	ID          uint   `gorm:"column:id"`
 	LoginEmail  string `gorm:"column:login_email"`

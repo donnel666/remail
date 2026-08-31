@@ -1,0 +1,1 @@
+"""AstrBot ReMail integration plugin."""

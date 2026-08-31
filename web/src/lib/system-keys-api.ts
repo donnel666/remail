@@ -3,6 +3,11 @@ import type { components } from "./openapi/schema";
 
 export type AdminSystemKey = components["schemas"]["AdminSystemKey"];
 export type SystemKeyPurpose = NonNullable<components["schemas"]["AdminSystemKeyCreateRequest"]["purpose"]>;
+export type BotSystemKeyScope = {
+  platform: string;
+  subjectNamespace: string;
+  allowedGroupIds: string[];
+};
 
 export async function listSystemKeys(signal?: AbortSignal) {
   return unwrap(
@@ -10,10 +15,10 @@ export async function listSystemKeys(signal?: AbortSignal) {
   );
 }
 
-export async function createSystemKey(name: string, purpose: SystemKeyPurpose) {
+export async function createSystemKey(name: string, purpose: SystemKeyPurpose, scope?: BotSystemKeyScope) {
   return unwrap(
     await apiClient.POST("/v1/admin/system-keys", {
-      body: { name, purpose },
+      body: { name, purpose, ...scope },
       params: { header: csrfHeader() },
     }),
   );

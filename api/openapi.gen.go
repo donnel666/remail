@@ -1522,6 +1522,7 @@ func (e AdminOperationLogResult) Valid() bool {
 
 // Defines values for AdminSystemKeyPurpose.
 const (
+	AdminSystemKeyPurposeBot              AdminSystemKeyPurpose = "bot"
 	AdminSystemKeyPurposeIcloudForwarding AdminSystemKeyPurpose = "icloud_forwarding"
 	AdminSystemKeyPurposeSmtpSubmission   AdminSystemKeyPurpose = "smtp_submission"
 )
@@ -1529,6 +1530,8 @@ const (
 // Valid indicates whether the value is a known member of the AdminSystemKeyPurpose enum.
 func (e AdminSystemKeyPurpose) Valid() bool {
 	switch e {
+	case AdminSystemKeyPurposeBot:
+		return true
 	case AdminSystemKeyPurposeIcloudForwarding:
 		return true
 	case AdminSystemKeyPurposeSmtpSubmission:
@@ -1540,6 +1543,7 @@ func (e AdminSystemKeyPurpose) Valid() bool {
 
 // Defines values for AdminSystemKeyCreateRequestPurpose.
 const (
+	AdminSystemKeyCreateRequestPurposeBot              AdminSystemKeyCreateRequestPurpose = "bot"
 	AdminSystemKeyCreateRequestPurposeIcloudForwarding AdminSystemKeyCreateRequestPurpose = "icloud_forwarding"
 	AdminSystemKeyCreateRequestPurposeSmtpSubmission   AdminSystemKeyCreateRequestPurpose = "smtp_submission"
 )
@@ -1547,6 +1551,8 @@ const (
 // Valid indicates whether the value is a known member of the AdminSystemKeyCreateRequestPurpose enum.
 func (e AdminSystemKeyCreateRequestPurpose) Valid() bool {
 	switch e {
+	case AdminSystemKeyCreateRequestPurposeBot:
+		return true
 	case AdminSystemKeyCreateRequestPurposeIcloudForwarding:
 		return true
 	case AdminSystemKeyCreateRequestPurposeSmtpSubmission:
@@ -1922,6 +1928,111 @@ func (e AllocationItemType) Valid() bool {
 	}
 }
 
+// Defines values for BotBindingResponseResult.
+const (
+	BotBindingResponseResultAccountUnavailable  BotBindingResponseResult = "account_unavailable"
+	BotBindingResponseResultBindingConflict     BotBindingResponseResult = "binding_conflict"
+	BotBindingResponseResultBotIdentityRequired BotBindingResponseResult = "bot_identity_required"
+	BotBindingResponseResultBound               BotBindingResponseResult = "bound"
+	BotBindingResponseResultCredentialIncorrect BotBindingResponseResult = "credential_incorrect"
+	BotBindingResponseResultInvalidRequest      BotBindingResponseResult = "invalid_request"
+	BotBindingResponseResultServiceUnavailable  BotBindingResponseResult = "service_unavailable"
+	BotBindingResponseResultUnbound             BotBindingResponseResult = "unbound"
+)
+
+// Valid indicates whether the value is a known member of the BotBindingResponseResult enum.
+func (e BotBindingResponseResult) Valid() bool {
+	switch e {
+	case BotBindingResponseResultAccountUnavailable:
+		return true
+	case BotBindingResponseResultBindingConflict:
+		return true
+	case BotBindingResponseResultBotIdentityRequired:
+		return true
+	case BotBindingResponseResultBound:
+		return true
+	case BotBindingResponseResultCredentialIncorrect:
+		return true
+	case BotBindingResponseResultInvalidRequest:
+		return true
+	case BotBindingResponseResultServiceUnavailable:
+		return true
+	case BotBindingResponseResultUnbound:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BotContextResponseAuthorized.
+const (
+	BotContextResponseAuthorizedTrue BotContextResponseAuthorized = true
+)
+
+// Valid indicates whether the value is a known member of the BotContextResponseAuthorized enum.
+func (e BotContextResponseAuthorized) Valid() bool {
+	switch e {
+	case BotContextResponseAuthorizedTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BotDiagnosisResponseResult.
+const (
+	BotDiagnosisResponseResultBindingRequired          BotDiagnosisResponseResult = "binding_required"
+	BotDiagnosisResponseResultCauseNotConfirmed        BotDiagnosisResponseResult = "cause_not_confirmed"
+	BotDiagnosisResponseResultInvalidRequest           BotDiagnosisResponseResult = "invalid_request"
+	BotDiagnosisResponseResultManualSupportRequired    BotDiagnosisResponseResult = "manual_support_required"
+	BotDiagnosisResponseResultOrderNotFound            BotDiagnosisResponseResult = "order_not_found"
+	BotDiagnosisResponseResultPickupGracePeriod        BotDiagnosisResponseResult = "pickup_grace_period"
+	BotDiagnosisResponseResultPickupNotRequested       BotDiagnosisResponseResult = "pickup_not_requested"
+	BotDiagnosisResponseResultProjectMismatch          BotDiagnosisResponseResult = "project_mismatch"
+	BotDiagnosisResponseResultResourceAbnormalRefunded BotDiagnosisResponseResult = "resource_abnormal_refunded"
+)
+
+// Valid indicates whether the value is a known member of the BotDiagnosisResponseResult enum.
+func (e BotDiagnosisResponseResult) Valid() bool {
+	switch e {
+	case BotDiagnosisResponseResultBindingRequired:
+		return true
+	case BotDiagnosisResponseResultCauseNotConfirmed:
+		return true
+	case BotDiagnosisResponseResultInvalidRequest:
+		return true
+	case BotDiagnosisResponseResultManualSupportRequired:
+		return true
+	case BotDiagnosisResponseResultOrderNotFound:
+		return true
+	case BotDiagnosisResponseResultPickupGracePeriod:
+		return true
+	case BotDiagnosisResponseResultPickupNotRequested:
+		return true
+	case BotDiagnosisResponseResultProjectMismatch:
+		return true
+	case BotDiagnosisResponseResultResourceAbnormalRefunded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BotOrderRankingsResponseTimezone.
+const (
+	AsiaShanghai BotOrderRankingsResponseTimezone = "Asia/Shanghai"
+)
+
+// Valid indicates whether the value is a known member of the BotOrderRankingsResponseTimezone enum.
+func (e BotOrderRankingsResponseTimezone) Valid() bool {
+	switch e {
+	case AsiaShanghai:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CardBulkFilterOwnerRole.
 const (
 	CardBulkFilterOwnerRoleAdmin      CardBulkFilterOwnerRole = "admin"
@@ -2173,13 +2284,13 @@ func (e DeleteProxiesRequest1All) Valid() bool {
 
 // Defines values for DisableProxiesRequestAll.
 const (
-	True DisableProxiesRequestAll = true
+	DisableProxiesRequestAllTrue DisableProxiesRequestAll = true
 )
 
 // Valid indicates whether the value is a known member of the DisableProxiesRequestAll enum.
 func (e DisableProxiesRequestAll) Valid() bool {
 	switch e {
-	case True:
+	case DisableProxiesRequestAllTrue:
 		return true
 	default:
 		return false
@@ -3971,6 +4082,39 @@ func (e UserResponseRole) Valid() bool {
 	}
 }
 
+// Defines values for BotPrivateScene.
+const (
+	BotPrivateScenePrivate BotPrivateScene = "private"
+)
+
+// Valid indicates whether the value is a known member of the BotPrivateScene enum.
+func (e BotPrivateScene) Valid() bool {
+	switch e {
+	case BotPrivateScenePrivate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BotScene.
+const (
+	BotSceneGroup   BotScene = "group"
+	BotScenePrivate BotScene = "private"
+)
+
+// Valid indicates whether the value is a known member of the BotScene enum.
+func (e BotScene) Valid() bool {
+	switch e {
+	case BotSceneGroup:
+		return true
+	case BotScenePrivate:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TicketStatusQuery.
 const (
 	TicketStatusQueryClosed     TicketStatusQuery = "closed"
@@ -4865,6 +5009,255 @@ func (e GetAdminUsersParamsRole) Valid() bool {
 	}
 }
 
+// Defines values for DeleteBotBindingParamsXBotScene.
+const (
+	DeleteBotBindingParamsXBotScenePrivate DeleteBotBindingParamsXBotScene = "private"
+)
+
+// Valid indicates whether the value is a known member of the DeleteBotBindingParamsXBotScene enum.
+func (e DeleteBotBindingParamsXBotScene) Valid() bool {
+	switch e {
+	case DeleteBotBindingParamsXBotScenePrivate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetBotBindingParamsXBotScene.
+const (
+	GetBotBindingParamsXBotScenePrivate GetBotBindingParamsXBotScene = "private"
+)
+
+// Valid indicates whether the value is a known member of the GetBotBindingParamsXBotScene enum.
+func (e GetBotBindingParamsXBotScene) Valid() bool {
+	switch e {
+	case GetBotBindingParamsXBotScenePrivate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostBotBindingParamsXBotScene.
+const (
+	PostBotBindingParamsXBotScenePrivate PostBotBindingParamsXBotScene = "private"
+)
+
+// Valid indicates whether the value is a known member of the PostBotBindingParamsXBotScene enum.
+func (e PostBotBindingParamsXBotScene) Valid() bool {
+	switch e {
+	case PostBotBindingParamsXBotScenePrivate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetBotContextParamsXBotScene.
+const (
+	GetBotContextParamsXBotSceneGroup   GetBotContextParamsXBotScene = "group"
+	GetBotContextParamsXBotScenePrivate GetBotContextParamsXBotScene = "private"
+)
+
+// Valid indicates whether the value is a known member of the GetBotContextParamsXBotScene enum.
+func (e GetBotContextParamsXBotScene) Valid() bool {
+	switch e {
+	case GetBotContextParamsXBotSceneGroup:
+		return true
+	case GetBotContextParamsXBotScenePrivate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostBotCodeDiagnosisParamsXBotScene.
+const (
+	PostBotCodeDiagnosisParamsXBotScenePrivate PostBotCodeDiagnosisParamsXBotScene = "private"
+)
+
+// Valid indicates whether the value is a known member of the PostBotCodeDiagnosisParamsXBotScene enum.
+func (e PostBotCodeDiagnosisParamsXBotScene) Valid() bool {
+	switch e {
+	case PostBotCodeDiagnosisParamsXBotScenePrivate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetBotProjectsParamsScope.
+const (
+	GetBotProjectsParamsScopeVisible GetBotProjectsParamsScope = "visible"
+)
+
+// Valid indicates whether the value is a known member of the GetBotProjectsParamsScope enum.
+func (e GetBotProjectsParamsScope) Valid() bool {
+	switch e {
+	case GetBotProjectsParamsScopeVisible:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetBotProjectsParamsStatus.
+const (
+	GetBotProjectsParamsStatusDelisted  GetBotProjectsParamsStatus = "delisted"
+	GetBotProjectsParamsStatusListed    GetBotProjectsParamsStatus = "listed"
+	GetBotProjectsParamsStatusReviewing GetBotProjectsParamsStatus = "reviewing"
+)
+
+// Valid indicates whether the value is a known member of the GetBotProjectsParamsStatus enum.
+func (e GetBotProjectsParamsStatus) Valid() bool {
+	switch e {
+	case GetBotProjectsParamsStatusDelisted:
+		return true
+	case GetBotProjectsParamsStatusListed:
+		return true
+	case GetBotProjectsParamsStatusReviewing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetBotProjectsParamsAccessType.
+const (
+	GetBotProjectsParamsAccessTypePrivate GetBotProjectsParamsAccessType = "private"
+	GetBotProjectsParamsAccessTypePublic  GetBotProjectsParamsAccessType = "public"
+)
+
+// Valid indicates whether the value is a known member of the GetBotProjectsParamsAccessType enum.
+func (e GetBotProjectsParamsAccessType) Valid() bool {
+	switch e {
+	case GetBotProjectsParamsAccessTypePrivate:
+		return true
+	case GetBotProjectsParamsAccessTypePublic:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetBotProjectsParamsProductType.
+const (
+	GetBotProjectsParamsProductTypeDomain       GetBotProjectsParamsProductType = "domain"
+	GetBotProjectsParamsProductTypeGmail        GetBotProjectsParamsProductType = "gmail"
+	GetBotProjectsParamsProductTypeGmailVariant GetBotProjectsParamsProductType = "gmail_variant"
+	GetBotProjectsParamsProductTypeIcloud       GetBotProjectsParamsProductType = "icloud"
+	GetBotProjectsParamsProductTypeMicrosoft    GetBotProjectsParamsProductType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the GetBotProjectsParamsProductType enum.
+func (e GetBotProjectsParamsProductType) Valid() bool {
+	switch e {
+	case GetBotProjectsParamsProductTypeDomain:
+		return true
+	case GetBotProjectsParamsProductTypeGmail:
+		return true
+	case GetBotProjectsParamsProductTypeGmailVariant:
+		return true
+	case GetBotProjectsParamsProductTypeIcloud:
+		return true
+	case GetBotProjectsParamsProductTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetBotProjectsParamsXBotScene.
+const (
+	GetBotProjectsParamsXBotSceneGroup   GetBotProjectsParamsXBotScene = "group"
+	GetBotProjectsParamsXBotScenePrivate GetBotProjectsParamsXBotScene = "private"
+)
+
+// Valid indicates whether the value is a known member of the GetBotProjectsParamsXBotScene enum.
+func (e GetBotProjectsParamsXBotScene) Valid() bool {
+	switch e {
+	case GetBotProjectsParamsXBotSceneGroup:
+		return true
+	case GetBotProjectsParamsXBotScenePrivate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetBotProjectParamsXBotScene.
+const (
+	GetBotProjectParamsXBotSceneGroup   GetBotProjectParamsXBotScene = "group"
+	GetBotProjectParamsXBotScenePrivate GetBotProjectParamsXBotScene = "private"
+)
+
+// Valid indicates whether the value is a known member of the GetBotProjectParamsXBotScene enum.
+func (e GetBotProjectParamsXBotScene) Valid() bool {
+	switch e {
+	case GetBotProjectParamsXBotSceneGroup:
+		return true
+	case GetBotProjectParamsXBotScenePrivate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetBotProjectInventoryParamsXBotScene.
+const (
+	GetBotProjectInventoryParamsXBotSceneGroup   GetBotProjectInventoryParamsXBotScene = "group"
+	GetBotProjectInventoryParamsXBotScenePrivate GetBotProjectInventoryParamsXBotScene = "private"
+)
+
+// Valid indicates whether the value is a known member of the GetBotProjectInventoryParamsXBotScene enum.
+func (e GetBotProjectInventoryParamsXBotScene) Valid() bool {
+	switch e {
+	case GetBotProjectInventoryParamsXBotSceneGroup:
+		return true
+	case GetBotProjectInventoryParamsXBotScenePrivate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetBotOrderRankingsParamsXBotScene.
+const (
+	GetBotOrderRankingsParamsXBotSceneGroup   GetBotOrderRankingsParamsXBotScene = "group"
+	GetBotOrderRankingsParamsXBotScenePrivate GetBotOrderRankingsParamsXBotScene = "private"
+)
+
+// Valid indicates whether the value is a known member of the GetBotOrderRankingsParamsXBotScene enum.
+func (e GetBotOrderRankingsParamsXBotScene) Valid() bool {
+	switch e {
+	case GetBotOrderRankingsParamsXBotSceneGroup:
+		return true
+	case GetBotOrderRankingsParamsXBotScenePrivate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetBotLatestLeaderboardRewardsParamsXBotScene.
+const (
+	GetBotLatestLeaderboardRewardsParamsXBotSceneGroup   GetBotLatestLeaderboardRewardsParamsXBotScene = "group"
+	GetBotLatestLeaderboardRewardsParamsXBotScenePrivate GetBotLatestLeaderboardRewardsParamsXBotScene = "private"
+)
+
+// Valid indicates whether the value is a known member of the GetBotLatestLeaderboardRewardsParamsXBotScene enum.
+func (e GetBotLatestLeaderboardRewardsParamsXBotScene) Valid() bool {
+	switch e {
+	case GetBotLatestLeaderboardRewardsParamsXBotSceneGroup:
+		return true
+	case GetBotLatestLeaderboardRewardsParamsXBotScenePrivate:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetOrdersParamsScope.
 const (
 	GetOrdersParamsScopeAll  GetOrdersParamsScope = "all"
@@ -5029,19 +5422,19 @@ func (e GetProjectsParamsScope) Valid() bool {
 
 // Defines values for GetProjectsParamsStatus.
 const (
-	Delisted  GetProjectsParamsStatus = "delisted"
-	Listed    GetProjectsParamsStatus = "listed"
-	Reviewing GetProjectsParamsStatus = "reviewing"
+	GetProjectsParamsStatusDelisted  GetProjectsParamsStatus = "delisted"
+	GetProjectsParamsStatusListed    GetProjectsParamsStatus = "listed"
+	GetProjectsParamsStatusReviewing GetProjectsParamsStatus = "reviewing"
 )
 
 // Valid indicates whether the value is a known member of the GetProjectsParamsStatus enum.
 func (e GetProjectsParamsStatus) Valid() bool {
 	switch e {
-	case Delisted:
+	case GetProjectsParamsStatusDelisted:
 		return true
-	case Listed:
+	case GetProjectsParamsStatusListed:
 		return true
-	case Reviewing:
+	case GetProjectsParamsStatusReviewing:
 		return true
 	default:
 		return false
@@ -5050,16 +5443,16 @@ func (e GetProjectsParamsStatus) Valid() bool {
 
 // Defines values for GetProjectsParamsAccessType.
 const (
-	Private GetProjectsParamsAccessType = "private"
-	Public  GetProjectsParamsAccessType = "public"
+	GetProjectsParamsAccessTypePrivate GetProjectsParamsAccessType = "private"
+	GetProjectsParamsAccessTypePublic  GetProjectsParamsAccessType = "public"
 )
 
 // Valid indicates whether the value is a known member of the GetProjectsParamsAccessType enum.
 func (e GetProjectsParamsAccessType) Valid() bool {
 	switch e {
-	case Private:
+	case GetProjectsParamsAccessTypePrivate:
 		return true
-	case Public:
+	case GetProjectsParamsAccessTypePublic:
 		return true
 	default:
 		return false
@@ -7289,15 +7682,19 @@ type AdminReverseTransactionResponse struct {
 
 // AdminSystemKey defines model for AdminSystemKey.
 type AdminSystemKey struct {
-	CreatedAt time.Time `json:"createdAt"`
-	Id        int       `json:"id"`
+	// AllowedGroupIds Normalized group whitelist for a Bot System Key. Omitted for non-Bot keys.
+	AllowedGroupIds *[]string `json:"allowedGroupIds,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
+	Id              int       `json:"id"`
 
 	// KeyPlain Plain system key returned only by the create endpoint.
-	KeyPlain   *string               `json:"keyPlain,omitempty"`
-	KeyPrefix  string                `json:"keyPrefix"`
-	LastUsedAt *time.Time            `json:"lastUsedAt"`
-	Name       string                `json:"name"`
-	Purpose    AdminSystemKeyPurpose `json:"purpose"`
+	KeyPlain         *string               `json:"keyPlain,omitempty"`
+	KeyPrefix        string                `json:"keyPrefix"`
+	LastUsedAt       *time.Time            `json:"lastUsedAt"`
+	Name             string                `json:"name"`
+	Platform         *string               `json:"platform,omitempty"`
+	Purpose          AdminSystemKeyPurpose `json:"purpose"`
+	SubjectNamespace *string               `json:"subjectNamespace,omitempty"`
 }
 
 // AdminSystemKeyPurpose defines model for AdminSystemKey.Purpose.
@@ -7305,13 +7702,21 @@ type AdminSystemKeyPurpose string
 
 // AdminSystemKeyCreateRequest defines model for AdminSystemKeyCreateRequest.
 type AdminSystemKeyCreateRequest struct {
-	Name string `json:"name"`
+	// AllowedGroupIds Required only for purpose=bot. Trusted platform group ids allowed to use this integration; QQ values are normalized positive decimal group numbers.
+	AllowedGroupIds *[]string `json:"allowedGroupIds,omitempty"`
+	Name            string    `json:"name"`
 
-	// Purpose Limits the key to either the iCloud forwarding API or SMTP submission.
+	// Platform Required only for purpose=bot; normalized platform scope such as qq or telegram. It does not tell ReMail how the bot resolved the trusted platform identity.
+	Platform *string `json:"platform,omitempty"`
+
+	// Purpose Limits the key to iCloud forwarding, SMTP submission, or the Bot integration API.
 	Purpose *AdminSystemKeyCreateRequestPurpose `json:"purpose,omitempty"`
+
+	// SubjectNamespace Required only for purpose=bot; stable identity namespace such as qq:appid or telegram:botid. Key rotation reuses this value.
+	SubjectNamespace *string `json:"subjectNamespace,omitempty"`
 }
 
-// AdminSystemKeyCreateRequestPurpose Limits the key to either the iCloud forwarding API or SMTP submission.
+// AdminSystemKeyCreateRequestPurpose Limits the key to iCloud forwarding, SMTP submission, or the Bot integration API.
 type AdminSystemKeyCreateRequestPurpose string
 
 // AdminSystemKeyList defines model for AdminSystemKeyList.
@@ -7709,6 +8114,90 @@ type AllocationItemSupplyScope string
 
 // AllocationItemType defines model for AllocationItem.Type.
 type AllocationItemType string
+
+// BotBindingRequest defines model for BotBindingRequest.
+type BotBindingRequest struct {
+	Email    openapi_types.Email `json:"email"`
+	Password *string             `json:"password,omitempty"`
+}
+
+// BotBindingResponse defines model for BotBindingResponse.
+type BotBindingResponse struct {
+	// AccountDisplay Masked remail account display; never a complete email address.
+	AccountDisplay *string                  `json:"accountDisplay,omitempty"`
+	Reason         string                   `json:"reason"`
+	RequestId      string                   `json:"requestId"`
+	Result         BotBindingResponseResult `json:"result"`
+}
+
+// BotBindingResponseResult defines model for BotBindingResponse.Result.
+type BotBindingResponseResult string
+
+// BotCodeDiagnosisRequest defines model for BotCodeDiagnosisRequest.
+type BotCodeDiagnosisRequest struct {
+	Email     openapi_types.Email `json:"email"`
+	ProjectId int                 `json:"projectId"`
+}
+
+// BotContextResponse defines model for BotContextResponse.
+type BotContextResponse struct {
+	// Authorized Always true. Unauthorized contexts receive 401 instead of a response body with scope details.
+	Authorized BotContextResponseAuthorized `json:"authorized"`
+}
+
+// BotContextResponseAuthorized Always true. Unauthorized contexts receive 401 instead of a response body with scope details.
+type BotContextResponseAuthorized bool
+
+// BotDiagnosisResponse defines model for BotDiagnosisResponse.
+type BotDiagnosisResponse struct {
+	Action    string                     `json:"action"`
+	Reason    string                     `json:"reason"`
+	RequestId string                     `json:"requestId"`
+	Result    BotDiagnosisResponseResult `json:"result"`
+}
+
+// BotDiagnosisResponseResult defines model for BotDiagnosisResponse.Result.
+type BotDiagnosisResponseResult string
+
+// BotLeaderboardItem defines model for BotLeaderboardItem.
+type BotLeaderboardItem struct {
+	// Name Safe user nickname or an anonymous label; never an email or user id.
+	Name         string `json:"name"`
+	Rank         int    `json:"rank"`
+	SuccessCount int    `json:"successCount"`
+}
+
+// BotLeaderboardRewardItem defines model for BotLeaderboardRewardItem.
+type BotLeaderboardRewardItem struct {
+	// Name Safe user nickname or an anonymous label; never an email or user id.
+	Name string `json:"name"`
+	Rank int    `json:"rank"`
+
+	// RewardAmount Non-negative point amount with up to 6 decimal places.
+	RewardAmount NonNegativeLedgerAmountResponse `json:"rewardAmount"`
+	SuccessCount int                             `json:"successCount"`
+}
+
+// BotLeaderboardRewardsResponse defines model for BotLeaderboardRewardsResponse.
+type BotLeaderboardRewardsResponse struct {
+	Available    bool                       `json:"available"`
+	BusinessDate *openapi_types.Date        `json:"businessDate"`
+	Items        []BotLeaderboardRewardItem `json:"items"`
+	PeriodEnd    *time.Time                 `json:"periodEnd"`
+	PeriodStart  *time.Time                 `json:"periodStart"`
+	SettledAt    *time.Time                 `json:"settledAt"`
+}
+
+// BotOrderRankingsResponse defines model for BotOrderRankingsResponse.
+type BotOrderRankingsResponse struct {
+	BusinessDate openapi_types.Date               `json:"businessDate"`
+	Historical   []BotLeaderboardItem             `json:"historical"`
+	Timezone     BotOrderRankingsResponseTimezone `json:"timezone"`
+	Today        []BotLeaderboardItem             `json:"today"`
+}
+
+// BotOrderRankingsResponseTimezone defines model for BotOrderRankingsResponse.Timezone.
+type BotOrderRankingsResponseTimezone string
 
 // CardBulkFilter defines model for CardBulkFilter.
 type CardBulkFilter struct {
@@ -9601,6 +10090,12 @@ type ProjectProduct struct {
 	// DotWeight Internal allocation weight; only returned to project admins.
 	DotWeight *int `json:"dotWeight,omitempty"`
 
+	// EffectiveCodePrice Non-negative point amount with up to 6 decimal places.
+	EffectiveCodePrice *NonNegativeLedgerAmountResponse `json:"effectiveCodePrice,omitempty"`
+
+	// EffectivePurchasePrice Non-negative point amount with up to 6 decimal places.
+	EffectivePurchasePrice *NonNegativeLedgerAmountResponse `json:"effectivePurchasePrice,omitempty"`
+
 	// MainWeight Internal allocation weight; only returned to project admins.
 	MainWeight *int `json:"mainWeight,omitempty"`
 
@@ -9691,6 +10186,12 @@ type ProjectProductSummary struct {
 	CodePrice           NonNegativeLedgerAmount `json:"codePrice"`
 	CodePublicAvailable *int64                  `json:"codePublicAvailable,omitempty"`
 	CodeWindowMinutes   int                     `json:"codeWindowMinutes"`
+
+	// EffectiveCodePrice Non-negative point amount with up to 6 decimal places.
+	EffectiveCodePrice *NonNegativeLedgerAmountResponse `json:"effectiveCodePrice,omitempty"`
+
+	// EffectivePurchasePrice Non-negative point amount with up to 6 decimal places.
+	EffectivePurchasePrice *NonNegativeLedgerAmountResponse `json:"effectivePurchasePrice,omitempty"`
 
 	// PriceMultiplier Exact decimal discount ratio from 0 through 1, with up to 6 decimal places.
 	PriceMultiplier UserGroupDiscountRatio `json:"priceMultiplier"`
@@ -10653,6 +11154,18 @@ type AdminStateCommandIdempotencyKey = string
 
 // AfterIdQuery defines model for AfterIdQuery.
 type AfterIdQuery = int
+
+// BotGroup defines model for BotGroup.
+type BotGroup = string
+
+// BotPrivateScene defines model for BotPrivateScene.
+type BotPrivateScene string
+
+// BotScene defines model for BotScene.
+type BotScene string
+
+// BotSubject defines model for BotSubject.
+type BotSubject = string
 
 // CreatedFromQuery defines model for CreatedFromQuery.
 type CreatedFromQuery = time.Time
@@ -12701,6 +13214,196 @@ type PatchApiKeyParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// DeleteBotBindingParams defines parameters for DeleteBotBinding.
+type DeleteBotBindingParams struct {
+	// XBotSubject Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument.
+	XBotSubject BotSubject `json:"X-Bot-Subject"`
+
+	// XBotScene Credential and account-specific operations are private-chat only; X-Bot-Group must be omitted.
+	XBotScene DeleteBotBindingParamsXBotScene `json:"X-Bot-Scene"`
+}
+
+// DeleteBotBindingParamsXBotScene defines parameters for DeleteBotBinding.
+type DeleteBotBindingParamsXBotScene string
+
+// DeleteBotBinding503JSONResponseBody defines parameters for DeleteBotBinding.
+type DeleteBotBinding503JSONResponseBody struct {
+	union json.RawMessage
+}
+
+// GetBotBindingParams defines parameters for GetBotBinding.
+type GetBotBindingParams struct {
+	// XBotSubject Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument.
+	XBotSubject BotSubject `json:"X-Bot-Subject"`
+
+	// XBotScene Credential and account-specific operations are private-chat only; X-Bot-Group must be omitted.
+	XBotScene GetBotBindingParamsXBotScene `json:"X-Bot-Scene"`
+}
+
+// GetBotBindingParamsXBotScene defines parameters for GetBotBinding.
+type GetBotBindingParamsXBotScene string
+
+// GetBotBinding503JSONResponseBody defines parameters for GetBotBinding.
+type GetBotBinding503JSONResponseBody struct {
+	union json.RawMessage
+}
+
+// PostBotBindingParams defines parameters for PostBotBinding.
+type PostBotBindingParams struct {
+	// XBotSubject Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument.
+	XBotSubject BotSubject `json:"X-Bot-Subject"`
+
+	// XBotScene Credential and account-specific operations are private-chat only; X-Bot-Group must be omitted.
+	XBotScene PostBotBindingParamsXBotScene `json:"X-Bot-Scene"`
+}
+
+// PostBotBindingParamsXBotScene defines parameters for PostBotBinding.
+type PostBotBindingParamsXBotScene string
+
+// PostBotBinding503JSONResponseBody defines parameters for PostBotBinding.
+type PostBotBinding503JSONResponseBody struct {
+	union json.RawMessage
+}
+
+// GetBotContextParams defines parameters for GetBotContext.
+type GetBotContextParams struct {
+	// XBotSubject Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument.
+	XBotSubject BotSubject `json:"X-Bot-Subject"`
+
+	// XBotScene Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only.
+	XBotScene GetBotContextParamsXBotScene `json:"X-Bot-Scene"`
+
+	// XBotGroup Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument.
+	XBotGroup *BotGroup `json:"X-Bot-Group,omitempty"`
+}
+
+// GetBotContextParamsXBotScene defines parameters for GetBotContext.
+type GetBotContextParamsXBotScene string
+
+// PostBotCodeDiagnosisParams defines parameters for PostBotCodeDiagnosis.
+type PostBotCodeDiagnosisParams struct {
+	// XBotSubject Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument.
+	XBotSubject BotSubject `json:"X-Bot-Subject"`
+
+	// XBotScene Credential and account-specific operations are private-chat only; X-Bot-Group must be omitted.
+	XBotScene PostBotCodeDiagnosisParamsXBotScene `json:"X-Bot-Scene"`
+}
+
+// PostBotCodeDiagnosisParamsXBotScene defines parameters for PostBotCodeDiagnosis.
+type PostBotCodeDiagnosisParamsXBotScene string
+
+// PostBotCodeDiagnosis503JSONResponseBody defines parameters for PostBotCodeDiagnosis.
+type PostBotCodeDiagnosis503JSONResponseBody struct {
+	union json.RawMessage
+}
+
+// GetBotProjectsParams defines parameters for GetBotProjects.
+type GetBotProjectsParams struct {
+	Scope *GetBotProjectsParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+
+	// Status Accepted for workbench compatibility; bot results are always constrained to listed projects.
+	Status         *GetBotProjectsParamsStatus      `form:"status,omitempty" json:"status,omitempty"`
+	AccessType     *GetBotProjectsParamsAccessType  `form:"accessType,omitempty" json:"accessType,omitempty"`
+	LooseMatch     *bool                            `form:"looseMatch,omitempty" json:"looseMatch,omitempty"`
+	ProductType    *GetBotProjectsParamsProductType `form:"productType,omitempty" json:"productType,omitempty"`
+	Search         *string                          `form:"search,omitempty" json:"search,omitempty"`
+	TargetPlatform *string                          `form:"targetPlatform,omitempty" json:"targetPlatform,omitempty"`
+	CreatedFrom    *CreatedFromQuery                `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo      *CreatedToQuery                  `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int         `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// XBotSubject Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument.
+	XBotSubject BotSubject `json:"X-Bot-Subject"`
+
+	// XBotScene Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only.
+	XBotScene GetBotProjectsParamsXBotScene `json:"X-Bot-Scene"`
+
+	// XBotGroup Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument.
+	XBotGroup *BotGroup `json:"X-Bot-Group,omitempty"`
+}
+
+// GetBotProjectsParamsScope defines parameters for GetBotProjects.
+type GetBotProjectsParamsScope string
+
+// GetBotProjectsParamsStatus defines parameters for GetBotProjects.
+type GetBotProjectsParamsStatus string
+
+// GetBotProjectsParamsAccessType defines parameters for GetBotProjects.
+type GetBotProjectsParamsAccessType string
+
+// GetBotProjectsParamsProductType defines parameters for GetBotProjects.
+type GetBotProjectsParamsProductType string
+
+// GetBotProjectsParamsXBotScene defines parameters for GetBotProjects.
+type GetBotProjectsParamsXBotScene string
+
+// GetBotProjectParams defines parameters for GetBotProject.
+type GetBotProjectParams struct {
+	// XBotSubject Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument.
+	XBotSubject BotSubject `json:"X-Bot-Subject"`
+
+	// XBotScene Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only.
+	XBotScene GetBotProjectParamsXBotScene `json:"X-Bot-Scene"`
+
+	// XBotGroup Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument.
+	XBotGroup *BotGroup `json:"X-Bot-Group,omitempty"`
+}
+
+// GetBotProjectParamsXBotScene defines parameters for GetBotProject.
+type GetBotProjectParamsXBotScene string
+
+// GetBotProjectInventoryParams defines parameters for GetBotProjectInventory.
+type GetBotProjectInventoryParams struct {
+	// XBotSubject Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument.
+	XBotSubject BotSubject `json:"X-Bot-Subject"`
+
+	// XBotScene Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only.
+	XBotScene GetBotProjectInventoryParamsXBotScene `json:"X-Bot-Scene"`
+
+	// XBotGroup Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument.
+	XBotGroup *BotGroup `json:"X-Bot-Group,omitempty"`
+}
+
+// GetBotProjectInventoryParamsXBotScene defines parameters for GetBotProjectInventory.
+type GetBotProjectInventoryParamsXBotScene string
+
+// GetBotOrderRankingsParams defines parameters for GetBotOrderRankings.
+type GetBotOrderRankingsParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// XBotSubject Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument.
+	XBotSubject BotSubject `json:"X-Bot-Subject"`
+
+	// XBotScene Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only.
+	XBotScene GetBotOrderRankingsParamsXBotScene `json:"X-Bot-Scene"`
+
+	// XBotGroup Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument.
+	XBotGroup *BotGroup `json:"X-Bot-Group,omitempty"`
+}
+
+// GetBotOrderRankingsParamsXBotScene defines parameters for GetBotOrderRankings.
+type GetBotOrderRankingsParamsXBotScene string
+
+// GetBotLatestLeaderboardRewardsParams defines parameters for GetBotLatestLeaderboardRewards.
+type GetBotLatestLeaderboardRewardsParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// XBotSubject Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument.
+	XBotSubject BotSubject `json:"X-Bot-Subject"`
+
+	// XBotScene Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only.
+	XBotScene GetBotLatestLeaderboardRewardsParamsXBotScene `json:"X-Bot-Scene"`
+
+	// XBotGroup Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument.
+	XBotGroup *BotGroup `json:"X-Bot-Group,omitempty"`
+}
+
+// GetBotLatestLeaderboardRewardsParamsXBotScene defines parameters for GetBotLatestLeaderboardRewards.
+type GetBotLatestLeaderboardRewardsParamsXBotScene string
+
 // PostCardRedeemParams defines parameters for PostCardRedeem.
 type PostCardRedeemParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -13504,6 +14207,12 @@ type PostApiKeyJSONRequestBody = APIKeyCreateRequest
 // PatchApiKeyJSONRequestBody defines body for PatchApiKey for application/json ContentType.
 type PatchApiKeyJSONRequestBody = APIKeyPatchRequest
 
+// PostBotBindingJSONRequestBody defines body for PostBotBinding for application/json ContentType.
+type PostBotBindingJSONRequestBody = BotBindingRequest
+
+// PostBotCodeDiagnosisJSONRequestBody defines body for PostBotCodeDiagnosis for application/json ContentType.
+type PostBotCodeDiagnosisJSONRequestBody = BotCodeDiagnosisRequest
+
 // PostCardRedeemJSONRequestBody defines body for PostCardRedeem for application/json ContentType.
 type PostCardRedeemJSONRequestBody = RedeemCardRequest
 
@@ -14215,6 +14924,254 @@ func (t *ResourceBulkSelection) UnmarshalJSON(b []byte) error {
 		}
 	}
 
+	return err
+}
+
+// AsBotBindingResponse returns the union data inside the DeleteBotBinding503JSONResponseBody as a BotBindingResponse
+func (t DeleteBotBinding503JSONResponseBody) AsBotBindingResponse() (BotBindingResponse, error) {
+	var body BotBindingResponse
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBotBindingResponse overwrites any union data inside the DeleteBotBinding503JSONResponseBody as the provided BotBindingResponse
+func (t *DeleteBotBinding503JSONResponseBody) FromBotBindingResponse(v BotBindingResponse) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeBotBindingResponse performs a merge with any union data inside the DeleteBotBinding503JSONResponseBody, using the provided BotBindingResponse
+func (t *DeleteBotBinding503JSONResponseBody) MergeBotBindingResponse(v BotBindingResponse) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsError returns the union data inside the DeleteBotBinding503JSONResponseBody as a Error
+func (t DeleteBotBinding503JSONResponseBody) AsError() (Error, error) {
+	var body Error
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromError overwrites any union data inside the DeleteBotBinding503JSONResponseBody as the provided Error
+func (t *DeleteBotBinding503JSONResponseBody) FromError(v Error) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeError performs a merge with any union data inside the DeleteBotBinding503JSONResponseBody, using the provided Error
+func (t *DeleteBotBinding503JSONResponseBody) MergeError(v Error) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t DeleteBotBinding503JSONResponseBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *DeleteBotBinding503JSONResponseBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsBotBindingResponse returns the union data inside the GetBotBinding503JSONResponseBody as a BotBindingResponse
+func (t GetBotBinding503JSONResponseBody) AsBotBindingResponse() (BotBindingResponse, error) {
+	var body BotBindingResponse
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBotBindingResponse overwrites any union data inside the GetBotBinding503JSONResponseBody as the provided BotBindingResponse
+func (t *GetBotBinding503JSONResponseBody) FromBotBindingResponse(v BotBindingResponse) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeBotBindingResponse performs a merge with any union data inside the GetBotBinding503JSONResponseBody, using the provided BotBindingResponse
+func (t *GetBotBinding503JSONResponseBody) MergeBotBindingResponse(v BotBindingResponse) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsError returns the union data inside the GetBotBinding503JSONResponseBody as a Error
+func (t GetBotBinding503JSONResponseBody) AsError() (Error, error) {
+	var body Error
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromError overwrites any union data inside the GetBotBinding503JSONResponseBody as the provided Error
+func (t *GetBotBinding503JSONResponseBody) FromError(v Error) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeError performs a merge with any union data inside the GetBotBinding503JSONResponseBody, using the provided Error
+func (t *GetBotBinding503JSONResponseBody) MergeError(v Error) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t GetBotBinding503JSONResponseBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *GetBotBinding503JSONResponseBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsBotBindingResponse returns the union data inside the PostBotBinding503JSONResponseBody as a BotBindingResponse
+func (t PostBotBinding503JSONResponseBody) AsBotBindingResponse() (BotBindingResponse, error) {
+	var body BotBindingResponse
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBotBindingResponse overwrites any union data inside the PostBotBinding503JSONResponseBody as the provided BotBindingResponse
+func (t *PostBotBinding503JSONResponseBody) FromBotBindingResponse(v BotBindingResponse) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeBotBindingResponse performs a merge with any union data inside the PostBotBinding503JSONResponseBody, using the provided BotBindingResponse
+func (t *PostBotBinding503JSONResponseBody) MergeBotBindingResponse(v BotBindingResponse) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsError returns the union data inside the PostBotBinding503JSONResponseBody as a Error
+func (t PostBotBinding503JSONResponseBody) AsError() (Error, error) {
+	var body Error
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromError overwrites any union data inside the PostBotBinding503JSONResponseBody as the provided Error
+func (t *PostBotBinding503JSONResponseBody) FromError(v Error) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeError performs a merge with any union data inside the PostBotBinding503JSONResponseBody, using the provided Error
+func (t *PostBotBinding503JSONResponseBody) MergeError(v Error) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t PostBotBinding503JSONResponseBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *PostBotBinding503JSONResponseBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsBotDiagnosisResponse returns the union data inside the PostBotCodeDiagnosis503JSONResponseBody as a BotDiagnosisResponse
+func (t PostBotCodeDiagnosis503JSONResponseBody) AsBotDiagnosisResponse() (BotDiagnosisResponse, error) {
+	var body BotDiagnosisResponse
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBotDiagnosisResponse overwrites any union data inside the PostBotCodeDiagnosis503JSONResponseBody as the provided BotDiagnosisResponse
+func (t *PostBotCodeDiagnosis503JSONResponseBody) FromBotDiagnosisResponse(v BotDiagnosisResponse) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeBotDiagnosisResponse performs a merge with any union data inside the PostBotCodeDiagnosis503JSONResponseBody, using the provided BotDiagnosisResponse
+func (t *PostBotCodeDiagnosis503JSONResponseBody) MergeBotDiagnosisResponse(v BotDiagnosisResponse) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsError returns the union data inside the PostBotCodeDiagnosis503JSONResponseBody as a Error
+func (t PostBotCodeDiagnosis503JSONResponseBody) AsError() (Error, error) {
+	var body Error
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromError overwrites any union data inside the PostBotCodeDiagnosis503JSONResponseBody as the provided Error
+func (t *PostBotCodeDiagnosis503JSONResponseBody) FromError(v Error) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeError performs a merge with any union data inside the PostBotCodeDiagnosis503JSONResponseBody, using the provided Error
+func (t *PostBotCodeDiagnosis503JSONResponseBody) MergeError(v Error) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t PostBotCodeDiagnosis503JSONResponseBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *PostBotCodeDiagnosis503JSONResponseBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
 	return err
 }
 
@@ -15112,6 +16069,39 @@ type ServerInterface interface {
 	// Update one API key
 	// (PATCH /v1/apikeys/{keyId})
 	PatchApiKey(c *gin.Context, keyId int, params PatchApiKeyParams)
+	// Remove the current bot-platform identity binding
+	// (DELETE /v1/bot/binding)
+	DeleteBotBinding(c *gin.Context, params DeleteBotBindingParams)
+	// Read the current bot-platform identity binding
+	// (GET /v1/bot/binding)
+	GetBotBinding(c *gin.Context, params GetBotBindingParams)
+	// Bind the current bot-platform identity to a remail account
+	// (POST /v1/bot/bindings)
+	PostBotBinding(c *gin.Context, params PostBotBindingParams)
+	// Verify the current trusted bot event context
+	// (GET /v1/bot/context)
+	GetBotContext(c *gin.Context, params GetBotContextParams)
+	// Diagnose why a bound user's project email has not delivered a code
+	// (POST /v1/bot/diagnoses/code)
+	PostBotCodeDiagnosis(c *gin.Context, params PostBotCodeDiagnosisParams)
+	// List the same safe projects, prices and inventory shown by the workbench
+	// (GET /v1/bot/projects)
+	GetBotProjects(c *gin.Context, params GetBotProjectsParams)
+	// Read the workbench-compatible safe project detail
+	// (GET /v1/bot/projects/{projectId})
+	GetBotProject(c *gin.Context, projectId int, params GetBotProjectParams)
+	// Read the same user-safe inventory totals used by the workbench
+	// (GET /v1/bot/projects/{projectId}/inventory)
+	GetBotProjectInventory(c *gin.Context, projectId int, params GetBotProjectInventoryParams)
+	// Read today's and all-time successful-order rankings
+	// (GET /v1/bot/rankings/orders)
+	GetBotOrderRankings(c *gin.Context, params GetBotOrderRankingsParams)
+	// Read the latest completed leaderboard reward list
+	// (GET /v1/bot/rankings/rewards/latest)
+	GetBotLatestLeaderboardRewards(c *gin.Context, params GetBotLatestLeaderboardRewardsParams)
+	// Open the persistent Bot WebSocket transport
+	// (GET /v1/bot/ws)
+	ConnectBotWebSocket(c *gin.Context)
 	// Redeem a card key into consumer balance
 	// (POST /v1/cards/redeem)
 	PostCardRedeem(c *gin.Context, params PostCardRedeemParams)
@@ -29734,6 +30724,927 @@ func (siw *ServerInterfaceWrapper) PatchApiKey(c *gin.Context) {
 	siw.Handler.PatchApiKey(c, keyId, params)
 }
 
+// DeleteBotBinding operation middleware
+func (siw *ServerInterfaceWrapper) DeleteBotBinding(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(SystemKeyAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteBotBindingParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-Bot-Subject" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Subject")]; found {
+		var XBotSubject BotSubject
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Subject, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Subject", valueList[0], &XBotSubject, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Subject: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotSubject = XBotSubject
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Subject is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Scene" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Scene")]; found {
+		var XBotScene DeleteBotBindingParamsXBotScene
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Scene, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Scene", valueList[0], &XBotScene, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Scene: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotScene = XBotScene
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Scene is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteBotBinding(c, params)
+}
+
+// GetBotBinding operation middleware
+func (siw *ServerInterfaceWrapper) GetBotBinding(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(SystemKeyAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetBotBindingParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-Bot-Subject" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Subject")]; found {
+		var XBotSubject BotSubject
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Subject, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Subject", valueList[0], &XBotSubject, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Subject: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotSubject = XBotSubject
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Subject is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Scene" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Scene")]; found {
+		var XBotScene GetBotBindingParamsXBotScene
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Scene, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Scene", valueList[0], &XBotScene, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Scene: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotScene = XBotScene
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Scene is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetBotBinding(c, params)
+}
+
+// PostBotBinding operation middleware
+func (siw *ServerInterfaceWrapper) PostBotBinding(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(SystemKeyAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostBotBindingParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-Bot-Subject" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Subject")]; found {
+		var XBotSubject BotSubject
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Subject, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Subject", valueList[0], &XBotSubject, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Subject: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotSubject = XBotSubject
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Subject is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Scene" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Scene")]; found {
+		var XBotScene PostBotBindingParamsXBotScene
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Scene, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Scene", valueList[0], &XBotScene, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Scene: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotScene = XBotScene
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Scene is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostBotBinding(c, params)
+}
+
+// GetBotContext operation middleware
+func (siw *ServerInterfaceWrapper) GetBotContext(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(SystemKeyAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetBotContextParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-Bot-Subject" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Subject")]; found {
+		var XBotSubject BotSubject
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Subject, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Subject", valueList[0], &XBotSubject, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Subject: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotSubject = XBotSubject
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Subject is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Scene" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Scene")]; found {
+		var XBotScene GetBotContextParamsXBotScene
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Scene, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Scene", valueList[0], &XBotScene, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Scene: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotScene = XBotScene
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Scene is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional header parameter "X-Bot-Group" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Group")]; found {
+		var XBotGroup BotGroup
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Group, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Group", valueList[0], &XBotGroup, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Group: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotGroup = &XBotGroup
+
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetBotContext(c, params)
+}
+
+// PostBotCodeDiagnosis operation middleware
+func (siw *ServerInterfaceWrapper) PostBotCodeDiagnosis(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(SystemKeyAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostBotCodeDiagnosisParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-Bot-Subject" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Subject")]; found {
+		var XBotSubject BotSubject
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Subject, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Subject", valueList[0], &XBotSubject, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Subject: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotSubject = XBotSubject
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Subject is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Scene" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Scene")]; found {
+		var XBotScene PostBotCodeDiagnosisParamsXBotScene
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Scene, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Scene", valueList[0], &XBotScene, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Scene: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotScene = XBotScene
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Scene is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostBotCodeDiagnosis(c, params)
+}
+
+// GetBotProjects operation middleware
+func (siw *ServerInterfaceWrapper) GetBotProjects(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(SystemKeyAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetBotProjectsParams
+
+	// ------------- Optional query parameter "scope" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "scope", c.Request.URL.Query(), &params.Scope, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter scope: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "accessType" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "accessType", c.Request.URL.Query(), &params.AccessType, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter accessType: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "looseMatch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "looseMatch", c.Request.URL.Query(), &params.LooseMatch, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter looseMatch: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "productType" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "productType", c.Request.URL.Query(), &params.ProductType, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter productType: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "targetPlatform" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "targetPlatform", c.Request.URL.Query(), &params.TargetPlatform, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter targetPlatform: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-Bot-Subject" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Subject")]; found {
+		var XBotSubject BotSubject
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Subject, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Subject", valueList[0], &XBotSubject, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Subject: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotSubject = XBotSubject
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Subject is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Scene" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Scene")]; found {
+		var XBotScene GetBotProjectsParamsXBotScene
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Scene, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Scene", valueList[0], &XBotScene, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Scene: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotScene = XBotScene
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Scene is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional header parameter "X-Bot-Group" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Group")]; found {
+		var XBotGroup BotGroup
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Group, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Group", valueList[0], &XBotGroup, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Group: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotGroup = &XBotGroup
+
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetBotProjects(c, params)
+}
+
+// GetBotProject operation middleware
+func (siw *ServerInterfaceWrapper) GetBotProject(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(SystemKeyAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetBotProjectParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-Bot-Subject" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Subject")]; found {
+		var XBotSubject BotSubject
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Subject, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Subject", valueList[0], &XBotSubject, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Subject: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotSubject = XBotSubject
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Subject is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Scene" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Scene")]; found {
+		var XBotScene GetBotProjectParamsXBotScene
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Scene, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Scene", valueList[0], &XBotScene, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Scene: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotScene = XBotScene
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Scene is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional header parameter "X-Bot-Group" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Group")]; found {
+		var XBotGroup BotGroup
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Group, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Group", valueList[0], &XBotGroup, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Group: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotGroup = &XBotGroup
+
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetBotProject(c, projectId, params)
+}
+
+// GetBotProjectInventory operation middleware
+func (siw *ServerInterfaceWrapper) GetBotProjectInventory(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(SystemKeyAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetBotProjectInventoryParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-Bot-Subject" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Subject")]; found {
+		var XBotSubject BotSubject
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Subject, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Subject", valueList[0], &XBotSubject, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Subject: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotSubject = XBotSubject
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Subject is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Scene" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Scene")]; found {
+		var XBotScene GetBotProjectInventoryParamsXBotScene
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Scene, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Scene", valueList[0], &XBotScene, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Scene: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotScene = XBotScene
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Scene is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional header parameter "X-Bot-Group" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Group")]; found {
+		var XBotGroup BotGroup
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Group, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Group", valueList[0], &XBotGroup, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Group: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotGroup = &XBotGroup
+
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetBotProjectInventory(c, projectId, params)
+}
+
+// GetBotOrderRankings operation middleware
+func (siw *ServerInterfaceWrapper) GetBotOrderRankings(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(SystemKeyAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetBotOrderRankingsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-Bot-Subject" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Subject")]; found {
+		var XBotSubject BotSubject
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Subject, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Subject", valueList[0], &XBotSubject, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Subject: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotSubject = XBotSubject
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Subject is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Scene" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Scene")]; found {
+		var XBotScene GetBotOrderRankingsParamsXBotScene
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Scene, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Scene", valueList[0], &XBotScene, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Scene: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotScene = XBotScene
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Scene is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional header parameter "X-Bot-Group" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Group")]; found {
+		var XBotGroup BotGroup
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Group, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Group", valueList[0], &XBotGroup, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Group: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotGroup = &XBotGroup
+
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetBotOrderRankings(c, params)
+}
+
+// GetBotLatestLeaderboardRewards operation middleware
+func (siw *ServerInterfaceWrapper) GetBotLatestLeaderboardRewards(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(SystemKeyAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetBotLatestLeaderboardRewardsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-Bot-Subject" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Subject")]; found {
+		var XBotSubject BotSubject
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Subject, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Subject", valueList[0], &XBotSubject, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Subject: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotSubject = XBotSubject
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Subject is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Scene" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Scene")]; found {
+		var XBotScene GetBotLatestLeaderboardRewardsParamsXBotScene
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Scene, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Scene", valueList[0], &XBotScene, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Scene: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotScene = XBotScene
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Scene is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional header parameter "X-Bot-Group" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Group")]; found {
+		var XBotGroup BotGroup
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Group, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Group", valueList[0], &XBotGroup, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Group: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotGroup = &XBotGroup
+
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetBotLatestLeaderboardRewards(c, params)
+}
+
+// ConnectBotWebSocket operation middleware
+func (siw *ServerInterfaceWrapper) ConnectBotWebSocket(c *gin.Context) {
+
+	c.Set(string(SystemKeyAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ConnectBotWebSocket(c)
+}
+
 // PostCardRedeem operation middleware
 func (siw *ServerInterfaceWrapper) PostCardRedeem(c *gin.Context) {
 
@@ -33484,6 +35395,17 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.DELETE(options.BaseURL+"/v1/apikeys/:keyId", wrapper.DeleteApiKey)
 	router.GET(options.BaseURL+"/v1/apikeys/:keyId", wrapper.GetApiKey)
 	router.PATCH(options.BaseURL+"/v1/apikeys/:keyId", wrapper.PatchApiKey)
+	router.DELETE(options.BaseURL+"/v1/bot/binding", wrapper.DeleteBotBinding)
+	router.GET(options.BaseURL+"/v1/bot/binding", wrapper.GetBotBinding)
+	router.POST(options.BaseURL+"/v1/bot/bindings", wrapper.PostBotBinding)
+	router.GET(options.BaseURL+"/v1/bot/context", wrapper.GetBotContext)
+	router.POST(options.BaseURL+"/v1/bot/diagnoses/code", wrapper.PostBotCodeDiagnosis)
+	router.GET(options.BaseURL+"/v1/bot/projects", wrapper.GetBotProjects)
+	router.GET(options.BaseURL+"/v1/bot/projects/:projectId", wrapper.GetBotProject)
+	router.GET(options.BaseURL+"/v1/bot/projects/:projectId/inventory", wrapper.GetBotProjectInventory)
+	router.GET(options.BaseURL+"/v1/bot/rankings/orders", wrapper.GetBotOrderRankings)
+	router.GET(options.BaseURL+"/v1/bot/rankings/rewards/latest", wrapper.GetBotLatestLeaderboardRewards)
+	router.GET(options.BaseURL+"/v1/bot/ws", wrapper.ConnectBotWebSocket)
 	router.POST(options.BaseURL+"/v1/cards/redeem", wrapper.PostCardRedeem)
 	router.GET(options.BaseURL+"/v1/customer-service", wrapper.GetCustomerService)
 	router.GET(options.BaseURL+"/v1/dashboard", wrapper.GetDashboard)

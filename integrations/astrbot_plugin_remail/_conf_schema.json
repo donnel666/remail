@@ -1,0 +1,58 @@
+{
+  "base_url": {
+    "type": "string",
+    "description": "ReMail API 地址",
+    "default": "https://remail.aishop6.com"
+  },
+  "launch_system_key_env": {
+    "type": "string",
+    "description": "WebSocket 主动推送使用的 System Key 环境变量名",
+    "hint": "必须以 REMAIL_BOT_ 开头；AstrBot 配置只保存变量名，完整 Key 不进入配置文件或管理页面。",
+    "default": "REMAIL_BOT_SYSTEM_KEY"
+  },
+  "platform_system_keys": {
+    "type": "template_list",
+    "description": "按 AstrBot 唯一 platform id 配置 System Key 环境变量",
+    "templates": {
+      "system_key": {
+        "name": "平台 ReMail System Key",
+        "display_item": "platform_id",
+        "items": {
+          "platform_id": {
+            "type": "string",
+            "description": "AstrBot 唯一 platform id",
+            "default": ""
+          },
+          "system_key_env": {
+            "type": "string",
+            "description": "保存该平台 ReMail Bot System Key 的环境变量名",
+            "hint": "必须以 REMAIL_BOT_ 开头，例如 REMAIL_BOT_QQ_SYSTEM_KEY。",
+            "default": ""
+          }
+        }
+      }
+    },
+    "default": []
+  },
+  "request_timeout_seconds": {
+    "type": "int",
+    "description": "ReMail 请求超时秒数",
+    "default": 10
+  },
+  "transport_mode": {
+    "type": "string",
+    "description": "ReMail Bot 传输模式",
+    "options": ["http", "websocket"],
+    "default": "websocket"
+  },
+  "launch_destinations": {
+    "type": "list",
+    "description": "接收全部主动推送的 AstrBot unified_msg_origin 列表",
+    "default": []
+  },
+  "docs_url": {
+    "type": "string",
+    "description": "用户可访问的 ReMail API 文档地址",
+    "default": "https://remail.aishop6.com/docs"
+  }
+}

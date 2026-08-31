@@ -87,6 +87,7 @@ type gmailUpstreamPickupSpy struct {
 	handled     bool
 	err         error
 	pickupCalls int
+	lastRequest upstream.PickupRequest
 }
 
 func (*gmailUpstreamPickupSpy) Supply(context.Context, upstream.Demand) (*upstream.SupplyQuote, error) {
@@ -105,9 +106,24 @@ func (*gmailUpstreamPickupSpy) CancelOrder(context.Context, string) (bool, error
 	return false, nil
 }
 
-func (s *gmailUpstreamPickupSpy) Pickup(context.Context, upstream.PickupRequest) (*upstream.PickupResult, bool, error) {
+func (s *gmailUpstreamPickupSpy) Pickup(_ context.Context, request upstream.PickupRequest) (*upstream.PickupResult, bool, error) {
 	s.pickupCalls++
+	s.lastRequest = request
 	return s.pickup, s.handled, s.err
+}
+
+func TestBotCodeDiagnosisRefreshRoutesUpstreamExactlyOnce(t *testing.T) {
+	provider := &gmailUpstreamPickupSpy{handled: true}
+	adapter := botCodeDiagnosisRefreshAdapter{upstreams: upstream.NewRouter(provider)}
+
+	require.NoError(t, adapter.RefreshCodeDiagnosis(context.Background(), "ORDER-UPSTREAM", "user@gmail.com", 0))
+	require.Equal(t, 1, provider.pickupCalls)
+	require.Equal(t, upstream.PickupRequest{OrderNo: "ORDER-UPSTREAM", Email: "user@gmail.com"}, provider.lastRequest)
+
+	localOnly := &gmailUpstreamPickupSpy{handled: true}
+	adapter = botCodeDiagnosisRefreshAdapter{upstreams: upstream.NewRouter(localOnly)}
+	require.NoError(t, adapter.RefreshCodeDiagnosis(context.Background(), "ORDER-LOCAL", "user@gmail.com", 8))
+	require.Zero(t, localOnly.pickupCalls)
 }
 
 func TestGmailPickupAdapterReadsLocalVariantBeforeFailingUpstream(t *testing.T) {

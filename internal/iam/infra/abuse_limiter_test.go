@@ -110,6 +110,31 @@ func TestAbuseLimiterUsesRuntimeSettings(t *testing.T) {
 	require.Equal(t, 7, retry)
 }
 
+func TestAbuseLimiterBotBindingCountsNormalizedEmailFailuresAndClearsSuccess(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	limiter := NewAbuseLimiter(client)
+	ctx := context.Background()
+
+	for range botBindingEmailLimit {
+		retry, err := limiter.TakeBotBinding(ctx, " User@Test.COM ")
+		require.NoError(t, err)
+		require.Zero(t, retry)
+	}
+	retry, err := limiter.TakeBotBinding(ctx, "user@test.com")
+	require.NoError(t, err)
+	require.Equal(t, botBindingWindow, retry)
+
+	for _, key := range server.Keys() {
+		require.NotContains(t, key, "user@test.com")
+	}
+	require.NoError(t, limiter.CompleteBotBinding(ctx, "USER@test.com"))
+	retry, err = limiter.TakeBotBinding(ctx, "user@test.com")
+	require.NoError(t, err)
+	require.Zero(t, retry)
+}
+
 func TestAbuseLimiterPasswordResetLimitIsAtomic(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})

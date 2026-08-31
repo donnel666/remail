@@ -72,18 +72,24 @@ type bulkSettingItem struct {
 }
 
 type systemKeyRequest struct {
-	Name    string                  `json:"name"`
-	Purpose domain.SystemKeyPurpose `json:"purpose"`
+	Name             string                  `json:"name"`
+	Purpose          domain.SystemKeyPurpose `json:"purpose"`
+	Platform         string                  `json:"platform"`
+	SubjectNamespace string                  `json:"subjectNamespace"`
+	AllowedGroupIDs  []string                `json:"allowedGroupIds"`
 }
 
 type systemKeyDTO struct {
-	ID         uint       `json:"id"`
-	Name       string     `json:"name"`
-	Purpose    string     `json:"purpose"`
-	KeyPrefix  string     `json:"keyPrefix"`
-	KeyPlain   string     `json:"keyPlain,omitempty"`
-	LastUsedAt *time.Time `json:"lastUsedAt"`
-	CreatedAt  time.Time  `json:"createdAt"`
+	ID               uint       `json:"id"`
+	Name             string     `json:"name"`
+	Purpose          string     `json:"purpose"`
+	Platform         string     `json:"platform,omitempty"`
+	SubjectNamespace string     `json:"subjectNamespace,omitempty"`
+	AllowedGroupIDs  []string   `json:"allowedGroupIds,omitempty"`
+	KeyPrefix        string     `json:"keyPrefix"`
+	KeyPlain         string     `json:"keyPlain,omitempty"`
+	LastUsedAt       *time.Time `json:"lastUsedAt"`
+	CreatedAt        time.Time  `json:"createdAt"`
 }
 
 func (h *Handler) GetSystemKeys(c *gin.Context) {
@@ -116,7 +122,10 @@ func (h *Handler) PostSystemKey(c *gin.Context) {
 	if req.Purpose == "" {
 		req.Purpose = domain.SystemKeyPurposeICloudForwarding
 	}
-	key, err := h.module.SystemKeys.Create(c.Request.Context(), req.Name, req.Purpose, mutationMeta(c))
+	key, err := h.module.SystemKeys.CreateWithScope(
+		c.Request.Context(), req.Name, req.Purpose, req.Platform, req.SubjectNamespace,
+		mutationMeta(c), req.AllowedGroupIDs...,
+	)
 	if err != nil {
 		writeSystemKeyError(c, err)
 		return
@@ -143,7 +152,8 @@ func (h *Handler) DeleteSystemKey(c *gin.Context) {
 
 func toSystemKeyDTO(key domain.SystemKey, includePlain bool) systemKeyDTO {
 	dto := systemKeyDTO{
-		ID: key.ID, Name: key.Name, Purpose: string(key.Purpose), KeyPrefix: key.KeyPrefix,
+		ID: key.ID, Name: key.Name, Purpose: string(key.Purpose), Platform: key.Platform,
+		SubjectNamespace: key.SubjectNamespace, AllowedGroupIDs: key.AllowedGroupIDs, KeyPrefix: key.KeyPrefix,
 		LastUsedAt: key.LastUsedAt, CreatedAt: key.CreatedAt,
 	}
 	if includePlain {

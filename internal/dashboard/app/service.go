@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/donnel666/remail/internal/botdisplay"
 	"github.com/donnel666/remail/internal/businessday"
 )
 
@@ -181,6 +182,19 @@ type ConsoleDashboard struct {
 	HistoricalCurrentUserRank RankItem
 }
 
+type BotRankItem struct {
+	Name         string
+	SuccessCount int
+	Rank         int
+}
+
+type BotLeaderboards struct {
+	BusinessDate string
+	Timezone     string
+	Today        []BotRankItem
+	Historical   []BotRankItem
+}
+
 // QueryService builds the console dashboard for one user.
 type QueryService struct {
 	view ConsoleView
@@ -189,6 +203,40 @@ type QueryService struct {
 
 func NewQueryService(view ConsoleView) *QueryService {
 	return &QueryService{view: view, now: time.Now}
+}
+
+// BotLeaderboards returns the same two successful-order rankings used by the
+// workbench, with identities reduced to public nicknames or anonymous labels.
+func (s *QueryService) BotLeaderboards(ctx context.Context, limit int) (*BotLeaderboards, error) {
+	if limit <= 0 || limit > 50 {
+		limit = leaderboardLimit
+	}
+	now := s.now()
+	todayStart := TodayStart(now)
+	today, err := s.view.Leaderboard(ctx, &todayStart, limit)
+	if err != nil {
+		return nil, err
+	}
+	historical, err := s.view.Leaderboard(ctx, nil, limit)
+	if err != nil {
+		return nil, err
+	}
+	return &BotLeaderboards{
+		BusinessDate: now.In(dashboardLocation).Format(time.DateOnly),
+		Timezone:     dashboardLocation.String(),
+		Today:        botRankItems(today),
+		Historical:   botRankItems(historical),
+	}, nil
+}
+
+func botRankItems(rows []LeaderRow) []BotRankItem {
+	items := make([]BotRankItem, len(rows))
+	for i, row := range rows {
+		items[i] = BotRankItem{
+			Name: botdisplay.Name(row.Nickname, row.UserID), SuccessCount: row.Count, Rank: i + 1,
+		}
+	}
+	return items
 }
 
 // ConsoleStats returns only the six account and fulfillment values used by

@@ -30,21 +30,25 @@ func SystemKeyRequired(authenticator SystemKeyAuthenticator) gin.HandlerFunc {
 		}
 		keyID, err := authenticator.AuthenticateSystemKey(c.Request.Context(), strings.TrimSpace(c.GetHeader(SystemKeyHeaderName)))
 		if err != nil {
-			if errors.Is(err, settingsdomain.ErrInvalidSystemKey) || errors.Is(err, settingsdomain.ErrSystemKeyNotFound) {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-					"message": "Authentication is required.", "requestId": GetRequestID(c),
-				})
-				return
-			}
-			slog.Error("system key lookup failed", "request_id", GetRequestID(c), "error", err)
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-				"message": "Service is temporarily unavailable.", "requestId": GetRequestID(c),
-			})
+			abortSystemKeyAuthentication(c, err)
 			return
 		}
 		c.Set(contextKeySystemKeyID, keyID)
 		c.Next()
 	}
+}
+
+func abortSystemKeyAuthentication(c *gin.Context, err error) {
+	if errors.Is(err, settingsdomain.ErrInvalidSystemKey) || errors.Is(err, settingsdomain.ErrSystemKeyNotFound) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+			"message": "Authentication is required.", "requestId": GetRequestID(c),
+		})
+		return
+	}
+	slog.Error("system key lookup failed", "request_id", GetRequestID(c), "error", err)
+	c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+		"message": "Service is temporarily unavailable.", "requestId": GetRequestID(c),
+	})
 }
 
 func GetCurrentSystemKeyID(c *gin.Context) (uint, bool) {

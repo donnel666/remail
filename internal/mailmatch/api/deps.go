@@ -26,6 +26,7 @@ type Module struct {
 	ResourceHistory        *mailmatchapp.ResourceHistoryUseCase
 	ProjectHistory         *mailmatchapp.ProjectHistoryScanUseCase
 	AdminMessages          *mailmatchapp.AdminMessageUseCase
+	BotDiagnosis           *mailmatchapp.BotDiagnosisService
 	BackgroundExecution    BackgroundExecutionGate
 	adminResourceFetchRepo *mailmatchinfra.AdminResourceFetchRepo
 	resourceHistoryRepo    *mailmatchinfra.ResourceHistoryRepo
@@ -54,6 +55,12 @@ type CodeOnlyPickupPort interface {
 func (m *Module) SetCodeOnlyPickup(port CodeOnlyPickupPort) {
 	if m != nil {
 		m.CodeOnlyPickup = port
+	}
+}
+
+func (m *Module) SetBotDiagnosisRefresh(port mailmatchapp.CodeDiagnosisRefreshPort) {
+	if m != nil && m.BotDiagnosis != nil {
+		m.BotDiagnosis.SetRefresh(port)
 	}
 }
 
@@ -133,6 +140,7 @@ func NewModule(db *gorm.DB, files governanceapp.FilePort, redisClient redis.Univ
 		ResourceHistory:        resourceHistory,
 		ProjectHistory:         projectHistory,
 		AdminMessages:          mailmatchapp.NewAdminMessageUseCase(adminMessageRepo),
+		BotDiagnosis:           mailmatchapp.NewBotDiagnosisService(repo, useCase),
 		adminResourceFetchRepo: adminResourceFetchRepo,
 		resourceHistoryRepo:    resourceHistoryRepo,
 		matchResults:           matchResults,

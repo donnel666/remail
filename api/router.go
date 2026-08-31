@@ -330,6 +330,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		mailmatchMod.SetGmailMatchPort(gmailMod.Service)
 		mailmatchMod.SetGmailPurchaseFetchPort(gmailMod.Service)
 		mailmatchMod.SetICloudMailFetchPort(iCloudMailFetchAdapter{service: icloudMod.Service})
+		mailmatchMod.SetBotDiagnosisRefresh(botCodeDiagnosisRefreshAdapter{local: mailmatchMod.UseCase, upstreams: upstreamRouter})
 		gmailMod.Service.SetMailIngest(gmailMailIngestAdapter{mailmatch: mailmatchMod.UseCase})
 		mailmatchMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
 		mailmatchMod.SetBackgroundExecutionGate(p.BackgroundLoad)
@@ -359,6 +360,19 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		cleanupFuncs = append(cleanupFuncs, dashboardapi.RegisterTaskHandlers(taskMux, dashboardMod))
 		dashboardapi.RegisterRoutes(v1, dashboardMod, iamSessionFetcher)
 		dashboardapi.RegisterAdminRoutes(v1, dashboardMod, iamSessionFetcher, iamMod.PermissionChecker)
+
+		registerBotRoutes(
+			v1,
+			r,
+			systemSettingsMod.SystemKeys,
+			iamMod,
+			coreMod,
+			mailmatchMod,
+			dashboardMod,
+			billingMod,
+			p.Redis,
+			newBotWebSocketDBEventSource(p.DB),
+		)
 
 		// Proxy module (admin proxy pool maintenance)
 		proxyapi.RegisterProxyTaskHandlers(taskMux, proxyMod)

@@ -498,39 +498,81 @@ func (r *UserRepo) BindThirdPartyIdentity(ctx context.Context, userID uint, prov
 		if user.Status != string(domain.UserStatusActive) {
 			return domain.ErrThirdPartyIdentityUnavailable
 		}
-
-		var identity ThirdPartyIdentityModel
-		err := tx.Where("provider = ? AND provider_user_id = ?", provider, providerUserID).First(&identity).Error
-		if err == nil {
-			if identity.UserID == userID {
-				return nil
-			}
-			return domain.ErrThirdPartyIdentityAlreadyBound
-		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("bind third-party find identity: %w", err)
-		}
-
-		err = tx.Where("user_id = ? AND provider = ?", userID, provider).First(&identity).Error
-		if err == nil {
-			return domain.ErrThirdPartyIdentityAlreadyBound
-		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("bind third-party find user identity: %w", err)
-		}
-
-		if err := tx.Create(&ThirdPartyIdentityModel{
-			UserID:         userID,
-			Provider:       provider,
-			ProviderUserID: providerUserID,
-		}).Error; err != nil {
-			if isIAMDuplicateKeyError(err) {
-				return domain.ErrThirdPartyIdentityAlreadyBound
-			}
-			return fmt.Errorf("bind third-party create identity: %w", err)
-		}
-		return nil
+		return bindThirdPartyIdentity(tx, userID, provider, providerUserID)
 	})
+}
+
+// BindThirdPartyIdentityWithPasswordSnapshot commits a Bot binding only while
+// the account is still active and the bcrypt hash verified by the use case is
+// unchanged. This closes the password-change/disable race without creating a
+// login session or mutating login state.
+func (r *UserRepo) BindThirdPartyIdentityWithPasswordSnapshot(ctx context.Context, userID uint, expectedPasswordHash, provider, providerUserID string) error {
+	provider, providerUserID, ok := normalizeThirdPartyIdentity(provider, providerUserID)
+	if userID == 0 || expectedPasswordHash == "" || !ok {
+		return domain.ErrAccountOrPasswordIncorrect
+	}
+
+	return r.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
+		var user UserModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "status", "password_hash").
+			First(&user, userID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrAccountOrPasswordIncorrect
+			}
+			return fmt.Errorf("bind third-party lock credential: %w", err)
+		}
+		if user.Status != string(domain.UserStatusActive) || user.PasswordHash != expectedPasswordHash {
+			return domain.ErrAccountOrPasswordIncorrect
+		}
+		return bindThirdPartyIdentity(tx, userID, provider, providerUserID)
+	})
+}
+
+func (r *UserRepo) DeleteThirdPartyIdentity(ctx context.Context, provider, providerUserID string) error {
+	provider, providerUserID, ok := normalizeThirdPartyIdentity(provider, providerUserID)
+	if !ok {
+		return domain.ErrThirdPartyIdentityUnavailable
+	}
+	if err := r.dbFor(ctx).Where("provider = ? AND provider_user_id = ?", provider, providerUserID).
+		Delete(&ThirdPartyIdentityModel{}).Error; err != nil {
+		return fmt.Errorf("delete third-party identity: %w", err)
+	}
+	return nil
+}
+
+func bindThirdPartyIdentity(tx *gorm.DB, userID uint, provider, providerUserID string) error {
+	var identity ThirdPartyIdentityModel
+	err := tx.Where("provider = ? AND provider_user_id = ?", provider, providerUserID).First(&identity).Error
+	if err == nil {
+		if identity.UserID == userID {
+			return nil
+		}
+		return domain.ErrThirdPartyIdentityAlreadyBound
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("bind third-party find identity: %w", err)
+	}
+
+	err = tx.Where("user_id = ? AND provider = ?", userID, provider).First(&identity).Error
+	if err == nil {
+		return domain.ErrThirdPartyIdentityAlreadyBound
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("bind third-party find user identity: %w", err)
+	}
+
+	if err := tx.Create(&ThirdPartyIdentityModel{
+		UserID:         userID,
+		Provider:       provider,
+		ProviderUserID: providerUserID,
+	}).Error; err != nil {
+		if isIAMDuplicateKeyError(err) {
+			return domain.ErrThirdPartyIdentityAlreadyBound
+		}
+		return fmt.Errorf("bind third-party create identity: %w", err)
+	}
+	return nil
 }
 
 func (r *UserRepo) UpdateLinuxDOPlaceholder(ctx context.Context, legacyUserID uint, linuxDOID, email, passwordHash string) error {

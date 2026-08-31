@@ -618,6 +618,27 @@ func TestProjectUseCaseAdminUpdateDoesNotApplyCreatePriceDefaults(t *testing.T) 
 	require.Equal(t, "0.000000", detail.Products[0].CodePrice)
 }
 
+func TestProjectUseCaseAdminUpdateEmitsPriceFactOnlyWhenPublicPricingChanges(t *testing.T) {
+	req := validProjectCreateRequest()
+	products, err := normalizeProductRequests(req.Products, true, false)
+	require.NoError(t, err)
+	repo := &fakeProjectRepo{detail: &domain.ProjectDetail{
+		Project:  domain.Project{ID: 55, Status: domain.ProjectStatusListed, AccessType: domain.ProjectAccessPublic},
+		Products: products,
+	}}
+	uc := NewProjectUseCase(repo)
+
+	req.Description = "description only"
+	_, err = uc.AdminUpdate(context.Background(), 9, 55, req, "req-description", "/v1/admin/projects/:projectId")
+	require.NoError(t, err)
+	require.Equal(t, "core.project.update", repo.log.OperationType)
+
+	req.Products[0].CodePrice = "0.200000"
+	_, err = uc.AdminUpdate(context.Background(), 9, 55, req, "req-price", "/v1/admin/projects/:projectId")
+	require.NoError(t, err)
+	require.Equal(t, "core.project.price_updated", repo.log.OperationType)
+}
+
 func TestProjectUseCaseAdminCreateListedNormalizesPrivateAccesses(t *testing.T) {
 	repo := &fakeProjectRepo{}
 	uc := NewProjectUseCase(repo)

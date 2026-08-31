@@ -1,13 +1,25 @@
 package middleware
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 )
+
+type trustedBotDispatchContextKey struct{}
+
+// WithTrustedBotDispatch marks an in-process request that already passed the
+// external connection's pre-authentication IP limit. It is not settable over HTTP.
+func WithTrustedBotDispatch(request *http.Request) *http.Request {
+	return request.WithContext(context.WithValue(request.Context(), trustedBotDispatchContextKey{}, true))
+}
 
 var rateLimitScript = redis.NewScript(`
 local count = redis.call('INCR', KEYS[1])
@@ -39,6 +51,39 @@ func RateLimitPerSystemKey(rdb redis.UniversalClient, scope string, limit, windo
 	return rateLimitPerID(rdb, "ratelimit:system_key:"+scope+":", limit, windowSeconds, GetCurrentSystemKeyID)
 }
 
+// RateLimitPerClientIP protects authentication storage before a credential is
+// known. It complements, rather than replaces, per-key and per-subject limits.
+func RateLimitPerClientIP(rdb redis.UniversalClient, scope string, limit, windowSeconds int) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if trusted, _ := c.Request.Context().Value(trustedBotDispatchContextKey{}).(bool); trusted {
+			c.Next()
+			return
+		}
+		ip := strings.TrimSpace(c.ClientIP())
+		sum := sha256.Sum256([]byte(ip))
+		if takeRateLimit(c, rdb, "ratelimit:client_ip:"+scope+":"+hex.EncodeToString(sum[:]), limit, windowSeconds) {
+			c.Next()
+		}
+	}
+}
+
+// RateLimitPerBotSubject gives one platform user a stable budget across Bot
+// System Key rotations. The opaque platform subject is hashed before it enters
+// Redis keys.
+func RateLimitPerBotSubject(rdb redis.UniversalClient, scope string, limit, windowSeconds int) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		identity, ok := GetCurrentBotIdentity(c)
+		if !ok {
+			c.Next()
+			return
+		}
+		sum := sha256.Sum256([]byte(identity.Platform + "\x00" + identity.SubjectNamespace + "\x00" + identity.Subject))
+		if takeRateLimit(c, rdb, "ratelimit:bot_subject:"+scope+":"+hex.EncodeToString(sum[:]), limit, windowSeconds) {
+			c.Next()
+		}
+	}
+}
+
 func rateLimitPerID(
 	rdb redis.UniversalClient,
 	keyPrefix string,
@@ -53,28 +98,32 @@ func rateLimitPerID(
 			c.Next()
 			return
 		}
-		if rdb == nil {
-			abortRateLimitUnavailable(c, nil)
-			return
-		}
-
 		key := keyPrefix + strconv.FormatUint(uint64(id), 10)
-		retryAfter, err := rateLimitScript.Run(c.Request.Context(), rdb, []string{key}, limit, windowSeconds).Int()
-		if err != nil {
-			abortRateLimitUnavailable(c, err)
-			return
+		if takeRateLimit(c, rdb, key, limit, windowSeconds) {
+			c.Next()
 		}
-		if retryAfter > 0 {
-			c.Header("Retry-After", strconv.Itoa(retryAfter))
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"message":   "Too many requests.",
-				"requestId": GetRequestID(c),
-			})
-			return
-		}
-
-		c.Next()
 	}
+}
+
+func takeRateLimit(c *gin.Context, rdb redis.UniversalClient, key string, limit, windowSeconds int) bool {
+	if rdb == nil {
+		abortRateLimitUnavailable(c, nil)
+		return false
+	}
+	retryAfter, err := rateLimitScript.Run(c.Request.Context(), rdb, []string{key}, limit, windowSeconds).Int()
+	if err != nil {
+		abortRateLimitUnavailable(c, err)
+		return false
+	}
+	if retryAfter > 0 {
+		c.Header("Retry-After", strconv.Itoa(retryAfter))
+		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+			"message":   "Too many requests.",
+			"requestId": GetRequestID(c),
+		})
+		return false
+	}
+	return true
 }
 
 func abortRateLimitUnavailable(c *gin.Context, err error) {

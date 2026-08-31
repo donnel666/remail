@@ -105,16 +105,7 @@ func (uc *SystemSettingsUseCase) Upsert(ctx context.Context, key, value string, 
 			return nil, err
 		}
 	}
-	err = uc.mutate(ctx, &governancedomain.OperationLog{
-		OperatorUserID: meta.OperatorUserID,
-		OperationType:  "system_settings.upsert",
-		ResourceType:   "system_setting",
-		ResourceID:     auditResourceID(key),
-		Path:           meta.Path,
-		Result:         "success",
-		SafeSummary:    "updated system setting key=" + key,
-		RequestID:      meta.RequestID,
-	}, func(txCtx context.Context) error {
+	err = uc.mutate(ctx, settingUpsertOperationLog(key, meta), func(txCtx context.Context) error {
 		persisted, err := uc.repo.List(txCtx)
 		if err != nil {
 			return err
@@ -179,8 +170,17 @@ func (uc *SystemSettingsUseCase) BulkUpsert(ctx context.Context, settings []doma
 			return err
 		}
 		published = newlyPublishedAnnouncements(persisted, normalized, time.Now())
+		eventKeys := changedPushSettingKeys(persisted, normalized)
 		saved, err = uc.repo.BulkUpsert(txCtx, normalized)
-		return err
+		if err != nil {
+			return err
+		}
+		for _, key := range eventKeys {
+			if err := uc.logs.Create(txCtx, settingUpsertOperationLog(key, meta)); err != nil {
+				return fmt.Errorf("audit system setting event fact: %w", err)
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -397,6 +397,46 @@ func auditResourceID(key string) string {
 		return key[:100]
 	}
 	return key
+}
+
+func settingUpsertOperationLog(key string, meta MutationMeta) *governancedomain.OperationLog {
+	return &governancedomain.OperationLog{
+		OperatorUserID: meta.OperatorUserID,
+		OperationType:  "system_settings.upsert",
+		ResourceType:   "system_setting",
+		ResourceID:     auditResourceID(key),
+		Path:           meta.Path,
+		Result:         "success",
+		SafeSummary:    "updated system setting key=" + key,
+		RequestID:      meta.RequestID,
+	}
+}
+
+func changedPushSettingKeys(persisted, updates []domain.Setting) []string {
+	previous := make(map[string]string, len(persisted))
+	for _, setting := range persisted {
+		previous[strings.ToLower(strings.TrimSpace(setting.Key))] = setting.Value
+	}
+	keys := make([]string, 0, len(updates))
+	for _, setting := range updates {
+		key := strings.ToLower(strings.TrimSpace(setting.Key))
+		value, exists := previous[key]
+		if pushSettingKey(key) && (!exists || value != setting.Value) {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+func pushSettingKey(key string) bool {
+	switch key {
+	case "global_notice", "announcements", "announcement_enabled",
+		runtimeconfig.MicrosoftPriceMultiplierKey, runtimeconfig.GmailPriceMultiplierKey,
+		runtimeconfig.ICloudPriceMultiplierKey, runtimeconfig.DomainPriceMultiplierKey:
+		return true
+	default:
+		return false
+	}
 }
 
 func invalidValueField(key string, err error) error {
