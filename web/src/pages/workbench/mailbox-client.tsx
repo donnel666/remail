@@ -71,6 +71,7 @@ export function MailboxClient({
   const [loadedBodies, setLoadedBodies] = useState<Record<string, string>>({});
   const [bodyErrors, setBodyErrors] = useState<Record<string, boolean>>({});
   const [loadingBodyIds, setLoadingBodyIds] = useState<Record<string, boolean>>({});
+  const [htmlPreviewKey, setHtmlPreviewKey] = useState("");
   const loadingBodyIdsRef = useRef(new Map<string, number>());
   const bodyGenerationRef = useRef(0);
   const onLoadMessageRef = useRef(onLoadMessage);
@@ -86,6 +87,7 @@ export function MailboxClient({
     if (emailChanged) {
       bodyGenerationRef.current += 1;
       loadingBodyIdsRef.current.clear();
+      setHtmlPreviewKey("");
       setLoadedBodies({});
       setBodyErrors({});
       setLoadingBodyIds({});
@@ -98,6 +100,7 @@ export function MailboxClient({
     ) {
       return;
     }
+    setHtmlPreviewKey("");
     setSelectedMessageId(filteredMessages[0]?.id ?? "");
   }, [email, filteredMessages, selectedMessageId]);
 
@@ -122,6 +125,7 @@ export function MailboxClient({
   const canLoadMessage = Boolean(
     onLoadMessage && /^[1-9]\d*$/.test(loadableMessageId)
   );
+  const previewHtml = htmlPreviewKey === selectedMessageKey;
 
   useEffect(() => {
     if (
@@ -202,7 +206,10 @@ export function MailboxClient({
                   selectedMessage?.id === message.id && "is-active"
                 )}
                 key={message.id}
-                onClick={() => setSelectedMessageId(message.id)}
+                onClick={() => {
+                  if (message.id !== selectedMessage?.id) setHtmlPreviewKey("");
+                  setSelectedMessageId(message.id);
+                }}
               >
                 <span className="mailbox-client-item-head">
                   <button
@@ -210,6 +217,7 @@ export function MailboxClient({
                     className="mailbox-client-item-select"
                     onClick={(event) => {
                       event.stopPropagation();
+                      if (message.id !== selectedMessage?.id) setHtmlPreviewKey("");
                       setSelectedMessageId(message.id);
                     }}
                     type="button"
@@ -312,7 +320,29 @@ export function MailboxClient({
                 <Text type="tertiary">{t("Loading...")}</Text>
               </div>
             ) : (
-              <pre className="mailbox-client-body">{selectedBody}</pre>
+              <>
+                <div className="flex justify-end border-b border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] px-3 py-2">
+                  <Button
+                    aria-pressed={previewHtml}
+                    onClick={() => setHtmlPreviewKey(previewHtml ? "" : selectedMessageKey)}
+                    size="small"
+                    theme="borderless"
+                  >
+                    {t(previewHtml ? "Show source" : "Preview HTML")}
+                  </Button>
+                </div>
+                {previewHtml ? (
+                  <iframe
+                    className="block min-h-0 w-full flex-1 border-0 bg-white"
+                    referrerPolicy="no-referrer"
+                    sandbox=""
+                    srcDoc={selectedBody}
+                    title={t("HTML email preview")}
+                  />
+                ) : (
+                  <pre className="mailbox-client-body">{selectedBody}</pre>
+                )}
+              </>
             )}
           </>
         ) : (

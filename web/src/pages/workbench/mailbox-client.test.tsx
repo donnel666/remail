@@ -78,8 +78,15 @@ describe("MailboxClient message body loading", () => {
     copyControls.forEach((control) => expect(control.closest("button")).toBeNull());
   });
 
-  it("retries a failed load and keeps unsafe HTML as text", async () => {
+  it("keeps HTML as text until the user opens a sandboxed preview", async () => {
     const unsafeBody = `<script>alert(1)</script><img src=x onerror=alert(2)><a href="https://example.com">Verify</a>`;
+    const firstMessage = message("first@example.com");
+    const secondMessage = {
+      ...firstMessage,
+      body: "Second body",
+      id: "2",
+      subject: "Second message",
+    };
     const loader = vi.fn()
       .mockRejectedValueOnce(new Error("temporary failure"))
       .mockResolvedValueOnce(unsafeBody);
@@ -87,7 +94,7 @@ describe("MailboxClient message body loading", () => {
       <MailboxClient
         email="first@example.com"
         fetchKey="first"
-        messages={[message("first@example.com")]}
+        messages={[firstMessage, secondMessage]}
         onFetch={vi.fn()}
         onLoadMessage={loader}
       />
@@ -98,7 +105,20 @@ describe("MailboxClient message body loading", () => {
 
     await waitFor(() => expect(view.container.querySelector(".mailbox-client-body")).toHaveTextContent(unsafeBody));
     expect(loader).toHaveBeenCalledTimes(2);
+    expect(view.container.querySelector("iframe")).toBeNull();
     expect(view.container.querySelector("script, img, a")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview HTML" }));
+    const preview = screen.getByTitle("HTML email preview");
+    expect(preview).toHaveAttribute("sandbox", "");
+    expect(preview).toHaveAttribute("referrerpolicy", "no-referrer");
+    expect(preview).toHaveAttribute("srcdoc", unsafeBody);
+
+    fireEvent.click(screen.getByRole("button", { name: "Second message" }));
+    expect(view.container.querySelector("iframe")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Verification" }));
+    expect(view.container.querySelector("iframe")).toBeNull();
+    expect(view.container.querySelector(".mailbox-client-body")).toHaveTextContent(unsafeBody);
   });
 
   it("treats an empty response as successfully loaded", async () => {

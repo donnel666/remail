@@ -295,24 +295,39 @@ describe("admin domain mailbox infinite list", () => {
     expect(apiMocks.listMessages).toHaveBeenCalledTimes(2);
   });
 
-  it("renders stored HTML as inert text", async () => {
+  it("renders stored HTML only after opening a sandboxed preview", async () => {
     const body = `<script>window.hacked=true</script><img src=x onerror=alert(1)><a href="https://example.com">Verify</a>`;
     apiMocks.listMessages.mockResolvedValueOnce({
-      items: [message(1)],
+      items: [message(1), message(2)],
       limit: 20,
       offset: 0,
-      total: 1,
+      total: 2,
       hasMore: false,
     });
-    apiMocks.getMessage.mockResolvedValueOnce({ ...message(1), body });
+    apiMocks.getMessage.mockImplementation(async (_resourceId, messageId) => ({
+      ...message(messageId),
+      body: messageId === 1 ? body : "Second body",
+    }));
 
     const view = render(<DomainMailsPanel resourceId={42} t={t} />);
 
     const renderedBody = await screen.findByText(body);
     expect(renderedBody).toBeInTheDocument();
+    expect(view.container.querySelector("iframe")).toBeNull();
     expect(view.container.querySelector("script")).toBeNull();
     expect(view.container.querySelector("img")).toBeNull();
     expect(view.container.querySelector("a")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview HTML" }));
+    const preview = screen.getByTitle("HTML email preview");
+    expect(preview).toHaveAttribute("sandbox", "");
+    expect(preview).toHaveAttribute("referrerpolicy", "no-referrer");
+    expect(preview).toHaveAttribute("srcdoc", body);
+
+    fireEvent.click(screen.getByRole("button", { name: "Subject 2" }));
+    expect(view.container.querySelector("iframe")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Subject 1" }));
+    expect(view.container.querySelector("iframe")).toBeNull();
   });
 
   it("labels HTTP extraction values as URLs without nesting copy controls", async () => {

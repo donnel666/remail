@@ -420,6 +420,7 @@ export function DomainMailsPanel({
     Record<number, AdminDomainMessage>
   >({});
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [htmlPreviewKey, setHtmlPreviewKey] = useState("");
   const listScope = `${resourceId}\u0000${auxiliary}\u0000${debouncedSearch}\u0000${pageSize}`;
   const listScopeRef = useRef(listScope);
 
@@ -430,6 +431,7 @@ export function DomainMailsPanel({
     setNextCursor(null);
     setHasMore(false);
     setListError(null);
+    setHtmlPreviewKey("");
     setSelectedId(null);
     setLoadedMessages({});
   }, [auxiliary, debouncedSearch, pageSize, resourceId]);
@@ -487,18 +489,24 @@ export function DomainMailsPanel({
   }, [auxiliary, cursor, debouncedSearch, listScope, pageSize, resourceId, retryKey, t]);
 
   useEffect(() => {
-    setSelectedId((current) =>
-      current && messages.some((message) => message.id === current)
-        ? current
-        : messages[0]?.id ?? null
-    );
-  }, [messages]);
+    const nextId =
+      selectedId && messages.some((message) => message.id === selectedId)
+        ? selectedId
+        : messages[0]?.id ?? null;
+    if (nextId === selectedId) return;
+    setHtmlPreviewKey("");
+    setSelectedId(nextId);
+  }, [messages, selectedId]);
 
   const selectedSummary =
     messages.find((message) => message.id === selectedId) ?? null;
   const selected = selectedSummary
     ? loadedMessages[selectedSummary.id] ?? selectedSummary
     : null;
+  const selectedMessageKey = selectedId
+    ? `${resourceId}\0${auxiliary}\0${selectedId}`
+    : "";
+  const previewHtml = htmlPreviewKey === selectedMessageKey;
 
   useEffect(() => {
     if (!selectedId || loadedMessages[selectedId]) return;
@@ -583,7 +591,10 @@ export function DomainMailsPanel({
                     : "hover:bg-[var(--semi-color-fill-0)]"
                 }`}
                 key={message.id}
-                onClick={() => setSelectedId(message.id)}
+                onClick={() => {
+                  if (message.id !== selectedId) setHtmlPreviewKey("");
+                  setSelectedId(message.id);
+                }}
               >
                 <div className="flex items-center justify-between gap-2">
                   <button
@@ -591,6 +602,7 @@ export function DomainMailsPanel({
                     className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-sm font-medium text-[var(--semi-color-text-0)]"
                     onClick={(event) => {
                       event.stopPropagation();
+                      if (message.id !== selectedId) setHtmlPreviewKey("");
                       setSelectedId(message.id);
                     }}
                     type="button"
@@ -688,9 +700,30 @@ export function DomainMailsPanel({
                 />
               ) : null}
             </div>
-            <div className="whitespace-pre-wrap break-words rounded-lg bg-[var(--semi-color-fill-0)] p-3 text-sm text-[var(--semi-color-text-0)]">
-              {selected.body}
+            <div className="flex justify-end">
+              <Button
+                aria-pressed={previewHtml}
+                onClick={() => setHtmlPreviewKey(previewHtml ? "" : selectedMessageKey)}
+                size="small"
+                theme="borderless"
+              >
+                {t(previewHtml ? "Show source" : "Preview HTML")}
+              </Button>
             </div>
+            {previewHtml ? (
+              <iframe
+                className="block min-h-64 w-full rounded-lg border border-[var(--semi-color-border)] bg-white"
+                referrerPolicy="no-referrer"
+                sandbox=""
+                srcDoc={selected.body}
+                style={{ height: "min(480px, calc(100vh - 420px))" }}
+                title={t("HTML email preview")}
+              />
+            ) : (
+              <div className="whitespace-pre-wrap break-words rounded-lg bg-[var(--semi-color-fill-0)] p-3 text-sm text-[var(--semi-color-text-0)]">
+                {selected.body}
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex h-full items-center justify-center">

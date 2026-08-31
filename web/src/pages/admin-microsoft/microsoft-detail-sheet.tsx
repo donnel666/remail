@@ -1014,6 +1014,7 @@ export function ResourceMailsPanel({
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<MailDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [htmlPreviewKey, setHtmlPreviewKey] = useState("");
   const listScope = `${auxiliary}\u0000${resourceType}\u0000${resourceId}\u0000${debouncedSearch}\u0000${pageSize}`;
   const listScopeRef = useRef(listScope);
 
@@ -1024,6 +1025,7 @@ export function ResourceMailsPanel({
     setNextCursor(null);
     setHasMore(false);
     setListError(null);
+    setHtmlPreviewKey("");
     setSelectedId(null);
     setSelectedDetail(null);
     setAddressFilter("all");
@@ -1123,14 +1125,20 @@ export function ResourceMailsPanel({
   );
 
   useEffect(() => {
-    setSelectedId((current) =>
-      current && filtered.some((message) => message.id === current)
-        ? current
-        : filtered[0]?.id ?? null
-    );
-  }, [filtered]);
+    const nextId =
+      selectedId && filtered.some((message) => message.id === selectedId)
+        ? selectedId
+        : filtered[0]?.id ?? null;
+    if (nextId === selectedId) return;
+    setHtmlPreviewKey("");
+    setSelectedId(nextId);
+  }, [filtered, selectedId]);
 
   const selected = filtered.find((message) => message.id === selectedId) ?? null;
+  const selectedMessageKey = selectedId
+    ? `${resourceType}\0${auxiliary}\0${resourceId}\0${selectedId}`
+    : "";
+  const previewHtml = htmlPreviewKey === selectedMessageKey;
 
   useEffect(() => {
     if (!selectedId) {
@@ -1351,7 +1359,10 @@ export function ResourceMailsPanel({
                     : "hover:bg-[var(--semi-color-fill-0)]"
                 }`}
                 key={message.id}
-                onClick={() => setSelectedId(message.id)}
+                onClick={() => {
+                  if (message.id !== selectedId) setHtmlPreviewKey("");
+                  setSelectedId(message.id);
+                }}
                 type="button"
               >
                 <span className="flex items-center justify-between gap-2">
@@ -1441,9 +1452,30 @@ export function ResourceMailsPanel({
                 {t("Match diagnostic")}: {selectedDetail.matchDiagnostic}
               </div>
             ) : null}
-            <div className="whitespace-pre-wrap break-words rounded-lg bg-[var(--semi-color-fill-0)] p-3 text-sm text-[var(--semi-color-text-0)]">
-              {detailLoading ? <Spin /> : selectedDetail?.body ?? ""}
+            <div className="flex justify-end">
+              <Button
+                aria-pressed={previewHtml}
+                onClick={() => setHtmlPreviewKey(previewHtml ? "" : selectedMessageKey)}
+                size="small"
+                theme="borderless"
+              >
+                {t(previewHtml ? "Show source" : "Preview HTML")}
+              </Button>
             </div>
+            {previewHtml ? (
+              <iframe
+                className="block min-h-64 w-full rounded-lg border border-[var(--semi-color-border)] bg-white"
+                referrerPolicy="no-referrer"
+                sandbox=""
+                srcDoc={selectedDetail?.body ?? ""}
+                style={{ height: "min(480px, calc(100vh - 420px))" }}
+                title={t("HTML email preview")}
+              />
+            ) : (
+              <div className="whitespace-pre-wrap break-words rounded-lg bg-[var(--semi-color-fill-0)] p-3 text-sm text-[var(--semi-color-text-0)]">
+                {detailLoading ? <Spin /> : selectedDetail?.body ?? ""}
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex h-full items-center justify-center">

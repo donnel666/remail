@@ -472,6 +472,53 @@ describe("admin Microsoft detail sheet runtime", () => {
     expect(copyControls[0]?.closest("button")).toBeNull();
   });
 
+  it("renders message HTML only after opening a sandboxed preview", async () => {
+    const body = `<script>window.hacked=true</script><img src=x onerror=alert(1)><a href="https://example.com">Verify</a>`;
+    const message = {
+      id: 1,
+      mailbox: "main",
+      orderNo: null,
+      preview: "Preview",
+      receivedAt: "2026-07-12T00:00:01Z",
+      recipient: "user@outlook.com",
+      sender: "sender@example.net",
+      status: "received",
+      subject: "HTML message",
+      verificationCode: null,
+    };
+    const secondMessage = { ...message, id: 2, subject: "Second message" };
+    mocks.messages.mockResolvedValueOnce({
+      ...EMPTY_PAGE,
+      items: [message, secondMessage],
+      total: 2,
+    });
+    mocks.message.mockImplementation(async (_resourceId, messageId) => ({
+      ...(messageId === 1 ? message : secondMessage),
+      body: messageId === 1 ? body : "Second body",
+    }));
+
+    const view = render(
+      <ResourceMailsPanel
+        resourceId={41}
+        t={((key: string) => key) as TFunction}
+      />
+    );
+
+    expect(await screen.findByText(body)).toBeInTheDocument();
+    expect(view.container.querySelector("iframe")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview HTML" }));
+    const preview = screen.getByTitle("HTML email preview");
+    expect(preview).toHaveAttribute("sandbox", "");
+    expect(preview).toHaveAttribute("referrerpolicy", "no-referrer");
+    expect(preview).toHaveAttribute("srcdoc", body);
+
+    fireEvent.click(screen.getByRole("button", { name: /Second message/ }));
+    expect(view.container.querySelector("iframe")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /HTML message/ }));
+    expect(view.container.querySelector("iframe")).toBeNull();
+  });
+
   it("retries a failed continuation with the same cursor", async () => {
     const mail = (id: number) => ({
       id,
