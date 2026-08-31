@@ -337,6 +337,21 @@ func (r *Repo) FindOrderTokenByOrder(ctx context.Context, orderNo string) (*doma
 	return &token, nil
 }
 
+func (r *Repo) FindOrderTokensByOrders(ctx context.Context, orderNos []string) (map[string]domain.OrderToken, error) {
+	result := make(map[string]domain.OrderToken, len(orderNos))
+	if len(orderNos) == 0 {
+		return result, nil
+	}
+	var models []OrderTokenModel
+	if err := r.dbFor(ctx).Where("order_no IN ? AND enabled = ?", orderNos, true).Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("find order tokens: %w", err)
+	}
+	for _, model := range models {
+		result[model.OrderNo] = orderTokenModelToDomain(model)
+	}
+	return result, nil
+}
+
 func (r *Repo) FindOrderTokenByPlain(ctx context.Context, tokenPlain string) (*domain.OrderToken, error) {
 	var model OrderTokenModel
 	if err := r.dbFor(ctx).First(&model, "token_plain = ?", strings.TrimSpace(tokenPlain)).Error; err != nil {

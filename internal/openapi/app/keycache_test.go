@@ -340,6 +340,10 @@ func (r *apiKeyRuntimeRepoStub) FindOrderTokenByOrder(context.Context, string) (
 	return nil, errors.New("not implemented")
 }
 
+func (r *apiKeyRuntimeRepoStub) FindOrderTokensByOrders(context.Context, []string) (map[string]domain.OrderToken, error) {
+	return nil, errors.New("not implemented")
+}
+
 func (r *apiKeyRuntimeRepoStub) FindOrderTokenByPlain(context.Context, string) (*domain.OrderToken, error) {
 	return nil, errors.New("not implemented")
 }

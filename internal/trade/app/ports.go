@@ -170,6 +170,7 @@ type OrderToken struct {
 type OrderTokenPort interface {
 	IssueOrderToken(ctx context.Context, orderNo string, expireAt *time.Time) (*OrderToken, error)
 	FindOrderTokenByOrder(ctx context.Context, orderNo string) (*OrderToken, error)
+	FindOrderTokensByOrders(ctx context.Context, orderNos []string) (map[string]OrderToken, error)
 	ExtendOrderToken(ctx context.Context, orderNo string, expireAt time.Time) error
 	DisableOrderToken(ctx context.Context, orderNo string, reason string) error
 }
@@ -286,6 +287,7 @@ type Repository interface {
 	LoadOrCreatePendingOrder(ctx context.Context, cmd CreatePendingOrderCommand) (*domain.Order, bool, error)
 	FindOrderByIdempotency(ctx context.Context, channel domain.ClientChannel, userID uint, apiKeyID *uint, idempotencyKey, requestFingerprint, randomRequestFingerprint string) (*domain.Order, error)
 	FindOrder(ctx context.Context, orderNo string) (*domain.Order, error)
+	FindOrdersByOrderNos(ctx context.Context, orderNos []string) (map[string]domain.Order, error)
 	MarkPaid(ctx context.Context, cmd MarkPaidCommand) (*domain.Order, error)
 	MarkActive(ctx context.Context, cmd MarkActiveCommand) (*domain.Order, error)
 	MarkFailed(ctx context.Context, cmd MarkFailedCommand) (*domain.Order, error)
@@ -527,6 +529,12 @@ type CheckoutResult struct {
 	GmailAppPassword     string
 	// Owner is populated only for the administrator site-wide order list.
 	Owner *OrderOwnerSummary
+}
+
+type OrderPickupCredential struct {
+	OrderNo       string
+	DeliveryEmail string
+	ServiceToken  string
 }
 
 type CheckoutBatchItem struct {
@@ -2556,6 +2564,40 @@ func (uc *UseCase) GetOrder(ctx context.Context, orderNo string, userID uint, is
 	}
 	result.ProjectName = displayed[0].ProjectName
 	result.ProjectLogoURL = displayed[0].ProjectLogoURL
+	return result, nil
+}
+
+func (uc *UseCase) GetOrderPickupCredentials(ctx context.Context, orderNos []string, userID uint) ([]OrderPickupCredential, error) {
+	orders, err := uc.repo.FindOrdersByOrderNos(ctx, orderNos)
+	if err != nil {
+		return nil, err
+	}
+	for _, orderNo := range orderNos {
+		order, exists := orders[orderNo]
+		if !exists {
+			return nil, domain.ErrOrderNotFound
+		}
+		if order.UserID != userID {
+			return nil, domain.ErrOrderForbidden
+		}
+	}
+	tokens, err := uc.tokens.FindOrderTokensByOrders(ctx, orderNos)
+	if err != nil {
+		return nil, err
+	}
+	now := uc.now()
+	result := make([]OrderPickupCredential, 0, len(orderNos))
+	for _, orderNo := range orderNos {
+		order := orders[orderNo]
+		token, exists := tokens[orderNo]
+		if !orderAllowsServiceToken(order.Status) || !exists || token.TokenPlain == "" ||
+			(token.ExpireAt != nil && !token.ExpireAt.After(now)) || strings.TrimSpace(order.DeliveryEmail) == "" {
+			continue
+		}
+		result = append(result, OrderPickupCredential{
+			OrderNo: orderNo, DeliveryEmail: order.DeliveryEmail, ServiceToken: token.TokenPlain,
+		})
+	}
 	return result, nil
 }
 

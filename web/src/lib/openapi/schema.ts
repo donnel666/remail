@@ -2112,6 +2112,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orders/pickup-credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Read pickup credentials for selected orders in one request */
+        post: operations["postOrderPickupCredentials"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orders/{orderNo}": {
         parameters: {
             query?: never;
@@ -5968,6 +5985,16 @@ export interface components {
             quantity: number;
         };
         CreateOrderBatchResponse: components["schemas"]["CreateOrderBatchItemResponse"][];
+        OrderPickupCredentialsRequest: {
+            orderNos: string[];
+        };
+        OrderPickupCredentialResponse: {
+            orderNo: string;
+            deliveryEmail: string;
+            /** @description Service credential used to construct the order pickup URL. */
+            serviceToken: string;
+        };
+        OrderPickupCredentialsResponse: components["schemas"]["OrderPickupCredentialResponse"][];
         OrderBatchItemErrorResponse: {
             /** @enum {string} */
             code: "insufficient_balance" | "insufficient_inventory" | "upstream_price_protected" | "upstream_unavailable" | "idempotency_conflict" | "temporarily_unavailable";
@@ -17613,6 +17640,78 @@ export interface operations {
             };
             /** @description Project, product, service mode, supply policy, or another batch-wide business validation failed */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    postOrderPickupCredentials: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderPickupCredentialsRequest"];
+            };
+        };
+        responses: {
+            /** @description Usable pickup credentials in request order; orders with missing, disabled, or expired tokens are omitted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderPickupCredentialsResponse"];
+                };
+            };
+            /** @description Invalid, empty, duplicate, or oversized order number list */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description One or more orders do not belong to the current user */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description One or more orders do not exist */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Request body is too large */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

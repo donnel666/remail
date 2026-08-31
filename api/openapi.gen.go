@@ -9645,6 +9645,23 @@ type OrderOwnerSummary struct {
 	UserId    int     `json:"userId"`
 }
 
+// OrderPickupCredentialResponse defines model for OrderPickupCredentialResponse.
+type OrderPickupCredentialResponse struct {
+	DeliveryEmail string `json:"deliveryEmail"`
+	OrderNo       string `json:"orderNo"`
+
+	// ServiceToken Service credential used to construct the order pickup URL.
+	ServiceToken string `json:"serviceToken"`
+}
+
+// OrderPickupCredentialsRequest defines model for OrderPickupCredentialsRequest.
+type OrderPickupCredentialsRequest struct {
+	OrderNos []string `json:"orderNos"`
+}
+
+// OrderPickupCredentialsResponse defines model for OrderPickupCredentialsResponse.
+type OrderPickupCredentialsResponse = []OrderPickupCredentialResponse
+
 // OrderProjectFacet defines model for OrderProjectFacet.
 type OrderProjectFacet struct {
 	Count     int64   `json:"count"`
@@ -13531,6 +13548,12 @@ type PostOrderBatchParamsServiceMode string
 // PostOrderBatchParamsSupply defines parameters for PostOrderBatch.
 type PostOrderBatchParamsSupply string
 
+// PostOrderPickupCredentialsParams defines parameters for PostOrderPickupCredentials.
+type PostOrderPickupCredentialsParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // PostOrderArchiveParams defines parameters for PostOrderArchive.
 type PostOrderArchiveParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for Session state-changing requests and ignored for API Key requests.
@@ -14245,6 +14268,9 @@ type PostOrderJSONRequestBody = CreateOrderRequest
 
 // PostOrderBatchJSONRequestBody defines body for PostOrderBatch for application/json ContentType.
 type PostOrderBatchJSONRequestBody = CreateOrderBatchRequest
+
+// PostOrderPickupCredentialsJSONRequestBody defines body for PostOrderPickupCredentials for application/json ContentType.
+type PostOrderPickupCredentialsJSONRequestBody = OrderPickupCredentialsRequest
 
 // PatchPasswordJSONRequestBody defines body for PatchPassword for application/json ContentType.
 type PatchPasswordJSONRequestBody = ChangePasswordRequest
@@ -16264,6 +16290,9 @@ type ServerInterface interface {
 	// Create multiple independent orders through console or API key
 	// (POST /v1/orders/batch)
 	PostOrderBatch(c *gin.Context, params PostOrderBatchParams)
+	// Read pickup credentials for selected orders in one request
+	// (POST /v1/orders/pickup-credentials)
+	PostOrderPickupCredentials(c *gin.Context, params PostOrderPickupCredentialsParams)
 	// Get one order
 	// (GET /v1/orders/{orderNo})
 	GetOrder(c *gin.Context, orderNo string)
@@ -32778,6 +32807,51 @@ func (siw *ServerInterfaceWrapper) PostOrderBatch(c *gin.Context) {
 	siw.Handler.PostOrderBatch(c, params)
 }
 
+// PostOrderPickupCredentials operation middleware
+func (siw *ServerInterfaceWrapper) PostOrderPickupCredentials(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostOrderPickupCredentialsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostOrderPickupCredentials(c, params)
+}
+
 // GetOrder operation middleware
 func (siw *ServerInterfaceWrapper) GetOrder(c *gin.Context) {
 
@@ -35494,6 +35568,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/orders", wrapper.GetOrders)
 	router.POST(options.BaseURL+"/v1/orders", wrapper.PostOrder)
 	router.POST(options.BaseURL+"/v1/orders/batch", wrapper.PostOrderBatch)
+	router.POST(options.BaseURL+"/v1/orders/pickup-credentials", wrapper.PostOrderPickupCredentials)
 	router.GET(options.BaseURL+"/v1/orders/:orderNo", wrapper.GetOrder)
 	router.POST(options.BaseURL+"/v1/orders/:orderNo/archive", wrapper.PostOrderArchive)
 	router.GET(options.BaseURL+"/v1/orders/:orderNo/events", wrapper.GetOrderEvents)

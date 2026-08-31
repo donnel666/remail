@@ -591,6 +591,18 @@ func (a orderTokenAdapter) FindOrderTokenByOrder(ctx context.Context, orderNo st
 	return &tradeapp.OrderToken{TokenPlain: token.TokenPlain, ExpireAt: token.ExpireAt}, nil
 }
 
+func (a orderTokenAdapter) FindOrderTokensByOrders(ctx context.Context, orderNos []string) (map[string]tradeapp.OrderToken, error) {
+	tokens, err := a.tokens.FindOrderTokensByOrders(ctx, orderNos)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]tradeapp.OrderToken, len(tokens))
+	for orderNo, token := range tokens {
+		result[orderNo] = tradeapp.OrderToken{TokenPlain: token.TokenPlain, ExpireAt: token.ExpireAt}
+	}
+	return result, nil
+}
+
 func (a orderTokenAdapter) ExtendOrderToken(ctx context.Context, orderNo string, expireAt time.Time) error {
 	return a.tokens.ExtendOrderToken(ctx, orderNo, expireAt)
 }

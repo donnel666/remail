@@ -32,6 +32,7 @@ type Repository interface {
 
 	IssueOrderToken(ctx context.Context, cmd IssueOrderTokenCommand) (*domain.OrderToken, error)
 	FindOrderTokenByOrder(ctx context.Context, orderNo string) (*domain.OrderToken, error)
+	FindOrderTokensByOrders(ctx context.Context, orderNos []string) (map[string]domain.OrderToken, error)
 	FindOrderTokenByPlain(ctx context.Context, tokenPlain string) (*domain.OrderToken, error)
 	ExtendOrderToken(ctx context.Context, orderNo string, expireAt time.Time) error
 	DisableOrderToken(ctx context.Context, orderNo string, reason string, disabledAt time.Time) error
@@ -305,6 +306,13 @@ func (uc *UseCase) FindOrderTokenByOrder(ctx context.Context, orderNo string) (*
 		return nil, domain.ErrInvalidOrderToken
 	}
 	return uc.repo.FindOrderTokenByOrder(ctx, orderNo)
+}
+
+func (uc *UseCase) FindOrderTokensByOrders(ctx context.Context, orderNos []string) (map[string]domain.OrderToken, error) {
+	if len(orderNos) == 0 {
+		return map[string]domain.OrderToken{}, nil
+	}
+	return uc.repo.FindOrderTokensByOrders(ctx, orderNos)
 }
 
 func (uc *UseCase) FindOrderTokenByPlain(ctx context.Context, tokenPlain string) (*domain.OrderToken, error) {

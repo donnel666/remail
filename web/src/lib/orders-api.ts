@@ -7,6 +7,7 @@ export type CreateOrderRequest = components["schemas"]["CreateOrderRequest"];
 export type CreateOrderBatchRequest = components["schemas"]["CreateOrderBatchRequest"];
 export type CreateOrderBatchResponse = components["schemas"]["CreateOrderBatchResponse"];
 export type OrderResponse = components["schemas"]["OrderResponse"];
+export type OrderPickupCredentialsResponse = components["schemas"]["OrderPickupCredentialsResponse"];
 export type OrderOwnerSummary = components["schemas"]["OrderOwnerSummary"];
 export type OrderListResponse = components["schemas"]["OrderListResponse"];
 export type OrderListFacets = components["schemas"]["OrderListFacets"];
@@ -109,6 +110,15 @@ export async function getOrder(orderNo: string) {
   return unwrap<OrderResponse>(
     await client.GET("/v1/orders/{orderNo}", {
       params: { path: { orderNo } },
+    })
+  );
+}
+
+export async function getOrderPickupCredentials(orderNos: string[]) {
+  return unwrap<OrderPickupCredentialsResponse>(
+    await client.POST("/v1/orders/pickup-credentials", {
+      body: { orderNos },
+      params: { header: csrfHeader() },
     })
   );
 }

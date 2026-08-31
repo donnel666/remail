@@ -27,6 +27,18 @@ type CreateOrderBatchItemResponse struct {
 
 type CreateOrderBatchResponse []CreateOrderBatchItemResponse
 
+type OrderPickupCredentialsRequest struct {
+	OrderNos []string `json:"orderNos"`
+}
+
+type OrderPickupCredentialResponse struct {
+	OrderNo       string `json:"orderNo"`
+	DeliveryEmail string `json:"deliveryEmail"`
+	ServiceToken  string `json:"serviceToken"`
+}
+
+type OrderPickupCredentialsResponse []OrderPickupCredentialResponse
+
 type AdminOrderCommandRequest struct {
 	Reason string `json:"reason"`
 }

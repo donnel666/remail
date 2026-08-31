@@ -8,7 +8,11 @@ vi.mock("@/lib/api-client", () => ({
   unwrap: async (result: { data?: unknown }) => result.data,
 }));
 
-import { adminRefundOrder, listOrders } from "./orders-api";
+import {
+  adminRefundOrder,
+  getOrderPickupCredentials,
+  listOrders,
+} from "./orders-api";
 
 describe("order API adapter", () => {
   beforeEach(() => {
@@ -49,6 +53,21 @@ describe("order API adapter", () => {
       expect.objectContaining({
         body: { reason: "Admin console manual refund." },
       })
+    );
+  });
+
+  it("loads pickup credentials for all selected orders in one request", async () => {
+    apiMocks.POST.mockResolvedValueOnce({ data: [] });
+
+    await getOrderPickupCredentials(["OR1", "OR2"]);
+
+    expect(apiMocks.POST).toHaveBeenCalledTimes(1);
+    expect(apiMocks.POST).toHaveBeenCalledWith(
+      "/v1/orders/pickup-credentials",
+      {
+        body: { orderNos: ["OR1", "OR2"] },
+        params: { header: {} },
+      }
     );
   });
 });

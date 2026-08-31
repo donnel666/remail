@@ -6256,6 +6256,60 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/orders/pickup-credentials:
+    post:
+      operationId: postOrderPickupCredentials
+      summary: Read pickup credentials for selected orders in one request
+      tags:
+        - Trade
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderPickupCredentialsRequest"
+      responses:
+        "200":
+          description: Usable pickup credentials in request order; orders with missing, disabled, or expired tokens are omitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderPickupCredentialsResponse"
+        "400":
+          description: Invalid, empty, duplicate, or oversized order number list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: One or more orders do not belong to the current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: One or more orders do not exist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: Request body is too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/orders/{orderNo}:
     get:
       operationId: getOrder
@@ -15720,6 +15774,44 @@ components:
       maxItems: 100
       items:
         $ref: "#/components/schemas/CreateOrderBatchItemResponse"
+
+    OrderPickupCredentialsRequest:
+      type: object
+      required:
+        - orderNos
+      properties:
+        orderNos:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+      additionalProperties: false
+
+    OrderPickupCredentialResponse:
+      type: object
+      required:
+        - orderNo
+        - deliveryEmail
+        - serviceToken
+      properties:
+        orderNo:
+          type: string
+        deliveryEmail:
+          type: string
+        serviceToken:
+          type: string
+          description: Service credential used to construct the order pickup URL.
+      additionalProperties: false
+
+    OrderPickupCredentialsResponse:
+      type: array
+      maxItems: 100
+      items:
+        $ref: "#/components/schemas/OrderPickupCredentialResponse"
 
     OrderBatchItemErrorResponse:
       type: object

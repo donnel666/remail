@@ -26,8 +26,9 @@ type Handler struct {
 }
 
 const (
-	maxCreateOrderQuantity = 100
-	maxOrderRequestBytes   = 8 << 10
+	maxCreateOrderQuantity            = 100
+	maxOrderPickupCredentialBatchSize = 100
+	maxOrderRequestBytes              = 8 << 10
 )
 
 func NewHandler(mod *Module) *Handler {
@@ -323,6 +324,49 @@ func (h *Handler) GetOrder(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, orderResponse(*result))
+}
+
+func (h *Handler) PostOrderPickupCredentials(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	var req OrderPickupCredentialsRequest
+	if err := bindOrderJSON(c, &req); err != nil {
+		writeOrderBodyError(c, err)
+		return
+	}
+	if len(req.OrderNos) == 0 || len(req.OrderNos) > maxOrderPickupCredentialBatchSize {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Order batch must contain between 1 and 100 order numbers.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	seen := make(map[string]struct{}, len(req.OrderNos))
+	for i, orderNo := range req.OrderNos {
+		orderNo = strings.TrimSpace(orderNo)
+		if orderNo == "" || len(orderNo) > 64 {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "Order numbers must be non-empty, unique, and at most 64 characters.", "requestId": middleware.GetRequestID(c)})
+			return
+		}
+		if _, exists := seen[orderNo]; exists {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "Order numbers must be non-empty, unique, and at most 64 characters.", "requestId": middleware.GetRequestID(c)})
+			return
+		}
+		seen[orderNo] = struct{}{}
+		req.OrderNos[i] = orderNo
+	}
+	items, err := h.mod.UseCase.GetOrderPickupCredentials(c.Request.Context(), req.OrderNos, userID)
+	if err != nil {
+		writeTradeError(c, err)
+		return
+	}
+	response := make(OrderPickupCredentialsResponse, len(items))
+	for i, item := range items {
+		response[i] = OrderPickupCredentialResponse{
+			OrderNo: item.OrderNo, DeliveryEmail: item.DeliveryEmail, ServiceToken: item.ServiceToken,
+		}
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *Handler) GetOrderEvents(c *gin.Context) {

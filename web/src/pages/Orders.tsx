@@ -45,6 +45,7 @@ import {
 } from "@/lib/mailmatch-api";
 import {
   getOrder,
+  getOrderPickupCredentials,
   listOrders,
   type OrderListFacets,
   type OrderListFilter,
@@ -77,6 +78,7 @@ import {
   renderServiceModeTag,
   serviceModeLabel,
 } from "./orders/order-meta";
+import { exportPickupURLs } from "./orders/order-pickup-export";
 import { useSelectionNotification } from "./resources/use-selection-notification";
 import {
   TICKET_CREATE_ORDER_STORAGE_KEY,
@@ -145,10 +147,12 @@ export default function Orders() {
   const [compactMode, setCompactMode] = useState(false);
   const [activePage, setActivePage] = useState(1);
   const [pageSize, setPageSize] = useSharedPageSize();
-
-  useEffect(() => setActivePage(1), [pageSize]);
   const [orderFacets, setOrderFacets] = useState<OrderListFacets | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  useEffect(() => {
+    setActivePage(1);
+    setSelectedKeys([]);
+  }, [pageSize]);
   const [detailOrder, setDetailOrder] = useState<OrderResponse | null>(null);
   const [detailLoadingOrderNo, setDetailLoadingOrderNo] = useState<string | null>(
     null
@@ -159,6 +163,7 @@ export default function Orders() {
   const [pickupLoadingOrderNo, setPickupLoadingOrderNo] = useState<
     string | null
   >(null);
+  const [exportingPickupURLs, setExportingPickupURLs] = useState(false);
   const [mailboxOrder, setMailboxOrder] = useState<OrderResponse | null>(null);
   const [mailboxMessages, setMailboxMessages] = useState<WorkbenchMessage[]>([]);
   const mailboxOrderNoRef = useRef<string | null>(null);
@@ -493,10 +498,57 @@ export default function Orders() {
     submitTicket(selectedKeys);
   }, [selectedKeys, submitTicket]);
 
+  const selectedOrders = useMemo(() => {
+    const keys = new Set(selectedKeys);
+    return pagedItems.filter((order) => keys.has(order.orderNo));
+  }, [pagedItems, selectedKeys]);
+  const selectionIsCurrentPage =
+    selectedKeys.length > 0 && selectedOrders.length === selectedKeys.length;
+  const selectionCanSubmitTicket =
+    selectionIsCurrentPage && selectedOrders.every(orderCanSubmitTicket);
+  const selectionCanExportPickupURLs =
+    selectionIsCurrentPage && selectedOrders.every(orderCanUseService);
+
+  const exportSelectedPickupURLs = useCallback(async () => {
+    if (!selectionCanExportPickupURLs || exportingPickupURLs) return;
+    setExportingPickupURLs(true);
+    try {
+      const credentials = await getOrderPickupCredentials(selectedKeys);
+      if (credentials.length === 0) {
+        Toast.error(t("Service credential is unavailable."));
+        return;
+      }
+      exportPickupURLs(
+        credentials.map(({ deliveryEmail, serviceToken }) => ({
+          email: deliveryEmail,
+          url: buildPickupUrl(deliveryEmail, serviceToken),
+        }))
+      );
+    } catch (error) {
+      Toast.error(getIamErrorMessage(t, error, "Pickup URL export failed."));
+    } finally {
+      setExportingPickupURLs(false);
+    }
+  }, [
+    exportingPickupURLs,
+    selectedKeys,
+    selectionCanExportPickupURLs,
+    t,
+  ]);
+
   useSelectionNotification({
+    extraActions: [
+      {
+        disabled: !selectionCanExportPickupURLs,
+        key: "export-pickup-urls",
+        labelKey: "Export pickup URLs",
+        loading: exportingPickupURLs,
+        onClick: () => void exportSelectedPickupURLs(),
+      },
+    ],
     selectedCount: selectedKeys.length,
     checkLabelKey: "Ticket",
-    onCheck: submitTicketForSelection,
+    onCheck: selectionCanSubmitTicket ? submitTicketForSelection : undefined,
     onClear: clearSelection,
     selectionDescriptionKey: "Selected orders",
     t,
@@ -690,10 +742,10 @@ export default function Orders() {
     onChange: (keys?: Array<string | number>) => {
       setSelectedKeys((keys ?? []).map(String));
     },
-    // Batch action is ticket submission only, so rows past the after-sale
-    // window cannot be selected at all.
     getCheckboxProps: (record?: OrderResponse) => ({
-      disabled: !record || !orderCanSubmitTicket(record),
+      disabled:
+        !record ||
+        (!orderCanSubmitTicket(record) && !orderCanUseService(record)),
     }),
   };
 
@@ -908,10 +960,14 @@ export default function Orders() {
   const paginationArea = createCardProPagination({
     currentPage: safePage,
     isMobile,
-    onPageChange: (page) => setActivePage(page),
+    onPageChange: (page) => {
+      setActivePage(page);
+      setSelectedKeys([]);
+    },
     onPageSizeChange: (size) => {
       setPageSize(size);
       setActivePage(1);
+      setSelectedKeys([]);
     },
     pageSize,
     total,

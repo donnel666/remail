@@ -320,6 +320,21 @@ func (r *Repo) FindOrder(ctx context.Context, orderNo string) (*domain.Order, er
 	return &order, nil
 }
 
+func (r *Repo) FindOrdersByOrderNos(ctx context.Context, orderNos []string) (map[string]domain.Order, error) {
+	result := make(map[string]domain.Order, len(orderNos))
+	if len(orderNos) == 0 {
+		return result, nil
+	}
+	var models []OrderModel
+	if err := r.dbFor(ctx).Where("order_no IN ?", orderNos).Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("find orders by order numbers: %w", err)
+	}
+	for _, model := range models {
+		result[model.OrderNo] = orderModelToDomain(model)
+	}
+	return result, nil
+}
+
 func (r *Repo) LockOrderForUpdate(ctx context.Context, orderNo string) (*domain.Order, error) {
 	var model OrderModel
 	if err := lockOrder(ctx, r.dbFor(ctx), strings.TrimSpace(orderNo), &model); err != nil {
