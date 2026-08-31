@@ -2,6 +2,16 @@ import type { WorkbenchOrder } from "./types";
 
 const purchaseAutoFetchWindowMs = 60 * 60 * 1000;
 
+export function orderReceiveUntil(order: {
+  afterSaleUntil?: string | null;
+  receiveUntil?: string | null;
+  serviceMode: string;
+}) {
+  return order.serviceMode === "code"
+    ? (order.afterSaleUntil ?? order.receiveUntil)
+    : order.receiveUntil;
+}
+
 export function shouldAutoFetchOrderMail(
   order: Pick<WorkbenchOrder, "createdAt" | "serviceMode" | "serviceState">,
   now = Date.now(),
@@ -24,17 +34,13 @@ export function shouldAutoFetchOrderMail(
 export function shouldShowQuickFetchControl(
   order: Pick<
     WorkbenchOrder,
-    | "contentMode"
     | "hasDelivery"
-    | "maxCodes"
-    | "receivedCount"
     | "serviceMode"
+    | "serviceState"
     | "verificationCode"
   >,
 ) {
-  if (order.contentMode === "code_only") {
-    return (order.receivedCount ?? 0) < (order.maxCodes || 3);
-  }
+  if (order.serviceMode === "code") return order.serviceState === "waiting_mail";
   return (
     !order.verificationCode &&
     (!order.hasDelivery || order.serviceMode === "purchase")
@@ -47,27 +53,16 @@ export function mergeOrderRuntimeState(
 ): WorkbenchOrder {
   if (!current) return next;
   const preserveDeliveredState = current.hasDelivery && !next.hasDelivery;
-  const preserveCodes = (current.codes?.length ?? 0) > (next.codes?.length ?? 0);
   return {
     ...next,
-    codes: preserveCodes ? current.codes : next.codes,
-    codesExpireAt: next.codesExpireAt ?? current.codesExpireAt,
-    contentMode: next.contentMode ?? current.contentMode,
     hasDelivery: next.hasDelivery || current.hasDelivery,
     lastFetchedAt:
       next.lastMailReceivedAt ?? current.lastFetchedAt ?? next.lastFetchedAt,
-    lastMailReceivedAt:
-      preserveCodes
-        ? current.lastMailReceivedAt
-        : next.lastMailReceivedAt ?? current.lastMailReceivedAt,
+    lastMailReceivedAt: next.lastMailReceivedAt ?? current.lastMailReceivedAt,
     messages: current.messages,
-    maxCodes: next.maxCodes || current.maxCodes,
-    receivedCount: preserveCodes
-      ? current.receivedCount
-      : next.receivedCount,
-    serviceState: preserveDeliveredState || preserveCodes ? current.serviceState : next.serviceState,
+    serviceState: preserveDeliveredState ? current.serviceState : next.serviceState,
     token: next.token || current.token,
-    verificationCode: preserveDeliveredState || preserveCodes
+    verificationCode: preserveDeliveredState
       ? current.verificationCode
       : next.verificationCode,
   };

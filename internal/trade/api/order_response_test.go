@@ -69,3 +69,16 @@ func TestOrderResponseDoesNotExposeInternalProductID(t *testing.T) {
 	require.NotContains(t, string(payload), "productId")
 	require.NotContains(t, string(payload), "projectProductId")
 }
+
+func TestOrderResponseHidesUpstreamPickupShape(t *testing.T) {
+	payload, err := json.Marshal(orderResponse(tradeapp.CheckoutResult{
+		VerificationCode: "654321",
+	}))
+
+	require.NoError(t, err)
+	require.Contains(t, string(payload), `"verificationCode":"654321"`)
+	require.NotContains(t, string(payload), "contentMode")
+	require.NotContains(t, string(payload), "codes")
+	require.NotContains(t, string(payload), "receivedCount")
+	require.NotContains(t, string(payload), "maxCodes")
+}

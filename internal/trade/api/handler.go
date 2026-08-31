@@ -654,12 +654,6 @@ func orderResponse(result tradeapp.CheckoutResult) OrderResponse {
 	if order.AllocationType != nil {
 		allocationType = string(*order.AllocationType)
 	}
-	codes := make([]GmailCodeResponse, len(result.GmailCodes))
-	for i := range result.GmailCodes {
-		codes[i] = GmailCodeResponse{
-			Seq: result.GmailCodes[i].Seq, Code: result.GmailCodes[i].Code, ReceivedAt: result.GmailCodes[i].ReceivedAt,
-		}
-	}
 	allocationID = result.AllocationID
 	return OrderResponse{
 		ID:                   order.ID,
@@ -690,11 +684,6 @@ func orderResponse(result tradeapp.CheckoutResult) OrderResponse {
 		HasDelivery:          result.HasDelivery,
 		VerificationCode:     result.VerificationCode,
 		LastMailReceivedAt:   result.LastMailReceivedAt,
-		ContentMode:          result.ContentMode,
-		Codes:                codes,
-		ReceivedCount:        result.ReceivedCount,
-		MaxCodes:             result.MaxCodes,
-		CodesExpireAt:        result.CodesExpireAt,
 		GmailPassword:        result.GmailPassword,
 		GmailTwoFactorSecret: result.GmailTwoFactorSecret,
 		GmailAppPassword:     result.GmailAppPassword,

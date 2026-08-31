@@ -5,6 +5,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -2318,6 +2319,21 @@ func (e DomainResourceDetailPurpose) Valid() bool {
 	}
 }
 
+// Defines values for DomainResourceDetailType.
+const (
+	DomainResourceDetailTypeDomain DomainResourceDetailType = "domain"
+)
+
+// Valid indicates whether the value is a known member of the DomainResourceDetailType enum.
+func (e DomainResourceDetailType) Valid() bool {
+	switch e {
+	case DomainResourceDetailTypeDomain:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GitHubPendingResponseIntent.
 const (
 	Bind  GitHubPendingResponseIntent = "bind"
@@ -2657,6 +2673,21 @@ func (e LotteryType) Valid() bool {
 	}
 }
 
+// Defines values for MicrosoftResourceDetailType.
+const (
+	MicrosoftResourceDetailTypeMicrosoft MicrosoftResourceDetailType = "microsoft"
+)
+
+// Valid indicates whether the value is a known member of the MicrosoftResourceDetailType enum.
+func (e MicrosoftResourceDetailType) Valid() bool {
+	switch e {
+	case MicrosoftResourceDetailTypeMicrosoft:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MonitoringMetricSeriesType.
 const (
 	Counter   MonitoringMetricSeriesType = "counter"
@@ -2719,8 +2750,10 @@ func (e NodeLocPendingResponseProvider) Valid() bool {
 
 // Defines values for OrderBatchItemErrorResponseCode.
 const (
+	OrderBatchItemErrorResponseCodeIdempotencyConflict    OrderBatchItemErrorResponseCode = "idempotency_conflict"
 	OrderBatchItemErrorResponseCodeInsufficientBalance    OrderBatchItemErrorResponseCode = "insufficient_balance"
 	OrderBatchItemErrorResponseCodeInsufficientInventory  OrderBatchItemErrorResponseCode = "insufficient_inventory"
+	OrderBatchItemErrorResponseCodeTemporarilyUnavailable OrderBatchItemErrorResponseCode = "temporarily_unavailable"
 	OrderBatchItemErrorResponseCodeUpstreamPriceProtected OrderBatchItemErrorResponseCode = "upstream_price_protected"
 	OrderBatchItemErrorResponseCodeUpstreamUnavailable    OrderBatchItemErrorResponseCode = "upstream_unavailable"
 )
@@ -2728,9 +2761,13 @@ const (
 // Valid indicates whether the value is a known member of the OrderBatchItemErrorResponseCode enum.
 func (e OrderBatchItemErrorResponseCode) Valid() bool {
 	switch e {
+	case OrderBatchItemErrorResponseCodeIdempotencyConflict:
+		return true
 	case OrderBatchItemErrorResponseCodeInsufficientBalance:
 		return true
 	case OrderBatchItemErrorResponseCodeInsufficientInventory:
+		return true
+	case OrderBatchItemErrorResponseCodeTemporarilyUnavailable:
 		return true
 	case OrderBatchItemErrorResponseCodeUpstreamPriceProtected:
 		return true
@@ -2759,21 +2796,6 @@ func (e OrderEventResponseOperatorType) Valid() bool {
 	case OrderEventResponseOperatorTypeSystem:
 		return true
 	case OrderEventResponseOperatorTypeUser:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for OrderMailResponseContentMode.
-const (
-	OrderMailResponseContentModeCodeOnly OrderMailResponseContentMode = "code_only"
-)
-
-// Valid indicates whether the value is a known member of the OrderMailResponseContentMode enum.
-func (e OrderMailResponseContentMode) Valid() bool {
-	switch e {
-	case OrderMailResponseContentModeCodeOnly:
 		return true
 	default:
 		return false
@@ -2816,21 +2838,6 @@ func (e OrderResponseClientChannel) Valid() bool {
 	case ApiKey:
 		return true
 	case Console:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for OrderResponseContentMode.
-const (
-	OrderResponseContentModeCodeOnly OrderResponseContentMode = "code_only"
-)
-
-// Valid indicates whether the value is a known member of the OrderResponseContentMode enum.
-func (e OrderResponseContentMode) Valid() bool {
-	switch e {
-	case OrderResponseContentModeCodeOnly:
 		return true
 	default:
 		return false
@@ -3053,7 +3060,6 @@ const (
 	PickupBatchItemErrorResponseCodeInternalError      PickupBatchItemErrorResponseCode = "internal_error"
 	PickupBatchItemErrorResponseCodeInvalidRequest     PickupBatchItemErrorResponseCode = "invalid_request"
 	PickupBatchItemErrorResponseCodeOrderUnavailable   PickupBatchItemErrorResponseCode = "order_unavailable"
-	PickupBatchItemErrorResponseCodeRateLimited        PickupBatchItemErrorResponseCode = "rate_limited"
 	PickupBatchItemErrorResponseCodeServiceUnavailable PickupBatchItemErrorResponseCode = "service_unavailable"
 )
 
@@ -3067,8 +3073,6 @@ func (e PickupBatchItemErrorResponseCode) Valid() bool {
 	case PickupBatchItemErrorResponseCodeInvalidRequest:
 		return true
 	case PickupBatchItemErrorResponseCodeOrderUnavailable:
-		return true
-	case PickupBatchItemErrorResponseCodeRateLimited:
 		return true
 	case PickupBatchItemErrorResponseCodeServiceUnavailable:
 		return true
@@ -8424,7 +8428,7 @@ type CreateMailServerRequest struct {
 type CreateOrderBatchItemResponse struct {
 	Error  *OrderBatchItemErrorResponse       `json:"error,omitempty"`
 	Index  int                                `json:"index"`
-	Order  OrderResponse                      `json:"order"`
+	Order  *OrderResponse                     `json:"order,omitempty"`
 	Status CreateOrderBatchItemResponseStatus `json:"status"`
 }
 
@@ -8702,11 +8706,15 @@ type DomainResourceDetail struct {
 	Purpose DomainResourceDetailPurpose `json:"purpose"`
 
 	// Status Domain resource status (pending/validating/normal/abnormal/disabled/deleted)
-	Status string `json:"status"`
+	Status string                   `json:"status"`
+	Type   DomainResourceDetailType `json:"type"`
 }
 
 // DomainResourceDetailPurpose Domain resource purpose. not_sale is user-side private/unavailable for sale; sale is public supply; binding is displayed as auxiliary mailbox in Chinese.
 type DomainResourceDetailPurpose string
+
+// DomainResourceDetailType defines model for DomainResourceDetail.Type.
+type DomainResourceDetailType string
 
 // EmailCodeRequest defines model for EmailCodeRequest.
 type EmailCodeRequest struct {
@@ -8823,13 +8831,6 @@ type GitHubPendingResponseIntent string
 
 // GitHubPendingResponseProvider defines model for GitHubPendingResponse.Provider.
 type GitHubPendingResponseProvider string
-
-// GmailCodeResponse defines model for GmailCodeResponse.
-type GmailCodeResponse struct {
-	Code       string    `json:"code"`
-	ReceivedAt time.Time `json:"receivedAt"`
-	Seq        int       `json:"seq"`
-}
 
 // GmailInventory defines model for GmailInventory.
 type GmailInventory struct {
@@ -9334,9 +9335,11 @@ type LotteryType string
 
 // MailContentDetailResponse defines model for MailContentDetailResponse.
 type MailContentDetailResponse struct {
-	Body             string    `json:"body"`
-	BodyPreview      string    `json:"bodyPreview"`
-	Id               int       `json:"id"`
+	Body        string `json:"body"`
+	BodyPreview string `json:"bodyPreview"`
+
+	// Id Present only for stored mail that supports the message-detail endpoint; omitted for synthesized upstream code items.
+	Id               *int      `json:"id,omitempty"`
 	ReceivedAt       time.Time `json:"receivedAt"`
 	Recipient        string    `json:"recipient"`
 	Sender           string    `json:"sender"`
@@ -9346,8 +9349,10 @@ type MailContentDetailResponse struct {
 
 // MailContentResponse defines model for MailContentResponse.
 type MailContentResponse struct {
-	BodyPreview      string    `json:"bodyPreview"`
-	Id               int       `json:"id"`
+	BodyPreview string `json:"bodyPreview"`
+
+	// Id Present only for stored mail that supports the message-detail endpoint; omitted for synthesized upstream code items.
+	Id               *int      `json:"id,omitempty"`
 	ReceivedAt       time.Time `json:"receivedAt"`
 	Recipient        string    `json:"recipient"`
 	Sender           string    `json:"sender"`
@@ -9392,17 +9397,21 @@ type MicrosoftInventory struct {
 
 // MicrosoftResourceDetail defines model for MicrosoftResourceDetail.
 type MicrosoftResourceDetail struct {
-	CreatedAt       time.Time  `json:"createdAt"`
-	EmailAddress    string     `json:"emailAddress"`
-	ForSale         bool       `json:"forSale"`
-	GraphAvailable  bool       `json:"graphAvailable"`
-	Id              int        `json:"id"`
-	LastAllocatedAt *time.Time `json:"lastAllocatedAt,omitempty"`
-	LastSafeError   *string    `json:"lastSafeError,omitempty"`
-	LongLived       bool       `json:"longLived"`
-	QualityScore    int        `json:"qualityScore"`
-	Status          string     `json:"status"`
+	CreatedAt       time.Time                   `json:"createdAt"`
+	EmailAddress    string                      `json:"emailAddress"`
+	ForSale         bool                        `json:"forSale"`
+	GraphAvailable  bool                        `json:"graphAvailable"`
+	Id              int                         `json:"id"`
+	LastAllocatedAt *time.Time                  `json:"lastAllocatedAt,omitempty"`
+	LastSafeError   *string                     `json:"lastSafeError,omitempty"`
+	LongLived       bool                        `json:"longLived"`
+	QualityScore    int                         `json:"qualityScore"`
+	Status          string                      `json:"status"`
+	Type            MicrosoftResourceDetailType `json:"type"`
 }
+
+// MicrosoftResourceDetailType defines model for MicrosoftResourceDetail.Type.
+type MicrosoftResourceDetailType string
 
 // MonitoringApplicationStats defines model for MonitoringApplicationStats.
 type MonitoringApplicationStats struct {
@@ -9613,20 +9622,9 @@ type OrderListResponse struct {
 
 // OrderMailResponse defines model for OrderMailResponse.
 type OrderMailResponse struct {
-	Codes *[]GmailCodeResponse `json:"codes,omitempty"`
-
-	// ContentMode Present for Gmail code-only pickup responses.
-	ContentMode   *OrderMailResponseContentMode `json:"contentMode,omitempty"`
-	Email         *openapi_types.Email          `json:"email,omitempty"`
-	ExpiresAt     *time.Time                    `json:"expiresAt,omitempty"`
-	Fetch         *FetchStateResponse           `json:"fetch,omitempty"`
-	Items         []MailContentResponse         `json:"items"`
-	MaxCodes      *int                          `json:"maxCodes,omitempty"`
-	ReceivedCount *int                          `json:"receivedCount,omitempty"`
+	Fetch *FetchStateResponse   `json:"fetch,omitempty"`
+	Items []MailContentResponse `json:"items"`
 }
-
-// OrderMailResponseContentMode Present for Gmail code-only pickup responses.
-type OrderMailResponseContentMode string
 
 // OrderOwnerSummary Safe buyer summary attached to admin site-wide order rows; omitted on the buyer's own order list.
 type OrderOwnerSummary struct {
@@ -9655,14 +9653,9 @@ type OrderResponse struct {
 	ApiKeyId       *int                         `json:"apiKeyId,omitempty"`
 	ArchivedAt     *time.Time                   `json:"archivedAt,omitempty"`
 	ClientChannel  OrderResponseClientChannel   `json:"clientChannel"`
-	Codes          *[]GmailCodeResponse         `json:"codes,omitempty"`
-	CodesExpireAt  *time.Time                   `json:"codesExpireAt,omitempty"`
-
-	// ContentMode Gmail code-mode orders expose verification codes only and never synthesize mail content.
-	ContentMode   *OrderResponseContentMode `json:"contentMode,omitempty"`
-	CreatedAt     time.Time                 `json:"createdAt"`
-	DeliveryEmail string                    `json:"deliveryEmail"`
-	FailureCode   *OrderResponseFailureCode `json:"failureCode,omitempty"`
+	CreatedAt      time.Time                    `json:"createdAt"`
+	DeliveryEmail  string                       `json:"deliveryEmail"`
+	FailureCode    *OrderResponseFailureCode    `json:"failureCode,omitempty"`
 
 	// GmailAppPassword Local Gmail purchase application password. Returned only by checkout and authorized order-detail reads.
 	GmailAppPassword *string `json:"gmailAppPassword,omitempty"`
@@ -9679,7 +9672,6 @@ type OrderResponse struct {
 
 	// LastMailReceivedAt Provider receive time of the delivered message.
 	LastMailReceivedAt *time.Time `json:"lastMailReceivedAt,omitempty"`
-	MaxCodes           *int       `json:"maxCodes,omitempty"`
 	OrderNo            string     `json:"orderNo"`
 
 	// Owner Safe buyer summary attached to admin site-wide order rows; omitted on the buyer's own order list.
@@ -9699,7 +9691,6 @@ type OrderResponse struct {
 	ProjectName      *string    `json:"projectName,omitempty"`
 	ReceiveStartedAt *time.Time `json:"receiveStartedAt,omitempty"`
 	ReceiveUntil     *time.Time `json:"receiveUntil,omitempty"`
-	ReceivedCount    *int       `json:"receivedCount,omitempty"`
 
 	// RefundAmount Non-negative point amount with up to 6 decimal places.
 	RefundAmount         NonNegativeLedgerAmountResponse `json:"refundAmount"`
@@ -9713,7 +9704,7 @@ type OrderResponse struct {
 	UpdatedAt    time.Time                 `json:"updatedAt"`
 	UserId       int                       `json:"userId"`
 
-	// VerificationCode Verification code from the earliest matched delivery, when that message contains one.
+	// VerificationCode Verification code selected for the order summary; use Pickup items for the complete received-mail list.
 	VerificationCode *string `json:"verificationCode,omitempty"`
 }
 
@@ -9722,9 +9713,6 @@ type OrderResponseAllocationType string
 
 // OrderResponseClientChannel defines model for OrderResponse.ClientChannel.
 type OrderResponseClientChannel string
-
-// OrderResponseContentMode Gmail code-mode orders expose verification codes only and never synthesize mail content.
-type OrderResponseContentMode string
 
 // OrderResponseFailureCode defines model for OrderResponse.FailureCode.
 type OrderResponseFailureCode string
@@ -15184,6 +15172,7 @@ func (t GetResourceDetail200JSONResponseBody) AsMicrosoftResourceDetail() (Micro
 
 // FromMicrosoftResourceDetail overwrites any union data inside the GetResourceDetail200JSONResponseBody as the provided MicrosoftResourceDetail
 func (t *GetResourceDetail200JSONResponseBody) FromMicrosoftResourceDetail(v MicrosoftResourceDetail) error {
+	v.Type = "microsoft"
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
@@ -15191,6 +15180,7 @@ func (t *GetResourceDetail200JSONResponseBody) FromMicrosoftResourceDetail(v Mic
 
 // MergeMicrosoftResourceDetail performs a merge with any union data inside the GetResourceDetail200JSONResponseBody, using the provided MicrosoftResourceDetail
 func (t *GetResourceDetail200JSONResponseBody) MergeMicrosoftResourceDetail(v MicrosoftResourceDetail) error {
+	v.Type = "microsoft"
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -15210,6 +15200,7 @@ func (t GetResourceDetail200JSONResponseBody) AsDomainResourceDetail() (DomainRe
 
 // FromDomainResourceDetail overwrites any union data inside the GetResourceDetail200JSONResponseBody as the provided DomainResourceDetail
 func (t *GetResourceDetail200JSONResponseBody) FromDomainResourceDetail(v DomainResourceDetail) error {
+	v.Type = "domain"
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
@@ -15217,6 +15208,7 @@ func (t *GetResourceDetail200JSONResponseBody) FromDomainResourceDetail(v Domain
 
 // MergeDomainResourceDetail performs a merge with any union data inside the GetResourceDetail200JSONResponseBody, using the provided DomainResourceDetail
 func (t *GetResourceDetail200JSONResponseBody) MergeDomainResourceDetail(v DomainResourceDetail) error {
+	v.Type = "domain"
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -15225,6 +15217,29 @@ func (t *GetResourceDetail200JSONResponseBody) MergeDomainResourceDetail(v Domai
 	merged, err := runtime.JSONMerge(t.union, b)
 	t.union = merged
 	return err
+}
+
+func (t GetResourceDetail200JSONResponseBody) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"type"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t GetResourceDetail200JSONResponseBody) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "domain":
+		return t.AsDomainResourceDetail()
+	case "microsoft":
+		return t.AsMicrosoftResourceDetail()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
 }
 
 func (t GetResourceDetail200JSONResponseBody) MarshalJSON() ([]byte, error) {
@@ -15246,6 +15261,7 @@ func (t PostResourcePublish200JSONResponseBody) AsMicrosoftResourceDetail() (Mic
 
 // FromMicrosoftResourceDetail overwrites any union data inside the PostResourcePublish200JSONResponseBody as the provided MicrosoftResourceDetail
 func (t *PostResourcePublish200JSONResponseBody) FromMicrosoftResourceDetail(v MicrosoftResourceDetail) error {
+	v.Type = "microsoft"
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
@@ -15253,6 +15269,7 @@ func (t *PostResourcePublish200JSONResponseBody) FromMicrosoftResourceDetail(v M
 
 // MergeMicrosoftResourceDetail performs a merge with any union data inside the PostResourcePublish200JSONResponseBody, using the provided MicrosoftResourceDetail
 func (t *PostResourcePublish200JSONResponseBody) MergeMicrosoftResourceDetail(v MicrosoftResourceDetail) error {
+	v.Type = "microsoft"
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -15272,6 +15289,7 @@ func (t PostResourcePublish200JSONResponseBody) AsDomainResourceDetail() (Domain
 
 // FromDomainResourceDetail overwrites any union data inside the PostResourcePublish200JSONResponseBody as the provided DomainResourceDetail
 func (t *PostResourcePublish200JSONResponseBody) FromDomainResourceDetail(v DomainResourceDetail) error {
+	v.Type = "domain"
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
@@ -15279,6 +15297,7 @@ func (t *PostResourcePublish200JSONResponseBody) FromDomainResourceDetail(v Doma
 
 // MergeDomainResourceDetail performs a merge with any union data inside the PostResourcePublish200JSONResponseBody, using the provided DomainResourceDetail
 func (t *PostResourcePublish200JSONResponseBody) MergeDomainResourceDetail(v DomainResourceDetail) error {
+	v.Type = "domain"
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -15287,6 +15306,29 @@ func (t *PostResourcePublish200JSONResponseBody) MergeDomainResourceDetail(v Dom
 	merged, err := runtime.JSONMerge(t.union, b)
 	t.union = merged
 	return err
+}
+
+func (t PostResourcePublish200JSONResponseBody) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"type"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t PostResourcePublish200JSONResponseBody) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "domain":
+		return t.AsDomainResourceDetail()
+	case "microsoft":
+		return t.AsMicrosoftResourceDetail()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
 }
 
 func (t PostResourcePublish200JSONResponseBody) MarshalJSON() ([]byte, error) {

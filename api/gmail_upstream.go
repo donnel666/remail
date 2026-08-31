@@ -8,9 +8,7 @@ import (
 
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	coredomain "github.com/donnel666/remail/internal/core/domain"
-	"github.com/donnel666/remail/internal/gmail"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
-	mailmatchapi "github.com/donnel666/remail/internal/mailmatch/api"
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	mailmatchdomain "github.com/donnel666/remail/internal/mailmatch/domain"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
@@ -121,17 +119,11 @@ func (m smsbowerAlertMailer) NotifySMSBower(ctx context.Context, alert smsbower.
 	return result
 }
 
-type gmailPickupReader interface {
-	PickupByOrder(ctx context.Context, orderNo, email string) (*gmail.CodeOnlyPickup, bool, error)
-	ListGmailDeliveries(ctx context.Context, orderNos []string) (map[string]tradeapp.GmailDeliverySummary, error)
-}
-
 type gmailOrderTokenReader interface {
 	FindOrderTokenByPlain(ctx context.Context, tokenPlain string) (*openapidomain.OrderToken, error)
 }
 
 type gmailPickupAdapter struct {
-	service   gmailPickupReader
 	upstreams *upstream.Router
 	tokens    gmailOrderTokenReader
 }
@@ -155,39 +147,17 @@ func (a botCodeDiagnosisRefreshAdapter) RefreshCodeDiagnosis(ctx context.Context
 	return err
 }
 
-func (a gmailPickupAdapter) ReadCodeOnlyPickup(ctx context.Context, email, tokenPlain string) (*mailmatchapi.CodeOnlyPickupResult, bool, error) {
-	if a.service == nil || a.tokens == nil {
+func (a gmailPickupAdapter) ReadUpstreamPickup(ctx context.Context, email, tokenPlain string) ([]mailmatchdomain.MailContent, bool, error) {
+	_, host, ok := strings.Cut(strings.TrimSpace(email), "@")
+	if !ok || !strings.EqualFold(host, "gmail.com") {
+		return nil, false, nil
+	}
+	if a.tokens == nil {
 		return nil, false, nil
 	}
 	token, err := a.tokens.FindOrderTokenByPlain(ctx, tokenPlain)
 	if err != nil {
 		return nil, false, mailmatchdomain.ErrPickupCredentialInvalid
-	}
-	pickup, matched, err := a.service.PickupByOrder(ctx, token.OrderNo, email)
-	if errors.Is(err, gmail.ErrPickupInvalid) {
-		return nil, true, mailmatchdomain.ErrPickupCredentialInvalid
-	}
-	if err != nil || matched {
-		if err != nil || pickup == nil {
-			return nil, matched, err
-		}
-		codes := make([]mailmatchapi.CodeOnlyPickupCode, len(pickup.Codes))
-		for i := range pickup.Codes {
-			codes[i] = mailmatchapi.CodeOnlyPickupCode{
-				Seq: pickup.Codes[i].Seq, Code: pickup.Codes[i].Code, ReceivedAt: pickup.Codes[i].ReceivedAt,
-			}
-		}
-		return &mailmatchapi.CodeOnlyPickupResult{
-			Email: pickup.Email, Codes: codes, ReceivedCount: pickup.ReceivedCount,
-			MaxCodes: pickup.MaxCodes, ExpiresAt: pickup.ExpiresAt,
-		}, true, nil
-	}
-	localDeliveries, err := a.service.ListGmailDeliveries(ctx, []string{token.OrderNo})
-	if err != nil {
-		return nil, false, err
-	}
-	if _, local := localDeliveries[token.OrderNo]; local {
-		return nil, false, nil
 	}
 	upstreamPickup, handled, err := a.upstreams.Pickup(ctx, upstream.PickupRequest{OrderNo: token.OrderNo, Email: email})
 	if errors.Is(err, upstream.ErrPickupInvalid) {
@@ -197,18 +167,16 @@ func (a gmailPickupAdapter) ReadCodeOnlyPickup(ctx context.Context, email, token
 		return nil, handled, err
 	}
 	if upstreamPickup == nil {
-		return nil, true, nil
+		return []mailmatchdomain.MailContent{}, true, nil
 	}
-	codes := make([]mailmatchapi.CodeOnlyPickupCode, len(upstreamPickup.Codes))
+	items := make([]mailmatchdomain.MailContent, len(upstreamPickup.Codes))
 	for i := range upstreamPickup.Codes {
-		codes[i] = mailmatchapi.CodeOnlyPickupCode{
-			Seq: upstreamPickup.Codes[i].Seq, Code: upstreamPickup.Codes[i].Value, ReceivedAt: upstreamPickup.Codes[i].ReceivedAt,
+		items[i] = mailmatchdomain.MailContent{
+			Recipient: upstreamPickup.Email, ReceivedAt: upstreamPickup.Codes[i].ReceivedAt,
+			VerificationCode: upstreamPickup.Codes[i].Value,
 		}
 	}
-	return &mailmatchapi.CodeOnlyPickupResult{
-		Email: upstreamPickup.Email, Codes: codes, ReceivedCount: upstreamPickup.ReceivedCount,
-		MaxCodes: upstreamPickup.MaxCodes, ExpiresAt: upstreamPickup.ExpiresAt,
-	}, true, nil
+	return items, true, nil
 }
 
 type gmailDeliveryReader interface {
@@ -256,9 +224,7 @@ func (c gmailDeliveryComposite) ListGmailDeliveries(ctx context.Context, orders 
 				Seq: delivery.Codes[i].Seq, Code: delivery.Codes[i].Value, ReceivedAt: delivery.Codes[i].ReceivedAt,
 			}
 		}
-		result[orderNo] = tradeapp.GmailDeliverySummary{
-			Codes: codes, ReceivedCount: delivery.ReceivedCount, MaxCodes: delivery.MaxCodes, ExpiresAt: delivery.ExpiresAt,
-		}
+		result[orderNo] = tradeapp.GmailDeliverySummary{Codes: codes}
 	}
 	return result, nil
 }

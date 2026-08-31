@@ -9,27 +9,11 @@ import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
   readPickupMail,
   readPickupMessage,
-  type OrderMailResponse,
 } from "@/lib/mailmatch-api";
 
 import { MailboxClient } from "./workbench/mailbox-client";
 import type { FetchSource, WorkbenchMessage } from "./workbench/types";
-
-function toPickupMessages(items: OrderMailResponse["items"]): WorkbenchMessage[] {
-  return items.map((item) => {
-    return {
-      body: "",
-      id: String(item.id),
-      preview: item.bodyPreview,
-      receivedAt: item.receivedAt,
-      recipient: item.recipient,
-      sender: item.sender,
-      status: item.verificationCode ? "matched" : "received",
-      subject: item.subject || "(No subject)",
-      verificationCode: item.verificationCode,
-    };
-  });
-}
+import { pickupMessagesToWorkbench } from "./workbench/utils";
 
 export default function Pickup() {
   const { t } = useTranslation();
@@ -60,7 +44,7 @@ export default function Pickup() {
       void source;
       const result = await readPickupMail(email, token);
       if (loadSeqRef.current !== seq) return;
-      setMessages(toPickupMessages(result.items));
+      setMessages(pickupMessagesToWorkbench(result.items));
       if (result.fetch?.nextFetchAllowedAt) {
         return Math.max(
           1,

@@ -1,9 +1,15 @@
 {
-  "openapi": "3.1.0",
+  "openapi": "3.0.3",
   "info": {
     "title": "ReMail 开放 API",
     "version": "1.0.0"
   },
+  "servers": [
+    {
+      "url": "https://remail.aishop6.com",
+      "description": "生产环境"
+    }
+  ],
   "tags": [
     {
       "name": "Core",
@@ -185,6 +191,7 @@
         "properties": {
           "id": {
             "type": "integer",
+            "format": "int64",
             "example": 18
           },
           "name": {
@@ -200,42 +207,37 @@
             "example": true
           },
           "concurrencyLimit": {
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer",
+            "nullable": true
           },
           "quotaLimit": {
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer",
+            "nullable": true,
+            "format": "int64"
           },
           "quotaUsed": {
             "type": "integer",
+            "format": "int64",
             "example": 372
           },
           "remainingQuota": {
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer",
+            "nullable": true,
+            "format": "int64"
           },
           "activeRequests": {
             "type": "integer",
             "example": 0
           },
           "expireAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
           },
           "lastUsedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
           },
           "createdAt": {
             "type": "string",
@@ -269,6 +271,7 @@
           },
           "total": {
             "type": "integer",
+            "format": "int64",
             "example": 36
           },
           "offset": {
@@ -319,6 +322,7 @@
         "properties": {
           "id": {
             "type": "integer",
+            "format": "int64",
             "example": 1001
           },
           "name": {
@@ -352,6 +356,16 @@
               "private"
             ]
           },
+          "owner": {
+            "$ref": "#/components/schemas/ProjectOwner"
+          },
+          "applicantUserId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "reviewReason": {
+            "type": "string"
+          },
           "looseMatch": {
             "type": "boolean",
             "example": false
@@ -363,6 +377,12 @@
           "mailRuleCount": {
             "type": "integer",
             "example": 3
+          },
+          "supportsDotAlias": {
+            "type": "boolean"
+          },
+          "supportsPlusAlias": {
+            "type": "boolean"
           },
           "products": {
             "type": "array",
@@ -388,9 +408,41 @@
           "looseMatch",
           "productCount",
           "mailRuleCount",
+          "supportsDotAlias",
+          "supportsPlusAlias",
           "createdAt",
           "updatedAt"
         ]
+      },
+      "ProjectOwner": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "nickname": {
+            "type": "string"
+          },
+          "groupName": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "enabled"
+        ],
+        "additionalProperties": false
       },
       "ProjectProductSummary": {
         "type": "object",
@@ -447,11 +499,29 @@
           },
           "totalAvailable": {
             "type": "integer",
+            "format": "int64",
             "example": 815
           },
           "publicAvailable": {
             "type": "integer",
+            "format": "int64",
             "example": 300
+          },
+          "codeAvailable": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "codePublicAvailable": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "purchaseAvailable": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "purchasePublicAvailable": {
+            "type": "integer",
+            "format": "int64"
           },
           "suffixes": {
             "type": "array",
@@ -459,7 +529,21 @@
               "$ref": "#/components/schemas/ProductSuffixInventory"
             }
           }
-        }
+        },
+        "required": [
+          "type",
+          "status",
+          "codeEnabled",
+          "purchaseEnabled",
+          "codePrice",
+          "purchasePrice",
+          "priceMultiplier",
+          "codeWindowMinutes",
+          "activationWindowMinutes",
+          "warrantyMinutes",
+          "totalAvailable",
+          "publicAvailable"
+        ]
       },
       "ProductSuffixInventory": {
         "type": "object",
@@ -471,10 +555,12 @@
           },
           "totalAvailable": {
             "type": "integer",
+            "format": "int64",
             "example": 120
           },
           "publicAvailable": {
             "type": "integer",
+            "format": "int64",
             "example": 80
           }
         },
@@ -494,6 +580,7 @@
             "properties": {
               "projectId": {
                 "type": "integer",
+                "format": "int64",
                 "example": 1001
               },
               "createdAt": {
@@ -504,7 +591,12 @@
                 "type": "string",
                 "format": "date-time"
               }
-            }
+            },
+            "required": [
+              "projectId",
+              "createdAt",
+              "updatedAt"
+            ]
           }
         ]
       },
@@ -512,10 +604,12 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "projectId": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "ruleType": {
             "type": "string",
@@ -541,7 +635,16 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "ruleType",
+          "pattern",
+          "enabled",
+          "createdAt",
+          "updatedAt"
+        ]
       },
       "ProjectFacets": {
         "type": "object",
@@ -549,34 +652,46 @@
           "status": {
             "type": "object",
             "additionalProperties": {
-              "type": "integer"
+              "type": "integer",
+              "format": "int64"
             }
           },
           "access": {
             "type": "object",
             "additionalProperties": {
-              "type": "integer"
+              "type": "integer",
+              "format": "int64"
             }
           },
           "match": {
             "type": "object",
             "additionalProperties": {
-              "type": "integer"
+              "type": "integer",
+              "format": "int64"
             }
           },
           "productType": {
             "type": "object",
             "additionalProperties": {
-              "type": "integer"
+              "type": "integer",
+              "format": "int64"
             }
           }
-        }
+        },
+        "required": [
+          "status",
+          "access",
+          "match",
+          "productType"
+        ],
+        "additionalProperties": false
       },
       "CreateOrderRequest": {
         "type": "object",
         "properties": {
           "projectId": {
             "type": "integer",
+            "format": "int64",
             "example": 1001
           },
           "emailSuffix": {
@@ -596,6 +711,7 @@
         "properties": {
           "projectId": {
             "type": "integer",
+            "format": "int64",
             "example": 1001
           },
           "emailSuffix": {
@@ -624,7 +740,11 @@
             "type": "string",
             "enum": [
               "insufficient_balance",
-              "insufficient_inventory"
+              "insufficient_inventory",
+              "upstream_price_protected",
+              "upstream_unavailable",
+              "idempotency_conflict",
+              "temporarily_unavailable"
             ]
           },
           "message": {
@@ -660,7 +780,6 @@
         },
         "required": [
           "index",
-          "order",
           "status"
         ],
         "additionalProperties": false
@@ -682,8 +801,18 @@
               "$ref": "#/components/schemas/Order"
             }
           },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "example": 120
+          },
+          "offset": {
+            "type": "integer",
+            "example": 0
+          },
           "nextAfterId": {
             "type": "integer",
+            "format": "int64",
             "example": 3019
           },
           "hasNext": {
@@ -697,6 +826,8 @@
         },
         "required": [
           "items",
+          "total",
+          "offset",
           "hasNext",
           "limit"
         ]
@@ -706,6 +837,7 @@
         "properties": {
           "id": {
             "type": "integer",
+            "format": "int64",
             "example": 3021
           },
           "orderNo": {
@@ -714,11 +846,20 @@
           },
           "userId": {
             "type": "integer",
+            "format": "int64",
             "example": 1
           },
           "projectId": {
             "type": "integer",
+            "format": "int64",
             "example": 1001
+          },
+          "projectName": {
+            "type": "string",
+            "example": "Microsoft 账号验证码"
+          },
+          "projectLogoUrl": {
+            "type": "string"
           },
           "productType": {
             "type": "string",
@@ -782,6 +923,7 @@
           },
           "allocationId": {
             "type": "integer",
+            "format": "int64",
             "example": 991
           },
           "deliveryEmail": {
@@ -789,38 +931,33 @@
             "example": "mateo.richards@outlook.com"
           },
           "receiveStartedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
           },
           "receiveUntil": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
           },
           "activatedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
           },
           "afterSaleUntil": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
           },
           "clientChannel": {
             "type": "string",
             "example": "api_key"
           },
           "apiKeyId": {
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer",
+            "nullable": true,
+            "format": "int64"
           },
           "serviceCleanupStatus": {
             "type": "string",
@@ -843,17 +980,23 @@
             "example": "829104"
           },
           "lastMailReceivedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": "string",
+            "nullable": true,
             "format": "date-time"
           },
+          "gmailPassword": {
+            "type": "string"
+          },
+          "gmailTwoFactorSecret": {
+            "type": "string"
+          },
+          "gmailAppPassword": {
+            "type": "string"
+          },
           "archivedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
           },
           "createdAt": {
             "type": "string",
@@ -927,7 +1070,7 @@
           "items": {
             "type": "array",
             "minItems": 2,
-            "maxItems": 200,
+            "maxItems": 100,
             "items": {
               "$ref": "#/components/schemas/PickupCredentialRequest"
             }
@@ -945,7 +1088,6 @@
             "type": "string",
             "enum": [
               "invalid_request",
-              "rate_limited",
               "credential_invalid",
               "order_unavailable",
               "service_unavailable",
@@ -992,7 +1134,7 @@
       "PickupBatchResponse": {
         "type": "array",
         "minItems": 2,
-        "maxItems": 200,
+        "maxItems": 100,
         "items": {
           "$ref": "#/components/schemas/PickupBatchItemResponse"
         }
@@ -1002,7 +1144,10 @@
         "properties": {
           "id": {
             "type": "integer",
-            "example": 5012
+            "format": "int64",
+            "minimum": 1,
+            "example": 5012,
+            "description": "存在正 ID 时可调用单封邮件正文接口；上游合成项不返回 ID。"
           },
           "sender": {
             "type": "string",
@@ -1030,7 +1175,6 @@
           }
         },
         "required": [
-          "id",
           "sender",
           "recipient",
           "receivedAt",
@@ -1061,49 +1205,48 @@
         "type": "object",
         "properties": {
           "lastJobId": {
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer",
+            "nullable": true,
+            "format": "int64"
           },
           "lastStatus": {
             "type": "string",
             "example": "succeeded"
           },
           "lastSubmittedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
           },
           "lastSuccessAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
           },
           "lastReceivedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
           },
           "nextFetchAllowedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
           },
           "lastSafeError": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "lastStatus"
+        ]
       },
       "Wallet": {
         "type": "object",
         "properties": {
           "userId": {
             "type": "integer",
+            "format": "int64",
             "example": 1
           },
           "consumerBalance": {
@@ -1118,13 +1261,28 @@
             "type": "string",
             "example": "0.00"
           },
+          "totalRecharged": {
+            "type": "string",
+            "example": "560.00"
+          },
           "historicalSpend": {
             "type": "string",
             "example": "391.20"
           },
           "orderCount": {
             "type": "integer",
+            "format": "int64",
             "example": 486
+          },
+          "supplierAllocationCount": {
+            "type": "integer",
+            "format": "int64",
+            "example": 0
+          },
+          "supplierFulfillmentSuccessRate": {
+            "type": "number",
+            "format": "double",
+            "example": 0
           },
           "updatedAt": {
             "type": "string",
@@ -1136,8 +1294,11 @@
           "consumerBalance",
           "supplierAvailable",
           "supplierFrozen",
+          "totalRecharged",
           "historicalSpend",
           "orderCount",
+          "supplierAllocationCount",
+          "supplierFulfillmentSuccessRate",
           "updatedAt"
         ]
       },
@@ -1151,7 +1312,8 @@
             }
           },
           "nextAfterId": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "hasNext": {
             "type": "boolean"
@@ -1170,14 +1332,16 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "transactionNo": {
             "type": "string",
             "example": "TX20260709140100188"
           },
           "userId": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "transactionType": {
             "type": "string",
@@ -1218,7 +1382,21 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "transactionNo",
+          "userId",
+          "transactionType",
+          "balanceBucket",
+          "direction",
+          "amount",
+          "balanceBefore",
+          "balanceAfter",
+          "bizType",
+          "bizId",
+          "createdAt"
+        ]
       },
       "RechargeListResponse": {
         "type": "object",
@@ -1230,7 +1408,8 @@
             }
           },
           "total": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "offset": {
             "type": "integer"
@@ -1250,14 +1429,16 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "rechargeNo": {
             "type": "string",
             "example": "RC20260709141500920"
           },
           "userId": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "paymentMethod": {
             "type": "string",
@@ -1271,6 +1452,28 @@
             "type": "string",
             "example": "succeeded"
           },
+          "gatewayTradeNo": {
+            "type": "string"
+          },
+          "failureReason": {
+            "type": "string"
+          },
+          "queryAttempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "paidAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reconciledAt": {
+            "type": "string",
+            "format": "date-time"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -1279,7 +1482,19 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "rechargeNo",
+          "userId",
+          "paymentMethod",
+          "creditedPoints",
+          "status",
+          "queryAttempts",
+          "expiresAt",
+          "createdAt",
+          "updatedAt"
+        ]
       },
       "RedeemCardRequest": {
         "type": "object",
@@ -1331,16 +1546,14 @@
             "type": "integer"
           },
           "expireAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
           },
           "createdByUserId": {
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer",
+            "nullable": true,
+            "format": "int64"
           },
           "createdAt": {
             "type": "string",
@@ -1350,7 +1563,18 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "cardKey",
+          "amount",
+          "status",
+          "maxRedemptions",
+          "redeemedCount",
+          "expireAt",
+          "createdByUserId",
+          "createdAt",
+          "updatedAt"
+        ]
       },
       "ResourceListResponse": {
         "type": "object",
@@ -1362,27 +1586,157 @@
             }
           },
           "total": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "offset": {
             "type": "integer"
           },
           "limit": {
             "type": "integer"
+          },
+          "nextAfterId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "facets": {
+            "$ref": "#/components/schemas/ResourceListFacets"
           }
         },
         "required": [
           "items",
-          "total",
           "offset",
           "limit"
-        ]
+        ],
+        "additionalProperties": false
+      },
+      "ResourceListFacets": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/ResourceFacetCounts"
+          },
+          "private": {
+            "$ref": "#/components/schemas/ResourceBooleanFacets"
+          },
+          "longLived": {
+            "$ref": "#/components/schemas/ResourceBooleanFacets"
+          },
+          "graphAvailable": {
+            "$ref": "#/components/schemas/ResourceBooleanFacets"
+          },
+          "suffixes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResourceKeyFacet"
+            }
+          },
+          "tlds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResourceKeyFacet"
+            }
+          }
+        },
+        "required": [
+          "status",
+          "private",
+          "longLived",
+          "graphAvailable",
+          "suffixes",
+          "tlds"
+        ],
+        "additionalProperties": false
+      },
+      "ResourceFacetCounts": {
+        "type": "object",
+        "properties": {
+          "all": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "normal": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "validating": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "identifying": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "abnormal": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "disabled": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "all",
+          "normal",
+          "pending",
+          "validating",
+          "identifying",
+          "abnormal",
+          "disabled"
+        ],
+        "additionalProperties": false
+      },
+      "ResourceBooleanFacets": {
+        "type": "object",
+        "properties": {
+          "all": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "yes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "no": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "all",
+          "yes",
+          "no"
+        ],
+        "additionalProperties": false
+      },
+      "ResourceKeyFacet": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "key",
+          "count"
+        ],
+        "additionalProperties": false
       },
       "Resource": {
         "type": "object",
         "properties": {
           "id": {
             "type": "integer",
+            "format": "int64",
             "example": 9081
           },
           "type": {
@@ -1393,29 +1747,24 @@
             ]
           },
           "ownerId": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "status": {
             "type": "string",
             "example": "valid"
           },
           "forSale": {
-            "type": [
-              "boolean",
-              "null"
-            ]
+            "type": "boolean",
+            "nullable": true
           },
           "longLived": {
-            "type": [
-              "boolean",
-              "null"
-            ]
+            "type": "boolean",
+            "nullable": true
           },
           "graphAvailable": {
-            "type": [
-              "boolean",
-              "null"
-            ]
+            "type": "boolean",
+            "nullable": true
           },
           "lastSafeError": {
             "type": "string"
@@ -1433,7 +1782,8 @@
             "example": "com"
           },
           "mailServerId": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "purpose": {
             "type": "string",
@@ -1443,27 +1793,123 @@
             "type": "integer",
             "example": 10000
           },
+          "orderCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "successfulOrderCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "lastAllocatedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "ownerId",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "ResourceDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "microsoft",
+              "domain"
+            ]
+          },
+          "emailAddress": {
+            "type": "string"
+          },
+          "forSale": {
+            "type": "boolean"
+          },
+          "longLived": {
+            "type": "boolean"
+          },
+          "graphAvailable": {
+            "type": "boolean"
+          },
+          "qualityScore": {
+            "type": "integer"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "mailServerId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "not_sale",
+              "sale",
+              "binding"
+            ]
+          },
+          "allowNewBindings": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          },
+          "lastSafeError": {
+            "type": "string"
+          },
+          "lastAllocatedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
           }
-        }
-      },
-      "ResourceDetail": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/MicrosoftResourceDetail"
-          },
-          {
-            "$ref": "#/components/schemas/DomainResourceDetail"
-          }
-        ]
+        },
+        "required": [
+          "id",
+          "type",
+          "status",
+          "createdAt"
+        ],
+        "additionalProperties": false
       },
       "MicrosoftResourceDetail": {
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "microsoft"
+            ]
           },
           "emailAddress": {
             "type": "string"
@@ -1487,31 +1933,58 @@
             "type": "string"
           },
           "lastAllocatedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
           },
           "createdAt": {
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "type",
+          "emailAddress",
+          "forSale",
+          "longLived",
+          "graphAvailable",
+          "status",
+          "qualityScore",
+          "createdAt"
+        ],
+        "additionalProperties": false
       },
       "DomainResourceDetail": {
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "domain"
+            ]
           },
           "domain": {
             "type": "string"
           },
           "mailServerId": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "purpose": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "not_sale",
+              "sale",
+              "binding"
+            ]
+          },
+          "allowNewBindings": {
+            "type": "boolean"
           },
           "status": {
             "type": "string"
@@ -1520,22 +1993,33 @@
             "type": "string"
           },
           "lastAllocatedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
           },
           "createdAt": {
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "type",
+          "domain",
+          "mailServerId",
+          "purpose",
+          "allowNewBindings",
+          "status",
+          "createdAt"
+        ],
+        "additionalProperties": false
       },
       "ImportAcceptedResponse": {
         "type": "object",
         "properties": {
           "importId": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "imported": {
             "type": "integer"
@@ -1550,7 +2034,8 @@
         "type": "object",
         "properties": {
           "importId": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "status": {
             "type": "string",
@@ -1618,7 +2103,8 @@
           "resourceIds": {
             "type": "array",
             "items": {
-              "type": "integer"
+              "type": "integer",
+              "format": "int64"
             }
           },
           "filter": {
@@ -1639,22 +2125,16 @@
                 "type": "string"
               },
               "forSale": {
-                "type": [
-                  "boolean",
-                  "null"
-                ]
+                "type": "boolean",
+                "nullable": true
               },
               "longLived": {
-                "type": [
-                  "boolean",
-                  "null"
-                ]
+                "type": "boolean",
+                "nullable": true
               },
               "graphAvailable": {
-                "type": [
-                  "boolean",
-                  "null"
-                ]
+                "type": "boolean",
+                "nullable": true
               }
             }
           }
@@ -1673,7 +2153,8 @@
             }
           },
           "total": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "offset": {
             "type": "integer"
@@ -1693,7 +2174,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "name": {
             "type": "string"
@@ -1708,7 +2190,15 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "name",
+          "serverAddress",
+          "status",
+          "createdAt"
+        ],
+        "additionalProperties": false
       },
       "CreateMailServerRequest": {
         "type": "object",
@@ -1750,6 +2240,7 @@
           },
           "mailServerId": {
             "type": "integer",
+            "format": "int64",
             "example": 12
           },
           "purpose": {
@@ -1771,7 +2262,8 @@
             }
           },
           "total": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "offset": {
             "type": "integer"
@@ -1791,7 +2283,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "email": {
             "type": "string"
@@ -1800,16 +2293,22 @@
             "type": "string"
           },
           "lastAllocatedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
           },
           "createdAt": {
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "email",
+          "status",
+          "createdAt"
+        ],
+        "additionalProperties": false
       }
     }
   },
@@ -2013,7 +2512,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "format": "int64"
             }
           }
         ],
@@ -2109,6 +2609,7 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -2187,6 +2688,7 @@
             "in": "query",
             "schema": {
               "type": "integer",
+              "format": "int64",
               "minimum": 1
             },
             "description": "上一页最后一条记录的 ID。"
@@ -2320,6 +2822,7 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -2500,20 +3003,8 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
-          },
-          "429": {
-            "$ref": "#/components/responses/TooManyRequests"
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
@@ -2531,9 +3022,10 @@
         ],
         "operationId": "pickupMessagesBatch",
         "summary": "批量取件读取邮件",
-        "description": "一次读取 2 到 200 组邮箱和服务凭证，响应数组与请求 items 顺序一致。单项失败不丢弃其他成功项；整批请求按客户端 IP 限流，每个服务 Token 仍受逐 Token 限流。请求体中的服务凭证不得记录到日志。",
+        "description": "一次读取 2 到 100 组邮箱和服务凭证，响应数组与请求 items 顺序一致。单项失败不丢弃其他成功项；请求体中的服务凭证不得记录到日志。",
         "security": [],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -2569,16 +3061,6 @@
           "413": {
             "$ref": "#/components/responses/PayloadTooLarge"
           },
-          "429": {
-            "description": "客户端 IP 的批量取件请求超过限制。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
@@ -2600,7 +3082,9 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
             }
           },
           {
@@ -2644,14 +3128,8 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
-          },
-          "429": {
-            "$ref": "#/components/responses/TooManyRequests"
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
@@ -2733,6 +3211,7 @@
             "in": "query",
             "schema": {
               "type": "integer",
+              "format": "int64",
               "minimum": 1
             },
             "description": "上一页最后一条记录的 ID。"
@@ -2913,6 +3392,7 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -3078,7 +3558,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "format": "int64"
             }
           }
         ],
@@ -3139,7 +3620,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "format": "int64"
             }
           }
         ],
@@ -3195,7 +3677,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "format": "int64"
             }
           }
         ],
@@ -3253,6 +3736,7 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "multipart/form-data": {
               "schema": {
@@ -3342,7 +3826,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "format": "int64"
             }
           }
         ],
@@ -3400,6 +3885,7 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -3546,6 +4032,7 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -3608,6 +4095,7 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -3675,7 +4163,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "format": "int64"
             }
           },
           {

@@ -469,7 +469,7 @@ func (s *Service) Pickup(ctx context.Context, request upstream.PickupRequest) (*
 		items[i] = upstream.Code{Seq: codes[i].Seq, Value: codes[i].Code, ReceivedAt: codes[i].ReceivedAt}
 	}
 	return &upstream.PickupResult{
-		Email: model.Email, Codes: items, ReceivedCount: int(model.ReceivedCount), MaxCodes: MaxCodes, ExpiresAt: model.ExpiresAt,
+		Email: model.Email, Codes: items,
 	}, true, nil
 }
 
@@ -492,7 +492,7 @@ func (s *Service) ListDeliveries(ctx context.Context, orderNos []string) (map[st
 			items[i] = upstream.Code{Seq: codes[i].Seq, Value: codes[i].Code, ReceivedAt: codes[i].ReceivedAt}
 		}
 		result[model.OrderNo] = upstream.PickupResult{
-			Email: model.Email, Codes: items, ReceivedCount: int(model.ReceivedCount), MaxCodes: MaxCodes, ExpiresAt: model.ExpiresAt,
+			Email: model.Email, Codes: items,
 		}
 	}
 	return result, nil

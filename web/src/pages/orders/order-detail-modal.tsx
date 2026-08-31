@@ -17,6 +17,7 @@ import {
   maskSecret,
   productTypeLabel,
 } from "@/pages/workbench/utils";
+import { orderReceiveUntil } from "@/pages/workbench/order-runtime";
 
 import {
   formatLedgerAmount,
@@ -112,14 +113,11 @@ export function OrderDetailModal({
 }) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
-  const codeOnly = order?.contentMode === "code_only";
-  const maxCodes = order?.maxCodes || 3;
-
-  const receiveUntilLabel = codeOnly
-    ? t("Codes expire at")
-    : order?.serviceMode === "purchase" && !order.activatedAt
+  const receiveUntilLabel =
+    order?.serviceMode === "purchase" && !order.activatedAt
       ? t("Activation until")
       : t("Receive until");
+  const receiveUntil = order ? orderReceiveUntil(order) : undefined;
   const pickupUrl = order?.serviceToken
     ? buildPickupUrl(order.deliveryEmail, order.serviceToken)
     : undefined;
@@ -144,11 +142,6 @@ export function OrderDetailModal({
             <Tag color="white" shape="circle">
               {order.clientChannel === "console" ? t("Console") : "API Key"}
             </Tag>
-            {codeOnly ? (
-              <Tag color="purple" shape="circle">
-                {t("Code-only delivery")}
-              </Tag>
-            ) : null}
           </div>
 
           <DetailRow
@@ -202,63 +195,30 @@ export function OrderDetailModal({
               }
             />
           ) : null}
-          {codeOnly
-            ? Array.from({ length: maxCodes }, (_, index) => {
-                const sequence = index + 1;
-                const item = order.codes?.find((code) => code.seq === sequence);
-                return (
-                  <DetailRow
-                    key={sequence}
-                    label={t("Verification code slot", {
-                      current: sequence,
-                      total: maxCodes,
-                    })}
-                    value={
-                      item ? (
-                        <div className="flex items-center gap-2">
-                          <CopyableEllipsisText
-                            className="font-mono-data"
-                            text={item.code}
-                          />
-                          <span className="text-[var(--semi-color-text-2)]">
-                            {formatOrderDateTime(item.receivedAt)}
-                          </span>
-                        </div>
-                      ) : (
-                        <Tag color="grey" shape="circle">
-                          {t("Waiting")}
-                        </Tag>
-                      )
-                    }
-                  />
-                );
-              })
-            : (
-              <DetailRow
-                label={t(
-                  order.verificationCode
-                    ? mailExtractionLabelKey(order.verificationCode, "Code")
-                    : "Code"
-                )}
-                value={
-                  order.verificationCode ? (
-                    <CopyableEllipsisText
-                      className="font-mono-data"
-                      text={order.verificationCode}
-                    />
-                  ) : order.status === "active" ? (
-                    <Tag color="grey" shape="circle">
-                      {t("Waiting")}
-                    </Tag>
-                  ) : (
-                    <span className="text-[var(--semi-color-text-3)]">-</span>
-                  )
-                }
-              />
+          <DetailRow
+            label={t(
+              order.verificationCode
+                ? mailExtractionLabelKey(order.verificationCode, "Code")
+                : "Code"
             )}
+            value={
+              order.verificationCode ? (
+                <CopyableEllipsisText
+                  className="font-mono-data"
+                  text={order.verificationCode}
+                />
+              ) : order.status === "active" ? (
+                <Tag color="grey" shape="circle">
+                  {t("Waiting")}
+                </Tag>
+              ) : (
+                <span className="text-[var(--semi-color-text-3)]">-</span>
+              )
+            }
+          />
           <DetailRow
             label={receiveUntilLabel}
-            value={formatOrderDateTime(codeOnly ? order.codesExpireAt : order.receiveUntil)}
+            value={formatOrderDateTime(receiveUntil)}
           />
           {order.activatedAt ? (
             <DetailRow
@@ -266,7 +226,7 @@ export function OrderDetailModal({
               value={formatOrderDateTime(order.activatedAt)}
             />
           ) : null}
-          {order.afterSaleUntil ? (
+          {order.serviceMode === "purchase" && order.afterSaleUntil ? (
             <DetailRow
               label={t("After-sales until")}
               value={formatOrderDateTime(order.afterSaleUntil)}

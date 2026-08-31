@@ -119,7 +119,9 @@ export function MailboxClient({
     : "";
   const loadableMessageId = selectedMessage?.id ?? "";
   const loadableMessageBody = selectedMessage?.body ?? "";
-  const canLoadMessage = Boolean(onLoadMessage);
+  const canLoadMessage = Boolean(
+    onLoadMessage && /^[1-9]\d*$/.test(loadableMessageId)
+  );
 
   useEffect(() => {
     if (

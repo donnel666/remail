@@ -54,9 +54,10 @@ import {
   type OrderStatus,
 } from "@/lib/orders-api";
 import { MailboxClientModal } from "@/pages/workbench/mailbox-client";
+import { orderReceiveUntil } from "@/pages/workbench/order-runtime";
 import { ProjectIcon } from "@/pages/workbench/project-icon";
 import type { FetchSource, WorkbenchMessage } from "@/pages/workbench/types";
-import { buildPickupUrl } from "@/pages/workbench/utils";
+import { buildPickupUrl, pickupMessagesToWorkbench } from "@/pages/workbench/utils";
 
 import {
   DATE_RANGE_DROPDOWN_CLASS,
@@ -94,22 +95,11 @@ function orderCanUseService(order: OrderResponse) {
   if (order.status === "active") return true;
   if (order.status !== "completed") return false;
   if (order.serviceMode === "purchase") return true;
-  return isFutureTime(order.receiveUntil);
+  return isFutureTime(orderReceiveUntil(order));
 }
 
 function toMailboxMessages(items: OrderMailResponse["items"]): WorkbenchMessage[] {
-  return items
-    .map<WorkbenchMessage>((item) => ({
-      body: "",
-      id: String(item.id),
-      preview: item.bodyPreview,
-      receivedAt: item.receivedAt,
-      recipient: item.recipient,
-      sender: item.sender,
-      status: item.verificationCode ? "matched" : "received",
-      subject: item.subject || "(No subject)",
-      verificationCode: item.verificationCode,
-    }))
+  return pickupMessagesToWorkbench(items)
     .sort((left, right) => {
       const leftTime = Date.parse(left.receivedAt);
       const rightTime = Date.parse(right.receivedAt);

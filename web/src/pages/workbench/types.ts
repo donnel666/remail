@@ -74,20 +74,11 @@ export interface WorkbenchMessage {
   verificationCode?: string;
 }
 
-export interface WorkbenchCode {
-  code: string;
-  receivedAt: string;
-  seq: number;
-}
-
 export interface WorkbenchOrder {
   afterSaleUntil: string;
   activationUntil?: string;
   activatedAt?: string;
   createdAt: string;
-  codes?: WorkbenchCode[];
-  codesExpireAt?: string;
-  contentMode?: "code_only";
   deliveryEmail: string;
   hasDelivery: boolean;
   id: string;
@@ -100,8 +91,6 @@ export interface WorkbenchOrder {
   productType: OrderProductType;
   projectId: string;
   quantity: number;
-  maxCodes?: number;
-  receivedCount?: number;
   receiveUntil?: string;
   serviceMode: ServiceMode;
   serviceState: ServiceState;

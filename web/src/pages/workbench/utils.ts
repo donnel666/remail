@@ -1,10 +1,12 @@
 import i18n from "@/i18n/config";
+import type { OrderMailResponse } from "@/lib/mailmatch-api";
 
 import type {
   InventoryScope,
   OrderProductType,
   ServiceMode,
   ServiceState,
+  WorkbenchMessage,
   WorkbenchOrder,
 } from "./types";
 
@@ -71,6 +73,23 @@ export function buildPickupUrl(email: string, token: string) {
   const origin =
     typeof window === "undefined" ? "" : window.location.origin;
   return `${origin}/pickup?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`;
+}
+
+export function pickupMessagesToWorkbench(
+  items: OrderMailResponse["items"],
+  emptyCodeStatus: WorkbenchMessage["status"] = "received"
+): WorkbenchMessage[] {
+  return items.map((item, index) => ({
+    body: "",
+    id: (item.id ?? 0) > 0 ? String(item.id) : `pickup-${index}-${item.receivedAt}`,
+    preview: item.bodyPreview,
+    receivedAt: item.receivedAt,
+    recipient: item.recipient,
+    sender: item.sender,
+    status: item.verificationCode ? "matched" : emptyCodeStatus,
+    subject: item.subject || "(No subject)",
+    verificationCode: item.verificationCode,
+  }));
 }
 
 export function serviceModeLabel(mode: ServiceMode, t: (key: string) => string) {

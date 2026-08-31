@@ -165,7 +165,7 @@ SDK 可调用接口示例：
 | 方法 | URI | 说明 |
 |------|-----|------|
 | `GET` | `/v1/pickup?email={email}&token={token}` | 资源钥匙读取邮件 6 元素；内部按 singleflight 提交异步收件任务。 |
-| `POST` | `/v1/pickup/batch` | 批量读取 2 到 200 组资源钥匙，响应顺序与请求一致；单项错误通过 `207 Multi-Status` 返回，整批请求受客户端 IP 限流，每个 Token 仍受原取件限流。 |
+| `POST` | `/v1/pickup/batch` | 批量读取 2 到 100 组资源钥匙，响应顺序与请求一致；单项错误通过 `207 Multi-Status` 返回。 |
 
 ---
 

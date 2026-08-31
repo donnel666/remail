@@ -326,7 +326,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		// MailMatch module (order-scoped message cache, async fetch and matching).
 		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Redis, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase, coreMod.ValidationUseCase)
-		mailmatchMod.SetCodeOnlyPickup(gmailPickupAdapter{service: gmailMod.Service, upstreams: upstreamRouter, tokens: openapiMod.UseCase})
+		mailmatchMod.SetUpstreamPickup(gmailPickupAdapter{upstreams: upstreamRouter, tokens: openapiMod.UseCase})
 		mailmatchMod.SetGmailMatchPort(gmailMod.Service)
 		mailmatchMod.SetGmailPurchaseFetchPort(gmailMod.Service)
 		mailmatchMod.SetICloudMailFetchPort(iCloudMailFetchAdapter{service: icloudMod.Service})

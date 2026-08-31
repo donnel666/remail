@@ -225,6 +225,7 @@ type ResourceListFacetsResponse struct {
 // MicrosoftResourceDetailResponse is the API-safe Microsoft resource detail (no credentials).
 type MicrosoftResourceDetailResponse struct {
 	ID              uint       `json:"id"`
+	Type            string     `json:"type"`
 	EmailAddress    string     `json:"emailAddress"`
 	ForSale         bool       `json:"forSale"`
 	LongLived       bool       `json:"longLived"`
@@ -239,6 +240,7 @@ type MicrosoftResourceDetailResponse struct {
 // DomainResourceDetailResponse is the API-safe domain resource detail.
 type DomainResourceDetailResponse struct {
 	ID               uint       `json:"id"`
+	Type             string     `json:"type"`
 	Domain           string     `json:"domain"`
 	MailServerID     uint       `json:"mailServerId"`
 	Purpose          string     `json:"purpose"`

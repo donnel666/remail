@@ -2307,6 +2307,7 @@ func TestCoreHandler_ResourceDetail_OwnerAccess(t *testing.T) {
 	if strings.Contains(body, "secret") {
 		t.Error("response contains password!")
 	}
+	require.Contains(t, body, `"type":"microsoft"`)
 }
 
 func TestCoreHandler_ResourceDetail_NonOwnerDenied(t *testing.T) {
@@ -2977,6 +2978,7 @@ func TestCoreHandler_PublishMicrosoftResource(t *testing.T) {
 	if !resp.ForSale {
 		t.Fatalf("expected response forSale true")
 	}
+	require.Equal(t, "microsoft", resp.Type)
 }
 
 func TestCoreHandler_PublishMicrosoftResourcesBatch(t *testing.T) {
@@ -3440,6 +3442,7 @@ func TestCoreHandler_CreateDomainDefaultsToLocalInboundServer(t *testing.T) {
 	require.Equal(t, coredomain.DomainStatusAbnormal, resourceRepo.domains[1].Status)
 	require.Equal(t, "mx.aishop6.com", mailServerRepo.servers[1].ServerAddress)
 	require.Equal(t, "mx.aishop6.com", mailServerRepo.servers[1].MXRecord)
+	require.Contains(t, w.Body.String(), `"type":"domain"`)
 }
 
 func TestCoreHandler_CreateDomainHidesForeignMailServerID(t *testing.T) {

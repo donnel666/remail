@@ -2,12 +2,12 @@ package api
 
 import (
 	"context"
-	"time"
 
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
+	mailmatchdomain "github.com/donnel666/remail/internal/mailmatch/domain"
 	mailmatchinfra "github.com/donnel666/remail/internal/mailmatch/infra"
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
@@ -31,30 +31,16 @@ type Module struct {
 	adminResourceFetchRepo *mailmatchinfra.AdminResourceFetchRepo
 	resourceHistoryRepo    *mailmatchinfra.ResourceHistoryRepo
 	matchResults           *matchResultAdapter
-	CodeOnlyPickup         CodeOnlyPickupPort
+	UpstreamPickup         UpstreamPickupPort
 }
 
-type CodeOnlyPickupCode struct {
-	Seq        int
-	Code       string
-	ReceivedAt time.Time
+type UpstreamPickupPort interface {
+	ReadUpstreamPickup(ctx context.Context, email, token string) ([]mailmatchdomain.MailContent, bool, error)
 }
 
-type CodeOnlyPickupResult struct {
-	Email         string
-	Codes         []CodeOnlyPickupCode
-	ReceivedCount int
-	MaxCodes      int
-	ExpiresAt     *time.Time
-}
-
-type CodeOnlyPickupPort interface {
-	ReadCodeOnlyPickup(ctx context.Context, email, token string) (*CodeOnlyPickupResult, bool, error)
-}
-
-func (m *Module) SetCodeOnlyPickup(port CodeOnlyPickupPort) {
+func (m *Module) SetUpstreamPickup(port UpstreamPickupPort) {
 	if m != nil {
-		m.CodeOnlyPickup = port
+		m.UpstreamPickup = port
 	}
 }
 

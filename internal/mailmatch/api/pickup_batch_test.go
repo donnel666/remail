@@ -19,6 +19,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestUpstreamPickupUsesNormalMailResponseShape(t *testing.T) {
+	receivedAt := time.Date(2026, 8, 31, 8, 0, 0, 0, time.UTC)
+	body, err := json.Marshal(orderMailResponse([]mailmatchdomain.MailContent{{
+		Recipient: "buyer@gmail.com", ReceivedAt: receivedAt, VerificationCode: "654321",
+	}}, nil))
+
+	require.NoError(t, err)
+	require.JSONEq(t, `{"items":[{"sender":"","recipient":"buyer@gmail.com","receivedAt":"2026-08-31T08:00:00Z","subject":"","bodyPreview":"","verificationCode":"654321"}]}`, string(body))
+}
+
 func TestPickupBatchAcceptsOneHundredItems(t *testing.T) {
 	repo, router := newPickupBatchTestRouter(t)
 	items := make([]PickupCredentialRequest, maxPickupBatchSize)

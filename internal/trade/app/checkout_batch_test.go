@@ -933,8 +933,6 @@ func TestGmailCodeCheckoutUsesLocalGmailAllocation(t *testing.T) {
 	require.Equal(t, domain.ServiceModeCode, allocation.lastAllocation.ServiceMode)
 	require.Equal(t, 1, supply.creates)
 	require.Equal(t, 1, supply.schedules)
-	require.Equal(t, "code_only", result.ContentMode)
-	require.Equal(t, 3, result.MaxCodes)
 	require.Equal(t, result.Order.OrderNo, supply.lastSession.OrderNo)
 	require.Equal(t, result.Order.ProjectID, supply.lastSession.ProjectID)
 	require.Equal(t, result.Order.ProjectProductID, supply.lastSession.ProductID)

@@ -50,7 +50,6 @@ const (
 var (
 	ErrInvalidRoute              = errors.New("gmail: invalid supply route")
 	ErrSessionMissing            = errors.New("gmail: code session not found")
-	ErrPickupInvalid             = errors.New("gmail: pickup credential mismatch")
 	ErrInvalidLocalResource      = errors.New("gmail: invalid local resource")
 	ErrLocalResourceMissing      = errors.New("gmail: local resource not found")
 	ErrLocalResourceBusy         = errors.New("gmail: local resource is leased or sold")
@@ -237,12 +236,4 @@ func decodeCodes(raw string) ([]Code, error) {
 		return nil, errors.New("gmail: invalid stored codes")
 	}
 	return codes, nil
-}
-
-type CodeOnlyPickup struct {
-	Email         string
-	Codes         []Code
-	ReceivedCount int
-	MaxCodes      int
-	ExpiresAt     *time.Time
 }

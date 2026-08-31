@@ -4802,6 +4802,11 @@ paths:
                 oneOf:
                   - $ref: "#/components/schemas/MicrosoftResourceDetail"
                   - $ref: "#/components/schemas/DomainResourceDetail"
+                discriminator:
+                  propertyName: type
+                  mapping:
+                    microsoft: "#/components/schemas/MicrosoftResourceDetail"
+                    domain: "#/components/schemas/DomainResourceDetail"
         "401":
           description: Authentication required
           content:
@@ -4988,6 +4993,11 @@ paths:
                 oneOf:
                   - $ref: "#/components/schemas/MicrosoftResourceDetail"
                   - $ref: "#/components/schemas/DomainResourceDetail"
+                discriminator:
+                  propertyName: type
+                  mapping:
+                    microsoft: "#/components/schemas/MicrosoftResourceDetail"
+                    domain: "#/components/schemas/DomainResourceDetail"
         "400":
           description: Invalid resource ID
           content:
@@ -6683,16 +6693,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "429":
-          description: Pickup rate limit exceeded
-          headers:
-            Retry-After:
-              schema:
-                type: integer
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
         "503":
           description: Mail service is temporarily unavailable
           content:
@@ -6704,7 +6704,7 @@ paths:
     post:
       operationId: postPickupMessagesBatch
       summary: Read mail messages for multiple service credentials
-      description: Returns one result per input item in the same order. The anonymous endpoint is limited by client IP and service token. The request body contains service credentials and must not be logged.
+      description: Returns one result per input item in the same order. The request body contains service credentials and must not be logged.
       tags:
         - MailMatch
       requestBody:
@@ -6738,17 +6738,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "429":
-          description: Batch Pickup request rate limit for the client IP was exceeded
-          headers:
-            Retry-After:
-              schema:
-                type: integer
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
   /v1/pickup/messages/{messageId}:
     get:
       operationId: getPickupMessage
@@ -6761,6 +6750,7 @@ paths:
           required: true
           schema:
             type: integer
+            minimum: 1
         - name: email
           in: query
           required: true
@@ -6802,17 +6792,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "429":
-          description: Pickup rate limit exceeded
-          headers:
-            Retry-After:
-              schema:
-                type: integer
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
   # --- Dashboard ---
   /v1/dashboard:
     get:
@@ -15749,7 +15728,7 @@ components:
       properties:
         code:
           type: string
-          enum: [insufficient_balance, insufficient_inventory, upstream_price_protected, upstream_unavailable]
+          enum: [insufficient_balance, insufficient_inventory, upstream_price_protected, upstream_unavailable, idempotency_conflict, temporarily_unavailable]
         message:
           type: string
       additionalProperties: false
@@ -15758,7 +15737,6 @@ components:
       type: object
       required:
         - index
-        - order
         - status
       properties:
         index:
@@ -15956,33 +15934,12 @@ components:
           description: Whether the order already has a matched delivery. Purchase deliveries may have no verification code.
         verificationCode:
           type: string
-          description: Verification code from the earliest matched delivery, when that message contains one.
+          description: Verification code selected for the order summary; use Pickup items for the complete received-mail list.
         lastMailReceivedAt:
           type: string
           format: date-time
           nullable: true
           description: Provider receive time of the delivered message.
-        contentMode:
-          type: string
-          enum: [code_only]
-          description: Gmail code-mode orders expose verification codes only and never synthesize mail content.
-        codes:
-          type: array
-          maxItems: 3
-          items:
-            $ref: "#/components/schemas/GmailCodeResponse"
-        receivedCount:
-          type: integer
-          minimum: 0
-          maximum: 3
-        maxCodes:
-          type: integer
-          minimum: 3
-          maximum: 3
-        codesExpireAt:
-          type: string
-          format: date-time
-          nullable: true
         gmailPassword:
           type: string
           description: Local Gmail purchase password. Returned only by checkout and authorized order-detail reads; omitted from order lists and resource APIs.
@@ -16194,7 +16151,6 @@ components:
     MailContentResponse:
       type: object
       required:
-        - id
         - sender
         - recipient
         - receivedAt
@@ -16203,6 +16159,8 @@ components:
       properties:
         id:
           type: integer
+          minimum: 1
+          description: Present only for stored mail that supports the message-detail endpoint; omitted for synthesized upstream code items.
         sender:
           type: string
         recipient:
@@ -16258,54 +16216,12 @@ components:
       required:
         - items
       properties:
-        contentMode:
-          type: string
-          enum: [code_only]
-          description: Present for Gmail code-only pickup responses.
-        email:
-          type: string
-          format: email
-        receivedCount:
-          type: integer
-          minimum: 0
-          maximum: 3
-        maxCodes:
-          type: integer
-          minimum: 3
-          maximum: 3
-        expiresAt:
-          type: string
-          format: date-time
-          nullable: true
-        codes:
-          type: array
-          maxItems: 3
-          items:
-            $ref: "#/components/schemas/GmailCodeResponse"
         items:
           type: array
           items:
             $ref: "#/components/schemas/MailContentResponse"
         fetch:
           $ref: "#/components/schemas/FetchStateResponse"
-      additionalProperties: false
-
-    GmailCodeResponse:
-      type: object
-      required:
-        - seq
-        - code
-        - receivedAt
-      properties:
-        seq:
-          type: integer
-          minimum: 1
-          maximum: 3
-        code:
-          type: string
-        receivedAt:
-          type: string
-          format: date-time
       additionalProperties: false
 
     PickupCredentialRequest:
@@ -16353,7 +16269,7 @@ components:
       properties:
         code:
           type: string
-          enum: [invalid_request, rate_limited, credential_invalid, order_unavailable, service_unavailable, internal_error]
+          enum: [invalid_request, credential_invalid, order_unavailable, service_unavailable, internal_error]
         message:
           type: string
       additionalProperties: false
@@ -19779,6 +19695,7 @@ components:
       type: object
       required:
         - id
+        - type
         - emailAddress
         - forSale
         - longLived
@@ -19789,6 +19706,9 @@ components:
       properties:
         id:
           type: integer
+        type:
+          type: string
+          enum: [microsoft]
         emailAddress:
           type: string
         forSale:
@@ -19816,6 +19736,7 @@ components:
       type: object
       required:
         - id
+        - type
         - domain
         - mailServerId
         - purpose
@@ -19825,6 +19746,9 @@ components:
       properties:
         id:
           type: integer
+        type:
+          type: string
+          enum: [domain]
         domain:
           type: string
         mailServerId:

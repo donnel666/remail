@@ -3,7 +3,7 @@ package api
 import "time"
 
 type MailContentResponse struct {
-	ID               uint      `json:"id"`
+	ID               uint      `json:"id,omitempty"`
 	Sender           string    `json:"sender"`
 	Recipient        string    `json:"recipient"`
 	ReceivedAt       time.Time `json:"receivedAt"`
@@ -18,20 +18,8 @@ type MailContentDetailResponse struct {
 }
 
 type OrderMailResponse struct {
-	ContentMode   string                   `json:"contentMode,omitempty"`
-	Email         string                   `json:"email,omitempty"`
-	ReceivedCount int                      `json:"receivedCount,omitempty"`
-	MaxCodes      int                      `json:"maxCodes,omitempty"`
-	ExpiresAt     *time.Time               `json:"expiresAt,omitempty"`
-	Codes         []CodeOnlyPickupResponse `json:"codes,omitempty"`
-	Items         []MailContentResponse    `json:"items"`
-	Fetch         *FetchStateResponse      `json:"fetch,omitempty"`
-}
-
-type CodeOnlyPickupResponse struct {
-	Seq        int       `json:"seq"`
-	Code       string    `json:"code"`
-	ReceivedAt time.Time `json:"receivedAt"`
+	Items []MailContentResponse `json:"items"`
+	Fetch *FetchStateResponse   `json:"fetch,omitempty"`
 }
 
 type PickupCredentialRequest struct {

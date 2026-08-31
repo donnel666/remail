@@ -96,6 +96,115 @@ func TestPublicOpenAPISchemaUsesBackendEnums(t *testing.T) {
 	})
 }
 
+func TestPublicOpenAPISDKContract(t *testing.T) {
+	spec := publicOpenAPISpec(t)
+	if got := spec["openapi"]; got != "3.0.3" {
+		t.Fatalf("public OpenAPI version = %v, want 3.0.3", got)
+	}
+	servers := spec["servers"].([]any)
+	if len(servers) != 1 || servers[0].(map[string]any)["url"] != "https://remail.aishop6.com" {
+		t.Fatalf("public OpenAPI servers = %v", servers)
+	}
+
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	pickup := schemas["PickupMailResponse"].(map[string]any)
+	pickupProperties := pickup["properties"].(map[string]any)
+	if len(pickupProperties) != 2 || pickupProperties["items"] == nil || pickupProperties["fetch"] == nil {
+		t.Fatalf("PickupMailResponse must expose only items/fetch: %v", pickupProperties)
+	}
+	batchItems := schemas["PickupBatchRequest"].(map[string]any)["properties"].(map[string]any)["items"].(map[string]any)
+	if batchItems["maxItems"] != float64(100) {
+		t.Fatalf("pickup batch maxItems = %v, want 100", batchItems["maxItems"])
+	}
+	assertSchemaEnum(t, spec, "OrderBatchItemErrorResponse", "code", []string{
+		"insufficient_balance", "insufficient_inventory", "upstream_price_protected",
+		"upstream_unavailable", "idempotency_conflict", "temporarily_unavailable",
+	})
+	if requiredField(schemas["CreateOrderBatchItemResponse"].(map[string]any), "order") {
+		t.Fatal("CreateOrderBatchItemResponse.order must be optional")
+	}
+	if requiredField(schemas["MailMessage"].(map[string]any), "id") {
+		t.Fatal("MailMessage.id must be optional for synthesized upstream code items")
+	}
+	createDomainProperties := schemas["CreateDomainRequest"].(map[string]any)["properties"].(map[string]any)
+	if _, ok := createDomainProperties["allowNewBindings"]; ok {
+		t.Fatal("public CreateDomainRequest cannot expose admin-only allowNewBindings")
+	}
+	resourceDetail := schemas["ResourceDetail"].(map[string]any)
+	if resourceDetail["type"] != "object" || !requiredField(resourceDetail, "type") {
+		t.Fatalf("ResourceDetail must be a flat typed object: %v", resourceDetail)
+	}
+
+	for name, rawSchema := range schemas {
+		schema, ok := rawSchema.(map[string]any)
+		if !ok || schema["type"] != "object" {
+			continue
+		}
+		properties, _ := schema["properties"].(map[string]any)
+		assertPublicPropertyFormats(t, name, properties)
+	}
+	for _, name := range []string{
+		"ProjectProductSummary", "ProjectMailRule", "ProjectFacets", "FetchState",
+		"Transaction", "Recharge", "CardKey", "Resource", "MicrosoftResourceDetail",
+		"DomainResourceDetail", "MailServer", "Mailbox",
+	} {
+		if required, ok := schemas[name].(map[string]any)["required"].([]any); !ok || len(required) == 0 {
+			t.Fatalf("public response schema %s must declare required fields", name)
+		}
+	}
+
+	paths := spec["paths"].(map[string]any)
+	for path, rawPath := range paths {
+		for method, rawOperation := range rawPath.(map[string]any) {
+			operation := rawOperation.(map[string]any)
+			if body, ok := operation["requestBody"].(map[string]any); ok && body["required"] != true {
+				t.Fatalf("%s %s requestBody must be required", method, path)
+			}
+			for _, rawParameter := range operationParameters(operation) {
+				parameter := rawParameter.(map[string]any)
+				name, _ := parameter["name"].(string)
+				schema, _ := parameter["schema"].(map[string]any)
+				if strings.HasSuffix(name, "Id") && schema["type"] == "integer" && schema["format"] != "int64" {
+					t.Fatalf("%s %s parameter %s must use int64", method, path, name)
+				}
+			}
+		}
+	}
+}
+
+func requiredField(schema map[string]any, name string) bool {
+	for _, raw := range schema["required"].([]any) {
+		if raw == name {
+			return true
+		}
+	}
+	return false
+}
+
+func assertPublicPropertyFormats(t *testing.T, schemaName string, properties map[string]any) {
+	t.Helper()
+	for name, rawProperty := range properties {
+		property, ok := rawProperty.(map[string]any)
+		if !ok {
+			continue
+		}
+		if (name == "id" || strings.HasSuffix(name, "Id")) && property["type"] == "integer" && property["format"] != "int64" {
+			t.Fatalf("public schema %s.%s must use int64", schemaName, name)
+		}
+		if (strings.HasSuffix(name, "At") || strings.HasSuffix(name, "Until")) && property["type"] == "string" && property["format"] != "date-time" {
+			t.Fatalf("public schema %s.%s must use date-time", schemaName, name)
+		}
+		if items, ok := property["items"].(map[string]any); ok && strings.HasSuffix(name, "Ids") && items["format"] != "int64" {
+			t.Fatalf("public schema %s.%s items must use int64", schemaName, name)
+		}
+	}
+}
+
+func operationParameters(operation map[string]any) []any {
+	parameters, _ := operation["parameters"].([]any)
+	return parameters
+}
+
 func TestPublicOpenAPIDoesNotExposeSystemKeySurface(t *testing.T) {
 	spec := publicOpenAPISpec(t)
 	paths := spec["paths"].(map[string]any)

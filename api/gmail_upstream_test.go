@@ -8,7 +8,7 @@ import (
 
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	coredomain "github.com/donnel666/remail/internal/core/domain"
-	"github.com/donnel666/remail/internal/gmail"
+	mailmatchdomain "github.com/donnel666/remail/internal/mailmatch/domain"
 	openapidomain "github.com/donnel666/remail/internal/openapi/domain"
 	"github.com/donnel666/remail/internal/smsbower"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
@@ -50,29 +50,16 @@ func TestOverlaySMSBowerInventoryAddsGmailProductTypeToNewItem(t *testing.T) {
 	require.Equal(t, coredomain.ProductTypeGmail, snapshots[7].Items[0].ProductType)
 }
 
-type gmailPickupReaderSpy struct {
-	pickup          *gmail.CodeOnlyPickup
-	pickupMatched   bool
-	pickupErr       error
-	deliveries      map[string]tradeapp.GmailDeliverySummary
-	deliveriesErr   error
-	pickupCalls     int
-	deliveriesCalls int
-}
-
-func (s *gmailPickupReaderSpy) PickupByOrder(context.Context, string, string) (*gmail.CodeOnlyPickup, bool, error) {
-	s.pickupCalls++
-	return s.pickup, s.pickupMatched, s.pickupErr
-}
-
-func (s *gmailPickupReaderSpy) ListGmailDeliveries(context.Context, []string) (map[string]tradeapp.GmailDeliverySummary, error) {
-	s.deliveriesCalls++
-	return s.deliveries, s.deliveriesErr
-}
-
 type gmailOrderTokenReaderStub struct {
 	orderNo string
 	err     error
+}
+
+type gmailOrderTokenReaderSpy struct{ calls int }
+
+func (s *gmailOrderTokenReaderSpy) FindOrderTokenByPlain(context.Context, string) (*openapidomain.OrderToken, error) {
+	s.calls++
+	return &openapidomain.OrderToken{OrderNo: "NORMAL-ORDER"}, nil
 }
 
 func (s gmailOrderTokenReaderStub) FindOrderTokenByPlain(context.Context, string) (*openapidomain.OrderToken, error) {
@@ -126,70 +113,57 @@ func TestBotCodeDiagnosisRefreshRoutesUpstreamExactlyOnce(t *testing.T) {
 	require.Zero(t, localOnly.pickupCalls)
 }
 
-func TestGmailPickupAdapterReadsLocalVariantBeforeFailingUpstream(t *testing.T) {
-	receivedAt := time.Date(2026, 8, 27, 8, 0, 0, 0, time.UTC)
-	local := &gmailPickupReaderSpy{
-		pickupMatched: true,
-		pickup: &gmail.CodeOnlyPickup{
-			Email: "buyer+variant@gmail.com", Codes: []gmail.Code{{Seq: 1, Code: "123456", ReceivedAt: receivedAt}},
-			ReceivedCount: 1, MaxCodes: gmail.MaxCodes,
-		},
-	}
-	provider := &gmailUpstreamPickupSpy{err: errors.New("SMSBower unavailable")}
+func TestGmailPickupAdapterFallsThroughWhenUpstreamDoesNotOwnOrder(t *testing.T) {
+	provider := &gmailUpstreamPickupSpy{}
 	adapter := gmailPickupAdapter{
-		service: local, upstreams: upstream.NewRouter(provider), tokens: gmailOrderTokenReaderStub{orderNo: "VARIANT-CODE-1"},
+		upstreams: upstream.NewRouter(provider), tokens: gmailOrderTokenReaderStub{orderNo: "VARIANT-PURCHASE-1"},
 	}
 
-	pickup, matched, err := adapter.ReadCodeOnlyPickup(context.Background(), "buyer+variant@gmail.com", "st_variant")
-
-	require.NoError(t, err)
-	require.True(t, matched)
-	require.Equal(t, "buyer+variant@gmail.com", pickup.Email)
-	require.Equal(t, "123456", pickup.Codes[0].Code)
-	require.Equal(t, 1, local.pickupCalls)
-	require.Zero(t, local.deliveriesCalls)
-	require.Zero(t, provider.pickupCalls)
-}
-
-func TestGmailPickupAdapterSkipsUpstreamForLocalVariantWithoutCodeSession(t *testing.T) {
-	local := &gmailPickupReaderSpy{deliveries: map[string]tradeapp.GmailDeliverySummary{
-		"VARIANT-PURCHASE-1": {AllocationID: 41},
-	}}
-	provider := &gmailUpstreamPickupSpy{err: errors.New("SMSBower unavailable")}
-	adapter := gmailPickupAdapter{
-		service: local, upstreams: upstream.NewRouter(provider), tokens: gmailOrderTokenReaderStub{orderNo: "VARIANT-PURCHASE-1"},
-	}
-
-	pickup, matched, err := adapter.ReadCodeOnlyPickup(context.Background(), "buyer+variant@gmail.com", "st_variant_purchase")
+	items, matched, err := adapter.ReadUpstreamPickup(context.Background(), "buyer+variant@gmail.com", "st_variant_purchase")
 
 	require.NoError(t, err)
 	require.False(t, matched)
-	require.Nil(t, pickup)
-	require.Equal(t, 1, local.pickupCalls)
-	require.Equal(t, 1, local.deliveriesCalls)
-	require.Zero(t, provider.pickupCalls)
+	require.Nil(t, items)
+	require.Equal(t, 1, provider.pickupCalls)
 }
 
-func TestGmailPickupAdapterFallsBackToOriginalGmailUpstream(t *testing.T) {
+func TestGmailPickupAdapterSkipsNonGmailWithoutLookup(t *testing.T) {
+	for _, email := range []string{"buyer@outlook.com", "buyer@icloud.com"} {
+		t.Run(email, func(t *testing.T) {
+			tokens := &gmailOrderTokenReaderSpy{}
+			provider := &gmailUpstreamPickupSpy{}
+			adapter := gmailPickupAdapter{upstreams: upstream.NewRouter(provider), tokens: tokens}
+
+			items, matched, err := adapter.ReadUpstreamPickup(context.Background(), email, "st_normal")
+
+			require.NoError(t, err)
+			require.False(t, matched)
+			require.Nil(t, items)
+			require.Zero(t, tokens.calls)
+			require.Zero(t, provider.pickupCalls)
+		})
+	}
+}
+
+func TestGmailPickupAdapterNormalizesUpstreamCodesAsMail(t *testing.T) {
 	receivedAt := time.Date(2026, 8, 27, 8, 30, 0, 0, time.UTC)
-	local := &gmailPickupReaderSpy{deliveries: map[string]tradeapp.GmailDeliverySummary{}}
 	provider := &gmailUpstreamPickupSpy{
 		handled: true,
 		pickup: &upstream.PickupResult{
 			Email: "buyer@gmail.com", Codes: []upstream.Code{{Seq: 1, Value: "654321", ReceivedAt: receivedAt}},
-			ReceivedCount: 1, MaxCodes: gmail.MaxCodes,
 		},
 	}
 	adapter := gmailPickupAdapter{
-		service: local, upstreams: upstream.NewRouter(provider), tokens: gmailOrderTokenReaderStub{orderNo: "GMAIL-UPSTREAM-1"},
+		upstreams: upstream.NewRouter(provider), tokens: gmailOrderTokenReaderStub{orderNo: "GMAIL-UPSTREAM-1"},
 	}
 
-	pickup, matched, err := adapter.ReadCodeOnlyPickup(context.Background(), "buyer@gmail.com", "st_upstream")
+	items, matched, err := adapter.ReadUpstreamPickup(context.Background(), "buyer@gmail.com", "st_upstream")
 
 	require.NoError(t, err)
 	require.True(t, matched)
-	require.Equal(t, "buyer@gmail.com", pickup.Email)
-	require.Equal(t, "654321", pickup.Codes[0].Code)
+	require.Equal(t, []mailmatchdomain.MailContent{{
+		Recipient: "buyer@gmail.com", ReceivedAt: receivedAt, VerificationCode: "654321",
+	}}, items)
 	require.Equal(t, 1, provider.pickupCalls)
 }
 

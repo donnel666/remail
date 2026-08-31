@@ -40,6 +40,7 @@ import {
 } from "./workbench/checkout-attempt";
 import {
   mergeOrderRuntimeState,
+  orderReceiveUntil,
   shouldAutoFetchOrderMail,
 } from "./workbench/order-runtime";
 import { OrderPanel } from "./workbench/order-panel";
@@ -51,7 +52,6 @@ import type {
   ServiceMode,
   ServiceState,
   WorkbenchOrder,
-  WorkbenchMessage,
   WorkbenchProduct,
   WorkbenchProject,
 } from "./workbench/types";
@@ -60,6 +60,7 @@ import {
   compareProjectNames,
   matchesProjectEmailSearch,
   normalizeInventorySuffix,
+  pickupMessagesToWorkbench,
 } from "./workbench/utils";
 
 function filterProjects(projects: WorkbenchProject[], search: string) {
@@ -296,9 +297,6 @@ function toWorkbenchOrder(order: OrderResponse): WorkbenchOrder {
     afterSaleUntil:
       order.afterSaleUntil ?? order.receiveUntil ?? order.updatedAt,
     createdAt: order.createdAt,
-    codes: order.codes ?? [],
-    codesExpireAt: order.codesExpireAt ?? undefined,
-    contentMode: order.contentMode,
     deliveryEmail: order.deliveryEmail,
     hasDelivery: order.hasDelivery ?? false,
     id: String(order.id),
@@ -311,11 +309,9 @@ function toWorkbenchOrder(order: OrderResponse): WorkbenchOrder {
     productType: order.productType,
     projectId: String(order.projectId),
     quantity: 1,
-    maxCodes: order.maxCodes ?? 0,
-    receivedCount: order.receivedCount ?? 0,
     receiveUntil:
       order.serviceMode === "code"
-        ? (order.receiveUntil ?? undefined)
+        ? (orderReceiveUntil(order) ?? undefined)
         : undefined,
     serviceMode: order.serviceMode,
     serviceState: orderServiceState(order),
@@ -325,43 +321,10 @@ function toWorkbenchOrder(order: OrderResponse): WorkbenchOrder {
   };
 }
 
-function toWorkbenchMessages(
-  items: OrderMailResponse["items"],
-): WorkbenchMessage[] {
-  return items.map((item) => {
-    return {
-      body: "",
-      id: String(item.id),
-      preview: item.bodyPreview,
-      receivedAt: item.receivedAt,
-      recipient: item.recipient,
-      sender: item.sender,
-      status: "matched",
-      subject: item.subject || "(No subject)",
-      verificationCode: item.verificationCode,
-    };
-  });
-}
-
 function pickupResultToOrderPatch(
   result: OrderMailResponse,
 ): Partial<WorkbenchOrder> {
-  if (result.contentMode !== "code_only") {
-    return { messages: toWorkbenchMessages(result.items) };
-  }
-  const codes = result.codes ?? [];
-  const latest = codes[codes.length - 1];
-  return {
-    codes,
-    codesExpireAt: result.expiresAt ?? undefined,
-    contentMode: "code_only",
-    hasDelivery: codes.length > 0,
-    lastMailReceivedAt: latest?.receivedAt,
-    maxCodes: result.maxCodes ?? 3,
-    messages: [],
-    receivedCount: result.receivedCount ?? codes.length,
-    verificationCode: latest?.code,
-  };
+  return { messages: pickupMessagesToWorkbench(result.items, "matched") };
 }
 
 function orderServiceState(order: OrderResponse): ServiceState {
@@ -828,7 +791,7 @@ export default function Dashboard() {
           result.fetch?.lastSubmittedAt ??
           new Date().toISOString();
         let refreshedDetail: WorkbenchOrder | undefined;
-        if (result.items.length > 0 || (result.codes?.length ?? 0) > 0) {
+        if (result.items.length > 0) {
           try {
             refreshedDetail = toWorkbenchOrder(await getOrder(target.orderNo));
           } catch {

@@ -36,8 +36,8 @@ func (h *Handler) GetPickupMessages(c *gin.Context) {
 	serviceStarted := time.Now()
 	serviceResult := "succeeded"
 	defer func() { platform.ObserveServiceDuration("pickup_single", "single", serviceResult, serviceStarted) }()
-	if h.mod.CodeOnlyPickup != nil {
-		pickup, matched, err := h.mod.CodeOnlyPickup.ReadCodeOnlyPickup(ctx, email, tokenPlain)
+	if h.mod.UpstreamPickup != nil {
+		items, matched, err := h.mod.UpstreamPickup.ReadUpstreamPickup(ctx, email, tokenPlain)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				serviceResult = "canceled"
@@ -53,7 +53,7 @@ func (h *Handler) GetPickupMessages(c *gin.Context) {
 			return
 		}
 		if matched {
-			c.JSON(http.StatusOK, codeOnlyMailResponse(pickup))
+			c.JSON(http.StatusOK, orderMailResponse(items, nil))
 			return
 		}
 	}
@@ -103,8 +103,8 @@ func (h *Handler) PostPickupMessagesBatch(c *gin.Context) {
 			businessFailedItems++
 			continue
 		}
-		if h.mod.CodeOnlyPickup != nil {
-			pickup, matched, err := h.mod.CodeOnlyPickup.ReadCodeOnlyPickup(c.Request.Context(), credential.Email, credential.Token)
+		if h.mod.UpstreamPickup != nil {
+			items, matched, err := h.mod.UpstreamPickup.ReadUpstreamPickup(c.Request.Context(), credential.Email, credential.Token)
 			if err != nil {
 				resp[i].Status = "failed"
 				resp[i].Error = pickupBatchItemError(err)
@@ -120,7 +120,7 @@ func (h *Handler) PostPickupMessagesBatch(c *gin.Context) {
 				continue
 			}
 			if matched {
-				data := codeOnlyMailResponse(pickup)
+				data := orderMailResponse(items, nil)
 				resp[i].Status = "succeeded"
 				resp[i].Data = &data
 				succeededItems++
@@ -311,20 +311,6 @@ func orderMailResponse(items []domain.MailContent, state *domain.FetchState) Ord
 		}
 	}
 	return resp
-}
-
-func codeOnlyMailResponse(item *CodeOnlyPickupResult) OrderMailResponse {
-	if item == nil {
-		return OrderMailResponse{ContentMode: "code_only", MaxCodes: 3, Items: []MailContentResponse{}}
-	}
-	codes := make([]CodeOnlyPickupResponse, len(item.Codes))
-	for i := range item.Codes {
-		codes[i] = CodeOnlyPickupResponse{Seq: item.Codes[i].Seq, Code: item.Codes[i].Code, ReceivedAt: item.Codes[i].ReceivedAt}
-	}
-	return OrderMailResponse{
-		ContentMode: "code_only", Email: item.Email, ReceivedCount: item.ReceivedCount,
-		MaxCodes: item.MaxCodes, ExpiresAt: item.ExpiresAt, Codes: codes, Items: []MailContentResponse{},
-	}
 }
 
 func mailContentResponse(item domain.MailContent) MailContentResponse {

@@ -308,33 +308,9 @@ func (s *Service) ListGmailDeliveries(ctx context.Context, orderNos []string) (m
 		}
 		delivery := result[session.OrderNo]
 		delivery.Codes = items
-		delivery.ReceivedCount = int(session.ReceivedCount)
-		delivery.MaxCodes = MaxCodes
-		delivery.ExpiresAt = session.ExpiresAt
 		result[session.OrderNo] = delivery
 	}
 	return result, nil
-}
-
-func (s *Service) PickupByOrder(ctx context.Context, orderNo, email string) (*CodeOnlyPickup, bool, error) {
-	var session sessionModel
-	err := s.dbFor(ctx).Where("order_no = ? AND source = ?", strings.TrimSpace(orderNo), SourceLocal).Take(&session).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, fmt.Errorf("load Gmail pickup: %w", err)
-	}
-	if session.Email == "" || !strings.EqualFold(strings.TrimSpace(email), session.Email) {
-		return nil, true, ErrPickupInvalid
-	}
-	codes, err := decodeCodes(session.CodesJSON)
-	if err != nil {
-		return nil, true, err
-	}
-	return &CodeOnlyPickup{
-		Email: session.Email, Codes: codes, ReceivedCount: int(session.ReceivedCount), MaxCodes: MaxCodes, ExpiresAt: session.ExpiresAt,
-	}, true, nil
 }
 
 func stableDigest(value string) string {

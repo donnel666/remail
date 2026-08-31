@@ -73,11 +73,8 @@ type PickupRequest struct {
 }
 
 type PickupResult struct {
-	Email         string
-	Codes         []Code
-	ReceivedCount int
-	MaxCodes      int
-	ExpiresAt     *time.Time
+	Email string
+	Codes []Code
 }
 
 type Provider interface {

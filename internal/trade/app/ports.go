@@ -219,11 +219,8 @@ type GmailCode struct {
 }
 
 type GmailDeliverySummary struct {
-	AllocationID  uint
-	Codes         []GmailCode
-	ReceivedCount int
-	MaxCodes      int
-	ExpiresAt     *time.Time
+	AllocationID uint
+	Codes        []GmailCode
 }
 
 type GmailDeliveryOrder struct {
@@ -525,11 +522,6 @@ type CheckoutResult struct {
 	HasDelivery          bool
 	VerificationCode     string
 	LastMailReceivedAt   *time.Time
-	ContentMode          string
-	GmailCodes           []GmailCode
-	ReceivedCount        int
-	MaxCodes             int
-	CodesExpireAt        *time.Time
 	GmailPassword        string
 	GmailTwoFactorSecret string
 	GmailAppPassword     string
@@ -1952,10 +1944,6 @@ func (uc *UseCase) checkoutGmailPurchasePrepared(ctx context.Context, prepared c
 
 func (uc *UseCase) gmailCheckoutResult(ctx context.Context, order domain.Order, created bool) (*CheckoutResult, error) {
 	result := &CheckoutResult{Order: order, Created: created}
-	if order.ServiceMode == domain.ServiceModeCode {
-		result.ContentMode = "code_only"
-		result.MaxCodes = 3
-	}
 	if order.Status != domain.OrderStatusActive && order.Status != domain.OrderStatusCompleted {
 		return result, nil
 	}
@@ -2812,11 +2800,6 @@ func (uc *UseCase) attachGmailDeliveries(ctx context.Context, results []Checkout
 		if results[i].Order.ServiceMode != domain.ServiceModeCode {
 			continue
 		}
-		results[i].ContentMode = "code_only"
-		results[i].GmailCodes = delivery.Codes
-		results[i].ReceivedCount = delivery.ReceivedCount
-		results[i].MaxCodes = delivery.MaxCodes
-		results[i].CodesExpireAt = delivery.ExpiresAt
 		if len(delivery.Codes) > 0 {
 			latest := delivery.Codes[len(delivery.Codes)-1]
 			receivedAt := latest.ReceivedAt.UTC()

@@ -171,6 +171,7 @@ func (h *CoreHandler) GetResourceDetail(c *gin.Context) {
 	case *coreapp.MicrosoftResourceDetail:
 		c.JSON(http.StatusOK, MicrosoftResourceDetailResponse{
 			ID:              d.ID,
+			Type:            "microsoft",
 			EmailAddress:    d.EmailAddress,
 			ForSale:         d.ForSale,
 			LongLived:       d.LongLived,
@@ -184,6 +185,7 @@ func (h *CoreHandler) GetResourceDetail(c *gin.Context) {
 	case *coreapp.DomainResourceDetail:
 		c.JSON(http.StatusOK, DomainResourceDetailResponse{
 			ID:               d.ID,
+			Type:             "domain",
 			Domain:           d.Domain,
 			MailServerID:     d.MailServerID,
 			Purpose:          d.Purpose,
@@ -388,6 +390,7 @@ func (h *CoreHandler) PostResourcePublish(c *gin.Context) {
 	case *coreapp.MicrosoftResourceDetail:
 		c.JSON(http.StatusOK, MicrosoftResourceDetailResponse{
 			ID:              d.ID,
+			Type:            "microsoft",
 			EmailAddress:    d.EmailAddress,
 			ForSale:         d.ForSale,
 			LongLived:       d.LongLived,
@@ -401,6 +404,7 @@ func (h *CoreHandler) PostResourcePublish(c *gin.Context) {
 	case *coreapp.DomainResourceDetail:
 		c.JSON(http.StatusOK, DomainResourceDetailResponse{
 			ID:               d.ID,
+			Type:             "domain",
 			Domain:           d.Domain,
 			MailServerID:     d.MailServerID,
 			Purpose:          d.Purpose,
@@ -1963,6 +1967,7 @@ func (h *CoreHandler) PostDomain(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, DomainResourceDetailResponse{
 		ID:               result.ID,
+		Type:             "domain",
 		Domain:           result.Domain,
 		MailServerID:     result.MailServerID,
 		Purpose:          string(result.Purpose),

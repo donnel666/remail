@@ -2276,7 +2276,7 @@ export interface paths {
         put?: never;
         /**
          * Read mail messages for multiple service credentials
-         * @description Returns one result per input item in the same order. The anonymous endpoint is limited by client IP and service token. The request body contains service credentials and must not be logged.
+         * @description Returns one result per input item in the same order. The request body contains service credentials and must not be logged.
          */
         post: operations["postPickupMessagesBatch"];
         delete?: never;
@@ -5969,14 +5969,14 @@ export interface components {
         CreateOrderBatchResponse: components["schemas"]["CreateOrderBatchItemResponse"][];
         OrderBatchItemErrorResponse: {
             /** @enum {string} */
-            code: "insufficient_balance" | "insufficient_inventory" | "upstream_price_protected" | "upstream_unavailable";
+            code: "insufficient_balance" | "insufficient_inventory" | "upstream_price_protected" | "upstream_unavailable" | "idempotency_conflict" | "temporarily_unavailable";
             message: string;
         };
         CreateOrderBatchItemResponse: {
             index: number;
             /** @enum {string} */
             status: "succeeded" | "failed";
-            order: components["schemas"]["OrderResponse"];
+            order?: components["schemas"]["OrderResponse"];
             error?: components["schemas"]["OrderBatchItemErrorResponse"];
         };
         AdminOrderCommandRequest: {
@@ -6055,23 +6055,13 @@ export interface components {
             serviceToken?: string;
             /** @description Whether the order already has a matched delivery. Purchase deliveries may have no verification code. */
             hasDelivery: boolean;
-            /** @description Verification code from the earliest matched delivery, when that message contains one. */
+            /** @description Verification code selected for the order summary; use Pickup items for the complete received-mail list. */
             verificationCode?: string;
             /**
              * Format: date-time
              * @description Provider receive time of the delivered message.
              */
             lastMailReceivedAt?: string | null;
-            /**
-             * @description Gmail code-mode orders expose verification codes only and never synthesize mail content.
-             * @enum {string}
-             */
-            contentMode?: "code_only";
-            codes?: components["schemas"]["GmailCodeResponse"][];
-            receivedCount?: number;
-            maxCodes?: number;
-            /** Format: date-time */
-            codesExpireAt?: string | null;
             /** @description Local Gmail purchase password. Returned only by checkout and authorized order-detail reads; omitted from order lists and resource APIs. */
             gmailPassword?: string;
             /** @description Local Gmail purchase 2FA secret. Returned only by checkout and authorized order-detail reads. */
@@ -6159,7 +6149,8 @@ export interface components {
             limit: number;
         };
         MailContentResponse: {
-            id: number;
+            /** @description Present only for stored mail that supports the message-detail endpoint; omitted for synthesized upstream code items. */
+            id?: number;
             sender: string;
             recipient: string;
             /** Format: date-time */
@@ -6185,26 +6176,8 @@ export interface components {
             lastSafeError?: string;
         };
         OrderMailResponse: {
-            /**
-             * @description Present for Gmail code-only pickup responses.
-             * @enum {string}
-             */
-            contentMode?: "code_only";
-            /** Format: email */
-            email?: string;
-            receivedCount?: number;
-            maxCodes?: number;
-            /** Format: date-time */
-            expiresAt?: string | null;
-            codes?: components["schemas"]["GmailCodeResponse"][];
             items: components["schemas"]["MailContentResponse"][];
             fetch?: components["schemas"]["FetchStateResponse"];
-        };
-        GmailCodeResponse: {
-            seq: number;
-            code: string;
-            /** Format: date-time */
-            receivedAt: string;
         };
         PickupCredentialRequest: {
             /** Format: email */
@@ -6217,7 +6190,7 @@ export interface components {
         PickupBatchResponse: components["schemas"]["PickupBatchItemResponse"][];
         PickupBatchItemErrorResponse: {
             /** @enum {string} */
-            code: "invalid_request" | "rate_limited" | "credential_invalid" | "order_unavailable" | "service_unavailable" | "internal_error";
+            code: "invalid_request" | "credential_invalid" | "order_unavailable" | "service_unavailable" | "internal_error";
             message: string;
         };
         PickupBatchItemResponse: {
@@ -7523,6 +7496,11 @@ export interface components {
         };
         MicrosoftResourceDetail: {
             id: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "microsoft";
             emailAddress: string;
             forSale: boolean;
             longLived: boolean;
@@ -7537,6 +7515,11 @@ export interface components {
         };
         DomainResourceDetail: {
             id: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "domain";
             domain: string;
             mailServerId: number;
             /**
@@ -18169,16 +18152,6 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Pickup rate limit exceeded */
-            429: {
-                headers: {
-                    "Retry-After"?: number;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
             /** @description Mail service is temporarily unavailable */
             503: {
                 headers: {
@@ -18233,16 +18206,6 @@ export interface operations {
             /** @description Request body is too large */
             413: {
                 headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Batch Pickup request rate limit for the client IP was exceeded */
-            429: {
-                headers: {
-                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -18304,16 +18267,6 @@ export interface operations {
             /** @description Order is not available for mail reading */
             422: {
                 headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Pickup rate limit exceeded */
-            429: {
-                headers: {
-                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {

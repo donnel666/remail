@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   mergeOrderRuntimeState,
+  orderReceiveUntil,
   shouldAutoFetchOrderMail,
   shouldShowQuickFetchControl,
 } from "./order-runtime";
@@ -73,29 +74,27 @@ describe("mergeOrderRuntimeState", () => {
     expect(merged.verificationCode).toBe("344992");
   });
 
-  it("keeps all received Gmail codes when an older order refresh arrives", () => {
-    const current = order({
-      codes: [
-        { code: "111111", receivedAt: "2026-07-10T10:01:00Z", seq: 1 },
-        { code: "222222", receivedAt: "2026-07-10T10:02:00Z", seq: 2 },
-      ],
-      contentMode: "code_only",
-      maxCodes: 3,
-      receivedCount: 2,
-    });
+});
 
-    const merged = mergeOrderRuntimeState(
-      order({
-        codes: [{ code: "111111", receivedAt: "2026-07-10T10:01:00Z", seq: 1 }],
-        contentMode: "code_only",
-        maxCodes: 3,
-        receivedCount: 1,
+describe("orderReceiveUntil", () => {
+  it("uses the full service window for code orders", () => {
+    expect(
+      orderReceiveUntil({
+        afterSaleUntil: "2026-07-10T12:00:00Z",
+        receiveUntil: "2026-07-10T10:10:00Z",
+        serviceMode: "code",
       }),
-      current,
-    );
+    ).toBe("2026-07-10T12:00:00Z");
+  });
 
-    expect(merged.codes).toEqual(current.codes);
-    expect(merged.receivedCount).toBe(2);
+  it("keeps receiveUntil for purchase orders", () => {
+    expect(
+      orderReceiveUntil({
+        afterSaleUntil: "2026-07-11T12:00:00Z",
+        receiveUntil: "2026-07-10T10:30:00Z",
+        serviceMode: "purchase",
+      }),
+    ).toBe("2026-07-10T10:30:00Z");
   });
 });
 
@@ -126,16 +125,13 @@ describe("shouldShowQuickFetchControl", () => {
     ).toBe(true);
   });
 
-  it("keeps Gmail code refresh available until all three codes arrive", () => {
-    const gmail = order({
-      contentMode: "code_only",
-      maxCodes: 3,
-      receivedCount: 1,
-      verificationCode: "123456",
-    });
+  it("keeps code refresh available while the order is waiting", () => {
+    const waiting = order({ verificationCode: "123456" });
 
-    expect(shouldShowQuickFetchControl(gmail)).toBe(true);
-    expect(shouldShowQuickFetchControl({ ...gmail, receivedCount: 3 })).toBe(false);
+    expect(shouldShowQuickFetchControl(waiting)).toBe(true);
+    expect(
+      shouldShowQuickFetchControl({ ...waiting, serviceState: "code_received" }),
+    ).toBe(false);
   });
 });
 
