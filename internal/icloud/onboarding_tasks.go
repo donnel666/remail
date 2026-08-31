@@ -1693,7 +1693,9 @@ func (s *Service) failICloudOnboardingTask(ctx context.Context, task *iCloudOnbo
 	if task.TaskKind == "refresh" && task.ResourceID != nil {
 		return s.failICloudRefreshTask(ctx, task, category, message)
 	}
-	if isICloudPostFamilyRecoveryTask(task) {
+	// A permanent phone is mandatory input, not a prerequisite the phase-3
+	// retry command can repair. Keep provider/session failures recoverable.
+	if category != "phone_binding_missing" && isICloudPostFamilyRecoveryTask(task) {
 		return s.waitICloudPostFamilyRecovery(ctx, task, category, message, task.Attempts+1, nil)
 	}
 	now := s.now().UTC().Truncate(time.Millisecond)

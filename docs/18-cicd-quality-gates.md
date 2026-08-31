@@ -10,8 +10,8 @@
 ## 流程
 
 1. `backend-static`：gofmt、OpenAPI Go 生成漂移、go vet、golangci-lint。
-2. `backend-test-shard`：两个并行分片运行真实 Testcontainers MySQL 集成测试；不再启动未被测试使用的 MySQL/Redis/MinIO service。
-3. `backend-test`：聚合两个分片，保留稳定的分支保护检查名。
+2. `backend-test-shard`：按 bounded context 并行运行真实 Testcontainers MySQL 集成测试；单个分片内部保持串行，不再启动未被测试使用的 MySQL/Redis/MinIO service。`mailmatch`、`proxy`、`trade` 独立分片，保证冷缓存时不共享同一个 30 分钟上限。
+3. `backend-test`：聚合全部分片，保留稳定的分支保护检查名。
 4. `frontend`：pnpm 缓存、OpenAPI TypeScript 漂移、typecheck、Vitest、生产 build；上传一天有效的 `web-dist`。
 5. PR：前三项通过后下载 `web-dist`，使用 `Dockerfile.ci` 验证 Docker build，不重复安装 Node 依赖或构建前端。
 6. main/tag：下载 `web-dist`，运行 MySQL/Redis/MinIO smoke；通过后使用同一预构建前端生成并推送 GHCR。

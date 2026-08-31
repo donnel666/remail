@@ -30,7 +30,8 @@ func TestLocalGmailPurchaseUsesUnifiedAllocationAndOrderLookup(t *testing.T) {
 	delivery, err := service.FindLocalPurchase(context.Background(), "PURCHASE-1")
 	require.NoError(t, err)
 	require.Equal(t, allocation.ID, delivery.AllocationID)
-	require.Equal(t, "purchase@gmail.com", delivery.Email)
+	require.Equal(t, allocation.Email, delivery.Email)
+	require.NotEqual(t, "purchase@gmail.com", delivery.Email)
 	require.Equal(t, "password", delivery.Password)
 
 	var resource localResourceModel
@@ -39,6 +40,7 @@ func TestLocalGmailPurchaseUsesUnifiedAllocationAndOrderLookup(t *testing.T) {
 	stored := mustLocalGmailAllocation(t, db, allocation.ID)
 	require.EqualValues(t, 11, stored.ProjectID)
 	require.EqualValues(t, 12, stored.ProductID)
+	require.Equal(t, GmailMailboxDot, stored.Mailbox)
 	require.Equal(t, AllocationStatusAllocated, stored.Status)
 
 	replayed := allocateLocalGmailTest(t, allocator, "PURCHASE-1", 2, 12, allocdomain.GmailServiceModePurchase, allocdomain.SupplyScopePublic)
@@ -56,7 +58,7 @@ func TestLocalGmailPurchaseUsesUnifiedAllocationAndOrderLookup(t *testing.T) {
 	require.Equal(t, AllocationStatusReleased, mustLocalGmailAllocation(t, db, allocation.ID).Status)
 }
 
-func TestUnifiedGmailAllocationRechecksProjectHistory(t *testing.T) {
+func TestUnifiedGmailAllocationReusesResourceWithUnusedProjectAlias(t *testing.T) {
 	db := newLocalGmailAllocationTestDB(t, "gmail-local-purchase-history")
 	resources := make([]localResourceModel, 2)
 	for i, email := range []string{"history@gmail.com", "fresh@gmail.com"} {
@@ -71,11 +73,12 @@ func TestUnifiedGmailAllocationRechecksProjectHistory(t *testing.T) {
 	}
 	require.NoError(t, db.Create(&localAllocationGuardModel{OrderNo: "HISTORY-1", Type: "gmail"}).Error)
 	historyResourceID := resources[0].ID
+	historyEmail := "h.istory@gmail.com"
 	releasedAt := time.Now().UTC()
 	require.NoError(t, db.Create(&allocationModel{
 		OrderNo: "HISTORY-1", GuardType: "gmail", ProjectID: 11, ProductID: 12,
 		Source: SourceLocal, ServiceMode: string(allocdomain.GmailServiceModeCode), ResourceID: &historyResourceID,
-		SupplyScope: AllocationSupplyPublic, Email: resources[0].Email, Status: AllocationStatusReleased,
+		SupplyScope: AllocationSupplyPublic, Mailbox: GmailMailboxDot, Email: historyEmail, Status: AllocationStatusReleased,
 		ReleasedAt: &releasedAt,
 	}).Error)
 
@@ -83,7 +86,9 @@ func TestUnifiedGmailAllocationRechecksProjectHistory(t *testing.T) {
 		t, allocapp.NewUseCase(allocinfra.NewRepo(db)), "PURCHASE-AFTER-HISTORY", 2, 12,
 		allocdomain.GmailServiceModePurchase, allocdomain.SupplyScopePublic,
 	)
-	require.Equal(t, resources[1].ID, allocation.ResourceID)
+	require.Equal(t, resources[0].ID, allocation.ResourceID)
+	require.Equal(t, GmailMailboxDot, allocation.Mailbox)
+	require.NotEqual(t, historyEmail, allocation.Email)
 }
 
 func TestLocalGmailSupplyIgnoresUpstreamHistoryButKeepsLocalHistory(t *testing.T) {
