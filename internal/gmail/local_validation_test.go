@@ -30,7 +30,7 @@ func TestLocalGmailValidationTransitionsHealth(t *testing.T) {
 		ID: root.ID, ResourceType: "gmail", OwnerUserID: 1,
 		Email: "validate@gmail.com", Identity: "validate@gmail.com", Password: "login-password",
 		BindingEmail:    "binding@example.com",
-		TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "app-password",
+		TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "abcdefghijklmnop",
 		CredentialRevision: 1, ValidationGeneration: 1, Status: LocalResourcePending,
 	}).Error)
 
@@ -44,18 +44,17 @@ func TestLocalGmailValidationTransitionsHealth(t *testing.T) {
 			require.Equal(t, "login-password", input.Password)
 			require.Equal(t, "binding@example.com", input.BindingEmail)
 			require.Equal(t, "JBSWY3DPEHPK3PXP", input.TwoFactorSecret)
-			require.Equal(t, "app-password", input.AppPassword)
+			require.Equal(t, "abcdefghijklmnop", input.AppPassword)
 			return localGmailValidationResult{
-				TwoFactorSecret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
-				AppPassword:     "abcdefghijklmnop",
+				AppPassword: "abcdefghijklmnop",
 			}
 		}))
 	var stored localResourceModel
 	require.NoError(t, db.First(&stored, root.ID).Error)
 	require.Equal(t, LocalResourceIdentifying, stored.Status)
-	require.Equal(t, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", stored.TwoFactorSecret)
+	require.Equal(t, "JBSWY3DPEHPK3PXP", stored.TwoFactorSecret)
 	require.Equal(t, "abcdefghijklmnop", stored.AppPassword)
-	require.EqualValues(t, 2, stored.CredentialRevision)
+	require.EqualValues(t, 1, stored.CredentialRevision)
 	require.Empty(t, stored.LastSafeError)
 	require.NotNil(t, stored.LastCheckedAt)
 	require.Equal(t, checkedAt, stored.LastCheckedAt.UTC())
@@ -88,7 +87,7 @@ func TestLocalGmailValidationTransitionsHealth(t *testing.T) {
 	require.Equal(t, LocalResourceAbnormal, stored.Status)
 	require.Equal(t, "Gmail account password is incorrect.", stored.LastSafeError)
 	require.NotContains(t, stored.LastSafeError, stored.AppPassword)
-	require.Equal(t, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", stored.TwoFactorSecret)
+	require.Equal(t, "JBSWY3DPEHPK3PXP", stored.TwoFactorSecret)
 	require.Equal(t, "abcdefghijklmnop", stored.AppPassword)
 
 	require.NoError(t, db.Model(&localResourceModel{}).Where("id = ?", root.ID).
@@ -117,6 +116,25 @@ func TestLocalGmailValidationTransitionsHealth(t *testing.T) {
 	require.EqualValues(t, 3, stored.ValidationGeneration)
 	require.NoError(t, db.First(&root, root.ID).Error)
 	require.EqualValues(t, 6, root.Version)
+}
+
+func TestLocalGmailAccountValidationAcceptsAppPasswordWithoutOrdinaryCredentials(t *testing.T) {
+	result := validateLocalGmailAccountWith(context.Background(), nil, localGmailValidationInput{
+		ResourceID: 1, ValidationGeneration: 1, Email: "owner@gmail.com",
+		AppPassword: "ghsf\u00a0peof\u2003qvby\taqiq",
+	}, func(
+		_ context.Context, input localGmailValidationInput, proxyURL string, _ localGmailBrowserFingerprint,
+	) localGmailValidationResult {
+		require.Empty(t, input.Password)
+		require.Empty(t, input.BindingEmail)
+		require.Empty(t, input.TwoFactorSecret)
+		require.Empty(t, proxyURL)
+		return localGmailValidationResult{AppPassword: removeWhitespace(input.AppPassword)}
+	})
+	require.NoError(t, result.Err)
+	require.Equal(t, "ghsfpeofqvbyaqiq", result.AppPassword)
+	require.Empty(t, result.TwoFactorSecret)
+	require.False(t, result.Temporary)
 }
 
 func TestLocalGmailValidationResultCannotOverwriteAdminDisable(t *testing.T) {
@@ -214,7 +232,7 @@ func TestLocalGmailValidationTaskFencesGenerationRevisionAndOwner(t *testing.T) 
 	require.EqualValues(t, 2, stored.CredentialRevision)
 }
 
-func TestLocalGmailValidationPersistsRotatedCredentialsBeforeHistoryEnqueue(t *testing.T) {
+func TestLocalGmailValidationQueuesHistoryWithoutRotatingCredentials(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:gmail-local-validation-history-dependency?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &gmailMaintenanceRunModel{}))
@@ -222,25 +240,23 @@ func TestLocalGmailValidationPersistsRotatedCredentialsBeforeHistoryEnqueue(t *t
 	require.NoError(t, db.Create(&root).Error)
 	require.NoError(t, db.Create(&localResourceModel{
 		ID: root.ID, ResourceType: "gmail", OwnerUserID: 7,
-		Email: "dependency@gmail.com", Identity: "dependency@gmail.com", AppPassword: "app-password",
+		Email: "dependency@gmail.com", Identity: "dependency@gmail.com", AppPassword: "abcdefghijklmnop",
 		CredentialRevision: 2, ValidationGeneration: 3, Status: LocalResourceValidating,
 	}).Error)
 	service := NewService(db, nil)
 	err = service.processLocalResourceValidationWith(context.Background(), localResourceValidationTask{
 		ResourceID: root.ID, OwnerUserID: 7, ValidationGeneration: 3, ExpectedCredentialRevision: 2,
 	}, func(context.Context, localGmailValidationInput) localGmailValidationResult {
-		return localGmailValidationResult{
-			TwoFactorSecret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", AppPassword: "abcdefghijklmnop",
-		}
+		return localGmailValidationResult{AppPassword: "abcdefghijklmnop"}
 	})
 	require.ErrorIs(t, err, ErrLocalValidationDependency)
 
 	var stored localResourceModel
 	require.NoError(t, db.First(&stored, root.ID).Error)
 	require.Equal(t, LocalResourceIdentifying, stored.Status)
-	require.Equal(t, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", stored.TwoFactorSecret)
+	require.Empty(t, stored.TwoFactorSecret)
 	require.Equal(t, "abcdefghijklmnop", stored.AppPassword)
-	require.EqualValues(t, 3, stored.CredentialRevision)
+	require.EqualValues(t, 2, stored.CredentialRevision)
 }
 
 func TestLocalGmailValidationPersistsAuthoritativePartialRotationForRetry(t *testing.T) {

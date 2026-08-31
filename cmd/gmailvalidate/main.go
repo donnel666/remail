@@ -1,5 +1,4 @@
-// Command gmailvalidate rotates one Gmail account from a TXT file using the
-// same browser flow as asynchronous resource validation.
+// Command gmailvalidate manually rotates one Gmail account from a TXT file.
 package main
 
 import (
@@ -86,6 +85,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 	credential, err := loadCredential(config.filePath, config.line)
 	if err != nil {
 		return err
+	}
+	if strings.TrimSpace(credential.Password) == "" {
+		return errors.New("gmailvalidate requires the Gmail login password; APP-password-only lines belong in the Web importer")
 	}
 	if !config.apply && !config.commit {
 		fmt.Fprintf(stdout, "line=%d parsed binding=%t 2fa=%t app_password=%t; add -apply to rotate\n",

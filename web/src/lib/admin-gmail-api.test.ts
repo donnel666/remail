@@ -93,7 +93,7 @@ describe("admin Gmail API adapter", () => {
     await expect(
       importAdminGmailResources({
         content:
-          "mail@gmail.com----password----JBSWY3DPEHPK3PXP----abcdefghijklmnop",
+          "mail@gmail.com----password----JBSWY3DPEHPK3PXP----abcd efgh ijkl mnop",
         ownerId: 101,
         errorStrategy: "skip",
       }),
@@ -108,7 +108,9 @@ describe("admin Gmail API adapter", () => {
     expect(formData.get("errorStrategy")).toBe("skip");
     expect(formData.has("longLived")).toBe(false);
     expect(file.name).toBe("gmail-resources.txt");
-    expect(await file.text()).toContain("mail@gmail.com----password");
+    expect(await file.text()).toBe(
+      "mail@gmail.com----password----JBSWY3DPEHPK3PXP----abcdefghijklmnop",
+    );
     expect(callOptions(apiMocks.POST).params?.header).toEqual({
       "X-CSRF-Token": "admin-csrf",
       "Idempotency-Key": "gmail-command-1",
@@ -307,6 +309,7 @@ describe("admin Gmail API adapter", () => {
         ownerId: 9,
         email: "mail@gmail.com",
         bindingEmail: "recovery@example.com",
+        appPassword: "abcd efgh ijkl mnop",
       }),
     ).resolves.toEqual(mutation);
     await expect(
@@ -314,7 +317,7 @@ describe("admin Gmail API adapter", () => {
         version: 3,
         password: "write-only-password",
         twoFactorSecret: "JBSWY3DPEHPK3PXP",
-        appPassword: "abcdefghijklmnop",
+        appPassword: "abcd efgh ijkl mnop",
       }),
     ).resolves.toEqual(mutation);
     await expect(scanAdminGmailResourceHistory(7)).resolves.toEqual(mutation);
@@ -324,6 +327,13 @@ describe("admin Gmail API adapter", () => {
     expect(apiMocks.PATCH).toHaveBeenCalledWith(
       "/v1/admin/gmail/resources/{resourceId}",
       expect.objectContaining({
+        body: {
+          version: 3,
+          ownerId: 9,
+          email: "mail@gmail.com",
+          bindingEmail: "recovery@example.com",
+          appPassword: "abcdefghijklmnop",
+        },
         params: expect.objectContaining({ path: { resourceId: 7 } }),
       }),
     );

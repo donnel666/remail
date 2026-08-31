@@ -654,8 +654,8 @@ func TestGmailProductInventoryTotalsAreSplitBySKU(t *testing.T) {
 		MainPublicAvailable: 1, DotPublicAvailable: 7, PlusPublicAvailable: 2,
 	}}
 	main := productInventoryRow{Type: string(coredomain.ProductTypeGmail), PlusWeight: 100}
-	require.EqualValues(t, 9, productInventoryTotalFromStats(main, stats))
-	require.EqualValues(t, 8, productInventoryPublicTotalFromStats(main, stats))
+	require.EqualValues(t, 8, productInventoryTotalFromStats(main, stats))
+	require.EqualValues(t, 7, productInventoryPublicTotalFromStats(main, stats))
 	variant := productInventoryRow{Type: string(coredomain.ProductTypeGmailVariant), MainWeight: 100, DotWeight: 100}
 	require.EqualValues(t, 2, productInventoryTotalFromStats(variant, stats))
 	require.EqualValues(t, 2, productInventoryPublicTotalFromStats(variant, stats))

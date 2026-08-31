@@ -14,7 +14,6 @@ const GmailVariantInventory int64 = 1_000_000_000
 const (
 	MicrosoftBucketCount        = coredomain.MicrosoftAllocationBucketCount
 	DomainBucketCount           = coredomain.DomainAllocationBucketCount
-	GmailBucketCount            = 2048
 	GmailDotMaxLocalCharacters  = 30
 	GeneratedMailboxBucketCount = coredomain.GeneratedMailboxBucketCount
 	DotAliasCapacityPerResource = 10
@@ -94,8 +93,9 @@ type ICloudCandidate struct {
 }
 
 type GmailCandidate struct {
-	ResourceID uint
-	Email      string
+	ResourceID      uint
+	Email           string
+	LastAllocatedAt *time.Time
 }
 
 type DomainCandidate struct {
@@ -441,7 +441,7 @@ type Repository interface {
 	ListProductSuffixInventory(ctx context.Context, config ProductAllocationConfig, buyerUserID uint, scope domain.SupplyScope) (map[string]int64, error)
 
 	ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, bucket *uint16, limit int, emailSuffix string) ([]MicrosoftCandidate, error)
-	ListGmailSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.GmailMailbox, bucket *uint16, limit int) ([]GmailCandidate, error)
+	ListGmailSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.GmailMailbox, after *GmailCandidate, limit int) ([]GmailCandidate, error)
 	ListICloudSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, requiredUntil time.Time, limit int) ([]ICloudCandidate, error)
 	ListDomainSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int, emailSuffix string) ([]DomainCandidate, error)
 	ListGeneratedMailboxCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int, emailSuffix string) ([]GeneratedMailboxCandidate, error)
@@ -456,6 +456,7 @@ type Repository interface {
 
 	IsMicrosoftMailboxHistoricallyMatched(ctx context.Context, projectID uint, mailbox domain.MicrosoftMailbox, mailboxID uint) (bool, error)
 	CountGmailDotHistory(ctx context.Context, resourceID uint, projectID uint) (uint64, error)
+	ListUnavailableGmailMailboxEmails(ctx context.Context, projectID uint, mailbox domain.GmailMailbox, emails []string) (map[string]struct{}, error)
 	IsGmailMailboxAvailable(ctx context.Context, resourceID uint, projectID uint, mailbox domain.GmailMailbox, email string) (bool, error)
 	IsDomainEmailHistoricallyAllocated(ctx context.Context, projectID uint, email string) (bool, error)
 	FindReusableExplicitAlias(ctx context.Context, projectID uint, resourceID uint, emailSuffix string) (*AliasCandidate, error)

@@ -269,7 +269,9 @@ func (s *Service) UpdateAdminLocalResource(ctx context.Context, command AdminLoc
 	if command.Credentials != nil {
 		command.Credentials.TwoFactorSecret = strings.ToUpper(removeWhitespace(command.Credentials.TwoFactorSecret))
 		command.Credentials.AppPassword = removeWhitespace(command.Credentials.AppPassword)
-		if strings.TrimSpace(command.Credentials.Password) == "" || len(command.Credentials.Password) > 512 ||
+		if strings.TrimSpace(command.Credentials.Password) == "" && command.Credentials.TwoFactorSecret == "" && command.Credentials.AppPassword == "" ||
+			len(command.Credentials.Password) > 512 ||
+			len(command.Credentials.TwoFactorSecret) > 512 ||
 			command.Credentials.TwoFactorSecret != "" && !validLocalGmailTOTPSecret(command.Credentials.TwoFactorSecret) ||
 			command.Credentials.AppPassword != "" && !validLocalGmailAppPassword(command.Credentials.AppPassword) {
 			return nil, ErrInvalidLocalResource
@@ -379,7 +381,9 @@ func (s *Service) UpdateAdminLocalResource(ctx context.Context, command AdminLoc
 		}
 		credentialChanged := identityChanged || bindingChanged || command.Credentials != nil
 		if command.Credentials != nil {
-			updates["password"] = command.Credentials.Password
+			if strings.TrimSpace(command.Credentials.Password) != "" {
+				updates["password"] = command.Credentials.Password
+			}
 			if command.Credentials.TwoFactorSecret != "" {
 				updates["two_factor_secret"] = command.Credentials.TwoFactorSecret
 			}

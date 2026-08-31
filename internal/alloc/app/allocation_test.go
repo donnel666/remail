@@ -689,11 +689,20 @@ func TestGmailDotAliasVariantsCoverEveryDotCombination(t *testing.T) {
 	}
 }
 
+func TestGmailDotAliasCapacitySupportsMaximumLocalPart(t *testing.T) {
+	if got, want := gmailDotAliasCapacity(strings.Repeat("a", GmailDotMaxLocalCharacters)+"@gmail.com"), uint64(1<<29)-1; got != want {
+		t.Fatalf("maximum Gmail dot capacity = %d, want %d", got, want)
+	}
+	if got := gmailDotAliasCapacity(strings.Repeat("a", GmailDotMaxLocalCharacters+1) + "@gmail.com"); got != 0 {
+		t.Fatalf("overlong Gmail dot capacity = %d, want 0", got)
+	}
+}
+
 func TestGmailMailboxPreferencesAreFixedByProduct(t *testing.T) {
 	main := gmailMailboxPreferences(ProductAllocationConfig{
 		ProductType: coredomain.ProductTypeGmail, PlusWeight: 100,
 	})
-	if want := []domain.GmailMailbox{domain.GmailMailboxMain, domain.GmailMailboxDot}; !slices.Equal(main, want) {
+	if want := []domain.GmailMailbox{domain.GmailMailboxDot}; !slices.Equal(main, want) {
 		t.Fatalf("gmail preferences = %v, want %v", main, want)
 	}
 	variant := gmailMailboxPreferences(ProductAllocationConfig{
@@ -701,6 +710,146 @@ func TestGmailMailboxPreferencesAreFixedByProduct(t *testing.T) {
 	})
 	if want := []domain.GmailMailbox{domain.GmailMailboxPlus}; !slices.Equal(variant, want) {
 		t.Fatalf("gmail variant preferences = %v, want %v", variant, want)
+	}
+}
+
+type gmailAllocationTestRepo struct {
+	Repository
+	candidates     []GmailCandidate
+	busyRoots      map[uint]bool
+	historyCount   uint64
+	unavailable    map[string]struct{}
+	tryLocks       []uint
+	waitLocks      int
+	historyBatches int
+}
+
+func (r *gmailAllocationTestRepo) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+func (*gmailAllocationTestRepo) HasParentTx(context.Context) bool { return true }
+
+func (*gmailAllocationTestRepo) FindExistingAllocation(context.Context, string) (*domain.UnifiedAllocation, error) {
+	return nil, nil
+}
+
+func (*gmailAllocationTestRepo) LoadProductConfig(context.Context, uint, uint, bool) (*ProductAllocationConfig, error) {
+	return &ProductAllocationConfig{
+		ProjectID: 10, ProductID: 20, ProductType: coredomain.ProductTypeGmail,
+		CodeEnabled: true, CodeSupplierPrice: "0",
+	}, nil
+}
+
+func (r *gmailAllocationTestRepo) ListGmailSourceCandidates(_ context.Context, _ uint, _ uint, _ domain.SupplyScope, _ domain.GmailMailbox, after *GmailCandidate, limit int) ([]GmailCandidate, error) {
+	start := 0
+	if after != nil {
+		for start < len(r.candidates) && r.candidates[start].ResourceID != after.ResourceID {
+			start++
+		}
+		start++
+	}
+	end := min(start+limit, len(r.candidates))
+	return r.candidates[start:end], nil
+}
+
+func (r *gmailAllocationTestRepo) LockResourceRoot(context.Context, uint, domain.AllocationType) (bool, error) {
+	r.waitLocks++
+	return true, nil
+}
+
+func (r *gmailAllocationTestRepo) TryLockResourceRoot(_ context.Context, resourceID uint, _ domain.AllocationType) (bool, error) {
+	r.tryLocks = append(r.tryLocks, resourceID)
+	return !r.busyRoots[resourceID], nil
+}
+
+func (r *gmailAllocationTestRepo) LockGmailCandidate(_ context.Context, resourceID uint, _ uint, _ uint, _ domain.SupplyScope, _ domain.GmailMailbox) (*GmailCandidate, error) {
+	for _, candidate := range r.candidates {
+		if candidate.ResourceID == resourceID {
+			result := candidate
+			return &result, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *gmailAllocationTestRepo) CountGmailDotHistory(context.Context, uint, uint) (uint64, error) {
+	return r.historyCount, nil
+}
+
+func (r *gmailAllocationTestRepo) ListUnavailableGmailMailboxEmails(_ context.Context, _ uint, _ domain.GmailMailbox, emails []string) (map[string]struct{}, error) {
+	r.historyBatches++
+	result := make(map[string]struct{}, len(emails))
+	for _, email := range emails {
+		if _, exists := r.unavailable[email]; exists {
+			result[email] = struct{}{}
+		}
+	}
+	return result, nil
+}
+
+func (*gmailAllocationTestRepo) CreateOrderGuard(context.Context, string, domain.AllocationType) error {
+	return nil
+}
+
+func (r *gmailAllocationTestRepo) CreateGmailAllocation(_ context.Context, allocation *domain.GmailAllocation) error {
+	allocation.ID = 1
+	return nil
+}
+
+func (*gmailAllocationTestRepo) TouchGmailAllocated(context.Context, uint, time.Time) error {
+	return nil
+}
+
+func TestGmailAllocationPagesPastBusyFirstWindow(t *testing.T) {
+	window := globalCandidateWindowValue()
+	repo := &gmailAllocationTestRepo{
+		candidates: make([]GmailCandidate, 0, window+1),
+		busyRoots:  make(map[uint]bool, window),
+	}
+	wantLocks := make([]uint, 0, window+1)
+	for i := 1; i <= window+1; i++ {
+		resourceID := uint(i)
+		repo.candidates = append(repo.candidates, GmailCandidate{ResourceID: resourceID, Email: fmt.Sprintf("user%d@gmail.com", i)})
+		wantLocks = append(wantLocks, resourceID)
+		if i <= window {
+			repo.busyRoots[resourceID] = true
+		}
+	}
+	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+		OrderNo: "gmail-rotate", BuyerUserID: 2, ProjectProductID: 20,
+		SupplyScope: domain.SupplyScopePublic, ServiceMode: domain.GmailServiceModeCode,
+	})
+	if err != nil || result == nil || result.ResourceID != uint(window+1) {
+		t.Fatalf("Allocate() result = %#v, error = %v; want resource %d", result, err, window+1)
+	}
+	if repo.waitLocks != 0 || !slices.Equal(repo.tryLocks, wantLocks) {
+		t.Fatalf("wait/try root locks = %d/%v, want 0/%v", repo.waitLocks, repo.tryLocks, wantLocks)
+	}
+}
+
+func TestGmailDotAllocationScansPastFragmentedHistoryWindow(t *testing.T) {
+	email := "abcdefghijkl@gmail.com"
+	window := aliasGenerationWindowValue()
+	blocked := gmailDotAliasVariantBatch(email, uint64(window), window)
+	unavailable := make(map[string]struct{}, len(blocked))
+	for _, alias := range blocked {
+		unavailable[alias] = struct{}{}
+	}
+	repo := &gmailAllocationTestRepo{
+		candidates:   []GmailCandidate{{ResourceID: 1, Email: email}},
+		historyCount: uint64(len(blocked)),
+		unavailable:  unavailable,
+	}
+	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+		OrderNo: "gmail-fragmented", BuyerUserID: 2, ProjectProductID: 20,
+		SupplyScope: domain.SupplyScopePublic, ServiceMode: domain.GmailServiceModeCode,
+	})
+	if err != nil || result == nil {
+		t.Fatalf("Allocate() result = %#v, error = %v; want free alias after fragmented window", result, err)
+	}
+	if _, blocked := unavailable[result.Email]; blocked || repo.historyBatches != 2 {
+		t.Fatalf("allocated email/batches = %q/%d, want unblocked alias from second batch", result.Email, repo.historyBatches)
 	}
 }
 

@@ -81,6 +81,9 @@ func rotateStandaloneAccount(
 	if sourceLine <= 0 {
 		return StandaloneRotationResult{SafeError: "Gmail source line is invalid.", Err: ErrLocalValidationConflict}
 	}
+	if strings.TrimSpace(credential.Password) == "" {
+		return StandaloneRotationResult{SafeError: "Gmail login password is required for standalone browser rotation.", Err: ErrLocalValidationConflict}
+	}
 	input := localGmailValidationInput{
 		ResourceID: uint(sourceLine), ValidationGeneration: 1,
 		Email: credential.Email, Password: credential.Password, BindingEmail: credential.BindingEmail,

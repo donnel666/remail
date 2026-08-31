@@ -25,6 +25,7 @@ import (
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
 	proxydomain "github.com/donnel666/remail/internal/proxy/domain"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	"github.com/emersion/go-imap/v2"
 )
 
 const (
@@ -81,7 +82,7 @@ func (e *localGmailAccountError) Unwrap() error {
 }
 
 func (s *Service) validateLocalGmailAccount(ctx context.Context, input localGmailValidationInput) localGmailValidationResult {
-	return validateLocalGmailAccountWith(ctx, s.validationProxies, input, rotateLocalGmailAccount)
+	return validateLocalGmailAccountWith(ctx, s.validationProxies, input, validateLocalGmailAppPassword)
 }
 
 func validateLocalGmailAccountWith(
@@ -94,7 +95,7 @@ func validateLocalGmailAccountWith(
 		ctx = context.Background()
 	}
 	if rotate == nil || input.ResourceID == 0 || input.ValidationGeneration == 0 ||
-		strings.TrimSpace(input.Email) == "" || strings.TrimSpace(input.Password) == "" {
+		strings.TrimSpace(input.Email) == "" || !validLocalGmailAppPassword(input.AppPassword) {
 		return localGmailValidationResult{SafeError: "Gmail credentials are incomplete.", Err: ErrLocalValidationConflict}
 	}
 	maxProxyAttempts := min(
@@ -211,6 +212,38 @@ func newLocalGmailBrowserFingerprintAttempt(input localGmailValidationInput, att
 	}
 }
 
+func validateLocalGmailAppPassword(
+	ctx context.Context,
+	input localGmailValidationInput,
+	proxyURL string,
+	_ localGmailBrowserFingerprint,
+) localGmailValidationResult {
+	return validateLocalGmailAppPasswordWith(ctx, input, proxyURL, verifyLocalGmailAppPassword)
+}
+
+func validateLocalGmailAppPasswordWith(
+	ctx context.Context,
+	input localGmailValidationInput,
+	proxyURL string,
+	verify func(context.Context, string, string, string) error,
+) localGmailValidationResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	attemptCtx, cancel := context.WithTimeout(ctx, localGmailFetchTimeout)
+	defer cancel()
+	result := localGmailValidationResult{AppPassword: removeWhitespace(input.AppPassword)}
+	if err := verify(attemptCtx, input.Email, result.AppPassword, proxyURL); err != nil {
+		attemptErr := attemptCtx.Err()
+		failure := localGmailValidationFailure(result, errors.Join(err, attemptErr))
+		if strings.TrimSpace(proxyURL) != "" && (errors.Is(attemptErr, context.DeadlineExceeded) || isLocalGmailPickupProxyFailure(err, proxyURL)) {
+			failure.ProxyFailure = true
+		}
+		return failure
+	}
+	return result
+}
+
 func rotateLocalGmailAccount(
 	ctx context.Context,
 	input localGmailValidationInput,
@@ -311,18 +344,19 @@ func extractLastLocalGmailAppPassword(body string) (string, bool) {
 
 func verifyLocalGmailAppPassword(ctx context.Context, email, appPassword, proxyURL string) error {
 	if !validLocalGmailAppPassword(appPassword) {
-		return &localGmailAccountError{err: errors.New("generated Gmail app password is invalid"), safeError: "Gmail returned an invalid App Password."}
+		return &localGmailAccountError{err: errors.New("gmail app password is invalid"), safeError: "Gmail App Password is invalid."}
 	}
 	client, closeClient, err := openLocalGmailPickupIMAP(ctx, email, appPassword, proxyURL, newLocalGmailClientFingerprint())
 	if err != nil {
 		if errors.Is(err, errLocalGmailAuthentication) {
-			return &localGmailAccountError{
-				err: err, safeError: "Gmail rejected the new App Password.", temporary: true,
-			}
+			return &localGmailAccountError{err: err, safeError: "Gmail rejected the App Password."}
 		}
 		return localGmailBrowserTransportError(err, strings.TrimSpace(proxyURL) != "")
 	}
 	defer closeClient()
+	if _, err := client.Select("INBOX", &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
+		return localGmailBrowserTransportError(err, strings.TrimSpace(proxyURL) != "")
+	}
 	_ = client.Logout().Wait()
 	return nil
 }

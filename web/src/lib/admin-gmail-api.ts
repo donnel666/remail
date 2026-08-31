@@ -57,6 +57,24 @@ const OWNER_PAGE_SIZE = 100;
 const ALL_MATCHING_PAGE_SIZE = 200;
 const COMMAND_CHUNK_SIZE = 1000;
 
+export function normalizeAdminGmailAppPassword(value: string) {
+  return value.replace(/\s/g, "");
+}
+
+function normalizeAdminGmailImportContent(content: string) {
+  return content
+    .split(/\r?\n/)
+    .map((line) => {
+      const parts = line.split("----");
+      if (parts.length < 2) return line;
+      parts[parts.length - 1] = normalizeAdminGmailAppPassword(
+        parts[parts.length - 1] ?? "",
+      );
+      return parts.join("----");
+    })
+    .join("\n");
+}
+
 function commandHeaders() {
   return {
     ...csrfHeader(),
@@ -121,9 +139,16 @@ export async function updateAdminGmailResource(
   request: AdminGmailResourceUpdateRequest,
   signal?: AbortSignal,
 ): Promise<AdminGmailMutationResponse> {
+  const body =
+    request.appPassword === undefined
+      ? request
+      : {
+          ...request,
+          appPassword: normalizeAdminGmailAppPassword(request.appPassword),
+        };
   return unwrap(
     await client.PATCH("/v1/admin/gmail/resources/{resourceId}", {
-      body: request,
+      body,
       params: {
         header: commandHeaders(),
         path: { resourceId },
@@ -138,9 +163,13 @@ export async function replaceAdminGmailCredentials(
   request: AdminGmailCredentialsReplaceRequest,
   signal?: AbortSignal,
 ): Promise<AdminGmailMutationResponse> {
+  const body = {
+    ...request,
+    appPassword: normalizeAdminGmailAppPassword(request.appPassword ?? ""),
+  };
   return unwrap(
     await client.PUT("/v1/admin/gmail/resources/{resourceId}/credentials", {
-      body: request,
+      body,
       params: {
         header: commandHeaders(),
         path: { resourceId },
@@ -202,9 +231,13 @@ export async function importAdminGmailResources(
   signal?: AbortSignal,
 ): Promise<AdminGmailImportResponse> {
   const formData = new FormData();
-  const file = new File([request.content], "gmail-resources.txt", {
-    type: "text/plain",
-  });
+  const file = new File(
+    [normalizeAdminGmailImportContent(request.content)],
+    "gmail-resources.txt",
+    {
+      type: "text/plain",
+    },
+  );
   formData.append("file", file);
   formData.append("ownerId", String(request.ownerId));
   formData.append("errorStrategy", request.errorStrategy);

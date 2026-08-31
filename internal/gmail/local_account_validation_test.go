@@ -3,6 +3,9 @@ package gmail
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"testing"
 	"time"
 
@@ -11,6 +14,62 @@ import (
 	proxydomain "github.com/donnel666/remail/internal/proxy/domain"
 	"github.com/stretchr/testify/require"
 )
+
+func TestValidateLocalGmailAppPasswordBoundsAndClassifiesProxyAttempts(t *testing.T) {
+	input := localGmailValidationInput{Email: "owner@gmail.com", AppPassword: "abcd efgh ijkl mnop"}
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{name: "timeout", err: context.DeadlineExceeded},
+		{name: "eof", err: io.EOF},
+		{name: "closed connection", err: net.ErrClosed},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			started := time.Now()
+			result := validateLocalGmailAppPasswordWith(context.Background(), input, "http://proxy.invalid:8080",
+				func(ctx context.Context, email, appPassword, proxyURL string) error {
+					deadline, ok := ctx.Deadline()
+					require.True(t, ok)
+					require.WithinDuration(t, started.Add(localGmailFetchTimeout), deadline, time.Second)
+					require.Equal(t, "owner@gmail.com", email)
+					require.Equal(t, "abcdefghijklmnop", appPassword)
+					require.Equal(t, "http://proxy.invalid:8080", proxyURL)
+					return &localGmailAccountError{err: test.err, safeError: "Gmail transport failed.", temporary: true}
+				})
+
+			require.ErrorIs(t, result.Err, test.err)
+			require.True(t, result.Temporary)
+			require.True(t, result.ProxyFailure)
+		})
+	}
+
+	authentication := validateLocalGmailAppPasswordWith(context.Background(), input, "http://proxy.invalid:8080",
+		func(context.Context, string, string, string) error {
+			return &localGmailAccountError{
+				err: fmt.Errorf("%w: rejected", errLocalGmailAuthentication), safeError: "Gmail rejected the App Password.",
+			}
+		})
+	require.ErrorIs(t, authentication.Err, errLocalGmailAuthentication)
+	require.False(t, authentication.Temporary)
+	require.False(t, authentication.ProxyFailure)
+
+	expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	timedOut := validateLocalGmailAppPasswordWith(expired, input, "http://proxy.invalid:8080",
+		func(context.Context, string, string, string) error { return context.Canceled })
+	require.ErrorIs(t, timedOut.Err, context.Canceled)
+	require.ErrorIs(t, timedOut.Err, context.DeadlineExceeded)
+	require.True(t, timedOut.ProxyFailure)
+}
+
+func TestStandaloneRotationRejectsAppPasswordOnlyCredential(t *testing.T) {
+	result := RotateStandaloneAccount(context.Background(), StandaloneCredential{
+		Email: "owner@gmail.com", AppPassword: "abcdefghijklmnop",
+	}, "", 1)
+	require.ErrorIs(t, result.Err, ErrLocalValidationConflict)
+	require.Contains(t, result.SafeError, "login password is required")
+}
 
 func TestLocalGmailAccountValidationRotatesFingerprintAndFailedIPv4Proxy(t *testing.T) {
 	setGmailRuntime(t, map[string]string{"max_proxy_attempts": "1"})
@@ -21,6 +80,7 @@ func TestLocalGmailAccountValidationRotatesFingerprintAndFailedIPv4Proxy(t *test
 	input := localGmailValidationInput{
 		ResourceID: 7, ValidationGeneration: 3, Email: " Owner.Name@GMAIL.com ", Password: "password",
 		BindingEmail: "binding@example.com",
+		AppPassword:  "abcdefghijklmnop",
 		RequestID:    "gmail-validation-request",
 	}
 	var proxyURLs []string
@@ -69,7 +129,7 @@ func TestLocalGmailAccountValidationReturnsAuthoritativeCredentialsBeforeProxyRe
 	}}
 	calls := 0
 	result := validateLocalGmailAccountWith(context.Background(), proxies, localGmailValidationInput{
-		ResourceID: 8, ValidationGeneration: 4, Email: "partial@gmail.com", Password: "password",
+		ResourceID: 8, ValidationGeneration: 4, Email: "partial@gmail.com", Password: "password", AppPassword: "abcdefghijklmnop",
 	}, func(context.Context, localGmailValidationInput, string, localGmailBrowserFingerprint) localGmailValidationResult {
 		calls++
 		return localGmailValidationResult{
@@ -96,7 +156,7 @@ func TestLocalGmailAccountValidationReturnsRevocationBeforeProxyRetry(t *testing
 	}}
 	calls := 0
 	result := validateLocalGmailAccountWith(context.Background(), proxies, localGmailValidationInput{
-		ResourceID: 9, ValidationGeneration: 5, Email: "revoked@gmail.com", Password: "password",
+		ResourceID: 9, ValidationGeneration: 5, Email: "revoked@gmail.com", Password: "password", AppPassword: "abcdefghijklmnop",
 	}, func(context.Context, localGmailValidationInput, string, localGmailBrowserFingerprint) localGmailValidationResult {
 		calls++
 		return localGmailValidationResult{

@@ -122,6 +122,8 @@ func (s *Service) checkLocalSupply(
 		Cost      string `gorm:"column:cost_points"`
 		Available uint64 `gorm:"column:available"`
 	}
+	dotLocalLength := "LENGTH(REPLACE(SUBSTR(gr.email, 1, INSTR(gr.email, '@') - 1), '.', ''))"
+	dotCapacity := "((1 << (" + dotLocalLength + " - 1)) - 1)"
 	result := s.dbFor(ctx).Table("project_products AS pp").
 		Select(`pp.`+costColumn+` AS cost_points,
 	(SELECT COUNT(*) FROM gmail_resources AS gr
@@ -130,10 +132,13 @@ func (s *Service) checkLocalSupply(
 	 WHERE gr.status IN (?, ?)
 	   AND (
 	     pp.type = 'gmail_variant'
-	     OR (pp.type = 'gmail' AND (
-	       NOT EXISTS (SELECT 1 FROM gmail_allocations AS history WHERE history.source = 'local' AND history.resource_id = gr.id AND history.project_id = pp.project_id AND history.mailbox = 'main')
-	       OR gr.email LIKE '__%@%'
-	     ))
+	     OR (pp.type = 'gmail'
+	       AND `+dotLocalLength+` BETWEEN 2 AND 30
+	       AND (SELECT COUNT(*) FROM gmail_allocations AS history
+	            WHERE history.source = 'local'
+	              AND history.resource_id = gr.id
+	              AND history.project_id = pp.project_id
+	              AND history.mailbox = 'dot') < `+dotCapacity+`)
 	   )
 	   AND ((? = 'private_first' AND gr.for_sale = FALSE AND er.owner_user_id = ?)
 	        OR (gr.for_sale = TRUE AND owner.status = 'active' AND owner.role IN ('supplier','admin','super_admin')))) AS available`,

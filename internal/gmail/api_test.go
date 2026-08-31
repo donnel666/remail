@@ -103,6 +103,34 @@ func TestAdminGmailCredentialRouteRequiresOperatePermission(t *testing.T) {
 	require.Equal(t, []string{"core:resource/operate"}, checker.calls)
 }
 
+func TestAdminGmailEditCredentialsRequiresOperatePermission(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	checker := &gmailPermissionChecker{allowed: map[string]bool{"core:resource/write": true}}
+	router := gin.New()
+	router.Use(middleware.RequestID())
+	RegisterRoutes(
+		router.Group("/v1"),
+		&Module{},
+		middleware.SessionFetcherFunc(func(context.Context, string) (uint, iamdomain.Role, string, bool) {
+			return 9, iamdomain.RoleAdmin, "admin@test.local", true
+		}),
+		checker,
+	)
+
+	request := httptest.NewRequest(http.MethodPatch, "/v1/admin/gmail/resources/42", bytes.NewBufferString(`{"version":1,"ownerId":7,"email":"safe@gmail.com","appPassword":"abcd efgh ijkl mnop"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "edit-gmail-credentials")
+	request.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "session"})
+	request.AddCookie(&http.Cookie{Name: middleware.CSRFCookieName, Value: "csrf"})
+	request.Header.Set(middleware.CSRFHeaderName, "csrf")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+	require.Equal(t, []string{"core:resource/write", "core:resource/operate"}, checker.calls)
+}
+
 func TestAdminGmailAliasRouteReturnsObservedVariantsWithReadPermission(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open("file:gmail-admin-alias-route?mode=memory&cache=shared"), &gorm.Config{})

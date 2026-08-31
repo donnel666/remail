@@ -4808,7 +4808,7 @@ export interface paths {
         put?: never;
         /**
          * Import Gmail resources for a selected owner
-         * @description Requires `core:resource/write`, Session authentication, CSRF, and an idempotency key. The request stores the original TXT in private object storage and the asynchronous import state in Redis before returning 202. Each non-empty line may use `email----password`, `email----password----2FA secret`, `email----password----binding email`, `email----password----2FA secret----Gmail app password`, or `email----password----binding email----2FA secret`. The optional binding email is stored using the same account-binding concept as Microsoft resources and is used when Google requests email confirmation. Parsing, canonical duplicate handling, Gmail resource creation or deleted-resource restoration, browser-based credential rotation, and project-history identification run asynchronously. Validation replaces the Authenticator secret, revokes every existing Gmail App Password, creates one new App Password, and only then persists a complete email/password/2FA/App-Password credential set before history identification. A restored resource keeps its original resource ID, moves to the selected owner, and returns to `pending` validation. The private source TXT is retained; skipped or failed rows are retained in a private `gmail-import-failures.csv` artifact. Uploaded text, credentials, private object keys, and failure-row email values are never returned or written to ordinary logs.
+         * @description Requires `core:resource/write`, Session authentication, CSRF, and an idempotency key. The request stores the original TXT in private object storage and the asynchronous import state in Redis before returning 202. Each non-empty line must use one of five formats: `email----App Password`, `email----password----App Password`, `email----password----binding email----App Password`, `email----password----2FA secret----App Password`, or `email----password----binding email----2FA secret----App Password`. The final field is always the Gmail App Password and all of its whitespace is removed; in four-field rows a valid email third field is the binding email, otherwise it is the 2FA secret. Password, binding email, and 2FA are stored when supplied. Validation only verifies that the submitted App Password can authenticate to Gmail IMAP; it never opens a browser, changes 2FA, revokes App Passwords, or creates a replacement. Canonical duplicate handling, resource creation or deleted-resource restoration, validation, and project-history identification run asynchronously. A restored resource keeps its original resource ID, moves to the selected owner, and returns to `pending` validation. The private source TXT is retained; skipped or failed rows are retained in a private `gmail-import-failures.csv` artifact. Uploaded text, credentials, private object keys, and failure-row email values are never returned or written to ordinary logs.
          */
         post: operations["postAdminGmailResourceImport"];
         delete?: never;
@@ -4848,7 +4848,7 @@ export interface paths {
         put?: never;
         /**
          * Queue asynchronous validation for selected Gmail resources
-         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. The bounded resource ID set is expanded through a Redis-backed cursor; each eligible row is fenced by owner, validation generation, and credential revision before the Gmail browser worker replaces 2FA, revokes old App Passwords, creates a new App Password, and queues history identification.
+         * @description Requires `core:resource/operate`, Session authentication, CSRF, and an idempotency key. The bounded resource ID set is expanded through a Redis-backed cursor; each eligible row is fenced by owner, validation generation, and credential revision before its stored App Password is checked against Gmail IMAP. Successful validation queues history identification and never starts a browser or modifies Google credentials.
          */
         post: operations["postAdminGmailResourceValidations"];
         delete?: never;
@@ -4992,8 +4992,8 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Atomically edit Gmail resource metadata
-         * @description Requires `core:resource/write`. Credential values are not accepted here; use the dedicated credential replacement endpoint, which requires `core:resource/operate`.
+         * Atomically edit a Gmail resource
+         * @description Requires `core:resource/write`. Supplying `password`, `twoFactorSecret`, or `appPassword` additionally requires `core:resource/operate`. Credential values are write-only; blank or omitted credential fields preserve their current values. Submitted credentials are stored in the same transaction as metadata and queue App Password IMAP validation.
          */
         patch: operations["patchAdminGmailResource"];
         trace?: never;
@@ -5028,7 +5028,8 @@ export interface paths {
         get?: never;
         /**
          * Replace Gmail credentials as one write-only set
-         * @description Requires `core:resource/operate`. Existing credential values are never returned. Password is required; omitted 2FA and App Password values keep their current values. A successful replacement advances the credential revision and queues validation.
+         * @deprecated
+         * @description Legacy compatibility endpoint requiring `core:resource/operate`. Existing credential values are never returned. Password is required; omitted 2FA and App Password values keep their current values. A successful replacement advances the credential revision and queues App Password IMAP validation. New clients should submit optional write-only credential fields together with metadata through the atomic PATCH endpoint.
          */
         put: operations["putAdminGmailResourceCredentials"];
         post?: never;
@@ -5956,12 +5957,12 @@ export interface components {
         };
         CreateOrderRequest: {
             projectId: number;
-            /** @description Product selector. gmail.com selects Gmail (local main or dot-alias allocation), gmail_variant selects the local Gmail variant product (plus-alias allocation only; it is not a real domain), icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
+            /** @description Product selector. gmail.com selects Gmail (local dot-alias allocation only; the original primary address is never allocated), gmail_variant selects the local Gmail variant product (plus-alias allocation only; it is not a real domain), icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
             emailSuffix: string;
         };
         CreateOrderBatchRequest: {
             projectId: number;
-            /** @description Product selector. gmail.com selects Gmail (local main or dot-alias allocation), gmail_variant selects the local Gmail variant product (plus-alias allocation only; it is not a real domain), icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
+            /** @description Product selector. gmail.com selects Gmail (local dot-alias allocation only; the original primary address is never allocated), gmail_variant selects the local Gmail variant product (plus-alias allocation only; it is not a real domain), icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
             emailSuffix: string;
             /** @description Number of independent orders to create. */
             quantity: number;
@@ -9792,6 +9793,15 @@ export interface components {
             email: string;
             /** @description Optional recovery or challenge mailbox; an empty string clears it. */
             bindingEmail?: string;
+            /**
+             * Format: password
+             * @description Optional account password replacement; blank keeps the current value.
+             */
+            password?: string;
+            /** @description Optional Authenticator secret replacement; whitespace is removed and blank keeps the current value. */
+            twoFactorSecret?: string;
+            /** @description Optional Gmail App Password replacement; all whitespace is removed and blank keeps the current value. */
+            appPassword?: string;
         };
         AdminGmailCredentialsReplaceRequest: {
             /**
@@ -24434,7 +24444,7 @@ export interface operations {
                 "multipart/form-data": {
                     /**
                      * Format: binary
-                     * @description UTF-8 TXT with one Gmail account per non-empty line in one of the five documented `----`-delimited formats; a third field containing an email address is parsed as the optional binding email.
+                     * @description UTF-8 TXT with one Gmail account per non-empty line in one of the five documented `----`-delimited formats. The final field is always an App Password and its whitespace is ignored; a third field containing an email address is parsed as the optional binding email.
                      */
                     file: string;
                     ownerId: number;
@@ -24843,7 +24853,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Edit committed and validation queued when identity, owner, or binding changed */
+            /** @description Atomic edit committed and validation queued when identity, owner, binding, or credentials changed */
             200: {
                 headers: {
                     [name: string]: unknown;

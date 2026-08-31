@@ -2,7 +2,6 @@ package gmail
 
 import (
 	"context"
-	"encoding/base32"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -319,30 +318,34 @@ func (s *Service) localResourceFacets(ctx context.Context, filter LocalResourceL
 
 func parseLocalResourceImportLine(raw string) (localResourceImportLine, bool) {
 	parts := strings.Split(raw, "----")
-	if len(parts) < 2 || len(parts) > 4 {
+	if len(parts) < 2 || len(parts) > 5 {
 		return localResourceImportLine{}, false
 	}
 	email := strings.ToLower(strings.TrimSpace(parts[0]))
-	password := parts[1]
-	bindingEmail, twoFactorSecret, appPassword := "", "", ""
-	if len(parts) >= 3 {
-		if candidate := strings.ToLower(strings.TrimSpace(parts[2])); validLocalGmailEmailAddress(candidate) {
+	password, bindingEmail, twoFactorSecret := "", "", ""
+	appPassword := removeWhitespace(parts[len(parts)-1])
+	switch len(parts) {
+	case 3:
+		password = parts[1]
+	case 4:
+		password = parts[1]
+		candidate := strings.ToLower(strings.TrimSpace(parts[2]))
+		if validLocalGmailEmailAddress(candidate) {
 			bindingEmail = candidate
 		} else {
 			twoFactorSecret = strings.ToUpper(strings.TrimRight(removeWhitespace(parts[2]), "="))
 		}
+	case 5:
+		password = parts[1]
+		bindingEmail = strings.ToLower(strings.TrimSpace(parts[2]))
+		twoFactorSecret = strings.ToUpper(strings.TrimRight(removeWhitespace(parts[3]), "="))
 	}
-	if len(parts) == 4 {
-		if bindingEmail != "" {
-			twoFactorSecret = strings.ToUpper(strings.TrimRight(removeWhitespace(parts[3]), "="))
-		} else {
-			appPassword = removeWhitespace(parts[3])
-		}
-	}
-	if len(email) > 320 || strings.TrimSpace(password) == "" || len(password) > 512 ||
-		len(bindingEmail) > 320 || len(twoFactorSecret) > 512 || len(appPassword) > 128 ||
-		len(parts) == 3 && bindingEmail == "" && twoFactorSecret == "" ||
-		len(parts) == 4 && (twoFactorSecret == "" || bindingEmail == "" && appPassword == "") {
+	if len(email) > 320 || len(password) > 512 || len(bindingEmail) > 320 || len(twoFactorSecret) > 512 ||
+		len(parts) > 2 && strings.TrimSpace(password) == "" ||
+		bindingEmail != "" && !validLocalGmailEmailAddress(bindingEmail) ||
+		len(parts) == 5 && bindingEmail == "" ||
+		(len(parts) == 4 && bindingEmail == "" || len(parts) == 5) && twoFactorSecret == "" ||
+		!validLocalGmailAppPassword(appPassword) {
 		return localResourceImportLine{}, false
 	}
 	if !validLocalGmailEmailAddress(email) {
@@ -352,10 +355,8 @@ func parseLocalResourceImportLine(raw string) (localResourceImportLine, bool) {
 	if !ok {
 		return localResourceImportLine{}, false
 	}
-	if twoFactorSecret != "" {
-		if _, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(twoFactorSecret); err != nil {
-			return localResourceImportLine{}, false
-		}
+	if twoFactorSecret != "" && !validLocalGmailTOTPSecret(twoFactorSecret) {
+		return localResourceImportLine{}, false
 	}
 	return localResourceImportLine{
 		email: email, identity: identity, password: password,

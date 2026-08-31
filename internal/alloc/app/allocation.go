@@ -246,10 +246,10 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 				if _, locked := lockedRoots[key]; locked {
 					return true, nil
 				}
-				// A request-level batch may already hold earlier resource roots. Never
-				// wait for another root in that state; SKIP LOCKED keeps the shared
-				// wallet -> resource lock order acyclic.
-				if len(lockedRoots) > 0 {
+				// Gmail rotation must skip a concurrently selected resource even when
+				// it is the first candidate. Later roots for every type also skip so the
+				// shared wallet -> resource lock order stays acyclic.
+				if allocationType == domain.AllocationTypeGmail || len(lockedRoots) > 0 {
 					locked, err := uc.repo.TryLockResourceRoot(lockCtx, resourceID, allocationType)
 					if locked {
 						lockedRoots[key] = struct{}{}
@@ -1570,18 +1570,7 @@ func (uc *UseCase) allocateGmail(ctx context.Context, cmd AllocateCommand, confi
 	now := time.Now().UTC()
 	resourceBusy := false
 	for _, mailbox := range preferences {
-		for _, bucket := range bucketProbeSequence(cmd.OrderNo, config.ProjectID, "gmail|"+string(mailbox), GmailBucketCount) {
-			result, busy, err := uc.tryGmailBucket(ctx, cmd, config, mailbox, &bucket, cost, now)
-			if err != nil {
-				return nil, err
-			}
-			resourceBusy = resourceBusy || busy
-			if result != nil {
-				return result, nil
-			}
-		}
-		platform.RecordAllocationBucketFallback(string(domain.AllocationTypeGmail), "probes_exhausted")
-		result, busy, err := uc.tryGmailBucket(ctx, cmd, config, mailbox, nil, cost, now)
+		result, busy, err := uc.tryGmailCandidates(ctx, cmd, config, mailbox, cost, now)
 		if err != nil {
 			return nil, err
 		}
@@ -1614,42 +1603,45 @@ func gmailAllocationCost(config ProductAllocationConfig, mode domain.GmailServic
 	return moneyfmt.Format(cost), nil
 }
 
-func (uc *UseCase) tryGmailBucket(
+func (uc *UseCase) tryGmailCandidates(
 	ctx context.Context,
 	cmd AllocateCommand,
 	config ProductAllocationConfig,
 	mailbox domain.GmailMailbox,
-	bucket *uint16,
 	cost string,
 	now time.Time,
 ) (*domain.UnifiedAllocation, bool, error) {
-	limit := candidateWindowSizeValue()
-	if bucket == nil {
-		limit = globalCandidateWindowValue()
-	}
-	candidates, err := uc.repo.ListGmailSourceCandidates(
-		ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, mailbox, bucket, limit,
-	)
-	if err != nil {
-		return nil, false, err
-	}
+	limit := globalCandidateWindowValue()
 	resourceBusy := false
-	for _, candidate := range candidates {
-		platform.AddAllocationCandidateAttempts(string(domain.AllocationTypeGmail), 1)
-		result, err := uc.tryGmailCandidate(ctx, cmd, config, mailbox, candidate, cost, now)
-		if err == nil && result != nil {
-			return result, false, nil
+	var after *GmailCandidate
+	for {
+		candidates, err := uc.repo.ListGmailSourceCandidates(
+			ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, mailbox, after, limit,
+		)
+		if err != nil {
+			return nil, false, err
 		}
-		if errors.Is(err, errResourceRootBusy) {
-			resourceBusy = true
-			continue
+		for _, candidate := range candidates {
+			platform.AddAllocationCandidateAttempts(string(domain.AllocationTypeGmail), 1)
+			result, err := uc.tryGmailCandidate(ctx, cmd, config, mailbox, candidate, cost, now)
+			if err == nil && result != nil {
+				return result, false, nil
+			}
+			if errors.Is(err, errResourceRootBusy) {
+				resourceBusy = true
+				continue
+			}
+			if errors.Is(err, domain.ErrInsufficientInventory) || errors.Is(err, errCandidateUnavailable) {
+				continue
+			}
+			return nil, false, err
 		}
-		if errors.Is(err, domain.ErrInsufficientInventory) || errors.Is(err, errCandidateUnavailable) {
-			continue
+		if len(candidates) < limit {
+			return nil, resourceBusy, nil
 		}
-		return nil, false, err
+		cursor := candidates[len(candidates)-1]
+		after = &cursor
 	}
-	return nil, resourceBusy, nil
 }
 
 func (uc *UseCase) tryGmailCandidate(
@@ -1689,11 +1681,40 @@ func (uc *UseCase) tryGmailCandidate(
 	case domain.GmailMailboxMain:
 		emails = []string{candidate.Email}
 	case domain.GmailMailboxDot:
-		offset, err := uc.repo.CountGmailDotHistory(ctx, candidate.ResourceID, config.ProjectID)
+		historyCount, err := uc.repo.CountGmailDotHistory(ctx, candidate.ResourceID, config.ProjectID)
 		if err != nil {
 			return nil, err
 		}
-		emails = gmailDotAliasVariants(candidate.Email, offset)
+		capacity := gmailDotAliasCapacity(candidate.Email)
+		if capacity == 0 || historyCount >= capacity {
+			return nil, errCandidateUnavailable
+		}
+		// Any historyCount+1 distinct candidates contain a free alias: there are
+		// only historyCount historical aliases. Scan in bounded query-sized pages
+		// so fragmented legacy history cannot pin generation to one full window.
+		// ponytail: O(history/window) DB batches; persist a per-project cursor or
+		// used-mask set only if a single resource's measured history makes this slow.
+		scanLimit := min(historyCount+1, capacity)
+		window := uint64(aliasGenerationWindowValue())
+		for scanned := uint64(0); scanned < scanLimit; {
+			batchSize := min(window, scanLimit-scanned)
+			batch := gmailDotAliasVariantBatch(candidate.Email, historyCount+scanned, int(batchSize))
+			if len(batch) == 0 {
+				break
+			}
+			unavailable, err := uc.repo.ListUnavailableGmailMailboxEmails(ctx, config.ProjectID, mailbox, batch)
+			if err != nil {
+				return nil, err
+			}
+			for _, email := range batch {
+				email = strings.ToLower(strings.TrimSpace(email))
+				if _, exists := unavailable[email]; !exists {
+					return uc.createGmailAllocation(ctx, cmd, config, candidate.ResourceID, mailbox, email, cost, now)
+				}
+			}
+			scanned += uint64(len(batch))
+		}
+		return nil, errCandidateUnavailable
 	case domain.GmailMailboxPlus:
 		emails = plusAliasVariants(candidate.Email, config.ProjectID, cmd.OrderNo)
 	default:
@@ -2416,7 +2437,7 @@ func microsoftMailboxPreferences(orderNo string, config ProductAllocationConfig)
 func gmailMailboxPreferences(config ProductAllocationConfig) []domain.GmailMailbox {
 	switch config.ProductType {
 	case coredomain.ProductTypeGmail:
-		return []domain.GmailMailbox{domain.GmailMailboxMain, domain.GmailMailboxDot}
+		return []domain.GmailMailbox{domain.GmailMailboxDot}
 	case coredomain.ProductTypeGmailVariant:
 		return []domain.GmailMailbox{domain.GmailMailboxPlus}
 	default:
@@ -2459,7 +2480,7 @@ func dotAliasVariants(email string) []string {
 	return result
 }
 
-func gmailDotAliasVariants(email string, offset uint64) []string {
+func gmailDotAliasParts(email string) ([]rune, string, uint64, uint64, bool) {
 	local, domainPart, ok := splitEmail(email)
 	characters := make([]rune, 0, len(local))
 	originalMask := uint64(0)
@@ -2473,23 +2494,39 @@ func gmailDotAliasVariants(email string, offset uint64) []string {
 		characters = append(characters, character)
 	}
 	if !ok || len(characters) < 2 || len(characters) > GmailDotMaxLocalCharacters {
+		return nil, "", 0, 0, false
+	}
+	aliasCount := (uint64(1) << (len(characters) - 1)) - 1
+	return characters, domainPart, originalMask, aliasCount, true
+}
+
+func gmailDotAliasCapacity(email string) uint64 {
+	_, _, _, capacity, ok := gmailDotAliasParts(email)
+	if !ok {
+		return 0
+	}
+	return capacity
+}
+
+func gmailDotAliasVariants(email string, offset uint64) []string {
+	return gmailDotAliasVariantBatch(email, offset, aliasGenerationWindowValue())
+}
+
+func gmailDotAliasVariantBatch(email string, offset uint64, limit int) []string {
+	characters, domainPart, originalMask, aliasCount, ok := gmailDotAliasParts(email)
+	if !ok || limit <= 0 {
 		return nil
 	}
-	patternCount := uint64(1) << (len(characters) - 1)
-	aliasCount := patternCount - 1
-	limit := aliasGenerationWindowValue()
 	if uint64(limit) > aliasCount {
 		limit = int(aliasCount)
 	}
 	result := make([]string, 0, limit)
-	// ponytail: history count is the generation cursor; store a dedicated cursor only if legacy alias holes become measurable.
 	for i := uint64(0); i < aliasCount && len(result) < limit; i++ {
 		mask := (offset + i) % aliasCount
 		if mask >= originalMask {
 			mask++
 		}
 		var alias strings.Builder
-		alias.Grow(len(local) + len(characters) + len(domainPart) + 1)
 		for i, character := range characters {
 			alias.WriteRune(character)
 			if i < len(characters)-1 && mask&(uint64(1)<<i) != 0 {

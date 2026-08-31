@@ -115,11 +115,11 @@ func TestGmailResourceImportAcceptsSupportedCredentialFormats(t *testing.T) {
 	harness := newGmailImportHarness(t)
 	accepted, _, err := harness.service.AcceptAdminGmailTXTFile(
 		context.Background(), 9, 7, "gmail.txt", []byte(strings.Join([]string{
-			"two.fields@gmail.com----password-2",
-			"three.fields@gmail.com----password-3----JBSW Y3DP EHPK 3PXP",
-			"binding.only@gmail.com----password-binding-only----Backup.Only@Example.NET",
-			"four.fields@gmail.com----password-4----JBSWY3DPEHPK3PXP----abcd efgh ijkl mnop",
-			"binding.fields@gmail.com----password-binding----Backup.Address@Example.COM----JBSW Y3DP EHPK 3PXP",
+			"five.fields@gmail.com----password-5----Backup.Address@Example.COM----JBSW Y3DP EHPK 3PXP----ghsf\u00a0peof\tqvby aqiq",
+			"binding.fields@gmail.com----password-binding----Backup.Only@Example.NET----abcd efgh ijkl mnop",
+			"three.fields@gmail.com----password-3----qrst uvwx yzab cdef",
+			"two.fields@gmail.com----mnop qrst uvwx yzab",
+			"four.fields@gmail.com----password-4----JBSWY3DPEHPK3PXP----ponm lkji hgfe dcba",
 		}, "\n")), "skip", "gmail-import-formats", "request-formats", "/v1/admin/gmail/resources/imports",
 	)
 	require.NoError(t, err)
@@ -135,18 +135,34 @@ func TestGmailResourceImportAcceptsSupportedCredentialFormats(t *testing.T) {
 		byEmail[resource.Email] = resource
 		require.Equal(t, LocalResourcePending, resource.Status)
 	}
-	require.Empty(t, byEmail["two.fields@gmail.com"].TwoFactorSecret)
-	require.Empty(t, byEmail["two.fields@gmail.com"].AppPassword)
-	require.Equal(t, "JBSWY3DPEHPK3PXP", byEmail["three.fields@gmail.com"].TwoFactorSecret)
-	require.Empty(t, byEmail["three.fields@gmail.com"].AppPassword)
-	require.Equal(t, "backup.only@example.net", byEmail["binding.only@gmail.com"].BindingEmail)
-	require.Empty(t, byEmail["binding.only@gmail.com"].TwoFactorSecret)
-	require.Empty(t, byEmail["binding.only@gmail.com"].AppPassword)
+	require.Equal(t, "password-5", byEmail["five.fields@gmail.com"].Password)
+	require.Equal(t, "backup.address@example.com", byEmail["five.fields@gmail.com"].BindingEmail)
+	require.Equal(t, "JBSWY3DPEHPK3PXP", byEmail["five.fields@gmail.com"].TwoFactorSecret)
+	require.Equal(t, "ghsfpeofqvbyaqiq", byEmail["five.fields@gmail.com"].AppPassword)
+	require.Equal(t, "backup.only@example.net", byEmail["binding.fields@gmail.com"].BindingEmail)
+	require.Empty(t, byEmail["binding.fields@gmail.com"].TwoFactorSecret)
+	require.Equal(t, "abcdefghijklmnop", byEmail["binding.fields@gmail.com"].AppPassword)
+	require.Equal(t, "password-3", byEmail["three.fields@gmail.com"].Password)
+	require.Equal(t, "qrstuvwxyzabcdef", byEmail["three.fields@gmail.com"].AppPassword)
+	require.Empty(t, byEmail["two.fields@gmail.com"].Password)
+	require.Equal(t, "mnopqrstuvwxyzab", byEmail["two.fields@gmail.com"].AppPassword)
 	require.Equal(t, "JBSWY3DPEHPK3PXP", byEmail["four.fields@gmail.com"].TwoFactorSecret)
-	require.Equal(t, "abcdefghijklmnop", byEmail["four.fields@gmail.com"].AppPassword)
-	require.Equal(t, "backup.address@example.com", byEmail["binding.fields@gmail.com"].BindingEmail)
-	require.Equal(t, "JBSWY3DPEHPK3PXP", byEmail["binding.fields@gmail.com"].TwoFactorSecret)
-	require.Empty(t, byEmail["binding.fields@gmail.com"].AppPassword)
+	require.Equal(t, "ponmlkjihgfedcba", byEmail["four.fields@gmail.com"].AppPassword)
+}
+
+func TestGmailResourceImportRejectsFormatsWithoutFinalAppPassword(t *testing.T) {
+	for _, raw := range []string{
+		"owner@gmail.com----login-password",
+		"owner@gmail.com----login-password----JBSWY3DPEHPK3PXP",
+		"owner@gmail.com----login-password----binding@example.com",
+		"owner@gmail.com----login-password----binding@example.com----JBSWY3DPEHPK3PXP",
+		"owner@gmail.com----login-password----binding@example.com----invalid-2fa----abcdefghijklmnop",
+		"owner@gmail.com----login-password----JBSWY3DPEHPK3PXP----abcd-efgh-ijkl-mnop",
+		"owner@gmail.com----login-password----binding@example.com----JBSWY3DPEHPK3PXP----abcdefghijklmnop----extra",
+	} {
+		_, valid := parseLocalResourceImportLine(raw)
+		require.False(t, valid, raw)
+	}
 }
 
 func TestGmailResourceImportUsesRedisReferenceTaskAndSafeLineResults(t *testing.T) {
@@ -304,7 +320,7 @@ func TestGmailResourceImportNeverUpdatesExistingCredentials(t *testing.T) {
 
 	skipView, _, err := harness.service.AcceptAdminGmailTXTFile(
 		ctx, 9, 7, "gmail.txt",
-		[]byte("e.xisting@googlemail.com----replacement-password----KRSXG5DSNFXGOIDB----replacement-app-password"),
+		[]byte("e.xisting@googlemail.com----replacement-password----KRSXG5DSNFXGOIDB----qrstuvwxyzabcdef"),
 		"skip", "skip-existing", "request-skip", "/v1/admin/gmail/resources/imports",
 	)
 	require.NoError(t, err)
@@ -373,7 +389,7 @@ func TestGmailResourceImportRestoresDeletedResourceWithImportedCredentials(t *te
 
 	accepted, reused, err := harness.service.AcceptAdminGmailTXTFile(
 		ctx, 9, 7, "gmail.txt",
-		[]byte("r.e.s.t.o.r.e@googlemail.com----new-password----KRSXG5DSNFXGOIDB----new-app-password"),
+		[]byte("r.e.s.t.o.r.e@googlemail.com----new-password----KRSXG5DSNFXGOIDB----ponmlkjihgfedcba"),
 		"skip", "restore-deleted", "request-restore", "/v1/admin/gmail/resources/imports",
 	)
 	require.NoError(t, err)
@@ -395,7 +411,7 @@ func TestGmailResourceImportRestoresDeletedResourceWithImportedCredentials(t *te
 	require.Equal(t, "restore@gmail.com", restored.Identity)
 	require.Equal(t, "new-password", restored.Password)
 	require.Equal(t, "KRSXG5DSNFXGOIDB", restored.TwoFactorSecret)
-	require.Equal(t, "new-app-password", restored.AppPassword)
+	require.Equal(t, "ponmlkjihgfedcba", restored.AppPassword)
 	require.Equal(t, LocalResourcePending, restored.Status)
 	require.Empty(t, restored.LastSafeError)
 	require.Nil(t, restored.LastCheckedAt)

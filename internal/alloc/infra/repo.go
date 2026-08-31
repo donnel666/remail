@@ -536,16 +536,20 @@ LIMIT 1`, productID, fulfillExistingOrder, buyerUserID).Scan(&item).Error
 	}, nil
 }
 
-func (r *Repo) ListGmailSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.GmailMailbox, bucket *uint16, limit int) ([]allocapp.GmailCandidate, error) {
+func (r *Repo) ListGmailSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.GmailMailbox, after *allocapp.GmailCandidate, limit int) ([]allocapp.GmailCandidate, error) {
 	if projectID == 0 || buyerUserID == 0 || limit <= 0 || !domain.IsValidGmailMailbox(mailbox) {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
 	query := gmailSourceCandidateQuery(r.dbFor(ctx), projectID, buyerUserID, scope, mailbox)
-	if bucket != nil {
-		query = query.Where("gr.alloc_bucket = ?", *bucket)
+	if after != nil {
+		if after.LastAllocatedAt == nil {
+			query = query.Where("(gr.last_allocated_at IS NULL AND gr.id > ?) OR gr.last_allocated_at IS NOT NULL", after.ResourceID)
+		} else {
+			query = query.Where("gr.last_allocated_at IS NOT NULL AND (gr.last_allocated_at > ? OR (gr.last_allocated_at = ? AND gr.id > ?))", after.LastAllocatedAt, after.LastAllocatedAt, after.ResourceID)
+		}
 	}
 	var rows []allocapp.GmailCandidate
-	if err := query.Select("gr.id AS resource_id, gr.email AS email").
+	if err := query.Select("gr.id AS resource_id, gr.email AS email, gr.last_allocated_at AS last_allocated_at").
 		Order("gr.last_allocated_at ASC, gr.id ASC").Limit(limit).Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list Gmail allocation candidates: %w", err)
 	}
@@ -557,10 +561,20 @@ func gmailSourceCandidateQuery(db *gorm.DB, projectID uint, buyerUserID uint, sc
 		Joins("JOIN email_resources AS er ON er.id = gr.id AND er.type = ?", string(domain.AllocationTypeGmail)).
 		Joins("JOIN users AS owner ON owner.id = er.owner_user_id").
 		Where("gr.status IN (?, ?)", "normal", "available")
-	if mailbox == domain.GmailMailboxMain {
+	switch mailbox {
+	case domain.GmailMailboxMain:
 		query = query.
 			Where("NOT EXISTS (SELECT 1 FROM gmail_allocations active WHERE active.source = ? AND active.resource_id = gr.id AND active.project_id = ? AND active.mailbox = ? AND active.status = ?)", gmailLocalSource, projectID, domain.GmailMailboxMain, domain.AllocationStatusAllocated).
 			Where("NOT EXISTS (SELECT 1 FROM gmail_allocations history WHERE history.source = ? AND history.resource_id = gr.id AND history.project_id = ? AND history.mailbox = ?)", gmailLocalSource, projectID, domain.GmailMailboxMain)
+	case domain.GmailMailboxDot:
+		query = query.Where(`
+(SELECT COUNT(*)
+ FROM gmail_allocations history
+ WHERE history.source = ?
+   AND history.resource_id = gr.id
+   AND history.project_id = ?
+   AND history.mailbox = ?) < `+gmailDotCandidateCapacityExpression(db, "gr"),
+			gmailLocalSource, projectID, domain.GmailMailboxDot)
 	}
 	if scope == domain.SupplyScopeOwned {
 		return query.Where("gr.for_sale = FALSE AND er.owner_user_id = ?", buyerUserID)
@@ -1229,6 +1243,43 @@ WHERE source = ?
 		return 0, fmt.Errorf("count Gmail dot mailbox history: %w", err)
 	}
 	return count, nil
+}
+
+func (r *Repo) ListUnavailableGmailMailboxEmails(ctx context.Context, projectID uint, mailbox domain.GmailMailbox, emails []string) (map[string]struct{}, error) {
+	if projectID == 0 || mailbox == domain.GmailMailboxMain || !domain.IsValidGmailMailbox(mailbox) {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+	normalized := make([]string, 0, len(emails))
+	seen := make(map[string]struct{}, len(emails))
+	for _, email := range emails {
+		email = strings.ToLower(strings.TrimSpace(email))
+		if email == "" {
+			continue
+		}
+		if _, exists := seen[email]; exists {
+			continue
+		}
+		seen[email] = struct{}{}
+		normalized = append(normalized, email)
+	}
+	if len(normalized) == 0 {
+		return map[string]struct{}{}, nil
+	}
+	var rows []struct {
+		Email string `gorm:"column:email"`
+	}
+	if err := r.dbFor(ctx).Table("gmail_allocations").
+		Select("LOWER(TRIM(email)) AS email").
+		Where("source = ? AND project_id = ? AND mailbox = ?", gmailLocalSource, projectID, mailbox).
+		Where("LOWER(TRIM(email)) IN ?", normalized).
+		Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list unavailable Gmail mailbox emails: %w", err)
+	}
+	unavailable := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		unavailable[strings.ToLower(strings.TrimSpace(row.Email))] = struct{}{}
+	}
+	return unavailable, nil
 }
 
 func (r *Repo) IsGmailMailboxAvailable(ctx context.Context, resourceID uint, projectID uint, mailbox domain.GmailMailbox, email string) (bool, error) {
@@ -1973,7 +2024,6 @@ JOIN project_products pp ON pp.project_id = p.id
 			stats.Gmail.Enabled = true
 			stats.Gmail.CodeEnabled = stats.Gmail.CodeEnabled || row.CodeEnabled
 			stats.Gmail.PurchaseEnabled = stats.Gmail.PurchaseEnabled || row.PurchaseEnabled
-			stats.Gmail.MainEnabled = true
 			stats.Gmail.DotEnabled = true
 		case coredomain.ProductTypeGmailVariant:
 			stats.Gmail.Enabled = true
@@ -2187,33 +2237,6 @@ WHERE gr.status IN ('normal', 'available')
 			return nil, err
 		}
 		stats.Gmail.PublicEligibleResources = stats.Gmail.EligibleResources
-		if stats.Gmail.MainEnabled {
-			if err := scan(&stats.Gmail.MainAvailable, `
-SELECT COUNT(*)
-FROM gmail_resources gr
-JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
-JOIN users owner ON owner.id = er.owner_user_id
-WHERE gr.status IN ('normal', 'available')
-  AND `+gmailScope+`
-  AND NOT EXISTS (
-      SELECT 1 FROM gmail_allocations active
-      WHERE active.source = 'local'
-        AND active.resource_id = gr.id
-        AND active.project_id = ?
-        AND active.mailbox = 'main'
-        AND active.status = 'allocated'
-  )
-  AND NOT EXISTS (
-      SELECT 1 FROM gmail_allocations history
-      WHERE history.source = 'local'
-        AND history.resource_id = gr.id
-        AND history.project_id = ?
-        AND history.mailbox = 'main'
-  )`, projectID, projectID); err != nil {
-				return nil, err
-			}
-			stats.Gmail.MainPublicAvailable = stats.Gmail.MainAvailable
-		}
 		if stats.Gmail.DotEnabled {
 			var dot struct {
 				Capacity int64
@@ -2251,7 +2274,7 @@ WHERE gr.status IN ('normal', 'available')
 			}
 			stats.Gmail.PlusPublicAvailable = stats.Gmail.PlusAvailable
 		}
-		stats.Gmail.TotalAvailable = stats.Gmail.MainAvailable + stats.Gmail.DotAvailable + stats.Gmail.PlusAvailable
+		stats.Gmail.TotalAvailable = stats.Gmail.DotAvailable + stats.Gmail.PlusAvailable
 		stats.Gmail.PublicAvailable = stats.Gmail.TotalAvailable
 	}
 	if stats.ICloud.Enabled {
@@ -2444,7 +2467,7 @@ func productInventoryTotalFromStats(row productInventoryRow, stats *allocapp.Inv
 	case coredomain.ProductTypeDomain:
 		return stats.Domain.TotalAvailable
 	case coredomain.ProductTypeGmail:
-		return stats.Gmail.MainAvailable + stats.Gmail.DotAvailable
+		return stats.Gmail.DotAvailable
 	case coredomain.ProductTypeGmailVariant:
 		return stats.Gmail.PlusAvailable
 	case coredomain.ProductTypeICloud:
@@ -2460,7 +2483,7 @@ func productInventoryPublicTotalFromStats(row productInventoryRow, stats *alloca
 	}
 	switch coredomain.ProductType(row.Type) {
 	case coredomain.ProductTypeGmail:
-		return stats.Gmail.MainPublicAvailable + stats.Gmail.DotPublicAvailable
+		return stats.Gmail.DotPublicAvailable
 	case coredomain.ProductTypeGmailVariant:
 		return stats.Gmail.PlusPublicAvailable
 	default:
@@ -2744,32 +2767,6 @@ ORDER BY pp.id ASC`, projectID).Scan(&rows).Error; err != nil {
 		available := int64(0)
 		switch coredomain.ProductType(row.Type) {
 		case coredomain.ProductTypeGmail:
-			var mainAvailable int64
-			if err := r.dbFor(ctx).Raw(`
-SELECT COUNT(*)
-FROM gmail_resources gr
-JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
-WHERE gr.status IN ('normal', 'available')
-  AND gr.for_sale = FALSE
-  AND er.owner_user_id = ?
-  AND NOT EXISTS (
-      SELECT 1 FROM gmail_allocations active
-      WHERE active.source = 'local'
-        AND active.resource_id = gr.id
-        AND active.project_id = ?
-        AND active.mailbox = 'main'
-        AND active.status = 'allocated'
-  )
-  AND NOT EXISTS (
-      SELECT 1 FROM gmail_allocations history
-      WHERE history.source = 'local'
-        AND history.resource_id = gr.id
-        AND history.project_id = ?
-        AND history.mailbox = 'main'
-  )`, buyerUserID, projectID, projectID).Scan(&mainAvailable).Error; err != nil {
-				return nil, fmt.Errorf("private Gmail main inventory: %w", err)
-			}
-			available += mainAvailable
 			var capacity, used int64
 			if err := r.dbFor(ctx).Raw(`
 SELECT COALESCE(SUM(`+gmailDotCapacityExpression("gr")+`), 0)
@@ -3160,6 +3157,17 @@ func gmailDotCapacityExpression(tableAlias string) string {
 	localPart := "REPLACE(SUBSTRING_INDEX(" + tableAlias + ".email, '@', 1), '.', '')"
 	return fmt.Sprintf(
 		"(CASE WHEN CHAR_LENGTH(%s) BETWEEN 2 AND %d THEN CAST(POWER(2, CHAR_LENGTH(%s) - 1) AS UNSIGNED) - 1 ELSE 0 END)",
+		localPart, allocapp.GmailDotMaxLocalCharacters, localPart,
+	)
+}
+
+func gmailDotCandidateCapacityExpression(db *gorm.DB, tableAlias string) string {
+	if db.Name() != "sqlite" {
+		return gmailDotCapacityExpression(tableAlias)
+	}
+	localPart := "REPLACE(SUBSTR(" + tableAlias + ".email, 1, INSTR(" + tableAlias + ".email, '@') - 1), '.', '')"
+	return fmt.Sprintf(
+		"(CASE WHEN LENGTH(%s) BETWEEN 2 AND %d THEN (1 << (LENGTH(%s) - 1)) - 1 ELSE 0 END)",
 		localPart, allocapp.GmailDotMaxLocalCharacters, localPart,
 	)
 }

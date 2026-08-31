@@ -254,17 +254,18 @@ INSERT INTO project_products(
 		require.Equal(t, codeEnabled, stats.Gmail.CodeEnabled)
 		require.Equal(t, purchaseEnabled, stats.Gmail.PurchaseEnabled)
 		require.Equal(t, int64(2), stats.Gmail.EligibleResources)
-		require.Equal(t, int64(1), stats.Gmail.MainAvailable)
+		require.False(t, stats.Gmail.MainEnabled)
+		require.Zero(t, stats.Gmail.MainAvailable)
 		require.Equal(t, int64(255), stats.Gmail.DotAvailable)
 		require.Equal(t, allocapp.GmailVariantInventory, stats.Gmail.PlusAvailable)
-		require.Equal(t, int64(1_000_000_256), stats.Gmail.TotalAvailable)
-		require.Equal(t, int64(1_000_000_256), stats.TotalAvailable)
+		require.Equal(t, int64(1_000_000_255), stats.Gmail.TotalAvailable)
+		require.Equal(t, int64(1_000_000_255), stats.TotalAvailable)
 
 		totals, err := repo.GetProductInventoryTotals(context.Background(), 10)
 		require.NoError(t, err)
 		require.Len(t, totals.Items, 2)
 		require.Equal(t, coredomain.ProductTypeGmail, totals.Items[0].ProductType)
-		require.Equal(t, int64(256), totals.Items[0].TotalAvailable)
+		require.Equal(t, int64(255), totals.Items[0].TotalAvailable)
 		require.Equal(t, coredomain.ProductTypeGmailVariant, totals.Items[1].ProductType)
 		require.Equal(t, allocapp.GmailVariantInventory, totals.Items[1].TotalAvailable)
 	}
@@ -273,15 +274,15 @@ INSERT INTO project_products(
 	privateInventory, err := repo.ListPrivateGmailInventoryTotals(context.Background(), 10, 2)
 	require.NoError(t, err)
 	require.Equal(t, []allocapp.PrivateSingletonInventoryTotal{
-		{ProductID: 20, ProductType: coredomain.ProductTypeGmail, Available: 16_384},
+		{ProductID: 20, ProductType: coredomain.ProductTypeGmail, Available: 16_383},
 		{ProductID: 21, ProductType: coredomain.ProductTypeGmailVariant, Available: allocapp.GmailVariantInventory},
 	}, privateInventory)
 	viewerTotals, err := uc.GetProductInventoryTotals(context.Background(), 10, 2)
 	require.NoError(t, err)
-	require.EqualValues(t, 1_000_016_640, viewerTotals.TotalAvailable)
-	require.EqualValues(t, 16_640, *viewerTotals.Items[0].CodeAvailable)
-	require.EqualValues(t, 16_640, *viewerTotals.Items[0].PurchaseAvailable)
-	require.EqualValues(t, 256, *viewerTotals.Items[0].CodePublicAvailable)
+	require.EqualValues(t, 1_000_016_638, viewerTotals.TotalAvailable)
+	require.EqualValues(t, 16_638, *viewerTotals.Items[0].CodeAvailable)
+	require.EqualValues(t, 16_638, *viewerTotals.Items[0].PurchaseAvailable)
+	require.EqualValues(t, 255, *viewerTotals.Items[0].CodePublicAvailable)
 	require.EqualValues(t, allocapp.GmailVariantInventory, *viewerTotals.Items[1].CodeAvailable)
 	require.EqualValues(t, allocapp.GmailVariantInventory, *viewerTotals.Items[1].CodePublicAvailable)
 	require.NoError(t, db.Table("project_products").Where("id = ?", 20).
@@ -308,7 +309,7 @@ INSERT INTO project_products(
 	assertInventory(false, true)
 }
 
-func TestGmailMainActiveAllocationIsProjectScopedMySQL(t *testing.T) {
+func TestGmailDotAllocationIsProjectScopedMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "gmail", 1, 0, 0)
 	seedGmailResources(t, db, []gmailResourceSeed{{ID: 1000, OwnerUserID: 1, Email: "shared@gmail.com", ForSale: true}})
@@ -329,25 +330,19 @@ INSERT INTO project_products(
 		ServiceMode: domain.GmailServiceModeCode, SupplyScope: domain.SupplyScopePublic,
 	})
 	require.NoError(t, err)
-	require.Equal(t, string(domain.GmailMailboxMain), first.Mailbox)
-
-	candidates, err := NewRepo(db).ListGmailSourceCandidates(
-		context.Background(), 11, 2, domain.SupplyScopePublic, domain.GmailMailboxMain, nil, 4,
-	)
-	require.NoError(t, err)
-	require.Len(t, candidates, 1, "another project must not inherit the first project's active exclusion")
+	require.Equal(t, string(domain.GmailMailboxDot), first.Mailbox)
 
 	second, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
 		OrderNo: "ord-gmail-project-11", BuyerUserID: 2, ProjectProductID: 21,
 		ServiceMode: domain.GmailServiceModeCode, SupplyScope: domain.SupplyScopePublic,
 	})
 	require.NoError(t, err)
-	require.Equal(t, string(domain.GmailMailboxMain), second.Mailbox)
+	require.Equal(t, string(domain.GmailMailboxDot), second.Mailbox)
 	require.Equal(t, first.ResourceID, second.ResourceID)
 	require.Equal(t, first.Email, second.Email)
 
 	var active int64
-	require.NoError(t, db.Raw("SELECT COUNT(*) FROM gmail_allocations WHERE resource_id = 1000 AND mailbox = 'main' AND status = 'allocated'").Scan(&active).Error)
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM gmail_allocations WHERE resource_id = 1000 AND mailbox = 'dot' AND status = 'allocated'").Scan(&active).Error)
 	require.Equal(t, int64(2), active)
 }
 

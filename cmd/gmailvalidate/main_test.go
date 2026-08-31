@@ -1,15 +1,32 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestRunRejectsAppPasswordOnlyInputBeforeSuggestingApply(t *testing.T) {
+	input := filepath.Join(t.TempDir(), "gmail.txt")
+	if err := os.WriteFile(input, []byte("owner@gmail.com----abcd efgh ijkl mnop\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"-file", input, "-line", "1"}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "requires the Gmail login password") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(stdout.String(), "add -apply") {
+		t.Fatalf("APP-password-only input was incorrectly advertised as applicable: %s", stdout.String())
+	}
+}
 
 func TestCredentialSelectionCheckpointAndSuccessReplacement(t *testing.T) {
 	dir := t.TempDir()
 	input := filepath.Join(dir, "gmail.txt")
-	if err := os.WriteFile(input, []byte("first@gmail.com----password----JBSWY3DPEHPK3PXP\nsecond@gmail.com----password----backup@example.com\n"), 0o600); err != nil {
+	if err := os.WriteFile(input, []byte("first@gmail.com----password----JBSWY3DPEHPK3PXP----abcdefghijklmnop\nsecond@gmail.com----password----backup@example.com----ponmlkjihgfedcba\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	credential, err := loadCredential(input, 2)

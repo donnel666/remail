@@ -375,7 +375,7 @@ function ImportGmailModal({
           <TextArea
             className="font-mono"
             onChange={setContent}
-            placeholder="email@gmail.com----password"
+            placeholder="email@gmail.com----app-password"
             rows={8}
             style={{ height: IMPORT_ENTRY_AREA_HEIGHT, resize: "none" }}
             value={content}
@@ -387,16 +387,18 @@ function ImportGmailModal({
             {t("Supported format")}
           </div>
           <pre className="overflow-x-auto font-mono text-xs leading-relaxed text-[var(--semi-color-text-2)]">
-            {`email@gmail.com----password
-email@gmail.com----password----2FA
-email@gmail.com----password----binding-email
+            {`email@gmail.com----app-password
+email@gmail.com----password----app-password
+email@gmail.com----password----binding-email----app-password
 email@gmail.com----password----2FA----app-password
-email@gmail.com----password----binding-email----2FA`}
+email@gmail.com----password----binding-email----2FA----app-password`}
           </pre>
         </div>
 
         <div className="rounded-lg border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] px-3 py-2 text-xs leading-5 text-[var(--semi-color-text-2)]">
-          {t("Gmail credentials are write-only and never returned by the resource API.")}
+          {t(
+            "Only the Gmail App Password is verified by IMAP. Spaces in the final App Password field are removed automatically; all credentials remain write-only.",
+          )}
         </div>
       </div>
     </Modal>
@@ -422,12 +424,16 @@ function ResourceStatusTag({ item }: { item: AdminGmailResourceItem }) {
   );
 }
 
-function EditGmailModal({
+export function EditGmailModal({
+  canOperate,
+  canWrite,
   onCancel,
   onSaved,
   owners,
   target,
 }: {
+  canOperate: boolean;
+  canWrite: boolean;
   onCancel: () => void;
   onSaved: () => void | Promise<void>;
   owners: AdminGmailOwner[];
@@ -437,6 +443,9 @@ function EditGmailModal({
   const [email, setEmail] = useState("");
   const [bindingEmail, setBindingEmail] = useState("");
   const [ownerId, setOwnerId] = useState<number | undefined>();
+  const [password, setPassword] = useState("");
+  const [twoFactorSecret, setTwoFactorSecret] = useState("");
+  const [appPassword, setAppPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -444,39 +453,68 @@ function EditGmailModal({
     setEmail(target.email);
     setBindingEmail(target.bindingEmail ?? "");
     setOwnerId(target.owner.id);
+    setPassword("");
+    setTwoFactorSecret("");
+    setAppPassword("");
   }, [target]);
 
   const submit = async () => {
-    if (!target || !ownerId) return;
+    if (!target || (canWrite && !ownerId)) return;
     const nextEmail = email.trim().toLowerCase();
     const nextBindingEmail = bindingEmail.trim().toLowerCase();
-    if (!isGmailAddress(nextEmail)) {
+    if (canWrite && !isGmailAddress(nextEmail)) {
       Toast.warning(t("A valid Gmail address is required."));
       return;
     }
-    if (nextBindingEmail && !/^\S+@\S+\.\S+$/.test(nextBindingEmail)) {
+    if (
+      canWrite &&
+      nextBindingEmail &&
+      !/^\S+@\S+\.\S+$/.test(nextBindingEmail)
+    ) {
       Toast.warning(t("A valid auxiliary mailbox address is required."));
       return;
     }
-    if (
-      nextEmail === target.email &&
-      nextBindingEmail === (target.bindingEmail ?? "") &&
-      ownerId === target.owner.id
-    ) {
+    const normalizedAppPassword = appPassword.replace(/\s/g, "");
+    const credentialsChanged = canOperate && Boolean(
+      password.trim() || twoFactorSecret.trim() || normalizedAppPassword,
+    );
+    const metadataChanged = canWrite && Boolean(
+      nextEmail !== target.email ||
+        nextBindingEmail !== (target.bindingEmail ?? "") ||
+        ownerId !== target.owner.id,
+    );
+    if (!metadataChanged && !credentialsChanged) {
       Toast.info(t("No changes to save."));
       return;
     }
-
-    const request: AdminGmailResourceUpdateRequest = {
-      bindingEmail: nextBindingEmail,
-      email: nextEmail,
-      ownerId,
-      version: target.version,
-    };
+    if (!canWrite && !password.trim()) {
+      Toast.warning(t("Gmail account password is required."));
+      return;
+    }
 
     setSubmitting(true);
     try {
-      await updateAdminGmailResource(target.id, request);
+      if (canWrite) {
+        const request: AdminGmailResourceUpdateRequest = {
+          bindingEmail: nextBindingEmail,
+          email: nextEmail,
+          ownerId: ownerId!,
+          version: target.version,
+        };
+        if (credentialsChanged) {
+          request.password = password;
+          request.twoFactorSecret = twoFactorSecret.trim();
+          request.appPassword = normalizedAppPassword;
+        }
+        await updateAdminGmailResource(target.id, request);
+      } else {
+        await replaceAdminGmailCredentials(target.id, {
+          appPassword: normalizedAppPassword,
+          password,
+          twoFactorSecret: twoFactorSecret.trim(),
+          version: target.version,
+        });
+      }
       Toast.success(t("Gmail resource updated."));
       await onSaved();
       onCancel();
@@ -497,161 +535,107 @@ function EditGmailModal({
       okText={t("Save")}
       title={t("Edit Gmail resource")}
       visible={Boolean(target)}
-      width={680}
+      width="min(680px, calc(100vw - 32px))"
     >
       {target ? (
         <div className="space-y-4 py-1">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block">
-              <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-                {t("Email")} *
-              </span>
-              <Input
-                className="font-mono"
-                onChange={(value) => setEmail(String(value))}
-                placeholder="name@gmail.com"
-                value={email}
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-                {t("Binding email")}
-              </span>
-              <Input
-                className="font-mono"
-                onChange={(value) => setBindingEmail(String(value))}
-                placeholder={t("Optional recovery mailbox")}
-                value={bindingEmail}
-              />
-            </label>
-          </div>
+          {canWrite ? (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                    {t("Email")} *
+                  </span>
+                  <Input
+                    className="font-mono"
+                    onChange={(value) => setEmail(String(value))}
+                    placeholder="name@gmail.com"
+                    value={email}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                    {t("Binding email")}
+                  </span>
+                  <Input
+                    className="font-mono"
+                    onChange={(value) => setBindingEmail(String(value))}
+                    placeholder={t("Optional recovery mailbox")}
+                    value={bindingEmail}
+                  />
+                </label>
+              </div>
 
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-              {t("Owner")}
-            </span>
-            <OwnerSelect
-              onChange={setOwnerId}
-              owners={owners}
-              selectedOwner={target.owner}
-              t={t}
-              value={ownerId}
-            />
-          </label>
-        </div>
-      ) : null}
-    </Modal>
-  );
-}
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                  {t("Owner")}
+                </span>
+                <OwnerSelect
+                  onChange={setOwnerId}
+                  owners={owners}
+                  selectedOwner={target.owner}
+                  t={t}
+                  value={ownerId}
+                />
+              </label>
+            </>
+          ) : null}
 
-function ReplaceGmailCredentialsModal({
-  onCancel,
-  onSaved,
-  target,
-}: {
-  onCancel: () => void;
-  onSaved: () => void | Promise<void>;
-  target: AdminGmailResourceItem | null;
-}) {
-  const { t } = useTranslation();
-  const [password, setPassword] = useState("");
-  const [twoFactorSecret, setTwoFactorSecret] = useState("");
-  const [appPassword, setAppPassword] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    setPassword("");
-    setTwoFactorSecret("");
-    setAppPassword("");
-  }, [target]);
-
-  const submit = async () => {
-    if (!target) return;
-    if (!password.trim()) {
-      Toast.warning(t("Gmail account password is required."));
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await replaceAdminGmailCredentials(target.id, {
-        appPassword: appPassword.trim(),
-        password,
-        twoFactorSecret: twoFactorSecret.trim(),
-        version: target.version,
-      });
-      Toast.success(t("Credentials replaced and validation queued."));
-      await onSaved();
-      onCancel();
-    } catch (error) {
-      Toast.error(
-        getIamErrorMessage(t, error, "Gmail resource operation failed."),
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <Modal
-      cancelText={t("Cancel")}
-      centered
-      confirmLoading={submitting}
-      onCancel={onCancel}
-      onOk={() => void submit()}
-      okText={t("Replace credentials")}
-      size="small"
-      title={t("Replace credentials")}
-      visible={Boolean(target)}
-    >
-      {target ? (
-        <div className="space-y-4 py-1">
-          <div className="rounded-lg border border-[var(--semi-color-warning-light-active)] bg-[var(--semi-color-warning-light-default)] px-3 py-2 text-sm text-[var(--semi-color-text-0)]">
-            {t(
-              "All credential fields are write-only. Password is required; leave optional 2FA and App Password blank to keep current values.",
-            )}
-          </div>
-          <InfoItem
-            label={t("Email")}
-            value={<span className="font-mono">{target.email}</span>}
-          />
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-              {t("Password")} *
-            </span>
-            <Input
-              autoComplete="new-password"
-              mode="password"
-              onChange={(value) => setPassword(String(value))}
-              placeholder={t("Enter a replacement password")}
-              value={password}
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-              2FA
-            </span>
-            <Input
-              autoComplete="off"
-              className="font-mono"
-              mode="password"
-              onChange={(value) => setTwoFactorSecret(String(value))}
-              placeholder={t("Leave blank to keep current")}
-              value={twoFactorSecret}
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
-              {t("App password")}
-            </span>
-            <Input
-              autoComplete="off"
-              className="font-mono"
-              mode="password"
-              onChange={(value) => setAppPassword(String(value))}
-              placeholder={t("Leave blank to keep current")}
-              value={appPassword}
-            />
-          </label>
+          {canOperate ? (
+            <div className="space-y-3 rounded-xl border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-3">
+              <div className="text-sm font-medium text-[var(--semi-color-text-0)]">
+                {t("Credentials")}
+              </div>
+              <div className="rounded-lg border border-[var(--semi-color-warning-light-active)] bg-[var(--semi-color-warning-light-default)] px-3 py-2 text-sm text-[var(--semi-color-text-0)]">
+                {t(
+                  "Credential values are write-only. Leave a field blank to keep its current value; spaces in App Password are removed automatically.",
+                )}
+              </div>
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                  {t("Password")}
+                  {!canWrite ? " *" : ""}
+                </span>
+                <Input
+                  autoComplete="new-password"
+                  mode="password"
+                  onChange={(value) => setPassword(String(value))}
+                  placeholder={t(
+                    canWrite
+                      ? "Leave blank to keep current"
+                      : "Enter a replacement password",
+                  )}
+                  value={password}
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                  2FA
+                </span>
+                <Input
+                  autoComplete="off"
+                  className="font-mono"
+                  mode="password"
+                  onChange={(value) => setTwoFactorSecret(String(value))}
+                  placeholder={t("Leave blank to keep current")}
+                  value={twoFactorSecret}
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                  {t("App password")}
+                </span>
+                <Input
+                  autoComplete="off"
+                  className="font-mono"
+                  mode="password"
+                  onChange={(value) => setAppPassword(String(value))}
+                  placeholder={t("Leave blank to keep current")}
+                  value={appPassword}
+                />
+              </label>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </Modal>
@@ -754,7 +738,7 @@ function GmailMaintenanceModal({
   const actions = [
     {
       description:
-        "Re-run Gmail credential validation, rotate Google 2FA and App Password, then identify projects.",
+        "Re-run Gmail App Password IMAP validation, then identify projects.",
       disabled:
         target.mode === "row" &&
         (target.item.status === "disabled" || target.item.status === "deleted"),
@@ -1191,7 +1175,6 @@ function GmailDetailSheet({
   onMaintain,
   onRecover,
   onRefresh,
-  onReplaceCredentials,
   onToggleDisabled,
   onTogglePublish,
 }: {
@@ -1209,7 +1192,6 @@ function GmailDetailSheet({
   onMaintain: (item: AdminGmailResourceItem) => void;
   onRecover: (item: AdminGmailResourceItem) => void;
   onRefresh: () => void | Promise<void>;
-  onReplaceCredentials: (item: AdminGmailResourceItem) => void;
   onToggleDisabled: (item: AdminGmailResourceItem) => void;
   onTogglePublish: (item: AdminGmailResourceItem) => void;
 }) {
@@ -1425,7 +1407,7 @@ function GmailDetailSheet({
                   ) : null
                 ) : (
                   <>
-                    {canWrite ? (
+                    {canWrite || canOperate ? (
                       <Button
                         disabled={Boolean(busyAction)}
                         onClick={() => onEdit(item)}
@@ -1436,13 +1418,6 @@ function GmailDetailSheet({
                     ) : null}
                     {canOperate ? (
                       <>
-                        <Button
-                          disabled={Boolean(busyAction)}
-                          onClick={() => onReplaceCredentials(item)}
-                          type="tertiary"
-                        >
-                          {t("Replace credentials")}
-                        </Button>
                         <Button
                           disabled={Boolean(busyAction)}
                           onClick={() => onMaintain(item)}
@@ -1518,8 +1493,6 @@ export default function AdminGmailEmails() {
   const [editTarget, setEditTarget] = useState<AdminGmailResourceItem | null>(
     null,
   );
-  const [credentialTarget, setCredentialTarget] =
-    useState<AdminGmailResourceItem | null>(null);
   const [maintenanceTarget, setMaintenanceTarget] =
     useState<GmailMaintenanceTarget | null>(null);
   const [bulkBusy, setBulkBusy] = useState<AdminGmailBatchAction | null>(null);
@@ -1914,7 +1887,7 @@ export default function AdminGmailEmails() {
       const busyAction = rowBusy?.id === item.id ? rowBusy.action : null;
       if (item.status === "deleted") {
         return (
-          <Space spacing={4} wrap={false}>
+          <Space spacing={4} wrap={isMobile}>
             <Button
               disabled={Boolean(busyAction)}
               onClick={() => void loadDetail(item.id, item)}
@@ -1939,7 +1912,7 @@ export default function AdminGmailEmails() {
       }
 
       return (
-        <Space spacing={4} wrap={false}>
+        <Space spacing={4} wrap={isMobile}>
           <Button
             disabled={Boolean(busyAction)}
             onClick={() => void loadDetail(item.id, item)}
@@ -1948,7 +1921,7 @@ export default function AdminGmailEmails() {
           >
             {t("Details")}
           </Button>
-          {canWrite ? (
+          {canWrite || canOperate ? (
             <Button
               disabled={Boolean(busyAction)}
               onClick={() => setEditTarget(item)}
@@ -1960,14 +1933,6 @@ export default function AdminGmailEmails() {
           ) : null}
           {canOperate ? (
             <>
-              <Button
-                disabled={Boolean(busyAction)}
-                onClick={() => setCredentialTarget(item)}
-                size="small"
-                type="tertiary"
-              >
-                {t("Replace credentials")}
-              </Button>
               <Button
                 disabled={Boolean(busyAction)}
                 onClick={() =>
@@ -2014,6 +1979,7 @@ export default function AdminGmailEmails() {
       canOperate,
       canWrite,
       confirmDelete,
+      isMobile,
       loadDetail,
       recoverResource,
       rowBusy,
@@ -2112,7 +2078,7 @@ export default function AdminGmailEmails() {
       fixed: "right" as const,
       key: "operate",
       title: t("Action"),
-      width: 620,
+      width: 360,
       render: (_value: unknown, item: AdminGmailResourceItem) =>
         renderRowActions(item),
     },
@@ -2431,20 +2397,14 @@ export default function AdminGmailEmails() {
       />
 
       <EditGmailModal
+        canOperate={canOperate}
+        canWrite={canWrite}
         onCancel={() => setEditTarget(null)}
         onSaved={async () => {
           await refreshAfterMutation(editTarget?.id);
         }}
         owners={owners}
-        target={canWrite ? editTarget : null}
-      />
-
-      <ReplaceGmailCredentialsModal
-        onCancel={() => setCredentialTarget(null)}
-        onSaved={async () => {
-          await refreshAfterMutation(credentialTarget?.id);
-        }}
-        target={canOperate ? credentialTarget : null}
+        target={canWrite || canOperate ? editTarget : null}
       />
 
       <GmailMaintenanceModal
@@ -2485,7 +2445,6 @@ export default function AdminGmailEmails() {
         onRefresh={async () => {
           if (detail) await refreshAfterMutation(detail.id);
         }}
-        onReplaceCredentials={setCredentialTarget}
         onToggleDisabled={(item) => void toggleResource(item)}
         onTogglePublish={(item) => void toggleResourceForSale(item)}
       />

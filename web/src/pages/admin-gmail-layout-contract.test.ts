@@ -50,12 +50,10 @@ describe("admin Gmail page layout", () => {
       'confirmBatch("delete", true)',
       "<GmailDetailSheet",
       "<EditGmailModal",
-      "<ReplaceGmailCredentialsModal",
       "<GmailMaintenanceModal",
       "<RelatedOrdersTable",
       "<GmailTaskDiagnostics",
       "<ResourceMailsPanel",
-      't("Replace credentials")',
       'tab={t("Validation")}',
       'tab={t("Other aliases")}',
       'tab={t("Orders")}',
@@ -73,6 +71,16 @@ describe("admin Gmail page layout", () => {
     )?.[1];
     expect(basicTabBody).toBeDefined();
     expect(basicTabBody).not.toContain("ConfiguredTag");
+    expect(gmailSource).not.toContain("<ReplaceGmailCredentialsModal");
+    expect(gmailSource).not.toContain('t("Replace credentials")');
+    expect(gmailSource).toContain(
+      "target={canWrite || canOperate ? editTarget : null}",
+    );
+    expect(gmailSource).toContain("await replaceAdminGmailCredentials");
+    expect(gmailSource).toContain("width: 360");
+    for (const source of [gmailSource, icloudSource]) {
+      expect(source).toContain('width={isMobile ? "100%" : 940}');
+    }
     expect(gmailSource).not.toContain("ADMIN_GMAIL_BATCH_MAX");
     expect(gmailSource).not.toContain("request.credentials");
     expect(gmailSource).not.toContain('type="type1"');

@@ -231,6 +231,38 @@ func TestGmailMigrationBackfillAndResumeMySQL(t *testing.T) {
 	}
 }
 
+func TestGmailAppPasswordOnlyMigrationMySQL(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	source := filepath.Clean(filepath.Join(filepath.Dir(file), "../..", "migrations"))
+	through131 := testmysql.MigrationsThrough(t, source, 131)
+	through132 := testmysql.MigrationsThrough(t, source, 132)
+	db := gmailMigrationMySQL.Database(t, through131)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	requireMigrationVersion(t, sqlDB, 131)
+
+	seedGmailMigrationProject(t, db)
+	require.NoError(t, db.Exec("INSERT INTO email_resources(id, type, owner_user_id) VALUES (990074, 'gmail', 990072)").Error)
+	require.NoError(t, db.Exec(`INSERT INTO gmail_resources(
+id, resource_type, owner_user_id, email, identity, password, two_factor_secret, app_password, status
+) VALUES (990074, 'gmail', 990072, 'app-only@gmail.com', 'app-only@gmail.com', 'password', 'JBSWY3DPEHPK3PXP', 'abcdefghijklmnop', 'normal')`).Error)
+
+	require.NoError(t, platform.RunMigrations(sqlDB, through132))
+	requireMigrationVersion(t, sqlDB, 132)
+	clause := migrationCheckClause(t, db, "gmail_resources", "chk_gmail_resources_credentials")
+	require.Contains(t, clause, "app_password")
+	require.NotContains(t, clause, "`password`")
+	require.NoError(t, db.Exec("UPDATE gmail_resources SET password = '', two_factor_secret = '' WHERE id = 990074").Error)
+
+	require.Error(t, goose.DownTo(sqlDB, through132, 131), "rollback must reject APP-password-only rows")
+	requireMigrationVersion(t, sqlDB, 132)
+	require.NoError(t, db.Exec("UPDATE gmail_resources SET password = 'password', two_factor_secret = 'JBSWY3DPEHPK3PXP' WHERE id = 990074").Error)
+	require.NoError(t, goose.DownTo(sqlDB, through132, 131))
+	requireMigrationVersion(t, sqlDB, 131)
+	require.Contains(t, migrationCheckClause(t, db, "gmail_resources", "chk_gmail_resources_credentials"), "`password`")
+}
+
 func newGmailMigrationDB(t *testing.T, version int) (*gorm.DB, *sql.DB, string) {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)

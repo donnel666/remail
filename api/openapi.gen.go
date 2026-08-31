@@ -6396,10 +6396,19 @@ type AdminGmailResourceStatus string
 
 // AdminGmailResourceUpdateRequest defines model for AdminGmailResourceUpdateRequest.
 type AdminGmailResourceUpdateRequest struct {
+	// AppPassword Optional Gmail App Password replacement; all whitespace is removed and blank keeps the current value.
+	AppPassword *string `json:"appPassword,omitempty"`
+
 	// BindingEmail Optional recovery or challenge mailbox; an empty string clears it.
 	BindingEmail *string             `json:"bindingEmail,omitempty"`
 	Email        openapi_types.Email `json:"email"`
 	OwnerId      int                 `json:"ownerId"`
+
+	// Password Optional account password replacement; blank keeps the current value.
+	Password *string `json:"password,omitempty"`
+
+	// TwoFactorSecret Optional Authenticator secret replacement; whitespace is removed and blank keeps the current value.
+	TwoFactorSecret *string `json:"twoFactorSecret,omitempty"`
 
 	// Version Last observed resource version; stale writes return 409.
 	Version int64 `json:"version"`
@@ -8437,7 +8446,7 @@ type CreateOrderBatchItemResponseStatus string
 
 // CreateOrderBatchRequest defines model for CreateOrderBatchRequest.
 type CreateOrderBatchRequest struct {
-	// EmailSuffix Product selector. gmail.com selects Gmail (local main or dot-alias allocation), gmail_variant selects the local Gmail variant product (plus-alias allocation only; it is not a real domain), icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
+	// EmailSuffix Product selector. gmail.com selects Gmail (local dot-alias allocation only; the original primary address is never allocated), gmail_variant selects the local Gmail variant product (plus-alias allocation only; it is not a real domain), icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
 	EmailSuffix string `json:"emailSuffix"`
 	ProjectId   int    `json:"projectId"`
 
@@ -8450,7 +8459,7 @@ type CreateOrderBatchResponse = []CreateOrderBatchItemResponse
 
 // CreateOrderRequest defines model for CreateOrderRequest.
 type CreateOrderRequest struct {
-	// EmailSuffix Product selector. gmail.com selects Gmail (local main or dot-alias allocation), gmail_variant selects the local Gmail variant product (plus-alias allocation only; it is not a real domain), icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
+	// EmailSuffix Product selector. gmail.com selects Gmail (local dot-alias allocation only; the original primary address is never allocated), gmail_variant selects the local Gmail variant product (plus-alias allocation only; it is not a real domain), icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
 	EmailSuffix string `json:"emailSuffix"`
 	ProjectId   int    `json:"projectId"`
 }
@@ -11627,7 +11636,7 @@ type PostAdminGmailResourcesValidateParams struct {
 type PostAdminGmailResourceImportMultipartBody struct {
 	ErrorStrategy PostAdminGmailResourceImportMultipartBodyErrorStrategy `json:"errorStrategy"`
 
-	// File UTF-8 TXT with one Gmail account per non-empty line in one of the five documented `----`-delimited formats; a third field containing an email address is parsed as the optional binding email.
+	// File UTF-8 TXT with one Gmail account per non-empty line in one of the five documented `----`-delimited formats. The final field is always an App Password and its whitespace is ignored; a third field containing an email address is parsed as the optional binding email.
 	File    openapi_types.File `json:"file"`
 	OwnerId int                `json:"ownerId"`
 }
@@ -15493,7 +15502,7 @@ type ServerInterface interface {
 	// Get one safe Gmail resource detail
 	// (GET /v1/admin/gmail/resources/{resourceId})
 	GetAdminGmailResource(c *gin.Context, resourceId int)
-	// Atomically edit Gmail resource metadata
+	// Atomically edit a Gmail resource
 	// (PATCH /v1/admin/gmail/resources/{resourceId})
 	PatchAdminGmailResource(c *gin.Context, resourceId int, params PatchAdminGmailResourceParams)
 	// List a Gmail resource's observed dot and plus aliases

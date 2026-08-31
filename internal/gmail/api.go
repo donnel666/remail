@@ -28,7 +28,7 @@ func NewModule(db *gorm.DB, redisClient redis.UniversalClient, queue *asynq.Clie
 }
 
 func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.SessionFetcher, checker middleware.PermissionChecker) {
-	h := &handler{service: module.Service}
+	h := &handler{service: module.Service, checker: checker}
 	resources := rg.Group("/admin/gmail/resources")
 	resources.Use(middleware.LoadSession(fetcher), middleware.AuthRequired(), middleware.CSRFRequired())
 	resources.GET("", middleware.PermissionRequired(checker, "core:resource", "read"), h.localResources)
@@ -56,7 +56,33 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 	resources.POST("/:resourceId/recover", middleware.PermissionRequired(checker, "core:resource", "operate"), h.localResourceCommand(AdminLocalResourceRecover))
 }
 
-type handler struct{ service *Service }
+type handler struct {
+	service *Service
+	checker middleware.PermissionChecker
+}
+
+func (h *handler) requirePermission(c *gin.Context, resource, action string) bool {
+	userID, userOK := middleware.GetCurrentUserID(c)
+	role, roleOK := middleware.GetCurrentRole(c)
+	if !userOK || !roleOK {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"message": "Authentication is required.", "requestId": middleware.GetRequestID(c)})
+		return false
+	}
+	if h.checker == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"message": "An unexpected error occurred.", "requestId": middleware.GetRequestID(c)})
+		return false
+	}
+	allowed, err := h.checker.Check(c.Request.Context(), userID, role, resource, action)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"message": "An unexpected error occurred.", "requestId": middleware.GetRequestID(c)})
+		return false
+	}
+	if !allowed {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"message": "Permission denied.", "requestId": middleware.GetRequestID(c)})
+		return false
+	}
+	return true
+}
 
 func (h *handler) localResources(c *gin.Context) {
 	offset, limit, ok := middleware.ParsePagination(c, middleware.PaginationOptions{
@@ -149,10 +175,13 @@ func (h *handler) localResourceAliases(c *gin.Context) {
 }
 
 type adminLocalResourceUpdateRequest struct {
-	Version      uint64 `json:"version" binding:"required"`
-	OwnerID      uint   `json:"ownerId" binding:"required"`
-	Email        string `json:"email" binding:"required"`
-	BindingEmail string `json:"bindingEmail"`
+	Version         uint64  `json:"version" binding:"required"`
+	OwnerID         uint    `json:"ownerId" binding:"required"`
+	Email           string  `json:"email" binding:"required"`
+	BindingEmail    string  `json:"bindingEmail"`
+	Password        *string `json:"password"`
+	TwoFactorSecret *string `json:"twoFactorSecret"`
+	AppPassword     *string `json:"appPassword"`
 }
 
 func (h *handler) updateLocalResource(c *gin.Context) {
@@ -166,16 +195,35 @@ func (h *handler) updateLocalResource(c *gin.Context) {
 		writeGmailError(c, ErrInvalidLocalResource)
 		return
 	}
+	credentialsChanged := request.Password != nil && strings.TrimSpace(*request.Password) != "" ||
+		request.TwoFactorSecret != nil && removeWhitespace(*request.TwoFactorSecret) != "" ||
+		request.AppPassword != nil && removeWhitespace(*request.AppPassword) != ""
+	if credentialsChanged && !h.requirePermission(c, "core:resource", "operate") {
+		return
+	}
 	operatorUserID, ok := middleware.GetCurrentUserID(c)
 	if !ok {
 		c.Status(http.StatusUnauthorized)
 		return
 	}
+	var credentials *AdminLocalResourceCredentialsInput
+	if credentialsChanged {
+		credentials = &AdminLocalResourceCredentialsInput{}
+		if request.Password != nil {
+			credentials.Password = *request.Password
+		}
+		if request.TwoFactorSecret != nil {
+			credentials.TwoFactorSecret = *request.TwoFactorSecret
+		}
+		if request.AppPassword != nil {
+			credentials.AppPassword = *request.AppPassword
+		}
+	}
 	result, err := h.service.UpdateAdminLocalResource(c.Request.Context(), AdminLocalResourceEditCommand{
 		ResourceID: resourceID, Version: request.Version, OperatorID: operatorUserID,
 		OwnerUserID: request.OwnerID, Email: request.Email, BindingEmail: request.BindingEmail,
-		IdempotencyKey: c.GetHeader("Idempotency-Key"),
-		RequestID:      middleware.GetRequestID(c), Path: c.FullPath(),
+		Credentials: credentials, CredentialReplacement: credentialsChanged,
+		IdempotencyKey: c.GetHeader("Idempotency-Key"), RequestID: middleware.GetRequestID(c), Path: c.FullPath(),
 	})
 	if err != nil {
 		writeGmailError(c, err)

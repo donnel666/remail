@@ -67,6 +67,12 @@ func TestAdminGmailManagementCoversBatchEditDeleteRecoverAndMaintenance(t *testi
 	service := NewService(db, nil)
 	service.now = func() time.Time { return now.Add(time.Hour) }
 	ctx := context.Background()
+	_, err = service.UpdateAdminLocalResource(ctx, AdminLocalResourceEditCommand{
+		ResourceID: 4, Version: 1, OperatorID: 99, OwnerUserID: 7, Email: "edit@gmail.com",
+		Credentials:           &AdminLocalResourceCredentialsInput{TwoFactorSecret: strings.Repeat("A", 520)},
+		CredentialReplacement: true, IdempotencyKey: "oversized-2fa",
+	})
+	require.ErrorIs(t, err, ErrInvalidLocalResource)
 
 	deleted, err := service.ApplyAdminLocalResourceBatch(ctx, AdminLocalResourceDelete,
 		AdminLocalResourceSelection{Mode: "ids", ResourceIDs: []uint{2, 1, 1}},
@@ -126,6 +132,21 @@ func TestAdminGmailManagementCoversBatchEditDeleteRecoverAndMaintenance(t *testi
 	require.EqualValues(t, 2, resource.ValidationGeneration)
 	require.Equal(t, "JBSWY3DPEHPK3PXP", resource.TwoFactorSecret)
 	require.Equal(t, "abcdefghijklmnop", resource.AppPassword)
+
+	credentials, err = service.UpdateAdminLocalResource(ctx, AdminLocalResourceEditCommand{
+		ResourceID: 5, Version: 2, OperatorID: 99, OwnerUserID: 7,
+		Email:                 "allocated@gmail.com",
+		Credentials:           &AdminLocalResourceCredentialsInput{AppPassword: "ponm lkji hgfe dcba"},
+		CredentialReplacement: true,
+		IdempotencyKey:        "app-password-only", RequestID: "request-app-password", Path: "/resources/:resourceId",
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 3, credentials.Version)
+	resource = localResourceModel{}
+	require.NoError(t, db.First(&resource, 5).Error)
+	require.Equal(t, "old-password", resource.Password)
+	require.Equal(t, "ponmlkjihgfedcba", resource.AppPassword)
+	require.EqualValues(t, 3, resource.CredentialRevision)
 
 	require.NoError(t, db.Model(&localResourceModel{}).Where("id = ?", 4).
 		Update("status", LocalResourceNormal).Error)

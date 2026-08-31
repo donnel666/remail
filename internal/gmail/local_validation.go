@@ -437,9 +437,8 @@ func (s *Service) processLocalResourceValidationWith(
 	if validation.AppPasswordAuthoritative && !validLocalGmailAppPassword(validation.AppPassword) {
 		validation.AppPasswordAuthoritative = false
 	}
-	if validation.Err == nil && !validLocalGmailRotatedCredentials(validation.TwoFactorSecret, validation.AppPassword) {
-		validation.SafeError = "Gmail returned incomplete replacement credentials."
-		validation.Temporary = true
+	if validation.Err == nil && !validLocalGmailAppPassword(validation.AppPassword) {
+		validation.SafeError = "Gmail App Password validation returned an invalid result."
 		validation.Err = ErrLocalValidationDependency
 	}
 	applyCtx, cancelApply := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
@@ -525,18 +524,20 @@ func (s *Service) applyLocalResourceValidationResult(
 			"last_safe_error": safeError, "last_checked_at": checkedAt, "updated_at": checkedAt,
 		}
 		credentialChanged := false
-		if validation.Err == nil || validation.TwoFactorAuthoritative || validation.TwoFactorRevoked {
+		if validation.TwoFactorAuthoritative || validation.TwoFactorRevoked {
 			twoFactorSecret := ""
-			if validation.Err == nil || validation.TwoFactorAuthoritative {
+			if validation.TwoFactorAuthoritative {
 				twoFactorSecret = strings.ToUpper(removeWhitespace(validation.TwoFactorSecret))
 			}
 			updates["two_factor_secret"] = twoFactorSecret
 			credentialChanged = true
 		}
-		if validation.Err == nil || validation.AppPasswordAuthoritative || validation.AppPasswordRevoked {
+		normalizedAppPassword := removeWhitespace(validation.AppPassword)
+		if validation.AppPasswordAuthoritative || validation.AppPasswordRevoked ||
+			validation.Err == nil && normalizedAppPassword != resource.AppPassword {
 			appPassword := ""
-			if validation.Err == nil || validation.AppPasswordAuthoritative {
-				appPassword = removeWhitespace(validation.AppPassword)
+			if validation.AppPasswordAuthoritative || validation.Err == nil && !validation.AppPasswordRevoked {
+				appPassword = normalizedAppPassword
 			}
 			updates["app_password"] = appPassword
 			credentialChanged = true

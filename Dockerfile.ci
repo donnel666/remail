@@ -15,7 +15,9 @@ RUN CGO_ENABLED=0 go build -o /aliasworker ./cmd/aliasworker
 
 FROM alpine:3.21
 LABEL io.remail.points-unit="1"
-RUN apk add --no-cache ca-certificates tzdata
+# Local Gmail validation launches Chromium; CI uses this file for production images.
+RUN apk add --no-cache ca-certificates tzdata chromium \
+    && chromium --version
 ENV TZ=Asia/Shanghai
 COPY --from=backend /server /server
 COPY --from=backend /msrecovery /usr/local/bin/msrecovery
