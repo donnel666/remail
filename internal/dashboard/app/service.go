@@ -206,7 +206,7 @@ func NewQueryService(view ConsoleView) *QueryService {
 }
 
 // BotLeaderboards returns the same two successful-order rankings used by the
-// workbench, with identities reduced to public nicknames or anonymous labels.
+// workbench, using nicknames or email local-parts exactly like the web view.
 func (s *QueryService) BotLeaderboards(ctx context.Context, limit int) (*BotLeaderboards, error) {
 	if limit <= 0 || limit > 50 {
 		limit = leaderboardLimit
@@ -233,7 +233,7 @@ func botRankItems(rows []LeaderRow) []BotRankItem {
 	items := make([]BotRankItem, len(rows))
 	for i, row := range rows {
 		items[i] = BotRankItem{
-			Name: botdisplay.Name(row.Nickname, row.UserID), SuccessCount: row.Count, Rank: i + 1,
+			Name: botdisplay.Name(row.Nickname, row.Email, row.UserID), SuccessCount: row.Count, Rank: i + 1,
 		}
 	}
 	return items
@@ -461,16 +461,7 @@ func projectLabel(projectID uint, projectName string) string {
 // otherwise the email local-part (before "@"), otherwise a user tag. The email
 // domain suffix is never exposed.
 func displayName(nickname, email string, userID uint) string {
-	if n := strings.TrimSpace(nickname); n != "" {
-		return n
-	}
-	if local, _, ok := strings.Cut(strings.TrimSpace(email), "@"); ok && local != "" {
-		return local
-	}
-	if e := strings.TrimSpace(email); e != "" {
-		return e
-	}
-	return fmt.Sprintf("#%d", userID)
+	return botdisplay.Name(nickname, email, userID)
 }
 
 // ---- bucketing helpers (mirrors internal/billing/app/finance.go) ---------

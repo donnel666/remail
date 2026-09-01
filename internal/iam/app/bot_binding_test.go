@@ -61,6 +61,12 @@ func TestBotBindingUsesCredentialSnapshotAndOneIdentityPerPlatformNamespace(t *t
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, "1", resolved.PriceDiscountRatio)
+	require.Equal(t, domain.RoleUser, resolved.Role)
+	require.Equal(t, "Default", resolved.UserGroup.Name)
+	resolution, err := bindings.ResolveBinding(ctx, "aiocqhttp", "qq:main", "123456789")
+	require.NoError(t, err)
+	require.True(t, resolution.Bound)
+	require.True(t, resolution.Available)
 
 	_, err = bindings.Bind(ctx, "aiocqhttp", "qq:main", "987654321", "alice@example.com", "alice-password")
 	require.ErrorIs(t, err, domain.ErrThirdPartyIdentityAlreadyBound)
@@ -98,10 +104,36 @@ func TestBotBindingStatusIsSafeAndUnbindIsIdempotent(t *testing.T) {
 	require.True(t, info.Bound)
 	require.False(t, info.Available)
 	require.Empty(t, info.MaskedEmail)
+	resolution, err := bindings.ResolveBinding(ctx, "aiocqhttp", "qq:main", "123456789")
+	require.NoError(t, err)
+	require.True(t, resolution.Bound)
+	require.False(t, resolution.Available)
 
 	require.NoError(t, bindings.Unbind(ctx, "aiocqhttp", "qq:main", "123456789"))
 	require.NoError(t, bindings.Unbind(ctx, "aiocqhttp", "qq:main", "123456789"))
 	info, err = bindings.Get(ctx, "aiocqhttp", "qq:main", "123456789")
 	require.NoError(t, err)
 	require.False(t, info.Bound)
+}
+
+func TestBotBindingQQNumberIgnoresTelegramAndOtherProviders(t *testing.T) {
+	db, _, bindings := botBindingFixture(t)
+	ctx := context.Background()
+
+	_, err := bindings.Bind(ctx, "telegram", "telegram:main", "99887766", "alice@example.com", "alice-password")
+	require.NoError(t, err)
+	_, err = bindings.Bind(ctx, "qq", "qq:main", "123456789", "alice@example.com", "alice-password")
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&iaminfra.ThirdPartyIdentityModel{
+		UserID: 2, Provider: "linuxdo", ProviderUserID: "96729",
+	}).Error)
+	_, err = bindings.Bind(ctx, "telegram", "telegram:main", "88776655", "bob@example.com", "bob-password")
+	require.NoError(t, err)
+
+	qqNumber, err := bindings.QQNumber(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, "123456789", qqNumber)
+	notQQ, err := bindings.QQNumber(ctx, 2)
+	require.NoError(t, err)
+	require.Empty(t, notQQ)
 }

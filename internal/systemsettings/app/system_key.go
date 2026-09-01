@@ -179,8 +179,8 @@ func normalizeSystemKeyScope(purpose domain.SystemKeyPurpose, platform, subjectN
 }
 
 func validBotKeyScope(platform, namespace string) bool {
-	return (platform == "qq" && (namespace == "qq" || strings.HasPrefix(namespace, "qq:"))) ||
-		(platform == "telegram" && (namespace == "telegram" || strings.HasPrefix(namespace, "telegram:")))
+	return platform == "qq" && namespace == "qq:main" ||
+		platform == "telegram" && namespace == "telegram:main"
 }
 
 func normalizeBotGroupIDs(namespace string, values []string) ([]string, bool) {

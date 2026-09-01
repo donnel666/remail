@@ -333,12 +333,13 @@ func (s *botWebSocketDBEventSource) listLeaderboardSettlements(ctx context.Conte
 		SettlementID uint64 `gorm:"column:settlement_id"`
 		UserID       uint   `gorm:"column:user_id"`
 		Nickname     string `gorm:"column:nickname"`
+		Email        string `gorm:"column:email"`
 		Rank         int    `gorm:"column:rank_no"`
 		Score        int    `gorm:"column:score"`
 		Amount       string `gorm:"column:reward_amount"`
 	}
 	if err := s.db.WithContext(ctx).Table("leaderboard_rewards AS reward").
-		Select("reward.settlement_id, reward.user_id, COALESCE(user.nickname, '') AS nickname, reward.rank_no, reward.score, reward.reward_amount").
+		Select("reward.settlement_id, reward.user_id, COALESCE(user.nickname, '') AS nickname, COALESCE(user.email, '') AS email, reward.rank_no, reward.score, reward.reward_amount").
 		Joins("JOIN users AS user ON user.id = reward.user_id").
 		Where("reward.settlement_id IN ?", ids).
 		Order("reward.settlement_id ASC, reward.rank_no ASC").Scan(&rewards).Error; err != nil {
@@ -351,7 +352,7 @@ func (s *botWebSocketDBEventSource) listLeaderboardSettlements(ctx context.Conte
 			amount = billingdomain.MoneyString(parsed)
 		}
 		bySettlement[reward.SettlementID] = append(bySettlement[reward.SettlementID], billingapi.BotLeaderboardRewardItem{
-			Rank: reward.Rank, Name: botdisplay.Name(reward.Nickname, reward.UserID),
+			Rank: reward.Rank, Name: botdisplay.Name(reward.Nickname, reward.Email, reward.UserID),
 			SuccessCount: reward.Score, RewardAmount: amount,
 		})
 	}

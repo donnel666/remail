@@ -24,12 +24,13 @@ func (r *BillingRepo) LatestLeaderboardRewards(ctx context.Context, limit int) (
 	var rows []struct {
 		UserID   uint   `gorm:"column:user_id"`
 		Nickname string `gorm:"column:nickname"`
+		Email    string `gorm:"column:email"`
 		Rank     int    `gorm:"column:rank_no"`
 		Score    int    `gorm:"column:score"`
 		Amount   string `gorm:"column:reward_amount"`
 	}
 	if err := r.db.WithContext(ctx).Table("leaderboard_rewards AS reward").
-		Select("reward.user_id, COALESCE(user.nickname, '') AS nickname, reward.rank_no, reward.score, reward.reward_amount").
+		Select("reward.user_id, COALESCE(user.nickname, '') AS nickname, COALESCE(user.email, '') AS email, reward.rank_no, reward.score, reward.reward_amount").
 		Joins("JOIN users AS user ON user.id = reward.user_id").
 		Where("reward.settlement_id = ?", settlement.ID).
 		Order("reward.rank_no ASC").Limit(limit).Scan(&rows).Error; err != nil {
@@ -42,7 +43,7 @@ func (r *BillingRepo) LatestLeaderboardRewards(ctx context.Context, limit int) (
 	}
 	for i, row := range rows {
 		result.Rewards[i] = billingapp.LeaderboardRewardRecord{
-			UserID: row.UserID, Nickname: row.Nickname, Rank: row.Rank,
+			UserID: row.UserID, Nickname: row.Nickname, Email: row.Email, Rank: row.Rank,
 			Score: row.Score, Amount: normalizeMoneyString(row.Amount),
 		}
 	}

@@ -24,6 +24,7 @@ type codeDiagnosisRefreshStub struct {
 	orderNo    string
 	email      string
 	resourceID uint
+	result     CodeDiagnosisRefreshResult
 }
 
 type diagnosisRefreshRepoStub struct {
@@ -42,18 +43,24 @@ func (r *diagnosisRefreshRepoStub) ListDomainMailboxMessages(context.Context, Or
 	return nil, nil
 }
 
-type diagnosisGmailFetchStub struct{ codeCalls int }
+type diagnosisGmailFetchStub struct {
+	codeCalls     int
+	purchaseCalls int
+}
 
-func (*diagnosisGmailFetchStub) FetchLocalPurchaseMail(context.Context, string) error { return nil }
+func (f *diagnosisGmailFetchStub) FetchLocalPurchaseMail(context.Context, string) error {
+	f.purchaseCalls++
+	return nil
+}
 func (f *diagnosisGmailFetchStub) FetchLocalCodeMail(context.Context, string) error {
 	f.codeCalls++
 	return nil
 }
 
-func (r *codeDiagnosisRefreshStub) RefreshCodeDiagnosis(_ context.Context, orderNo, email string, resourceID uint) error {
+func (r *codeDiagnosisRefreshStub) RefreshCodeDiagnosis(_ context.Context, orderNo, email string, resourceID uint) (CodeDiagnosisRefreshResult, error) {
 	r.calls++
 	r.orderNo, r.email, r.resourceID = orderNo, email, resourceID
-	return nil
+	return r.result, nil
 }
 
 func TestBotCodeDiagnosisReturnsProjectResolvedFromTheUsersOrder(t *testing.T) {
@@ -80,21 +87,23 @@ func TestBotCodeDiagnosisReturnsProjectResolvedFromTheUsersOrder(t *testing.T) {
 	}
 }
 
-func TestBotCodeDiagnosisUsesExistingPickupFactsAndOnlyThreeCauses(t *testing.T) {
+func TestBotCodeDiagnosisUsesDeliveryFactsForBothServiceModes(t *testing.T) {
 	now := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)
 	oldMail := now.Add(-time.Minute)
 	newMail := now.Add(-30 * time.Second)
 	active := CodeDiagnosisOrderFact{OrderNo: "ORDER-1", ServiceMode: "code", Status: "active", EmailResourceID: 8}
 	tests := []struct {
-		name         string
-		lookups      []CodeDiagnosisLookup
-		want         string
-		refreshCalls int
+		name          string
+		lookups       []CodeDiagnosisLookup
+		want          string
+		refreshCalls  int
+		refreshResult CodeDiagnosisRefreshResult
 	}{
 		{name: "resource abnormal and refunded", lookups: []CodeDiagnosisLookup{{Orders: []CodeDiagnosisOrderFact{{ServiceMode: "code", ResourceAbnormalRefunded: true}}}}, want: "resource_abnormal_refunded"},
 		{name: "matched for one minute", lookups: []CodeDiagnosisLookup{{Orders: []CodeDiagnosisOrderFact{{ServiceMode: "code", DeliveryStoredAt: &oldMail}}}}, want: "pickup_not_requested"},
+		{name: "purchased mailbox matched for one minute", lookups: []CodeDiagnosisLookup{{Orders: []CodeDiagnosisOrderFact{{ServiceMode: "purchase", DeliveryStoredAt: &oldMail}}}}, want: "pickup_not_requested"},
 		{name: "matched inside grace", lookups: []CodeDiagnosisLookup{{Orders: []CodeDiagnosisOrderFact{{ServiceMode: "code", DeliveryStoredAt: &newMail}}}}, want: "pickup_grace_period"},
-		{name: "purchase is wrong project mode", lookups: []CodeDiagnosisLookup{{Orders: []CodeDiagnosisOrderFact{{ServiceMode: "purchase"}}}}, want: "project_mismatch"},
+		{name: "purchase can also receive mail", lookups: []CodeDiagnosisLookup{{Orders: []CodeDiagnosisOrderFact{{OrderNo: "ORDER-P", ServiceMode: "purchase", Status: "completed", EmailResourceID: 9}}}}, want: "cause_not_confirmed", refreshCalls: 1},
 		{
 			name: "cache miss refreshes once then sees mail",
 			lookups: []CodeDiagnosisLookup{
@@ -104,14 +113,17 @@ func TestBotCodeDiagnosisUsesExistingPickupFactsAndOnlyThreeCauses(t *testing.T)
 			want: "pickup_not_requested", refreshCalls: 1,
 		},
 		{name: "no confirmed cause", lookups: []CodeDiagnosisLookup{{Orders: []CodeDiagnosisOrderFact{active}}}, want: "cause_not_confirmed", refreshCalls: 1},
+		{
+			name: "refresh result reports a delivered code", lookups: []CodeDiagnosisLookup{{Orders: []CodeDiagnosisOrderFact{active}}},
+			want: "pickup_not_requested", refreshCalls: 1,
+			refreshResult: CodeDiagnosisRefreshResult{DeliveryFound: true, ReceivedAt: oldMail},
+		},
 	}
-	causes := map[string]bool{
-		"project_mismatch": true, "pickup_not_requested": true, "resource_abnormal_refunded": true,
-	}
+	causes := map[string]bool{"pickup_not_requested": true, "resource_abnormal_refunded": true}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			repo := &codeDiagnosisRepoStub{lookups: test.lookups}
-			refresh := &codeDiagnosisRefreshStub{}
+			refresh := &codeDiagnosisRefreshStub{result: test.refreshResult}
 			service := NewBotDiagnosisService(repo, refresh)
 			service.now = func() time.Time { return now }
 
@@ -141,7 +153,8 @@ func TestRefreshCodeDiagnosisUsesDomainAndGmailOwnedFetchPaths(t *testing.T) {
 	domainRepo.scope.AllocationType = "domain"
 	domainUseCase := NewUseCase(domainRepo, nil, nil, nil)
 	domainUseCase.now = func() time.Time { return now }
-	require.NoError(t, domainUseCase.RefreshCodeDiagnosis(context.Background(), "ORDER-1", "user@example.com", 8))
+	_, err := domainUseCase.RefreshCodeDiagnosis(context.Background(), "ORDER-1", "user@example.com", 8)
+	require.NoError(t, err)
 	require.Equal(t, 1, domainRepo.domainReads)
 
 	gmailRepo := &diagnosisRefreshRepoStub{scope: base}
@@ -150,6 +163,14 @@ func TestRefreshCodeDiagnosisUsesDomainAndGmailOwnedFetchPaths(t *testing.T) {
 	gmailUseCase := NewUseCase(gmailRepo, nil, nil, nil)
 	gmailUseCase.SetGmailPurchaseFetchPort(gmailFetch)
 	gmailUseCase.now = func() time.Time { return now }
-	require.NoError(t, gmailUseCase.RefreshCodeDiagnosis(context.Background(), "ORDER-1", "user@example.com", 8))
+	_, err = gmailUseCase.RefreshCodeDiagnosis(context.Background(), "ORDER-1", "user@example.com", 8)
+	require.NoError(t, err)
 	require.Equal(t, 1, gmailFetch.codeCalls)
+
+	gmailRepo.scope.ServiceMode = "purchase"
+	gmailRepo.scope.OrderStatus = "completed"
+	gmailRepo.scope.ReceiveUntil = nil
+	_, err = gmailUseCase.RefreshCodeDiagnosis(context.Background(), "ORDER-1", "user@example.com", 8)
+	require.NoError(t, err)
+	require.Equal(t, 1, gmailFetch.purchaseCalls)
 }

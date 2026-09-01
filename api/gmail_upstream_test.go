@@ -100,16 +100,24 @@ func (s *gmailUpstreamPickupSpy) Pickup(_ context.Context, request upstream.Pick
 }
 
 func TestBotCodeDiagnosisRefreshRoutesUpstreamExactlyOnce(t *testing.T) {
-	provider := &gmailUpstreamPickupSpy{handled: true}
+	receivedAt := time.Now().UTC().Add(-time.Minute)
+	provider := &gmailUpstreamPickupSpy{handled: true, pickup: &upstream.PickupResult{
+		Codes: []upstream.Code{{Seq: 1, Value: "must-not-leak", ReceivedAt: receivedAt}},
+	}}
 	adapter := botCodeDiagnosisRefreshAdapter{upstreams: upstream.NewRouter(provider)}
 
-	require.NoError(t, adapter.RefreshCodeDiagnosis(context.Background(), "ORDER-UPSTREAM", "user@gmail.com", 0))
+	result, err := adapter.RefreshCodeDiagnosis(context.Background(), "ORDER-UPSTREAM", "user@gmail.com", 0)
+	require.NoError(t, err)
+	require.True(t, result.DeliveryFound)
+	require.Equal(t, receivedAt, result.ReceivedAt)
 	require.Equal(t, 1, provider.pickupCalls)
 	require.Equal(t, upstream.PickupRequest{OrderNo: "ORDER-UPSTREAM", Email: "user@gmail.com"}, provider.lastRequest)
 
 	localOnly := &gmailUpstreamPickupSpy{handled: true}
 	adapter = botCodeDiagnosisRefreshAdapter{upstreams: upstream.NewRouter(localOnly)}
-	require.NoError(t, adapter.RefreshCodeDiagnosis(context.Background(), "ORDER-LOCAL", "user@gmail.com", 8))
+	result, err = adapter.RefreshCodeDiagnosis(context.Background(), "ORDER-LOCAL", "user@gmail.com", 8)
+	require.NoError(t, err)
+	require.False(t, result.DeliveryFound)
 	require.Zero(t, localOnly.pickupCalls)
 }
 

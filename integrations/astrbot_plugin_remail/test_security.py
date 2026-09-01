@@ -4,6 +4,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -41,6 +42,113 @@ def _load_push_renderer():
     namespace = {"Any": Any, "re": re}
     exec(compile(ast.Module(body=body, type_ignores=[]), "main.py", "exec"), namespace)
     return namespace["_render_push_text"]
+
+
+def _load_announcement_formatter():
+    tree = ast.parse((PLUGIN_DIR / "main.py").read_text(encoding="utf-8"))
+    main_class = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "Main"
+    )
+    methods = [
+        node
+        for node in main_class.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {"_clip", "_format_announcements"}
+    ]
+    for method in methods:
+        method.decorator_list = []
+    namespace = {"Any": Any, "re": re}
+    exec(
+        compile(
+            ast.fix_missing_locations(ast.Module(body=methods, type_ignores=[])),
+            "main.py",
+            "exec",
+        ),
+        namespace,
+    )
+    main = type("Main", (), {"_clip": staticmethod(namespace["_clip"])})
+    namespace["_format_announcements"].__globals__["Main"] = main
+    return namespace["_format_announcements"]
+
+
+def _load_user_error_helpers():
+    tree = ast.parse((PLUGIN_DIR / "main.py").read_text(encoding="utf-8"))
+    body = [
+        node
+        for node in tree.body
+        if (
+            isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name)
+                and target.id in {"_CHINESE_TEXT", "_UNBOUND_TEXT"}
+                for target in node.targets
+            )
+        )
+        or (isinstance(node, ast.ClassDef) and node.name == "ReMailError")
+        or (isinstance(node, ast.FunctionDef) and node.name == "_safe_user_error")
+    ]
+    namespace = {"re": re}
+    exec(compile(ast.Module(body=body, type_ignores=[]), "main.py", "exec"), namespace)
+    return namespace
+
+
+def _load_fae_filter():
+    tree = ast.parse((PLUGIN_DIR / "main.py").read_text(encoding="utf-8"))
+    body = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name)
+            and (target.id.startswith("_PUSH_") or target.id == "_INTERNAL_DETAIL")
+            for target in node.targets
+        ):
+            body.append(node)
+        elif isinstance(node, ast.FunctionDef) and node.name in {
+            "_safe_push_value",
+            "_safe_fae_completion",
+        }:
+            body.append(node)
+    namespace = {"Any": Any, "re": re}
+    exec(compile(ast.Module(body=body, type_ignores=[]), "main.py", "exec"), namespace)
+    return namespace["_safe_fae_completion"]
+
+
+def _load_profile_formatter():
+    tree = ast.parse((PLUGIN_DIR / "main.py").read_text(encoding="utf-8"))
+    main_class = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "Main"
+    )
+    formatter = next(
+        node
+        for node in main_class.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_format_profile"
+    )
+    formatter.decorator_list = []
+    helpers = _load_user_error_helpers()
+    push = _load_push_renderer()
+    namespace = {
+        "Any": Any,
+        "_safe_push_value": push.__globals__["_safe_push_value"],
+        "_UNBOUND_TEXT": helpers["_UNBOUND_TEXT"],
+    }
+    exec(
+        compile(ast.Module(body=[formatter], type_ignores=[]), "main.py", "exec"),
+        namespace,
+    )
+    main = type(
+        "Main",
+        (),
+        {
+            "_result_text": staticmethod(
+                lambda payload, fallback: payload.get("message") or fallback
+            )
+        },
+    )
+    namespace["_format_profile"].__globals__["Main"] = main
+    return namespace["_format_profile"]
 
 
 def test_redact_message_outline() -> None:
@@ -109,6 +217,101 @@ def test_channel_keys_are_optional_but_cannot_be_shared() -> None:
         channel_system_keys("sk_shared", "sk_shared")
 
 
+def test_command_errors_are_mapped_to_safe_chinese() -> None:
+    helpers = _load_user_error_helpers()
+    error = helpers["ReMailError"]
+    safe = helpers["_safe_user_error"]
+
+    assert helpers["_UNBOUND_TEXT"] == (
+        "当前账号尚未绑定 ReMail。\n"
+        "请先私聊机器人发送 /绑定 <ReMail邮箱> <密码> 完成绑定。"
+    )
+    assert safe(error(401, "Authentication is required.")) == "当前会话未获授权。"
+    assert str(error(503, "ReMail WebSocket response lost")) == "ReMail 请求失败。"
+    assert safe(error(429, "rate limit exceeded")) == "请求过于频繁，请稍后再试。"
+    assert (
+        safe(error(503, "ReMail WebSocket response lost"))
+        == "服务暂时不可用，请稍后重试。"
+    )
+    assert safe(error(422, "Account or password is incorrect."), binding=True) == (
+        "ReMail 账号或密码错误。"
+    )
+    assert safe(error(422, "账号或密码不正确。"), binding=True) == "账号或密码不正确。"
+
+    safe_completion = _load_fae_filter()
+    assert safe_completion("该邮箱对应 GitHub 项目，请核对。", "fallback") == (
+        "该邮箱对应 GitHub 项目，请核对。"
+    )
+    for unsafe in ("内部别名 route_a", "代理节点 provider_x", "源站渠道 vendor_x"):
+        assert safe_completion(unsafe, "fallback") == "fallback"
+
+
+def test_llm_request_requires_remail_event_authorization() -> None:
+    tree = ast.parse((PLUGIN_DIR / "main.py").read_text(encoding="utf-8"))
+    handler = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "authorize_llm"
+    )
+    handler.decorator_list = []
+    helpers = _load_user_error_helpers()
+    namespace = {
+        "AstrMessageEvent": object,
+        "ProviderRequest": object,
+        "MessageChain": lambda items: items,
+        "Plain": lambda text: text,
+        "ReMailError": helpers["ReMailError"],
+        "_safe_user_error": helpers["_safe_user_error"],
+    }
+    exec(
+        compile(ast.Module(body=[handler], type_ignores=[]), "main.py", "exec"),
+        namespace,
+    )
+
+    class Plugin:
+        async def _authorize_event(self, _event):
+            raise helpers["ReMailError"](401, "Authentication is required.")
+
+    sent = []
+    stopped = []
+
+    async def send(message):
+        sent.append(message)
+
+    event = SimpleNamespace(send=send, stop_event=lambda: stopped.append(True))
+    asyncio.run(namespace["authorize_llm"](Plugin(), event, object()))
+    assert sent == [["当前会话未获授权。"]]
+    assert stopped == [True]
+
+
+def test_personal_info_formatter_handles_binding_states() -> None:
+    render = _load_profile_formatter()
+    assert render({"bound": False}) == (
+        "当前账号尚未绑定 ReMail。\n"
+        "请先私聊机器人发送 /绑定 <ReMail邮箱> <密码> 完成绑定。"
+    )
+    assert render(
+        {
+            "bound": True,
+            "available": True,
+            "balance": "12.50",
+            "totalRecharged": "200.00",
+            "groupName": "VIP 1",
+            "roleDisplay": "普通用户",
+            "nextGroupName": "VIP 2",
+            "upgradeRemaining": "300.00",
+        }
+    ) == (
+        "ReMail 个人信息\n"
+        "余额：12.50 积分\n"
+        "账号分组：VIP 1\n"
+        "角色：普通用户\n"
+        "累计充值：200.00 积分\n"
+        "升级进度：距离 VIP 2 还差 300.00 积分"
+    )
+    assert render({"bound": True, "message": "账号不可用"}) == "账号不可用"
+
+
 def test_commands_and_llm_tools_cannot_accept_platform_identity() -> None:
     tree = ast.parse((PLUGIN_DIR / "main.py").read_text(encoding="utf-8"))
     forbidden_parts = {"qq", "subject", "sender", "user_id", "platform", "group"}
@@ -136,6 +339,103 @@ def test_commands_and_llm_tools_cannot_accept_platform_identity() -> None:
         assert not forbidden, (node.name, forbidden)
 
 
+def test_help_is_chinese_authorized_and_stops_builtin_help() -> None:
+    tree = ast.parse((PLUGIN_DIR / "main.py").read_text(encoding="utf-8"))
+    help_assignment = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "_REMAIL_HELP_TEXT"
+            for target in node.targets
+        )
+    )
+    help_text = ast.literal_eval(help_assignment.value)
+    for command in (
+        "/help",
+        "/公告",
+        "/常见问题",
+        "/接口文档",
+        "/项目",
+        "/库存",
+        "/排行榜",
+        "/排行榜奖励",
+        "/绑定",
+        "/绑定状态",
+        "/个人信息",
+        "/解绑",
+        "/诊断",
+        "/反馈",
+        "/建议",
+    ):
+        assert command in help_text
+    for internal in ("WebSocket", "System Key", "数据库", "上游", "供应商"):
+        assert internal not in help_text
+
+    handler = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "remail_help"
+    )
+    decorator = ast.unparse(handler.decorator_list[0])
+    assert "command('help'" in decorator
+    assert "'帮助'" in decorator
+    assert "'remail帮助'" in decorator
+    assert "priority=sys.maxsize" in decorator
+    source = ast.unparse(handler)
+    assert "_private_target" in source
+    assert source.index("_authorize_event") < source.index("context.send_message")
+    assert "event.send" not in source
+    assert "event.stop_event()" in source
+    assert "exc.message" not in source
+    assert not any(
+        isinstance(node, (ast.Yield, ast.YieldFrom)) for node in ast.walk(handler)
+    )
+
+    handler.decorator_list = []
+    namespace = {
+        "AstrMessageEvent": object,
+        "MessageChain": lambda items: items,
+        "Plain": lambda text: text,
+        "ReMailError": RuntimeError,
+        "logger": SimpleNamespace(warning=lambda *_args: None),
+    }
+    exec(
+        compile(
+            ast.fix_missing_locations(
+                ast.Module(body=[help_assignment, handler], type_ignores=[])
+            ),
+            "main.py",
+            "exec",
+        ),
+        namespace,
+    )
+    sent = []
+
+    class Context:
+        async def send_message(self, target, message):
+            sent.append((target, message))
+            return True
+
+    class Plugin:
+        context = Context()
+
+        @staticmethod
+        def _private_target(_event):
+            return "qq-main:FriendMessage:123456789"
+
+        async def _authorize_event(self, _event):
+            return None
+
+    stopped = []
+    event = SimpleNamespace(
+        stop_event=lambda: stopped.append(True),
+    )
+    asyncio.run(namespace["remail_help"](Plugin(), event))
+    assert sent == [("qq-main:FriendMessage:123456789", [help_text])]
+    assert stopped == [True]
+
+
 def test_event_key_uses_channel_key_and_binding_stops_after_direct_send() -> None:
     source = (PLUGIN_DIR / "main.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -149,6 +449,8 @@ def test_event_key_uses_channel_key_and_binding_stops_after_direct_send() -> Non
     assert "priority=sys.maxsize - 1" in source
     assert "AstrMessageEvent.get_message_str = redacted_text" in source
     assert "AstrMessageEvent.get_messages = redacted_messages" in source
+    assert "_REMAIL_IGNORE_MARKER" not in source
+    assert not (PLUGIN_DIR / "PERSONA.md").exists()
 
     headers_source = ast.unparse(functions["_bot_headers"])
     assert "event.get_platform_name()" in headers_source
@@ -172,6 +474,10 @@ def test_event_key_uses_channel_key_and_binding_stops_after_direct_send() -> Non
 
     authorize_source = ast.unparse(functions["_authorize_event"])
     assert "/v1/bot/context" in authorize_source
+    llm_authorize_source = ast.unparse(functions["authorize_llm"])
+    assert "_authorize_event" in llm_authorize_source
+    assert "event.send" in llm_authorize_source
+    assert "event.stop_event" in llm_authorize_source
     for name in (
         "docs",
         "announcements",
@@ -211,17 +517,257 @@ def test_event_key_uses_channel_key_and_binding_stops_after_direct_send() -> Non
     result_source = ast.unparse(functions["_result_text"])
     assert "payload.get('message')" in result_source
     assert "requestId" not in result_source
+    assert "_CHINESE_TEXT" in result_source
+
+    for name in (
+        "remail_help",
+        "bind",
+        "binding_status",
+        "personal_info",
+        "unbind",
+        "diagnose_code",
+        "projects",
+        "inventory",
+        "rankings",
+        "ranking_rewards",
+        "docs",
+        "announcements",
+        "faqs",
+    ):
+        assert "exc.message" not in ast.unparse(functions[name]), name
+
+    for name in ("binding_status", "unbind"):
+        handler = functions[name]
+        handler_source = ast.unparse(handler)
+        assert not any(
+            isinstance(node, (ast.Yield, ast.YieldFrom)) for node in ast.walk(handler)
+        )
+        assert "event.send" in handler_source
+        assert handler_source.index("event.send") < handler_source.index(
+            "event.stop_event"
+        )
+        assert "_authorize_event" in handler_source
+
+    for name in (
+        "projects",
+        "inventory",
+        "rankings",
+        "ranking_rewards",
+        "docs",
+        "announcements",
+        "faqs",
+    ):
+        handler = functions[name]
+        handler_source = ast.unparse(handler)
+        assert not any(
+            isinstance(node, (ast.Yield, ast.YieldFrom)) for node in ast.walk(handler)
+        )
+        assert "_reply" in handler_source
+
+    private_target_source = ast.unparse(functions["_private_target"])
+    assert "event.get_platform_id()" in private_target_source
+    assert "event.get_platform_name()" in private_target_source
+    assert "event.get_sender_id()" in private_target_source
+    assert "MessageType.FRIEND_MESSAGE.value" in private_target_source
+
+    profile_source = ast.unparse(functions["personal_info"])
+    assert "/v1/bot/profile" in profile_source
+    assert "_private_target" in profile_source
+    assert "context.send_message" in profile_source
+    assert "event.send" not in profile_source
+    assert profile_source.index("context.send_message") < profile_source.rindex(
+        "event.stop_event"
+    )
+
+    inventory_source = ast.unparse(functions["inventory"])
+    assert "格式：/库存 <项目ID>" in inventory_source
+    assert "project_id: str=''" in inventory_source
+    assert "_authorize_event" in inventory_source
+    assert "_PRODUCT_LABELS" in ast.unparse(functions["_format_projects"])
+    assert "_PRODUCT_LABELS" in ast.unparse(functions["_format_inventory"])
+
+    binding_status_source = ast.unparse(functions["_binding_status_text"])
+    assert "result == 'unbound'" in binding_status_source
+    assert "_UNBOUND_TEXT" in binding_status_source
     diagnosis_source = ast.unparse(functions["diagnose_code"])
     assert "格式：/诊断 邮箱 原因" in diagnosis_source
     assert "_DIAGNOSIS_ARGUMENTS" in diagnosis_source
     assert "body={'email': email}" in diagnosis_source
-    assert "event.request_llm" in diagnosis_source
-    assert "用户描述：" in diagnosis_source
-    assert "ReMail诊断：" in diagnosis_source
+    assert "bindingRequired" in diagnosis_source
+    assert diagnosis_source.index("bindingRequired") < diagnosis_source.index(
+        "context.llm_generate"
+    )
+    assert "event.request_llm" not in diagnosis_source
+    assert "context.llm_generate" in diagnosis_source
+    assert "get_current_chat_provider_id" in diagnosis_source
+    assert "sanitize_feedback_text(description)" in diagnosis_source
+    assert "event.send" in diagnosis_source
+    assert "event.stop_event" in diagnosis_source
+    assert not any(
+        isinstance(node, (ast.Yield, ast.YieldFrom))
+        for node in ast.walk(functions["diagnose_code"])
+    )
+    assert "该邮箱对应的是" in diagnosis_source
+    assert "请核对" in diagnosis_source
+    prompt_assignment = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "_DIAGNOSIS_SYSTEM_PROMPT"
+            for target in node.targets
+        )
+    )
+    diagnosis_prompt = ast.literal_eval(prompt_assignment.value)
+    for rule in (
+        "购买邮箱",
+        "接码",
+        "绝不能把订单类型本身当作失败原因",
+        "不得擅自断定买错项目",
+        "不得输出邮箱",
+    ):
+        assert rule in diagnosis_prompt
     tool_source = ast.unparse(functions["remail_code_diagnosis"])
     assert "description.strip()" in tool_source
     assert "body={'email': email}" in tool_source
+    assert "accountUnavailable" in tool_source
+    assert "_reply" in tool_source
     assert "project_id" not in tool_source
+
+
+def test_diagnosis_binding_required_returns_message_without_llm() -> None:
+    tree = ast.parse((PLUGIN_DIR / "main.py").read_text(encoding="utf-8"))
+    assignments = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name)
+            and target.id in {"_DIAGNOSIS_ARGUMENTS", "_UNBOUND_TEXT"}
+            for target in node.targets
+        )
+    ]
+    handler = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "diagnose_code"
+    )
+    handler.decorator_list = []
+    namespace = {
+        "AstrMessageEvent": object,
+        "MessageChain": lambda items: items,
+        "Plain": lambda text: text,
+        "json": json,
+        "re": re,
+    }
+    exec(
+        compile(
+            ast.fix_missing_locations(
+                ast.Module(body=[*assignments, handler], type_ignores=[])
+            ),
+            "main.py",
+            "exec",
+        ),
+        namespace,
+    )
+
+    class Plugin:
+        context = SimpleNamespace(
+            get_current_chat_provider_id=lambda *_args: pytest.fail(
+                "unbound diagnosis must not call LLM"
+            ),
+            llm_generate=lambda **_kwargs: pytest.fail(
+                "unbound diagnosis must not call LLM"
+            ),
+        )
+
+        async def _request(self, *_args, **_kwargs):
+            return {
+                "bindingRequired": True,
+                "message": (
+                    "当前账号尚未绑定 ReMail。\n"
+                    "请先私聊机器人发送 /绑定 <ReMail邮箱> <密码> 完成绑定。"
+                ),
+            }
+
+        @staticmethod
+        def _result_text(payload, fallback):
+            return payload.get("message") or fallback
+
+    sent = []
+    stopped = []
+
+    async def send(message):
+        sent.append(message)
+
+    event = SimpleNamespace(
+        message_str="/诊断 order@example.com 一直没收到",
+        send=send,
+        stop_event=lambda: stopped.append(True),
+    )
+    asyncio.run(namespace["diagnose_code"](Plugin(), event))
+    assert sent == [
+        [
+            "当前账号尚未绑定 ReMail。\n"
+            "请先私聊机器人发送 /绑定 <ReMail邮箱> <密码> 完成绑定。"
+        ]
+    ]
+    assert stopped == [True]
+
+
+def test_diagnosis_tool_directly_sends_binding_state() -> None:
+    tree = ast.parse((PLUGIN_DIR / "main.py").read_text(encoding="utf-8"))
+    unbound = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "_UNBOUND_TEXT"
+            for target in node.targets
+        )
+    )
+    handler = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "remail_code_diagnosis"
+    )
+    handler.decorator_list = []
+    namespace = {"AstrMessageEvent": object, "json": json}
+    exec(
+        compile(
+            ast.Module(body=[unbound, handler], type_ignores=[]), "main.py", "exec"
+        ),
+        namespace,
+    )
+
+    class Plugin:
+        payload = {}
+
+        async def _request(self, *_args, **_kwargs):
+            return self.payload
+
+        async def _reply(self, _event, text):
+            sent.append(text)
+
+        @staticmethod
+        def _result_text(payload, fallback):
+            return payload.get("message") or fallback
+
+    plugin = Plugin()
+    sent = []
+    for payload in (
+        {"bindingRequired": True, "message": "请绑定"},
+        {"accountUnavailable": True, "message": "账号不可用"},
+    ):
+        plugin.payload = payload
+        result = asyncio.run(
+            namespace["remail_code_diagnosis"](
+                plugin, object(), "order@example.com", "接不到码"
+            )
+        )
+        assert result == ""
+    assert sent == ["请绑定", "账号不可用"]
 
 
 def test_system_keys_are_read_from_plugin_config() -> None:
@@ -366,6 +912,32 @@ def test_push_subscription_topics_cursor_order_and_safe_renderer() -> None:
     assert "json.dumps" not in renderer_source
     assert "filter(" not in renderer_source
     assert "filter(" not in ast.unparse(functions["_format_announcements"])
+
+
+def test_announcements_are_numbered_and_visually_separated() -> None:
+    render = _load_announcement_formatter()
+    result = render(
+        {"notice": "系统正在试运营"},
+        {
+            "announcements": [
+                {
+                    "title": "公告：第一条",
+                    "content": "第一段\n\n\n第二段",
+                },
+                {"title": "公告：公告：第二条", "content": "第二条正文"},
+                {"title": "", "content": "无标题正文"},
+            ]
+        },
+    )
+    assert result == (
+        "系统通知\n系统正在试运营\n\n"
+        "公告（3 条）\n\n"
+        "1. 第一条\n第一段\n\n第二段\n\n"
+        "2. 第二条\n第二条正文\n\n"
+        "3. 未命名公告\n无标题正文"
+    )
+    assert "公告：公告：" not in result
+    assert render({}, {"announcements": []}) == "暂无系统通知或公告。"
 
 
 def test_push_cursor_advances_only_for_successful_destination() -> None:

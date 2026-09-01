@@ -5,7 +5,7 @@ export type AdminSystemKey = components["schemas"]["AdminSystemKey"];
 export type SystemKeyPurpose = NonNullable<components["schemas"]["AdminSystemKeyCreateRequest"]["purpose"]>;
 export type BotSystemKeyScope = {
   platform: NonNullable<components["schemas"]["AdminSystemKeyCreateRequest"]["platform"]>;
-  subjectNamespace: string;
+  subjectNamespace: NonNullable<components["schemas"]["AdminSystemKeyCreateRequest"]["subjectNamespace"]>;
   allowedGroupIds: string[];
 };
 

@@ -1275,6 +1275,11 @@ paths:
           schema:
             type: string
             enum: [user, supplier, admin, super_admin]
+            x-enum-varnames:
+              - GetAdminUsersParamsRoleUser
+              - GetAdminUsersParamsRoleSupplier
+              - GetAdminUsersParamsRoleAdmin
+              - GetAdminUsersParamsRoleSuperAdmin
         - name: enabled
           in: query
           schema:
@@ -2220,6 +2225,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BotContextResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/bot/profile:
+    get:
+      operationId: getBotProfile
+      summary: Read the current bound user's safe account summary
+      description: |
+        Resolves only the trusted sender from the current QQ or Telegram event. An unbound sender
+        receives a binding instruction instead of account data. A bound sender receives consumer
+        balance, cumulative recharge, role, membership group and the next automatic-upgrade gap.
+        The response never includes a user id, email address, order data, credentials or another
+        user's information. Group callers must be in the System Key whitelist and must deliver the
+        returned account summary privately to that same sender.
+      tags: [Bot]
+      security:
+        - systemKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BotChannel"
+        - $ref: "#/components/parameters/BotSubject"
+        - $ref: "#/components/parameters/BotScene"
+        - $ref: "#/components/parameters/BotGroup"
+      responses:
+        "200":
+          description: Safe profile summary or a binding instruction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotProfileResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "429":
@@ -3416,6 +3454,7 @@ paths:
           schema:
             type: string
             enum: [public, private]
+            x-enum-varnames: [Public, Private]
         - name: looseMatch
           in: query
           schema:
@@ -15085,6 +15124,7 @@ components:
       schema:
         type: string
         enum: [qq, telegram]
+        x-enum-varnames: [Qq, Telegram]
     BotSubject:
       name: X-Bot-Subject
       in: header
@@ -15844,7 +15884,7 @@ components:
       properties:
         code:
           type: string
-          enum: [insufficient_balance, insufficient_inventory, upstream_price_protected, upstream_unavailable, idempotency_conflict, temporarily_unavailable]
+          enum: [insufficient_balance, insufficient_inventory, idempotency_conflict, temporarily_unavailable]
         message:
           type: string
       additionalProperties: false
@@ -18491,6 +18531,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ThirdPartyIdentityResponse"
+        qqNumber:
+          type: string
+          pattern: '^[1-9][0-9]*$'
+          maxLength: 255
+          description: Read-only QQ number bound through the current QQ Bot identity. Omitted when no QQ account is bound; LinuxDO, Telegram and other identities are never projected into this field.
         hasLocalPassword:
           type: boolean
         enabled:
@@ -18856,7 +18901,8 @@ components:
         subjectNamespace:
           type: string
           maxLength: 50
-          description: Required only for purpose=bot; stable identity namespace such as qq:appid or telegram:botid. Key rotation reuses this value.
+          enum: [qq:main, telegram:main]
+          description: Required only for purpose=bot; use qq:main for QQ or telegram:main for Telegram. Key rotation reuses this value.
         allowedGroupIds:
           type: array
           minItems: 1
@@ -18924,6 +18970,42 @@ components:
           description: Always true. Unauthorized contexts receive 401 instead of a response body with scope details.
       additionalProperties: false
 
+    BotProfileResponse:
+      type: object
+      required: [bound]
+      properties:
+        bound:
+          type: boolean
+          description: Whether the trusted platform sender has a ReMail binding record.
+        available:
+          type: boolean
+          description: True only when the bound ReMail account is active and profile data is available.
+        message:
+          type: string
+          description: Safe user-facing instruction, returned when the sender is not bound.
+        balance:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        totalRecharged:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        groupName:
+          type: string
+          description: Current user-visible membership group name.
+        role:
+          type: string
+          enum: [user, supplier, admin, super_admin]
+        roleDisplay:
+          type: string
+          description: Chinese user-facing role label.
+        nextGroupName:
+          type: string
+          description: Next enabled automatic-upgrade group, when one exists.
+        upgradeRemaining:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        highestGroup:
+          type: boolean
+          description: True when no enabled higher membership group exists.
+      additionalProperties: false
+
     BotBindingRequest:
       type: object
       required: [email, password]
@@ -18962,7 +19044,7 @@ components:
           minimum: 1
         name:
           type: string
-          description: Safe user nickname or an anonymous label; never an email or user id.
+          description: User nickname when configured; otherwise the email local-part before "@". A non-empty malformed legacy email is returned unchanged.
         successCount:
           type: integer
           minimum: 0
@@ -18997,7 +19079,7 @@ components:
           minimum: 1
         name:
           type: string
-          description: Safe user nickname or an anonymous label; never an email or user id.
+          description: User nickname when configured; otherwise the email local-part before "@". A non-empty malformed legacy email is returned unchanged.
         successCount:
           type: integer
           minimum: 1
@@ -19209,6 +19291,12 @@ components:
         message:
           type: string
           description: User-facing diagnosis only; never includes email, order number, message content, credentials, codes, internal status names or implementation steps.
+        bindingRequired:
+          type: boolean
+          description: True only when the trusted platform sender must bind a ReMail account before diagnosis.
+        accountUnavailable:
+          type: boolean
+          description: True only when a binding exists but the bound ReMail account is unavailable.
         projectId:
           type: integer
           minimum: 1

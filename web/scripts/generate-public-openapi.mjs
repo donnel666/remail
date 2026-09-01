@@ -15,8 +15,8 @@ const json = (schema) => ({
 const jsonBody = (schema) => ({ required: true, ...json(schema) });
 
 const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
-const emailSuffixDescription = "商品选择后缀。gmail.com 选择只分配点号别名的谷歌邮箱（原始主邮箱不会分配），gmail_variant 选择仅分配加号别名的 Gmail 变种商品（它不是实际域名），icloud.com 选择苹果邮箱；outlook.com 等具体后缀精确选择对应库存，特殊值 outlook 会在有货的微软白名单后缀中按库存量加权随机，特殊值 domain 会在有货的域名后缀中按库存量加权随机。private_first 随机时先在自有库存内按数量加权；只有自有后缀无货时才使用公共库存。private_first 下也可指定当前用户自有的完整域名，例如 mydomain.com。不接受完整邮箱地址。";
-const batchEmailSuffixDescription = `${emailSuffixDescription} 批量下单只随机一次，所有子订单固定使用该后缀；该后缀库存耗尽后不再随机其他后缀。`;
+const emailSuffixDescription = "选择项目支持的邮箱类型或具体后缀；可用值以项目接口返回为准，不接受完整邮箱地址。";
+const batchEmailSuffixDescription = `${emailSuffixDescription} 批量订单中的所有子订单使用同一个选择值。`;
 const listOf = (name) => ({ type: "array", items: ref(name) });
 const nullable = (type, schema = {}) => ({ type, nullable: true, ...schema });
 const id = (schema = {}) => ({ type: "integer", format: "int64", ...schema });
@@ -113,8 +113,6 @@ const stableEnumVarNames = Object.freeze({
   temporarily_unavailable: "TemporarilyUnavailable",
   transfer: "Transfer",
   unknown: "Unknown",
-  upstream_price_protected: "UpstreamPriceProtected",
-  upstream_unavailable: "UpstreamUnavailable",
   user: "User",
   validating: "Validating",
   visible: "Visible",
@@ -442,8 +440,6 @@ const schemas = {
       code: stringEnum([
         "insufficient_balance",
         "insufficient_inventory",
-        "upstream_price_protected",
-        "upstream_unavailable",
         "idempotency_conflict",
         "temporarily_unavailable",
       ]),
@@ -609,7 +605,7 @@ const schemas = {
   MailMessage: {
     type: "object",
     properties: {
-      id: id({ minimum: 1, example: 5012, description: "存在正 ID 时可调用单封邮件正文接口；上游合成项不返回 ID。" }),
+      id: id({ minimum: 1, example: 5012, description: "存在正 ID 时可调用单封邮件正文接口；聚合结果不返回 ID。" }),
       sender: { type: "string", example: "account-security-noreply@accountprotection.microsoft.com" },
       recipient: { type: "string", example: "mateo.richards@outlook.com" },
       receivedAt: dateTime(),

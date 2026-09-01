@@ -246,6 +246,40 @@ func (r *mockUserRepo) BindThirdPartyIdentity(_ context.Context, userID uint, pr
 	return nil
 }
 
+func (r *mockUserRepo) BindThirdPartyIdentityWithPasswordSnapshot(ctx context.Context, userID uint, expectedPasswordHash, provider, providerUserID string) error {
+	r.mu.Lock()
+	user := r.users[userID]
+	valid := user != nil && user.IsActive() && user.PasswordHash == expectedPasswordHash
+	r.mu.Unlock()
+	if !valid {
+		return domain.ErrAccountOrPasswordIncorrect
+	}
+	return r.BindThirdPartyIdentity(ctx, userID, provider, providerUserID)
+}
+
+func (r *mockUserRepo) DeleteThirdPartyIdentity(_ context.Context, provider, providerUserID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := thirdPartyTestKey(provider, providerUserID)
+	userID, ok := r.byThirdParty[key]
+	if !ok {
+		return nil
+	}
+	delete(r.byThirdParty, key)
+	user := r.users[userID]
+	if user == nil {
+		return nil
+	}
+	filtered := make([]domain.ThirdPartyIdentity, 0, len(user.ThirdPartyIdentities))
+	for _, identity := range user.ThirdPartyIdentities {
+		if identity.Provider != strings.TrimSpace(provider) || identity.ProviderUserID != strings.TrimSpace(providerUserID) {
+			filtered = append(filtered, identity)
+		}
+	}
+	user.ThirdPartyIdentities = filtered
+	return nil
+}
+
 func (r *mockUserRepo) HasThirdPartyIdentity(_ context.Context, userID uint, provider string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -256,6 +290,21 @@ func (r *mockUserRepo) HasThirdPartyIdentity(_ context.Context, userID uint, pro
 		}
 	}
 	return false, nil
+}
+
+func (r *mockUserRepo) FindThirdPartyProviderUserID(_ context.Context, userID uint, provider string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	user := r.users[userID]
+	if user == nil {
+		return "", nil
+	}
+	for _, identity := range user.ThirdPartyIdentities {
+		if identity.Provider == strings.TrimSpace(provider) {
+			return identity.ProviderUserID, nil
+		}
+	}
+	return "", nil
 }
 
 func (r *mockUserRepo) BindLinuxDOIdentity(_ context.Context, userID uint, linuxDOID string) error {
@@ -1393,6 +1442,7 @@ func newTestHandler() *IAMHandler {
 		ActivationUseCase:     app.NewActivationUseCase(userRepo, hasher),
 		RegistrationUseCase:   app.NewRegistrationUseCase(userRepo, hasher, emailCodeStore),
 		LoginUseCase:          loginUseCase,
+		BotBindingUseCase:     app.NewBotBindingUseCase(userRepo, hasher),
 		SessionUseCase:        app.NewSessionUseCase(sessionStore, userRepo),
 		ChangePasswordUseCase: app.NewChangePasswordUseCase(userRepo, hasher, sessionStore),
 		PasswordResetUseCase:  app.NewPasswordResetUseCase(userRepo, hasher, sessionStore, emailCodeStore, emailCodeUseCase),
@@ -2169,6 +2219,63 @@ func TestAdminUsersIncludesThirdPartyLoginBindings(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), `"thirdPartyIdentities":[{"provider":"linuxdo","providerUserId":"96729"`)
+}
+
+func TestMeAndAdminUsersExposeOnlyQQBotNumber(t *testing.T) {
+	h := newTestHandler()
+	r := setupTestRouterWithHandler(h)
+	seedAdminSession(t, h, "admin-session")
+	target := seedUserSession(t, h, "qq-bound@example.com", "user-session")
+	_, err := h.module.BotBindingUseCase.Bind(
+		context.Background(), "telegram", "telegram:main", "99887766", target.Email, "User123!",
+	)
+	require.NoError(t, err)
+	_, err = h.module.BotBindingUseCase.Bind(
+		context.Background(), "qq", "qq:main", "123456789", target.Email, "User123!",
+	)
+	require.NoError(t, err)
+	require.NoError(t, testRepo(h).BindLinuxDOIdentity(context.Background(), target.ID, "96729"))
+
+	me := httptest.NewRecorder()
+	meRequest := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	addAuthenticatedRequest(meRequest, "user-session")
+	r.ServeHTTP(me, meRequest)
+	require.Equal(t, http.StatusOK, me.Code, me.Body.String())
+	var meBody struct {
+		User UserResponse `json:"user"`
+	}
+	require.NoError(t, json.Unmarshal(me.Body.Bytes(), &meBody))
+	require.Equal(t, "123456789", meBody.User.QQNumber)
+	require.NotEqual(t, "99887766", meBody.User.QQNumber)
+	require.NotEqual(t, "96729", meBody.User.QQNumber)
+	for _, identity := range meBody.User.ThirdPartyIdentities {
+		require.NotContains(t, identity.Provider, "bot:")
+	}
+
+	admin := httptest.NewRecorder()
+	adminRequest := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/admin/users?ids=%d", target.ID), nil)
+	addAuthenticatedRequest(adminRequest, "admin-session")
+	r.ServeHTTP(admin, adminRequest)
+	require.Equal(t, http.StatusOK, admin.Code, admin.Body.String())
+	var adminBody AdminUserListResponse
+	require.NoError(t, json.Unmarshal(admin.Body.Bytes(), &adminBody))
+	require.Len(t, adminBody.Users, 1)
+	require.Equal(t, "123456789", adminBody.Users[0].QQNumber)
+	for _, identity := range adminBody.Users[0].ThirdPartyIdentities {
+		require.NotContains(t, identity.Provider, "bot:")
+	}
+
+	updated := httptest.NewRecorder()
+	updatedRequest := httptest.NewRequest(http.MethodPatch, fmt.Sprintf("/v1/admin/users/%d", target.ID), strings.NewReader(`{"enabled":false}`))
+	updatedRequest.Header.Set("Content-Type", "application/json")
+	addAuthenticatedRequest(updatedRequest, "admin-session")
+	r.ServeHTTP(updated, updatedRequest)
+	require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+	var updatedBody struct {
+		User UserResponse `json:"user"`
+	}
+	require.NoError(t, json.Unmarshal(updated.Body.Bytes(), &updatedBody))
+	require.Equal(t, "123456789", updatedBody.User.QQNumber)
 }
 
 func TestPatchAdminUserWritesOperationLog(t *testing.T) {

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
     name: "LinuxDo User",
     role: "user",
     permissions: [],
+    qqNumber: "123456789",
     hasLocalPassword: false,
     enabled: true,
     createdAt: "2026-07-28T00:00:00Z",
@@ -111,6 +112,7 @@ describe("Account LinuxDO binding", () => {
     vi.clearAllMocks();
     window.history.replaceState({}, "", "/account");
     mocks.currentUser.email = "linuxdo-42@oauth.invalid";
+    mocks.currentUser.qqNumber = "123456789";
     mocks.currentUser.hasLocalPassword = false;
     mocks.getLoginConfig.mockResolvedValue({ githubOAuthEnabled: false, githubBound: false, linuxdoOAuthEnabled: true, linuxdoBound: false, nodelocOAuthEnabled: false, nodelocBound: false });
     mocks.getWallet.mockResolvedValue({ consumerBalance: "0", historicalSpend: "0" });
@@ -129,6 +131,16 @@ describe("Account LinuxDO binding", () => {
     expect(screen.queryByRole("button", { name: "Change Binding" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Set login password" })).toHaveAttribute("href", "/password-reset");
     expect(screen.getByText("Set a password through email verification if you also want to sign in with email and password.")).toBeInTheDocument();
+  });
+
+  it("shows the bound QQ number without a write action", () => {
+    render(<Account />);
+
+    const qqCard = screen.getByText("QQ number").closest("section");
+    expect(qqCard).not.toBeNull();
+    expect(within(qqCard as HTMLElement).getByText("123456789")).toBeInTheDocument();
+    expect(within(qqCard as HTMLElement).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(qqCard as HTMLElement).queryByRole("link")).not.toBeInTheDocument();
   });
 
   it("shows the bound state without an email-change action", async () => {

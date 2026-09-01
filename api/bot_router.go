@@ -46,6 +46,7 @@ func registerBotRoutes(
 	contextReads.Use(middleware.BotIdentityRequired())
 	contextReads.Use(middleware.RateLimitPerBotSubject(rdb, "context_read", botSubjectReadsPerMinute, 60))
 	contextReads.GET("/context", getBotContext)
+	contextReads.GET("/profile", func(c *gin.Context) { getBotProfile(c, iamMod, billingMod) })
 
 	iamapi.RegisterBotBindingRoutes(bot, iamMod, rdb)
 	resolveUser := botUserResolver(iamMod)
@@ -70,28 +71,27 @@ func registerBotRoutes(
 }
 
 func botDiagnosisUserResolver(iamMod *iamapi.IAMModule) mailmatchapi.BotUserIDResolver {
-	return func(c *gin.Context) (uint, bool) {
+	return func(c *gin.Context) (mailmatchapi.BotUserResolution, bool) {
 		identity, ok := middleware.GetCurrentBotIdentity(c)
 		if !ok {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"message": "Authentication is required."})
-			return 0, false
+			return mailmatchapi.BotUserResolution{}, false
 		}
 		if iamMod == nil || iamMod.BotBindingUseCase == nil {
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"message": "Service is temporarily unavailable."})
-			return 0, false
+			return mailmatchapi.BotUserResolution{}, false
 		}
-		userID, found, err := iamMod.BotBindingUseCase.ResolveActiveUserID(
+		resolution, err := iamMod.BotBindingUseCase.ResolveBinding(
 			c.Request.Context(), identity.Platform, identity.SubjectNamespace, identity.Subject,
 		)
 		if err != nil {
 			slog.Error("bot diagnosis identity resolution failed", "request_id", middleware.GetRequestID(c), "error", err)
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"message": "Service is temporarily unavailable."})
-			return 0, false
+			return mailmatchapi.BotUserResolution{}, false
 		}
-		if !found {
-			return 0, true
-		}
-		return userID, true
+		return mailmatchapi.BotUserResolution{
+			UserID: resolution.User.UserID, Bound: resolution.Bound, Available: resolution.Available,
+		}, true
 	}
 }
 

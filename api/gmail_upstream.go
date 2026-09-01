@@ -133,18 +133,27 @@ type botCodeDiagnosisRefreshAdapter struct {
 	upstreams *upstream.Router
 }
 
-func (a botCodeDiagnosisRefreshAdapter) RefreshCodeDiagnosis(ctx context.Context, orderNo, email string, emailResourceID uint) error {
+func (a botCodeDiagnosisRefreshAdapter) RefreshCodeDiagnosis(ctx context.Context, orderNo, email string, emailResourceID uint) (mailmatchapp.CodeDiagnosisRefreshResult, error) {
 	if emailResourceID > 0 {
 		if a.local == nil {
-			return nil
+			return mailmatchapp.CodeDiagnosisRefreshResult{}, nil
 		}
 		return a.local.RefreshCodeDiagnosis(ctx, orderNo, email, emailResourceID)
 	}
 	if a.upstreams == nil {
-		return nil
+		return mailmatchapp.CodeDiagnosisRefreshResult{}, nil
 	}
-	_, _, err := a.upstreams.Pickup(ctx, upstream.PickupRequest{OrderNo: orderNo, Email: email})
-	return err
+	pickup, handled, err := a.upstreams.Pickup(ctx, upstream.PickupRequest{OrderNo: orderNo, Email: email})
+	result := mailmatchapp.CodeDiagnosisRefreshResult{}
+	if handled && pickup != nil && len(pickup.Codes) > 0 {
+		result.DeliveryFound = true
+		for _, code := range pickup.Codes {
+			if code.ReceivedAt.After(result.ReceivedAt) {
+				result.ReceivedAt = code.ReceivedAt
+			}
+		}
+	}
+	return result, err
 }
 
 func (a gmailPickupAdapter) ReadUpstreamPickup(ctx context.Context, email, tokenPlain string) ([]mailmatchdomain.MailContent, bool, error) {

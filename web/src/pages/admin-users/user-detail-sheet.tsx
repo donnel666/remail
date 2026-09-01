@@ -498,6 +498,7 @@ function ProfileTab({
       Toast.success(t("User updated."));
       await onSaved({
         ...updated,
+        qqNumber: updated.qqNumber ?? user.qqNumber,
         thirdPartyIdentities:
           updated.thirdPartyIdentities ?? user.thirdPartyIdentities,
       });
@@ -537,6 +538,16 @@ function ProfileTab({
       <section>
         <div className="mb-3 text-sm font-semibold text-[var(--semi-color-text-0)]">
           {t("Third-party login bindings")}
+        </div>
+        <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <InfoItem
+            label={t("QQ number")}
+            value={
+              <span className="font-mono-data">
+                {user.qqNumber || t("Unbound")}
+              </span>
+            }
+          />
         </div>
         {user.thirdPartyIdentities?.length ? (
           <div className="divide-y divide-[var(--semi-color-border)] overflow-hidden rounded-lg border border-[var(--semi-color-border)]">

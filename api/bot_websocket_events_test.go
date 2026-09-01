@@ -56,7 +56,7 @@ func TestBotWebSocketDBEventsExposeOnlyPublicProjection(t *testing.T) {
 		`CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT, description TEXT, status TEXT, access_type TEXT)`,
 		`CREATE TABLE leaderboard_settlements (id INTEGER PRIMARY KEY, business_date TEXT, status TEXT, settled_at DATETIME)`,
 		`CREATE TABLE leaderboard_rewards (settlement_id INTEGER, user_id INTEGER, rank_no INTEGER, score INTEGER, reward_amount TEXT)`,
-		`CREATE TABLE users (id INTEGER PRIMARY KEY, nickname TEXT)`,
+		`CREATE TABLE users (id INTEGER PRIMARY KEY, nickname TEXT, email TEXT)`,
 	} {
 		if err := db.Exec(statement).Error; err != nil {
 			t.Fatalf("create fixture table: %v", err)
@@ -94,7 +94,7 @@ func TestBotWebSocketDBEventsExposeOnlyPublicProjection(t *testing.T) {
 	if err := db.Exec("INSERT INTO projects(id, name, description, status, access_type) VALUES (7, '公开项目', '公开说明', 'listed', 'public'), (8, '私有项目', '私有说明', 'listed', 'private')").Error; err != nil {
 		t.Fatalf("insert projects: %v", err)
 	}
-	if err := db.Exec("INSERT INTO users(id, nickname) VALUES (99, 'winner@example.com')").Error; err != nil {
+	if err := db.Exec("INSERT INTO users(id, nickname, email) VALUES (99, '', 'winner@example.com')").Error; err != nil {
 		t.Fatalf("insert user: %v", err)
 	}
 	if err := db.Exec("INSERT INTO leaderboard_settlements(id, business_date, status, settled_at) VALUES (1, '2026-08-30', 'completed', ?)", eventAt).Error; err != nil {
@@ -134,7 +134,7 @@ func TestBotWebSocketDBEventsExposeOnlyPublicProjection(t *testing.T) {
 			t.Fatalf("unsafe value %q leaked in %s", forbidden, payload)
 		}
 	}
-	for _, wanted := range []string{`"notice":"维护通知"`, `"title":"公开标题"`, `"name":"匿名用户"`, `"rewardAmount":"12.34"`, `"projectId":7`, `"name":"公开项目"`, `"description":"公开说明"`, "项目价格已批量更新"} {
+	for _, wanted := range []string{`"notice":"维护通知"`, `"title":"公开标题"`, `"name":"winner"`, `"rewardAmount":"12.34"`, `"projectId":7`, `"name":"公开项目"`, `"description":"公开说明"`, "项目价格已批量更新"} {
 		if !strings.Contains(payload, wanted) {
 			t.Fatalf("safe projection %s missing from %s", wanted, payload)
 		}

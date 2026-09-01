@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/donnel666/remail/internal/iam/app"
@@ -181,6 +182,7 @@ type UserResponse struct {
 	UserGroup            UserGroupResponse            `json:"userGroup"`
 	Permissions          []string                     `json:"permissions,omitempty"`
 	ThirdPartyIdentities []ThirdPartyIdentityResponse `json:"thirdPartyIdentities,omitempty"`
+	QQNumber             string                       `json:"qqNumber,omitempty"`
 	HasLocalPassword     bool                         `json:"hasLocalPassword"`
 	Enabled              bool                         `json:"enabled"`
 	CreatedAt            time.Time                    `json:"createdAt"`
@@ -465,13 +467,16 @@ type InviteUsesResponse struct {
 
 // toUserResponse converts a domain User to a safe API response.
 func toUserResponse(u *domain.User) UserResponse {
-	identities := make([]ThirdPartyIdentityResponse, len(u.ThirdPartyIdentities))
-	for i, identity := range u.ThirdPartyIdentities {
-		identities[i] = ThirdPartyIdentityResponse{
+	identities := make([]ThirdPartyIdentityResponse, 0, len(u.ThirdPartyIdentities))
+	for _, identity := range u.ThirdPartyIdentities {
+		if strings.HasPrefix(identity.Provider, "bot:") {
+			continue
+		}
+		identities = append(identities, ThirdPartyIdentityResponse{
 			Provider:       identity.Provider,
 			ProviderUserID: identity.ProviderUserID,
 			CreatedAt:      identity.CreatedAt,
-		}
+		})
 	}
 	return UserResponse{
 		ID:                   u.ID,
@@ -480,6 +485,7 @@ func toUserResponse(u *domain.User) UserResponse {
 		Role:                 u.Role.String(),
 		UserGroup:            toUserGroupResponse(u.UserGroup),
 		ThirdPartyIdentities: identities,
+		QQNumber:             app.BotQQNumber(u.ThirdPartyIdentities),
 		HasLocalPassword:     u.HasLocalPassword(),
 		Enabled:              u.IsActive(),
 		CreatedAt:            u.CreatedAt,

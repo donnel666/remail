@@ -638,6 +638,23 @@ func (r *UserRepo) HasThirdPartyIdentity(ctx context.Context, userID uint, provi
 	return count > 0, nil
 }
 
+func (r *UserRepo) FindThirdPartyProviderUserID(ctx context.Context, userID uint, provider string) (string, error) {
+	provider = strings.TrimSpace(provider)
+	if userID == 0 || provider == "" || len(provider) > 50 {
+		return "", domain.ErrThirdPartyIdentityUnavailable
+	}
+	var identity ThirdPartyIdentityModel
+	if err := r.dbFor(ctx).Select("provider_user_id").
+		Where("user_id = ? AND provider = ?", userID, provider).
+		Take(&identity).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", nil
+		}
+		return "", fmt.Errorf("find third-party provider user id: %w", err)
+	}
+	return identity.ProviderUserID, nil
+}
+
 func (r *UserRepo) FindByID(ctx context.Context, id uint) (*domain.User, error) {
 	var model UserModel
 	err := r.dbFor(ctx).Preload("UserGroup").Where("id = ? AND status <> ?", id, domain.UserStatusDeleted).First(&model).Error

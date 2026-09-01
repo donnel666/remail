@@ -24,6 +24,7 @@ import {
   adjustAdminUsersWalletByIds,
   getAdminUserDashboardStats,
   getAdminUserRealtimeUsage,
+  listAdminUsers,
   setAdminUsersEnabledByFilter,
   setAdminUsersEnabledByIds,
 } from "./admin-users-api";
@@ -134,5 +135,43 @@ describe("admin user bulk API adapter", () => {
       "/v1/admin/users/{userId}/apikeys/realtime-usage",
       { params: { path: { userId: 42 } } }
     );
+  });
+
+  it("preserves the read-only QQ number in an admin user detail model", async () => {
+    apiMocks.GET
+      .mockResolvedValueOnce({
+        data: {
+          users: [{
+            id: 42,
+            email: "bound@example.com",
+            nickname: "Bound",
+            role: "user",
+            userGroup: {
+              id: 1,
+              code: "normal",
+              name: "Normal",
+              description: "",
+              enabled: true,
+              apiConcurrencyLimit: 3,
+              priceDiscountRatio: "1",
+              topupThreshold: "0",
+              autoUpgradeEnabled: false,
+            },
+            qqNumber: "123456789",
+            hasLocalPassword: true,
+            enabled: true,
+            createdAt: "2026-09-01T00:00:00Z",
+            updatedAt: "2026-09-01T00:00:00Z",
+          }],
+          total: 1,
+          offset: 0,
+          limit: 20,
+        },
+      })
+      .mockResolvedValueOnce({ data: { balances: [] } });
+
+    const result = await listAdminUsers({}, 0, 20);
+
+    expect(result.users[0].qqNumber).toBe("123456789");
   });
 });

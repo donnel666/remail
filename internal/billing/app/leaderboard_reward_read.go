@@ -11,6 +11,7 @@ import (
 type LeaderboardRewardRecord struct {
 	UserID   uint
 	Nickname string
+	Email    string
 	Rank     int
 	Score    int
 	Amount   string
@@ -68,7 +69,7 @@ func (uc *WalletUseCase) LatestBotLeaderboardRewards(ctx context.Context, limit 
 	result.Items = make([]BotLeaderboardRewardItem, len(settlement.Rewards))
 	for i, reward := range settlement.Rewards {
 		result.Items[i] = BotLeaderboardRewardItem{
-			Rank: reward.Rank, Name: botdisplay.Name(reward.Nickname, reward.UserID),
+			Rank: reward.Rank, Name: botdisplay.Name(reward.Nickname, reward.Email, reward.UserID),
 			SuccessCount: reward.Score, RewardAmount: reward.Amount,
 		}
 	}

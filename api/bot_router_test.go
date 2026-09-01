@@ -23,6 +23,12 @@ func (f botRouterAuthenticator) AuthenticateBotSystemKey(ctx context.Context, ke
 	return f(ctx, key)
 }
 
+func TestGeneratedOpenAPICompatibilityAliases(t *testing.T) {
+	if Qq != "qq" || Telegram != "telegram" || Private != "private" || Public != "public" {
+		t.Fatalf("unexpected compatibility aliases: %q %q %q %q", Qq, Telegram, Private, Public)
+	}
+}
+
 func TestBotProjectOpenAPIModelsExcludeInternalFields(t *testing.T) {
 	forbidden := map[string]bool{
 		"owner": true, "applicantUserId": true, "reviewReason": true,
@@ -63,6 +69,7 @@ func TestBotRoutesRequireBotSystemKeyAndMatchContract(t *testing.T) {
 		"DELETE /v1/bot/binding",
 		"GET /v1/bot/binding",
 		"GET /v1/bot/context",
+		"GET /v1/bot/profile",
 		"GET /v1/bot/projects",
 		"GET /v1/bot/projects/:projectId",
 		"GET /v1/bot/projects/:projectId/inventory",
@@ -99,6 +106,7 @@ func TestEveryBotBusinessRouteRequiresSubjectAndGroupContext(t *testing.T) {
 	registerBotRoutes(router.Group("/v1"), router, auth, nil, nil, nil, nil, nil, rdb)
 	routes := []struct{ method, path string }{
 		{http.MethodGet, "/v1/bot/context"},
+		{http.MethodGet, "/v1/bot/profile"},
 		{http.MethodPost, "/v1/bot/bindings"},
 		{http.MethodGet, "/v1/bot/binding"},
 		{http.MethodDelete, "/v1/bot/binding"},

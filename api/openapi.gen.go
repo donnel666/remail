@@ -1581,6 +1581,24 @@ func (e AdminSystemKeyCreateRequestPurpose) Valid() bool {
 	}
 }
 
+// Defines values for AdminSystemKeyCreateRequestSubjectNamespace.
+const (
+	QqMain       AdminSystemKeyCreateRequestSubjectNamespace = "qq:main"
+	TelegramMain AdminSystemKeyCreateRequestSubjectNamespace = "telegram:main"
+)
+
+// Valid indicates whether the value is a known member of the AdminSystemKeyCreateRequestSubjectNamespace enum.
+func (e AdminSystemKeyCreateRequestSubjectNamespace) Valid() bool {
+	switch e {
+	case QqMain:
+		return true
+	case TelegramMain:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminSystemLogItemCategory.
 const (
 	AdminSystemLogItemCategorySystem AdminSystemLogItemCategory = "system"
@@ -2007,6 +2025,30 @@ const (
 func (e BotOrderRankingsResponseTimezone) Valid() bool {
 	switch e {
 	case AsiaShanghai:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BotProfileResponseRole.
+const (
+	BotProfileResponseRoleAdmin      BotProfileResponseRole = "admin"
+	BotProfileResponseRoleSuperAdmin BotProfileResponseRole = "super_admin"
+	BotProfileResponseRoleSupplier   BotProfileResponseRole = "supplier"
+	BotProfileResponseRoleUser       BotProfileResponseRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the BotProfileResponseRole enum.
+func (e BotProfileResponseRole) Valid() bool {
+	switch e {
+	case BotProfileResponseRoleAdmin:
+		return true
+	case BotProfileResponseRoleSuperAdmin:
+		return true
+	case BotProfileResponseRoleSupplier:
+		return true
+	case BotProfileResponseRoleUser:
 		return true
 	default:
 		return false
@@ -2811,8 +2853,6 @@ const (
 	OrderBatchItemErrorResponseCodeInsufficientBalance    OrderBatchItemErrorResponseCode = "insufficient_balance"
 	OrderBatchItemErrorResponseCodeInsufficientInventory  OrderBatchItemErrorResponseCode = "insufficient_inventory"
 	OrderBatchItemErrorResponseCodeTemporarilyUnavailable OrderBatchItemErrorResponseCode = "temporarily_unavailable"
-	OrderBatchItemErrorResponseCodeUpstreamPriceProtected OrderBatchItemErrorResponseCode = "upstream_price_protected"
-	OrderBatchItemErrorResponseCodeUpstreamUnavailable    OrderBatchItemErrorResponseCode = "upstream_unavailable"
 )
 
 // Valid indicates whether the value is a known member of the OrderBatchItemErrorResponseCode enum.
@@ -2825,10 +2865,6 @@ func (e OrderBatchItemErrorResponseCode) Valid() bool {
 	case OrderBatchItemErrorResponseCodeInsufficientInventory:
 		return true
 	case OrderBatchItemErrorResponseCodeTemporarilyUnavailable:
-		return true
-	case OrderBatchItemErrorResponseCodeUpstreamPriceProtected:
-		return true
-	case OrderBatchItemErrorResponseCodeUpstreamUnavailable:
 		return true
 	default:
 		return false
@@ -5259,6 +5295,42 @@ func (e PostBotCodeDiagnosisParamsXBotScene) Valid() bool {
 	}
 }
 
+// Defines values for GetBotProfileParamsXBotChannel.
+const (
+	GetBotProfileParamsXBotChannelQq       GetBotProfileParamsXBotChannel = "qq"
+	GetBotProfileParamsXBotChannelTelegram GetBotProfileParamsXBotChannel = "telegram"
+)
+
+// Valid indicates whether the value is a known member of the GetBotProfileParamsXBotChannel enum.
+func (e GetBotProfileParamsXBotChannel) Valid() bool {
+	switch e {
+	case GetBotProfileParamsXBotChannelQq:
+		return true
+	case GetBotProfileParamsXBotChannelTelegram:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetBotProfileParamsXBotScene.
+const (
+	GetBotProfileParamsXBotSceneGroup   GetBotProfileParamsXBotScene = "group"
+	GetBotProfileParamsXBotScenePrivate GetBotProfileParamsXBotScene = "private"
+)
+
+// Valid indicates whether the value is a known member of the GetBotProfileParamsXBotScene enum.
+func (e GetBotProfileParamsXBotScene) Valid() bool {
+	switch e {
+	case GetBotProfileParamsXBotSceneGroup:
+		return true
+	case GetBotProfileParamsXBotScenePrivate:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetBotProjectsParamsScope.
 const (
 	GetBotProjectsParamsScopeVisible GetBotProjectsParamsScope = "visible"
@@ -5522,16 +5594,16 @@ func (e GetBotLatestLeaderboardRewardsParamsXBotScene) Valid() bool {
 
 // Defines values for ConnectBotWebSocketParamsXBotChannel.
 const (
-	Qq       ConnectBotWebSocketParamsXBotChannel = "qq"
-	Telegram ConnectBotWebSocketParamsXBotChannel = "telegram"
+	ConnectBotWebSocketParamsXBotChannelQq       ConnectBotWebSocketParamsXBotChannel = "qq"
+	ConnectBotWebSocketParamsXBotChannelTelegram ConnectBotWebSocketParamsXBotChannel = "telegram"
 )
 
 // Valid indicates whether the value is a known member of the ConnectBotWebSocketParamsXBotChannel enum.
 func (e ConnectBotWebSocketParamsXBotChannel) Valid() bool {
 	switch e {
-	case Qq:
+	case ConnectBotWebSocketParamsXBotChannelQq:
 		return true
-	case Telegram:
+	case ConnectBotWebSocketParamsXBotChannelTelegram:
 		return true
 	default:
 		return false
@@ -5723,16 +5795,16 @@ func (e GetProjectsParamsStatus) Valid() bool {
 
 // Defines values for GetProjectsParamsAccessType.
 const (
-	Private GetProjectsParamsAccessType = "private"
-	Public  GetProjectsParamsAccessType = "public"
+	GetProjectsParamsAccessTypePrivate GetProjectsParamsAccessType = "private"
+	GetProjectsParamsAccessTypePublic  GetProjectsParamsAccessType = "public"
 )
 
 // Valid indicates whether the value is a known member of the GetProjectsParamsAccessType enum.
 func (e GetProjectsParamsAccessType) Valid() bool {
 	switch e {
-	case Private:
+	case GetProjectsParamsAccessTypePrivate:
 		return true
-	case Public:
+	case GetProjectsParamsAccessTypePublic:
 		return true
 	default:
 		return false
@@ -8001,8 +8073,8 @@ type AdminSystemKeyCreateRequest struct {
 	// Purpose Limits the key to iCloud forwarding, SMTP submission, or the Bot integration API.
 	Purpose *AdminSystemKeyCreateRequestPurpose `json:"purpose,omitempty"`
 
-	// SubjectNamespace Required only for purpose=bot; stable identity namespace such as qq:appid or telegram:botid. Key rotation reuses this value.
-	SubjectNamespace *string `json:"subjectNamespace,omitempty"`
+	// SubjectNamespace Required only for purpose=bot; use qq:main for QQ or telegram:main for Telegram. Key rotation reuses this value.
+	SubjectNamespace *AdminSystemKeyCreateRequestSubjectNamespace `json:"subjectNamespace,omitempty"`
 }
 
 // AdminSystemKeyCreateRequestPlatform Required only for purpose=bot. This immutable Key type is either qq or telegram and must match the trusted X-Bot-Channel on every Bot request.
@@ -8010,6 +8082,9 @@ type AdminSystemKeyCreateRequestPlatform string
 
 // AdminSystemKeyCreateRequestPurpose Limits the key to iCloud forwarding, SMTP submission, or the Bot integration API.
 type AdminSystemKeyCreateRequestPurpose string
+
+// AdminSystemKeyCreateRequestSubjectNamespace Required only for purpose=bot; use qq:main for QQ or telegram:main for Telegram. Key rotation reuses this value.
+type AdminSystemKeyCreateRequestSubjectNamespace string
 
 // AdminSystemKeyList defines model for AdminSystemKeyList.
 type AdminSystemKeyList struct {
@@ -8440,6 +8515,12 @@ type BotContextResponseAuthorized bool
 
 // BotDiagnosisResponse defines model for BotDiagnosisResponse.
 type BotDiagnosisResponse struct {
+	// AccountUnavailable True only when a binding exists but the bound ReMail account is unavailable.
+	AccountUnavailable *bool `json:"accountUnavailable,omitempty"`
+
+	// BindingRequired True only when the trusted platform sender must bind a ReMail account before diagnosis.
+	BindingRequired *bool `json:"bindingRequired,omitempty"`
+
 	// Message User-facing diagnosis only; never includes email, order number, message content, credentials, codes, internal status names or implementation steps.
 	Message string `json:"message"`
 
@@ -8452,7 +8533,7 @@ type BotDiagnosisResponse struct {
 
 // BotLeaderboardItem defines model for BotLeaderboardItem.
 type BotLeaderboardItem struct {
-	// Name Safe user nickname or an anonymous label; never an email or user id.
+	// Name User nickname when configured; otherwise the email local-part before "@". A non-empty malformed legacy email is returned unchanged.
 	Name         string `json:"name"`
 	Rank         int    `json:"rank"`
 	SuccessCount int    `json:"successCount"`
@@ -8460,7 +8541,7 @@ type BotLeaderboardItem struct {
 
 // BotLeaderboardRewardItem defines model for BotLeaderboardRewardItem.
 type BotLeaderboardRewardItem struct {
-	// Name Safe user nickname or an anonymous label; never an email or user id.
+	// Name User nickname when configured; otherwise the email local-part before "@". A non-empty malformed legacy email is returned unchanged.
 	Name string `json:"name"`
 	Rank int    `json:"rank"`
 
@@ -8489,6 +8570,43 @@ type BotOrderRankingsResponse struct {
 
 // BotOrderRankingsResponseTimezone defines model for BotOrderRankingsResponse.Timezone.
 type BotOrderRankingsResponseTimezone string
+
+// BotProfileResponse defines model for BotProfileResponse.
+type BotProfileResponse struct {
+	// Available True only when the bound ReMail account is active and profile data is available.
+	Available *bool `json:"available,omitempty"`
+
+	// Balance Non-negative point amount with up to 6 decimal places.
+	Balance *NonNegativeLedgerAmountResponse `json:"balance,omitempty"`
+
+	// Bound Whether the trusted platform sender has a ReMail binding record.
+	Bound bool `json:"bound"`
+
+	// GroupName Current user-visible membership group name.
+	GroupName *string `json:"groupName,omitempty"`
+
+	// HighestGroup True when no enabled higher membership group exists.
+	HighestGroup *bool `json:"highestGroup,omitempty"`
+
+	// Message Safe user-facing instruction, returned when the sender is not bound.
+	Message *string `json:"message,omitempty"`
+
+	// NextGroupName Next enabled automatic-upgrade group, when one exists.
+	NextGroupName *string                 `json:"nextGroupName,omitempty"`
+	Role          *BotProfileResponseRole `json:"role,omitempty"`
+
+	// RoleDisplay Chinese user-facing role label.
+	RoleDisplay *string `json:"roleDisplay,omitempty"`
+
+	// TotalRecharged Non-negative point amount with up to 6 decimal places.
+	TotalRecharged *NonNegativeLedgerAmountResponse `json:"totalRecharged,omitempty"`
+
+	// UpgradeRemaining Non-negative point amount with up to 6 decimal places.
+	UpgradeRemaining *NonNegativeLedgerAmountResponse `json:"upgradeRemaining,omitempty"`
+}
+
+// BotProfileResponseRole defines model for BotProfileResponse.Role.
+type BotProfileResponseRole string
 
 // BotProjectDetailResponse defines model for BotProjectDetailResponse.
 type BotProjectDetailResponse struct {
@@ -11439,14 +11557,17 @@ type UserPermissionPoliciesResponse struct {
 
 // UserResponse defines model for UserResponse.
 type UserResponse struct {
-	CreatedAt            time.Time                     `json:"createdAt"`
-	Email                string                        `json:"email"`
-	Enabled              bool                          `json:"enabled"`
-	HasLocalPassword     bool                          `json:"hasLocalPassword"`
-	Id                   int                           `json:"id"`
-	LastLoginAt          *time.Time                    `json:"lastLoginAt,omitempty"`
-	Nickname             string                        `json:"nickname"`
-	Permissions          *[]string                     `json:"permissions,omitempty"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	Email            string     `json:"email"`
+	Enabled          bool       `json:"enabled"`
+	HasLocalPassword bool       `json:"hasLocalPassword"`
+	Id               int        `json:"id"`
+	LastLoginAt      *time.Time `json:"lastLoginAt,omitempty"`
+	Nickname         string     `json:"nickname"`
+	Permissions      *[]string  `json:"permissions,omitempty"`
+
+	// QqNumber Read-only QQ number bound through the current QQ Bot identity. Omitted when no QQ account is bound; LinuxDO, Telegram and other identities are never projected into this field.
+	QqNumber             *string                       `json:"qqNumber,omitempty"`
 	Role                 UserResponseRole              `json:"role"`
 	ThirdPartyIdentities *[]ThirdPartyIdentityResponse `json:"thirdPartyIdentities,omitempty"`
 	UpdatedAt            time.Time                     `json:"updatedAt"`
@@ -13706,6 +13827,27 @@ type PostBotCodeDiagnosisParamsXBotScene string
 type PostBotCodeDiagnosis503JSONResponseBody struct {
 	union json.RawMessage
 }
+
+// GetBotProfileParams defines parameters for GetBotProfile.
+type GetBotProfileParams struct {
+	// XBotChannel Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument.
+	XBotChannel GetBotProfileParamsXBotChannel `json:"X-Bot-Channel"`
+
+	// XBotSubject Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument.
+	XBotSubject BotSubject `json:"X-Bot-Subject"`
+
+	// XBotScene Private scenes may use the current bound account and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group; binding remains private-only, while diagnosis is available for the current sender's own bound account.
+	XBotScene GetBotProfileParamsXBotScene `json:"X-Bot-Scene"`
+
+	// XBotGroup Trusted platform group id supplied by the bot adapter. QQ values are positive decimal group numbers and Telegram values are non-zero decimal Chat IDs (normally negative). Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument.
+	XBotGroup *BotGroup `json:"X-Bot-Group,omitempty"`
+}
+
+// GetBotProfileParamsXBotChannel defines parameters for GetBotProfile.
+type GetBotProfileParamsXBotChannel string
+
+// GetBotProfileParamsXBotScene defines parameters for GetBotProfile.
+type GetBotProfileParamsXBotScene string
 
 // GetBotProjectsParams defines parameters for GetBotProjects.
 type GetBotProjectsParams struct {
@@ -16596,6 +16738,9 @@ type ServerInterface interface {
 	// Safely diagnose why the current bound user has not received a code
 	// (POST /v1/bot/diagnoses/code)
 	PostBotCodeDiagnosis(c *gin.Context, params PostBotCodeDiagnosisParams)
+	// Read the current bound user's safe account summary
+	// (GET /v1/bot/profile)
+	GetBotProfile(c *gin.Context, params GetBotProfileParams)
 	// List the same safe projects, prices and inventory shown by the workbench
 	// (GET /v1/bot/projects)
 	GetBotProjects(c *gin.Context, params GetBotProjectsParams)
@@ -31722,6 +31867,114 @@ func (siw *ServerInterfaceWrapper) PostBotCodeDiagnosis(c *gin.Context) {
 	siw.Handler.PostBotCodeDiagnosis(c, params)
 }
 
+// GetBotProfile operation middleware
+func (siw *ServerInterfaceWrapper) GetBotProfile(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(SystemKeyAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetBotProfileParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-Bot-Channel" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Channel")]; found {
+		var XBotChannel GetBotProfileParamsXBotChannel
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Channel, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Channel", valueList[0], &XBotChannel, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Channel: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotChannel = XBotChannel
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Channel is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Subject" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Subject")]; found {
+		var XBotSubject BotSubject
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Subject, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Subject", valueList[0], &XBotSubject, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Subject: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotSubject = XBotSubject
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Subject is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Scene" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Scene")]; found {
+		var XBotScene GetBotProfileParamsXBotScene
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Scene, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Scene", valueList[0], &XBotScene, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Scene: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotScene = XBotScene
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Scene is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional header parameter "X-Bot-Group" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Group")]; found {
+		var XBotGroup BotGroup
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Group, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Group", valueList[0], &XBotGroup, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Group: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotGroup = &XBotGroup
+
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetBotProfile(c, params)
+}
+
 // GetBotProjects operation middleware
 func (siw *ServerInterfaceWrapper) GetBotProjects(c *gin.Context) {
 
@@ -36229,6 +36482,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/bot/bindings", wrapper.PostBotBinding)
 	router.GET(options.BaseURL+"/v1/bot/context", wrapper.GetBotContext)
 	router.POST(options.BaseURL+"/v1/bot/diagnoses/code", wrapper.PostBotCodeDiagnosis)
+	router.GET(options.BaseURL+"/v1/bot/profile", wrapper.GetBotProfile)
 	router.GET(options.BaseURL+"/v1/bot/projects", wrapper.GetBotProjects)
 	router.GET(options.BaseURL+"/v1/bot/projects/:projectId", wrapper.GetBotProject)
 	router.GET(options.BaseURL+"/v1/bot/projects/:projectId/inventory", wrapper.GetBotProjectInventory)

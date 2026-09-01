@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/donnel666/remail/api/middleware"
+	"github.com/donnel666/remail/internal/botdisplay"
 	"github.com/donnel666/remail/internal/iam/app"
 	"github.com/donnel666/remail/internal/iam/domain"
 	"github.com/gin-gonic/gin"
@@ -76,7 +77,7 @@ func (h *botBindingHandler) post(c *gin.Context) {
 	var req botBindingRequest
 	if err := bindBotBindingJSON(c, &req); err != nil {
 		c.JSON(http.StatusBadRequest, botBindingResponse{
-			Result: "invalid_request", Reason: "Invalid request body.",
+			Result: "invalid_request", Reason: "请求参数不正确。",
 		})
 		return
 	}
@@ -108,7 +109,7 @@ func (h *botBindingHandler) post(c *gin.Context) {
 		slog.Warn("clear bot binding abuse limit", "request_id", middleware.GetRequestID(c), "error", err)
 	}
 	c.JSON(http.StatusOK, botBindingResponse{
-		Result: "bound", Reason: "The current bot account is bound to remail.",
+		Result: "bound", Reason: "当前账号已绑定 ReMail。",
 		AccountDisplay: info.MaskedEmail,
 	})
 }
@@ -141,13 +142,13 @@ func (h *botBindingHandler) get(c *gin.Context) {
 		writeBotBindingError(c, err)
 		return
 	}
-	response := botBindingResponse{Result: "unbound", Reason: "The current bot account is not bound to remail."}
+	response := botBindingResponse{Result: "unbound", Reason: botdisplay.BindingRequiredMessage}
 	if info.Bound && !info.Available {
 		response.Result = "account_unavailable"
-		response.Reason = "The bound remail account is unavailable."
+		response.Reason = "已绑定的 ReMail 账号不可用，请重新绑定。"
 	} else if info.Bound {
 		response.Result = "bound"
-		response.Reason = "The current bot account is bound to remail."
+		response.Reason = "当前账号已绑定 ReMail。"
 		response.AccountDisplay = info.MaskedEmail
 	}
 	c.JSON(http.StatusOK, response)
@@ -167,15 +168,15 @@ func (h *botBindingHandler) delete(c *gin.Context) {
 }
 
 func writeBotBindingError(c *gin.Context, err error) {
-	response := botBindingResponse{Result: "service_unavailable", Reason: "Service is temporarily unavailable."}
+	response := botBindingResponse{Result: "service_unavailable", Reason: "服务暂时不可用，请稍后重试。"}
 	status := http.StatusServiceUnavailable
 	switch {
 	case errors.Is(err, domain.ErrAccountOrPasswordIncorrect):
-		status, response.Result, response.Reason = http.StatusUnprocessableEntity, "credential_incorrect", "Account or password is incorrect."
+		status, response.Result, response.Reason = http.StatusUnprocessableEntity, "credential_incorrect", "ReMail 账号或密码错误。"
 	case errors.Is(err, domain.ErrThirdPartyIdentityAlreadyBound):
-		status, response.Result, response.Reason = http.StatusConflict, "binding_conflict", "The bot account or remail account already has another binding."
+		status, response.Result, response.Reason = http.StatusConflict, "binding_conflict", "当前账号或该 ReMail 账号已存在其他绑定。"
 	case errors.Is(err, domain.ErrThirdPartyIdentityUnavailable):
-		status, response.Result, response.Reason = http.StatusUnauthorized, "bot_identity_required", "Bot identity is required."
+		status, response.Result, response.Reason = http.StatusUnauthorized, "bot_identity_required", "身份验证失败。"
 	default:
 		slog.Error("bot binding failed", "request_id", middleware.GetRequestID(c), "error", err)
 	}

@@ -63,11 +63,15 @@ func botDiagnosisRequest(scene, body string) *http.Request {
 	return request
 }
 
+func activeBotUser(userID uint) BotUserResolution {
+	return BotUserResolution{UserID: userID, Bound: true, Available: true}
+}
+
 func TestBotCodeDiagnosisResponseCannotExposeRawFacts(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &botDiagnosisRepoStub{}
 	module := &Module{BotDiagnosis: mailmatchapp.NewBotDiagnosisService(repo)}
-	router := botDiagnosisRouter(module, func(*gin.Context) (uint, bool) { return 2, true })
+	router := botDiagnosisRouter(module, func(*gin.Context) (BotUserResolution, bool) { return activeBotUser(2), true })
 	req := botDiagnosisRequest(middleware.BotScenePrivate, `{"email":"private@example.com"}`)
 	response := httptest.NewRecorder()
 
@@ -90,7 +94,7 @@ func TestBotCodeDiagnosisResponseCannotExposeRawFacts(t *testing.T) {
 func TestBotCodeDiagnosisRejectsUnknownBodyFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	module := &Module{BotDiagnosis: mailmatchapp.NewBotDiagnosisService(&botDiagnosisRepoStub{})}
-	router := botDiagnosisRouter(module, func(*gin.Context) (uint, bool) { return 2, true })
+	router := botDiagnosisRouter(module, func(*gin.Context) (BotUserResolution, bool) { return activeBotUser(2), true })
 	req := botDiagnosisRequest(middleware.BotScenePrivate, `{"email":"private@example.com","orderNo":"SECRET"}`)
 	response := httptest.NewRecorder()
 
@@ -106,9 +110,9 @@ func TestBotCodeDiagnosisRejectsUnknownBodyFields(t *testing.T) {
 func TestBotCodeDiagnosisPreservesResolverFailureResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	module := &Module{BotDiagnosis: mailmatchapp.NewBotDiagnosisService(&botDiagnosisRepoStub{})}
-	router := botDiagnosisRouter(module, func(c *gin.Context) (uint, bool) {
+	router := botDiagnosisRouter(module, func(c *gin.Context) (BotUserResolution, bool) {
 		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"message": "Service is temporarily unavailable."})
-		return 0, false
+		return BotUserResolution{}, false
 	})
 	request := botDiagnosisRequest(middleware.BotScenePrivate, `{"email":"private@example.com"}`)
 	response := httptest.NewRecorder()
@@ -122,7 +126,7 @@ func TestBotCodeDiagnosisPreservesResolverFailureResponse(t *testing.T) {
 func TestBotCodeDiagnosisGroupUsesBoundUserAndEmailWithoutExposingRawOrder(t *testing.T) {
 	repo := &botDiagnosisRepoStub{}
 	module := &Module{BotDiagnosis: mailmatchapp.NewBotDiagnosisService(repo)}
-	router := botDiagnosisRouter(module, func(*gin.Context) (uint, bool) { return 2, true })
+	router := botDiagnosisRouter(module, func(*gin.Context) (BotUserResolution, bool) { return activeBotUser(2), true })
 	response := httptest.NewRecorder()
 
 	router.ServeHTTP(response, botDiagnosisRequest(middleware.BotSceneGroup, `{"email":"private@example.com"}`))
@@ -139,19 +143,36 @@ func TestBotCodeDiagnosisGroupUsesBoundUserAndEmailWithoutExposingRawOrder(t *te
 
 func TestBotCodeDiagnosisGroupReportsMissingBindingWithoutOrderData(t *testing.T) {
 	module := &Module{BotDiagnosis: mailmatchapp.NewBotDiagnosisService(&botDiagnosisRepoStub{})}
-	router := botDiagnosisRouter(module, func(*gin.Context) (uint, bool) { return 0, true })
+	router := botDiagnosisRouter(module, func(*gin.Context) (BotUserResolution, bool) { return BotUserResolution{}, true })
 	response := httptest.NewRecorder()
 
 	router.ServeHTTP(response, botDiagnosisRequest(middleware.BotSceneGroup, `{"email":"private@example.com"}`))
 
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	require.Contains(t, response.Body.String(), "尚未绑定")
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.ElementsMatch(t, []string{"message", "bindingRequired"}, mapKeys(body))
+	require.Equal(t, true, body["bindingRequired"])
 	require.NotContains(t, response.Body.String(), "projectId")
+}
+
+func TestBotCodeDiagnosisReportsUnavailableBoundAccount(t *testing.T) {
+	module := &Module{BotDiagnosis: mailmatchapp.NewBotDiagnosisService(&botDiagnosisRepoStub{})}
+	router := botDiagnosisRouter(module, func(*gin.Context) (BotUserResolution, bool) {
+		return BotUserResolution{Bound: true}, true
+	})
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, botDiagnosisRequest(middleware.BotScenePrivate, `{"email":"private@example.com"}`))
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.JSONEq(t, `{"message":"当前绑定的 ReMail 账号不可用，请重新绑定或联系客服。","accountUnavailable":true}`, response.Body.String())
 }
 
 func TestBotCodeDiagnosisGroupRequiresEmail(t *testing.T) {
 	module := &Module{BotDiagnosis: mailmatchapp.NewBotDiagnosisService(&botDiagnosisRepoStub{})}
-	router := botDiagnosisRouter(module, func(*gin.Context) (uint, bool) { return 2, true })
+	router := botDiagnosisRouter(module, func(*gin.Context) (BotUserResolution, bool) { return activeBotUser(2), true })
 	response := httptest.NewRecorder()
 
 	router.ServeHTTP(response, botDiagnosisRequest(middleware.BotSceneGroup, `{}`))

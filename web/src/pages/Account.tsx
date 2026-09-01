@@ -20,6 +20,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import {
   BarChart2,
   Coins,
+  MessageCircle,
   ShieldCheck,
   UserPlus,
   Users,
@@ -412,6 +413,16 @@ export default function Account() {
                     icon={<IconMail />}
                     iconTone="orange"
                     title={t("Email")}
+                  />
+                  <SettingItem
+                    description={
+                      <OverflowTooltip content={currentUser?.qqNumber || t("Unbound")}>
+                        {currentUser?.qqNumber || t("Unbound")}
+                      </OverflowTooltip>
+                    }
+                    icon={<MessageCircle size={20} />}
+                    iconTone="green"
+                    title={t("QQ number")}
                   />
                   <SettingItem
                     action={

@@ -683,39 +683,45 @@ func (uc *UseCase) applyPickupMessageCache(ctx context.Context, emailResourceID 
 
 // RefreshCodeDiagnosis reuses the normal pickup cache and fetch lease. It does
 // not create a second observation store just for the Bot diagnostic path.
-func (uc *UseCase) RefreshCodeDiagnosis(ctx context.Context, orderNo, _ string, emailResourceID uint) error {
+func (uc *UseCase) RefreshCodeDiagnosis(ctx context.Context, orderNo, _ string, emailResourceID uint) (CodeDiagnosisRefreshResult, error) {
 	orderNo = strings.TrimSpace(orderNo)
 	if uc == nil || uc.repo == nil || orderNo == "" || emailResourceID == 0 {
-		return nil
+		return CodeDiagnosisRefreshResult{}, nil
 	}
 	scope, err := uc.repo.LoadOrderScopeForServiceToken(ctx, orderNo)
 	if err != nil {
-		return err
+		return CodeDiagnosisRefreshResult{}, err
 	}
-	if scope == nil || scope.ServiceMode != "code" || scope.EmailResourceID != emailResourceID || !scopeReadable(*scope, uc.now) {
-		return nil
+	if scope == nil || scope.EmailResourceID != emailResourceID || !scopeReadable(*scope, uc.now) {
+		return CodeDiagnosisRefreshResult{}, nil
 	}
 	if scope.AllocationType == domain.ResourceTypeDomain {
 		_, err = uc.syncDomainMailbox(ctx, *scope)
-		return err
+		return CodeDiagnosisRefreshResult{}, err
 	}
 	if scope.AllocationType == domain.ResourceTypeGmail {
+		if scope.ServiceMode == "purchase" {
+			if uc.gmailPurchase == nil {
+				return CodeDiagnosisRefreshResult{}, nil
+			}
+			return CodeDiagnosisRefreshResult{}, uc.gmailPurchase.FetchLocalPurchaseMail(ctx, scope.OrderNo)
+		}
 		fetch, ok := uc.gmailPurchase.(GmailCodeDiagnosisFetchPort)
 		if !ok {
-			return nil
+			return CodeDiagnosisRefreshResult{}, nil
 		}
-		return fetch.FetchLocalCodeMail(ctx, scope.OrderNo)
+		return CodeDiagnosisRefreshResult{}, fetch.FetchLocalCodeMail(ctx, scope.OrderNo)
 	}
 	if !scopeFetchable(*scope, uc.now) {
-		return nil
+		return CodeDiagnosisRefreshResult{}, nil
 	}
 	if uc.applyPickupMessageCache(ctx, emailResourceID, []OrderScope{*scope}).satisfied {
-		return nil
+		return CodeDiagnosisRefreshResult{}, nil
 	}
 	_, err = uc.processPickupRequestScope(ctx, uc.now(), PickupRequestFetchScope{
 		OrderNo: orderNo, OrderNos: []string{orderNo}, EmailResourceID: emailResourceID,
 	}, configuredPickupFetchTiming())
-	return err
+	return CodeDiagnosisRefreshResult{}, err
 }
 
 func (uc *UseCase) applyLoadedPickupMessageCache(ctx context.Context, emailResourceID uint, scopes []OrderScope, messages []FetchedMessage, found bool) pickupMessageCacheMatch {

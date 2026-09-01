@@ -201,7 +201,7 @@ func TestConsoleStatsUsesSelectedUserAndSkipsFullDashboardReads(t *testing.T) {
 	}
 }
 
-func TestBotLeaderboardsUseAnonymousFallback(t *testing.T) {
+func TestBotLeaderboardsMatchWebDisplayName(t *testing.T) {
 	now := time.Date(2026, 8, 30, 9, 0, 0, 0, time.UTC)
 	view := &fakeView{leaders: []LeaderRow{
 		{UserID: 7, Email: "secret@example.com", Count: 20},
@@ -217,8 +217,8 @@ func TestBotLeaderboardsUseAnonymousFallback(t *testing.T) {
 	if got.BusinessDate != "2026-08-30" || got.Timezone != "Asia/Shanghai" || len(got.Today) != 2 || len(got.Historical) != 2 {
 		t.Fatalf("unexpected response: %+v", got)
 	}
-	if got.Today[0].Name == "secret" || got.Today[0].Name == "7" || got.Today[0].Rank != 1 {
-		t.Fatalf("unsafe anonymous row: %+v", got.Today[0])
+	if got.Today[0].Name != "secret" || got.Today[0].Rank != 1 {
+		t.Fatalf("email prefix row: %+v", got.Today[0])
 	}
 	if got.Today[1].Name != "Alice" || got.Today[1].SuccessCount != 10 {
 		t.Fatalf("nickname row: %+v", got.Today[1])

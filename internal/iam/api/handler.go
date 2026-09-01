@@ -393,7 +393,12 @@ func (h *IAMHandler) GetMe(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"user": h.userResponseWithPermissions(c.Request.Context(), user)})
+	response := h.userResponseWithPermissions(c.Request.Context(), user)
+	if err := h.populateQQNumber(c.Request.Context(), user.ID, &response); err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"user": response})
 }
 
 // GET /v1/user-groups
@@ -1066,13 +1071,20 @@ func (h *IAMHandler) PatchAdminUser(c *gin.Context) {
 	if !ok {
 		return
 	}
+	response := UserResponse{}
+	if err := h.populateQQNumber(c.Request.Context(), uint(targetUserID), &response); err != nil {
+		writeError(c, err)
+		return
+	}
 	user, err := h.module.AdminUseCase.UpdateUser(c.Request.Context(), operatorID, middleware.GetRequestID(c), c.FullPath(), uint(targetUserID), updateReq, allowSensitive)
 	if err != nil {
 		writeError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"user": toUserResponse(user)})
+	updated := toUserResponse(user)
+	updated.QQNumber = response.QQNumber
+	c.JSON(http.StatusOK, gin.H{"user": updated})
 }
 
 // POST /v1/admin/users
@@ -1375,6 +1387,18 @@ func (h *IAMHandler) userResponseWithPermissions(ctx context.Context, user *doma
 	}
 	resp.Permissions = permissions
 	return resp
+}
+
+func (h *IAMHandler) populateQQNumber(ctx context.Context, userID uint, response *UserResponse) error {
+	if response == nil || response.QQNumber != "" || h == nil || h.module == nil || h.module.BotBindingUseCase == nil {
+		return nil
+	}
+	qqNumber, err := h.module.BotBindingUseCase.QQNumber(ctx, userID)
+	if err != nil {
+		return err
+	}
+	response.QQNumber = qqNumber
+	return nil
 }
 
 // writeError maps domain errors to HTTP responses.

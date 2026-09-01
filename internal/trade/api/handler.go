@@ -164,9 +164,9 @@ func batchOrderItemError(err error) *OrderBatchItemErrorResponse {
 	case errors.Is(err, domain.ErrInsufficientInventory):
 		return &OrderBatchItemErrorResponse{Code: "insufficient_inventory", Message: "Insufficient inventory."}
 	case errors.Is(err, domain.ErrUpstreamPriceProtected):
-		return &OrderBatchItemErrorResponse{Code: "upstream_price_protected", Message: "Order price is below the configured upstream margin floor."}
+		return &OrderBatchItemErrorResponse{Code: "temporarily_unavailable", Message: "Order cannot be completed at the current price."}
 	case errors.Is(err, domain.ErrUpstreamUnavailable):
-		return &OrderBatchItemErrorResponse{Code: "upstream_unavailable", Message: "Upstream Gmail supply is temporarily unavailable."}
+		return &OrderBatchItemErrorResponse{Code: "temporarily_unavailable", Message: "Order service is temporarily unavailable."}
 	case errors.Is(err, domain.ErrIdempotencyConflict):
 		return &OrderBatchItemErrorResponse{Code: "idempotency_conflict", Message: "Idempotency-Key conflicts with a different request."}
 	default:
@@ -771,9 +771,9 @@ func writeTradeError(c *gin.Context, err error) {
 	case errors.Is(err, domain.ErrInsufficientInventory):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Insufficient inventory.", "requestId": requestID})
 	case errors.Is(err, domain.ErrUpstreamPriceProtected):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Order price is below the configured upstream margin floor.", "requestId": requestID})
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Order cannot be completed at the current price.", "requestId": requestID})
 	case errors.Is(err, domain.ErrUpstreamUnavailable):
-		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Upstream Gmail supply is temporarily unavailable.", "requestId": requestID})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Order service is temporarily unavailable.", "requestId": requestID})
 	case errors.Is(err, domain.ErrProjectUnavailable):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Project is not available for ordering.", "requestId": requestID})
 	case errors.Is(err, domain.ErrCheckoutBusy):

@@ -485,6 +485,7 @@
   "This NodeLoc account is already bound to another account.": "该 NodeLoc 账号已绑定到其他本站账号。",
   "Choose whether to bind an existing account or create a new account.": "请选择绑定已有账号或创建新账号。",
   "Third-party login bindings": "第三方登录绑定",
+  "QQ number": "QQ 号",
   "Provider user ID": "第三方用户 ID",
   "Bound at": "绑定时间",
   "No third-party login is bound.": "未绑定第三方登录。",

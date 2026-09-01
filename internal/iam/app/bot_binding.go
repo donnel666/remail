@@ -15,6 +15,7 @@ import (
 type BotBindingRepository interface {
 	FindByEmail(ctx context.Context, email string) (*domain.User, error)
 	FindByThirdPartyIdentity(ctx context.Context, provider, providerUserID string) (*domain.User, error)
+	FindThirdPartyProviderUserID(ctx context.Context, userID uint, provider string) (string, error)
 	BindThirdPartyIdentityWithPasswordSnapshot(ctx context.Context, userID uint, expectedPasswordHash, provider, providerUserID string) error
 	DeleteThirdPartyIdentity(ctx context.Context, provider, providerUserID string) error
 }
@@ -32,7 +33,15 @@ type BotBindingInfo struct {
 
 type BotBindingContext struct {
 	UserID             uint
+	Role               domain.Role
+	UserGroup          domain.UserGroup
 	PriceDiscountRatio string
+}
+
+type BotBindingResolution struct {
+	Bound     bool
+	Available bool
+	User      BotBindingContext
 }
 
 func NewBotBindingUseCase(repo BotBindingRepository, hasher Hasher) *BotBindingUseCase {
@@ -82,6 +91,43 @@ func (uc *BotBindingUseCase) Unbind(ctx context.Context, platform, namespace, su
 	return nil
 }
 
+// QQNumber returns the plaintext QQ number bound through the current QQ Bot scope.
+func (uc *BotBindingUseCase) QQNumber(ctx context.Context, userID uint) (string, error) {
+	if uc == nil || uc.repo == nil || userID == 0 {
+		return "", domain.ErrThirdPartyIdentityUnavailable
+	}
+	provider := botQQProvider()
+	value, err := uc.repo.FindThirdPartyProviderUserID(ctx, userID, provider)
+	if err != nil {
+		return "", fmt.Errorf("find QQ bot identity: %w", err)
+	}
+	value = strings.TrimSpace(value)
+	if !isPositiveDecimalBotSubject(value) {
+		return "", nil
+	}
+	return value, nil
+}
+
+// BotQQNumber projects only the current QQ Bot identity from an already loaded
+// identity collection. LinuxDO, Telegram and other providers never match.
+func BotQQNumber(identities []domain.ThirdPartyIdentity) string {
+	provider := botQQProvider()
+	for _, identity := range identities {
+		value := strings.TrimSpace(identity.ProviderUserID)
+		if identity.Provider == provider && isPositiveDecimalBotSubject(value) {
+			return value
+		}
+	}
+	return ""
+}
+
+func botQQProvider() string {
+	// ponytail: the settings UI currently owns one QQ scope; accept a provider
+	// set here only when multiple QQ namespaces become a real requirement.
+	provider, _, _ := normalizeBotIdentity("qq", "qq:main", "1")
+	return provider
+}
+
 // ResolveActiveUserID is the internal bridge used by other remail Bot
 // capabilities. The ID is never serialized by this use case's HTTP handlers.
 func (uc *BotBindingUseCase) ResolveActiveUserID(ctx context.Context, platform, namespace, subject string) (uint, bool, error) {
@@ -90,15 +136,29 @@ func (uc *BotBindingUseCase) ResolveActiveUserID(ctx context.Context, platform, 
 }
 
 func (uc *BotBindingUseCase) ResolveActiveUser(ctx context.Context, platform, namespace, subject string) (BotBindingContext, bool, error) {
+	resolution, err := uc.ResolveBinding(ctx, platform, namespace, subject)
+	return resolution.User, resolution.Bound && resolution.Available, err
+}
+
+func (uc *BotBindingUseCase) ResolveBinding(ctx context.Context, platform, namespace, subject string) (BotBindingResolution, error) {
 	user, err := uc.find(ctx, platform, namespace, subject)
-	if err != nil || user == nil || !user.IsActive() {
-		return BotBindingContext{}, false, err
+	if err != nil || user == nil {
+		return BotBindingResolution{}, err
+	}
+	if !user.IsActive() {
+		return BotBindingResolution{Bound: true}, nil
 	}
 	ratio := strings.TrimSpace(user.UserGroup.PriceDiscountRatio)
 	if ratio == "" {
 		ratio = "1"
 	}
-	return BotBindingContext{UserID: user.ID, PriceDiscountRatio: ratio}, true, nil
+	return BotBindingResolution{
+		Bound: true, Available: true,
+		User: BotBindingContext{
+			UserID: user.ID, Role: user.Role, UserGroup: user.UserGroup,
+			PriceDiscountRatio: ratio,
+		},
+	}, nil
 }
 
 func (uc *BotBindingUseCase) find(ctx context.Context, platform, namespace, subject string) (*domain.User, error) {

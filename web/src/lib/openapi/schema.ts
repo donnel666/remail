@@ -967,6 +967,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bot/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the current bound user's safe account summary
+         * @description Resolves only the trusted sender from the current QQ or Telegram event. An unbound sender
+         *     receives a binding instruction instead of account data. A bound sender receives consumer
+         *     balance, cumulative recharge, role, membership group and the next automatic-upgrade gap.
+         *     The response never includes a user id, email address, order data, credentials or another
+         *     user's information. Group callers must be in the System Key whitelist and must deliver the
+         *     returned account summary privately to that same sender.
+         */
+        get: operations["getBotProfile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/bot/bindings": {
         parameters: {
             query?: never;
@@ -5997,7 +6022,7 @@ export interface components {
         OrderPickupCredentialsResponse: components["schemas"]["OrderPickupCredentialResponse"][];
         OrderBatchItemErrorResponse: {
             /** @enum {string} */
-            code: "insufficient_balance" | "insufficient_inventory" | "upstream_price_protected" | "upstream_unavailable" | "idempotency_conflict" | "temporarily_unavailable";
+            code: "insufficient_balance" | "insufficient_inventory" | "idempotency_conflict" | "temporarily_unavailable";
             message: string;
         };
         CreateOrderBatchItemResponse: {
@@ -7022,6 +7047,8 @@ export interface components {
             userGroup: components["schemas"]["UserGroupResponse"];
             permissions?: string[];
             thirdPartyIdentities?: components["schemas"]["ThirdPartyIdentityResponse"][];
+            /** @description Read-only QQ number bound through the current QQ Bot identity. Omitted when no QQ account is bound; LinuxDO, Telegram and other identities are never projected into this field. */
+            qqNumber?: string;
             hasLocalPassword: boolean;
             enabled: boolean;
             /** Format: date-time */
@@ -7165,8 +7192,11 @@ export interface components {
              * @enum {string}
              */
             platform?: "qq" | "telegram";
-            /** @description Required only for purpose=bot; stable identity namespace such as qq:appid or telegram:botid. Key rotation reuses this value. */
-            subjectNamespace?: string;
+            /**
+             * @description Required only for purpose=bot; use qq:main for QQ or telegram:main for Telegram. Key rotation reuses this value.
+             * @enum {string}
+             */
+            subjectNamespace?: "qq:main" | "telegram:main";
             /** @description Required only for purpose=bot. Trusted platform group ids allowed to use this integration; QQ values are normalized positive decimal group numbers and Telegram values are normalized non-zero decimal Chat IDs. */
             allowedGroupIds?: string[];
         };
@@ -7197,6 +7227,27 @@ export interface components {
              */
             authorized: true;
         };
+        BotProfileResponse: {
+            /** @description Whether the trusted platform sender has a ReMail binding record. */
+            bound: boolean;
+            /** @description True only when the bound ReMail account is active and profile data is available. */
+            available?: boolean;
+            /** @description Safe user-facing instruction, returned when the sender is not bound. */
+            message?: string;
+            balance?: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            totalRecharged?: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            /** @description Current user-visible membership group name. */
+            groupName?: string;
+            /** @enum {string} */
+            role?: "user" | "supplier" | "admin" | "super_admin";
+            /** @description Chinese user-facing role label. */
+            roleDisplay?: string;
+            /** @description Next enabled automatic-upgrade group, when one exists. */
+            nextGroupName?: string;
+            upgradeRemaining?: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            /** @description True when no enabled higher membership group exists. */
+            highestGroup?: boolean;
+        };
         BotBindingRequest: {
             /** Format: email */
             email: string;
@@ -7211,7 +7262,7 @@ export interface components {
         };
         BotLeaderboardItem: {
             rank: number;
-            /** @description Safe user nickname or an anonymous label; never an email or user id. */
+            /** @description User nickname when configured; otherwise the email local-part before "@". A non-empty malformed legacy email is returned unchanged. */
             name: string;
             successCount: number;
         };
@@ -7225,7 +7276,7 @@ export interface components {
         };
         BotLeaderboardRewardItem: {
             rank: number;
-            /** @description Safe user nickname or an anonymous label; never an email or user id. */
+            /** @description User nickname when configured; otherwise the email local-part before "@". A non-empty malformed legacy email is returned unchanged. */
             name: string;
             successCount: number;
             rewardAmount: components["schemas"]["NonNegativeLedgerAmountResponse"];
@@ -7315,6 +7366,10 @@ export interface components {
         BotDiagnosisResponse: {
             /** @description User-facing diagnosis only; never includes email, order number, message content, credentials, codes, internal status names or implementation steps. */
             message: string;
+            /** @description True only when the trusted platform sender must bind a ReMail account before diagnosis. */
+            bindingRequired?: boolean;
+            /** @description True only when a binding exists but the bound ReMail account is unavailable. */
+            accountUnavailable?: boolean;
             /** @description Public project id resolved from the current user's matching order; omitted when no order was found. */
             projectId?: number;
             /** @description Public project name resolved from the current user's matching order; omitted when no order was found. */
@@ -13086,6 +13141,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BotContextResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getBotProfile: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument. */
+                "X-Bot-Channel": components["parameters"]["BotChannel"];
+                /** @description Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument. */
+                "X-Bot-Subject": components["parameters"]["BotSubject"];
+                /** @description Private scenes may use the current bound account and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group; binding remains private-only, while diagnosis is available for the current sender's own bound account. */
+                "X-Bot-Scene": components["parameters"]["BotScene"];
+                /** @description Trusted platform group id supplied by the bot adapter. QQ values are positive decimal group numbers and Telegram values are non-zero decimal Chat IDs (normally negative). Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+                "X-Bot-Group"?: components["parameters"]["BotGroup"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe profile summary or a binding instruction */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotProfileResponse"];
                 };
             };
             401: components["responses"]["Unauthorized"];

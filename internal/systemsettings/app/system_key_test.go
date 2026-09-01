@@ -99,6 +99,7 @@ func TestBotSystemKeyRequiresAndReturnsStableScope(t *testing.T) {
 	for _, scope := range [][2]string{
 		{"", "qq:main"}, {"qq", ""}, {"QQ 官方", "qq:main"},
 		{"aiocqhttp", "qq:main"}, {"qq", "telegram:main"}, {"telegram", "qq:main"},
+		{"qq", "qq:corp"}, {"telegram", "telegram:bot1"},
 	} {
 		_, err := useCase.CreateWithScope(context.Background(), "bad bot", settingsdomain.SystemKeyPurposeBot, scope[0], scope[1], meta)
 		require.ErrorIs(t, err, settingsdomain.ErrInvalidSystemKey)

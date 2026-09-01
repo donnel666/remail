@@ -499,6 +499,7 @@ func allowedBotWebSocketRequest(method, path string) bool {
 		"GET /v1/bot/binding",
 		"DELETE /v1/bot/binding",
 		"GET /v1/bot/context",
+		"GET /v1/bot/profile",
 		"GET /v1/bot/projects",
 		"GET /v1/bot/rankings/orders",
 		"GET /v1/bot/rankings/rewards/latest",

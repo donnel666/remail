@@ -485,6 +485,7 @@
   "This NodeLoc account is already bound to another account.": "This NodeLoc account is already bound to another account.",
   "Choose whether to bind an existing account or create a new account.": "Choose whether to bind an existing account or create a new account.",
   "Third-party login bindings": "Third-party login bindings",
+  "QQ number": "QQ number",
   "Provider user ID": "Provider user ID",
   "Bound at": "Bound at",
   "No third-party login is bound.": "No third-party login is bound.",

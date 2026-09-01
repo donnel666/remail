@@ -144,14 +144,13 @@ func TestPublicOpenAPISDKContract(t *testing.T) {
 		t.Fatalf("pickup batch maxItems = %v, want 100", batchItems["maxItems"])
 	}
 	assertSchemaEnum(t, spec, "OrderBatchItemErrorResponse", "code", []string{
-		"insufficient_balance", "insufficient_inventory", "upstream_price_protected",
-		"upstream_unavailable", "idempotency_conflict", "temporarily_unavailable",
+		"insufficient_balance", "insufficient_inventory", "idempotency_conflict", "temporarily_unavailable",
 	})
 	if requiredField(schemas["CreateOrderBatchItemResponse"].(map[string]any), "order") {
 		t.Fatal("CreateOrderBatchItemResponse.order must be optional")
 	}
 	if requiredField(schemas["MailMessage"].(map[string]any), "id") {
-		t.Fatal("MailMessage.id must be optional for synthesized upstream code items")
+		t.Fatal("MailMessage.id must be optional for aggregated code items")
 	}
 	createDomainProperties := schemas["CreateDomainRequest"].(map[string]any)["properties"].(map[string]any)
 	if _, ok := createDomainProperties["allowNewBindings"]; ok {

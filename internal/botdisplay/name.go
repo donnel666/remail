@@ -1,29 +1,35 @@
 package botdisplay
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 )
 
-// Name returns the user-chosen nickname or a stable anonymous label. Bot
-// responses must never fall back to an email address or an internal user ID.
-func Name(nickname string, _ uint) string {
+// Name returns the same leaderboard label used by the web console: nickname,
+// then the email local-part, then a stable user tag for malformed legacy rows.
+func Name(nickname, email string, userID uint) string {
 	if nickname = strings.TrimSpace(nickname); safeNickname(nickname) {
 		return nickname
 	}
-	return "匿名用户"
+	email = strings.TrimSpace(email)
+	if local, _, ok := strings.Cut(email, "@"); ok && safeNickname(local) {
+		return local
+	}
+	if safeNickname(email) {
+		return email
+	}
+	return fmt.Sprintf("#%d", userID)
 }
 
 func safeNickname(value string) bool {
-	if value == "" || strings.Contains(value, "@") {
+	if value == "" {
 		return false
 	}
-	onlyDigits := true
 	for _, char := range value {
 		if unicode.IsControl(char) {
 			return false
 		}
-		onlyDigits = onlyDigits && unicode.IsDigit(char)
 	}
-	return !onlyDigits
+	return true
 }

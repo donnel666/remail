@@ -65,6 +65,7 @@ export interface AdminUser {
   userGroup: AdminUserGroup;
   permissions?: string[];
   thirdPartyIdentities?: components["schemas"]["ThirdPartyIdentityResponse"][];
+  qqNumber?: string;
   hasLocalPassword: boolean;
   enabled: boolean;
   createdAt: string;
