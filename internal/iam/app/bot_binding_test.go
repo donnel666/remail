@@ -41,6 +41,8 @@ func TestBotBindingUsesCredentialSnapshotAndOneIdentityPerPlatformNamespace(t *t
 	ctx := context.Background()
 	_, err := bindings.Bind(ctx, "qq_official", "qq:main", "openid-alice", "alice@example.com", "alice-password")
 	require.ErrorIs(t, err, domain.ErrAccountOrPasswordIncorrect)
+	_, err = bindings.Bind(ctx, "telegram", "telegram:main", "alice", "alice@example.com", "alice-password")
+	require.ErrorIs(t, err, domain.ErrAccountOrPasswordIncorrect)
 
 	info, err := bindings.Bind(ctx, "aiocqhttp", "qq:main", "123456789", " Alice@Example.com ", "alice-password")
 	require.NoError(t, err)

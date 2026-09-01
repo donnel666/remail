@@ -12,6 +12,8 @@ const botDiagnosisPickupGrace = time.Minute
 
 type CodeDiagnosisOrderFact struct {
 	OrderNo                  string
+	ProjectID                uint
+	ProjectName              string
 	ServiceMode              string
 	Status                   string
 	EmailResourceID          uint
@@ -20,12 +22,11 @@ type CodeDiagnosisOrderFact struct {
 }
 
 type CodeDiagnosisLookup struct {
-	EmailOrderExists bool
-	Orders           []CodeDiagnosisOrderFact
+	Orders []CodeDiagnosisOrderFact
 }
 
 type CodeDiagnosisRepository interface {
-	LookupCodeDiagnosis(ctx context.Context, userID uint, email string, projectID uint) (CodeDiagnosisLookup, error)
+	LookupCodeDiagnosis(ctx context.Context, userID uint, email string) (CodeDiagnosisLookup, error)
 }
 
 type CodeDiagnosisRefreshPort interface {
@@ -33,9 +34,11 @@ type CodeDiagnosisRefreshPort interface {
 }
 
 type BotCodeDiagnosis struct {
-	Result string
-	Reason string
-	Action string
+	Result      string
+	Reason      string
+	Action      string
+	ProjectID   uint
+	ProjectName string
 }
 
 type BotDiagnosisService struct {
@@ -58,46 +61,43 @@ func (s *BotDiagnosisService) SetRefresh(port CodeDiagnosisRefreshPort) {
 	}
 }
 
-func (s *BotDiagnosisService) DiagnoseCode(ctx context.Context, userID uint, email string, projectID uint) (BotCodeDiagnosis, error) {
+func (s *BotDiagnosisService) DiagnoseCode(ctx context.Context, userID uint, email string) (BotCodeDiagnosis, error) {
 	email = normalizeEmail(email)
-	if s == nil || s.repo == nil || userID == 0 || projectID == 0 || email == "" {
+	if s == nil || s.repo == nil || userID == 0 || email == "" {
 		return BotCodeDiagnosis{}, domain.ErrInvalidRequest
 	}
-	lookup, err := s.repo.LookupCodeDiagnosis(ctx, userID, email, projectID)
+	lookup, err := s.repo.LookupCodeDiagnosis(ctx, userID, email)
 	if err != nil {
 		return BotCodeDiagnosis{}, err
 	}
 	order, result := selectCodeDiagnosisOrder(lookup)
 	if result != "" {
-		return botDiagnosis(result), nil
+		return botDiagnosis(result, order), nil
 	}
 	if result = classifyCodeDiagnosisOrder(order, s.now().UTC()); result != "" {
-		return botDiagnosis(result), nil
+		return botDiagnosis(result, order), nil
 	}
 	if s.refresh != nil && strings.TrimSpace(order.Status) == "active" {
 		refreshErr := s.refresh.RefreshCodeDiagnosis(ctx, order.OrderNo, email, order.EmailResourceID)
-		refreshed, lookupErr := s.repo.LookupCodeDiagnosis(ctx, userID, email, projectID)
+		refreshed, lookupErr := s.repo.LookupCodeDiagnosis(ctx, userID, email)
 		if lookupErr != nil {
 			return BotCodeDiagnosis{}, lookupErr
 		}
 		if refreshedOrder, refreshedResult := selectCodeDiagnosisOrder(refreshed); refreshedResult == "" {
 			order = refreshedOrder
 			if classified := classifyCodeDiagnosisOrder(order, s.now().UTC()); classified != "" {
-				return botDiagnosis(classified), nil
+				return botDiagnosis(classified, order), nil
 			}
 		}
 		if refreshErr != nil {
 			return BotCodeDiagnosis{}, refreshErr
 		}
 	}
-	return botDiagnosis("cause_not_confirmed"), nil
+	return botDiagnosis("cause_not_confirmed", order), nil
 }
 
 func selectCodeDiagnosisOrder(lookup CodeDiagnosisLookup) (CodeDiagnosisOrderFact, string) {
 	if len(lookup.Orders) == 0 {
-		if lookup.EmailOrderExists {
-			return CodeDiagnosisOrderFact{}, "project_mismatch"
-		}
 		return CodeDiagnosisOrderFact{}, "order_not_found"
 	}
 	for _, order := range lookup.Orders {
@@ -124,19 +124,22 @@ func classifyCodeDiagnosisOrder(order CodeDiagnosisOrderFact, now time.Time) str
 	return ""
 }
 
-func botDiagnosis(result string) BotCodeDiagnosis {
+func botDiagnosis(result string, order CodeDiagnosisOrderFact) BotCodeDiagnosis {
 	messages := map[string][2]string{
-		"order_not_found":            {"未找到当前账号下与该邮箱对应的接码订单。", "请核对邮箱后重试。"},
-		"project_mismatch":           {"提供的项目与该邮箱对应的订单不一致。", "请选择下单时使用的项目后重试。"},
-		"pickup_not_requested":       {"验证码邮件已匹配超过 1 分钟，但用户端尚未正确拉取。", "请在工作台查看订单，或使用该订单的正确邮箱和凭证调用 pickup。"},
+		"order_not_found":            {"当前账号下没有找到该邮箱对应的订单。", "请确认邮箱后重试。"},
+		"project_mismatch":           {"该邮箱对应的订单不是接码订单，可能购买了错误的业务类型。", "请确认需要的是接码还是购买邮箱。"},
+		"pickup_not_requested":       {"验证码邮件已经到达，但尚未完成领取。", "请回到对应订单重新获取验证码。"},
 		"resource_abnormal_refunded": {"邮箱资源异常，系统已自动退款。", "请在工作台查看退款记录后重新下单。"},
-		"pickup_grace_period":        {"验证码邮件刚刚匹配，仍在 1 分钟拉取宽限期内。", "请立即使用正确邮箱和凭证调用 pickup。"},
-		"cause_not_confirmed":        {"已检查本地邮件缓存并触发一次拉取，暂未确认上述三类原因。", "请稍后重试；持续无结果时联系人工客服。"},
+		"pickup_grace_period":        {"验证码正在处理中。", "请稍后重新获取。"},
+		"cause_not_confirmed":        {"暂未发现明确异常。", "请稍后重试；持续无结果时联系人工客服。"},
 	}
 	message, ok := messages[result]
 	if !ok {
 		result = "cause_not_confirmed"
 		message = messages[result]
 	}
-	return BotCodeDiagnosis{Result: result, Reason: message[0], Action: message[1]}
+	return BotCodeDiagnosis{
+		Result: result, Reason: message[0], Action: message[1],
+		ProjectID: order.ProjectID, ProjectName: order.ProjectName,
+	}
 }

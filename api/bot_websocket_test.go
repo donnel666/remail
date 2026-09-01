@@ -26,19 +26,47 @@ func botWebSocketTestServer(t *testing.T, dispatch http.Handler, eventSources ..
 	router := gin.New()
 	router.Use(middleware.RequestID())
 	bot := router.Group("/v1/bot")
-	bot.Use(middleware.BotSystemKeyRequired(botRouterAuthenticator(func(_ context.Context, plain string) (*settingsdomain.SystemKey, error) {
+	auth := botRouterAuthenticator(func(_ context.Context, plain string) (*settingsdomain.SystemKey, error) {
 		if plain != "sk_test" {
 			return nil, settingsdomain.ErrInvalidSystemKey
 		}
 		return &settingsdomain.SystemKey{
 			ID: 9, Purpose: settingsdomain.SystemKeyPurposeBot,
-			Platform: "aiocqhttp", SubjectNamespace: "qq:main", AllowedGroupIDs: []string{"10001"},
+			Platform: "qq", SubjectNamespace: "qq:main", AllowedGroupIDs: []string{"10001"},
 		}, nil
-	})))
-	registerBotWebSocketRoute(bot, dispatch, eventSources...)
+	})
+	bot.Use(middleware.BotSystemKeyRequired(auth))
+	bot.Use(middleware.BotChannelRequired())
+	registerBotWebSocketRoute(bot, dispatch, auth, eventSources...)
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 	return server, "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/bot/ws"
+}
+
+func TestBotWebSocketSessionReauthenticatesDeletedKey(t *testing.T) {
+	active := true
+	auth := botRouterAuthenticator(func(context.Context, string) (*settingsdomain.SystemKey, error) {
+		if !active {
+			return nil, settingsdomain.ErrInvalidSystemKey
+		}
+		return &settingsdomain.SystemKey{
+			ID: 9, Purpose: settingsdomain.SystemKeyPurposeBot,
+			Platform: "qq", SubjectNamespace: "qq:main", AllowedGroupIDs: []string{"10001"},
+		}, nil
+	})
+	now := time.Now()
+	session := &botWebSocketSession{
+		ctx: context.Background(), plainKey: "sk_test", authenticator: auth,
+		integration:   middleware.BotIntegration{SystemKeyID: 9, Platform: "qq", SubjectNamespace: "qq:main"},
+		authenticated: now,
+	}
+	if !session.reauthenticate(now.Add(botWebSocketReauthInterval - time.Second)) {
+		t.Fatal("session reauthenticated before the interval elapsed")
+	}
+	active = false
+	if session.reauthenticate(now.Add(botWebSocketReauthInterval)) {
+		t.Fatal("session remained authenticated after its Bot Key was deleted")
+	}
 }
 
 func dialBotWebSocket(t *testing.T, target string) *websocket.Conn {
@@ -48,6 +76,7 @@ func dialBotWebSocket(t *testing.T, target string) *websocket.Conn {
 		t.Fatalf("websocket config: %v", err)
 	}
 	config.Header.Set(middleware.SystemKeyHeaderName, "sk_test")
+	config.Header.Set(middleware.BotChannelHeaderName, "qq")
 	conn, err := websocket.DialConfig(config)
 	if err != nil {
 		t.Fatalf("websocket dial: %v", err)
@@ -66,6 +95,23 @@ func receiveBotWebSocketFrame(t *testing.T, conn *websocket.Conn) map[string]any
 	return frame
 }
 
+func TestBotWebSocketRejectsChannelThatDoesNotMatchKey(t *testing.T) {
+	_, target := botWebSocketTestServer(t, http.NotFoundHandler())
+	config, err := websocket.NewConfig(target, "http://localhost")
+	if err != nil {
+		t.Fatalf("websocket config: %v", err)
+	}
+	config.Header.Set(middleware.SystemKeyHeaderName, "sk_test")
+	config.Header.Set(middleware.BotChannelHeaderName, "telegram")
+	conn, err := websocket.DialConfig(config)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil {
+		t.Fatal("WebSocket accepted a Telegram channel with a QQ System Key")
+	}
+}
+
 type botWebSocketEventSourceFunc func(context.Context, []string, botWebSocketCursor, time.Time, int) ([]botWebSocketEvent, error)
 
 func (f botWebSocketEventSourceFunc) List(ctx context.Context, topics []string, cursor botWebSocketCursor, cutoff time.Time, limit int) ([]botWebSocketEvent, error) {
@@ -77,6 +123,7 @@ func TestBotWebSocketHeartbeatAndRequestTunnel(t *testing.T) {
 	dispatch := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		calls.Add(1)
 		if request.Header.Get(middleware.SystemKeyHeaderName) != "sk_test" ||
+			request.Header.Get(middleware.BotChannelHeaderName) != "qq" ||
 			request.Header.Get(middleware.BotSubjectHeaderName) != "123456789" ||
 			request.Header.Get(middleware.BotSceneHeaderName) != middleware.BotSceneGroup ||
 			request.Header.Get(middleware.BotGroupHeaderName) != "10001" {
@@ -96,7 +143,7 @@ func TestBotWebSocketHeartbeatAndRequestTunnel(t *testing.T) {
 	conn := dialBotWebSocket(t, target)
 
 	hello := receiveBotWebSocketFrame(t, conn)
-	if hello["type"] != "hello" || hello["platform"] != "aiocqhttp" {
+	if hello["type"] != "hello" || hello["platform"] != "qq" {
 		t.Fatalf("unexpected hello: %v", hello)
 	}
 	if err := websocket.JSON.Send(conn, map[string]any{"type": "ping", "id": "heartbeat-1"}); err != nil {
@@ -260,7 +307,7 @@ func TestBotWebSocketReusesRegisteredBotMiddleware(t *testing.T) {
 	auth := botRouterAuthenticator(func(context.Context, string) (*settingsdomain.SystemKey, error) {
 		return &settingsdomain.SystemKey{
 			ID: 9, Purpose: settingsdomain.SystemKeyPurposeBot,
-			Platform: "aiocqhttp", SubjectNamespace: "qq:main", AllowedGroupIDs: []string{"10001"},
+			Platform: "qq", SubjectNamespace: "qq:main", AllowedGroupIDs: []string{"10001"},
 		}, nil
 	})
 	registerBotRoutes(router.Group("/v1"), router, auth, nil, nil, nil, nil, nil, rdb)

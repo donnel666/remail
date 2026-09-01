@@ -96,29 +96,46 @@ func TestBotSystemKeyRequiresAndReturnsStableScope(t *testing.T) {
 	useCase := settingsapp.NewSystemKeyUseCase(settingsinfra.NewRepository(db), governanceinfra.NewOperationLogRepo(db))
 	meta := settingsapp.MutationMeta{OperatorUserID: 7}
 
-	for _, scope := range [][2]string{{"", "qq:main"}, {"qq_official", ""}, {"QQ 官方", "qq:main"}} {
+	for _, scope := range [][2]string{
+		{"", "qq:main"}, {"qq", ""}, {"QQ 官方", "qq:main"},
+		{"aiocqhttp", "qq:main"}, {"qq", "telegram:main"}, {"telegram", "qq:main"},
+	} {
 		_, err := useCase.CreateWithScope(context.Background(), "bad bot", settingsdomain.SystemKeyPurposeBot, scope[0], scope[1], meta)
 		require.ErrorIs(t, err, settingsdomain.ErrInvalidSystemKey)
 	}
 	_, err = useCase.CreateWithScope(context.Background(), "bad smtp", settingsdomain.SystemKeyPurposeSMTPSubmission, "telegram", "telegram:main", meta)
 	require.ErrorIs(t, err, settingsdomain.ErrInvalidSystemKey)
+	for _, groupID := range []string{"telegram-group", "0", "--1001"} {
+		_, err = useCase.CreateWithScope(
+			context.Background(), "bad Telegram group", settingsdomain.SystemKeyPurposeBot,
+			"telegram", "telegram:main", meta, groupID,
+		)
+		require.ErrorIs(t, err, settingsdomain.ErrInvalidSystemKey, groupID)
+	}
 
 	created, err := useCase.CreateWithScope(
 		context.Background(), "QQ main", settingsdomain.SystemKeyPurposeBot,
-		" QQ_OFFICIAL ", " QQ:MAIN ", meta, " 456 ", "123", "123",
+		" QQ ", " QQ:MAIN ", meta, " 456 ", "123", "123",
 	)
 	require.NoError(t, err)
-	require.Equal(t, "qq_official", created.Platform)
+	require.Equal(t, "qq", created.Platform)
 	require.Equal(t, "qq:main", created.SubjectNamespace)
 	require.Equal(t, []string{"123", "456"}, created.AllowedGroupIDs)
 
 	authenticated, err := useCase.AuthenticateBotSystemKey(context.Background(), created.KeyPlain)
 	require.NoError(t, err)
 	require.Equal(t, created.ID, authenticated.ID)
-	require.Equal(t, "qq_official", authenticated.Platform)
+	require.Equal(t, "qq", authenticated.Platform)
 	require.Equal(t, "qq:main", authenticated.SubjectNamespace)
 	require.Equal(t, []string{"123", "456"}, authenticated.AllowedGroupIDs)
 	require.Empty(t, authenticated.KeyPlain)
+	telegram, err := useCase.CreateWithScope(
+		context.Background(), "Telegram main", settingsdomain.SystemKeyPurposeBot,
+		"telegram", "telegram:main", meta, "-1001234567890",
+	)
+	require.NoError(t, err)
+	require.Equal(t, "telegram", telegram.Platform)
+	require.Equal(t, []string{"-1001234567890"}, telegram.AllowedGroupIDs)
 
 	_, err = useCase.AuthenticateSystemKey(context.Background(), created.KeyPlain)
 	require.ErrorIs(t, err, settingsdomain.ErrInvalidSystemKey)

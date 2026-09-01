@@ -18,16 +18,23 @@ GET /v1/bot/ws HTTP/1.1
 Connection: Upgrade
 Upgrade: websocket
 X-System-Key: sk_...
+X-Bot-Channel: qq
 ```
 
 - Key 必须是系统设置创建的 `purpose=bot` Key。
 - Key 的 `platform + subjectNamespace + allowedGroupIds` 由 ReMail 系统设置固定，
   客户端帧不能覆盖。
+- `X-Bot-Channel` 只能由 AstrBot 插件从当前适配器生成。服务端先鉴权 Key，再要求该
+  渠道与 Key 的 `platform` 类型一致；QQ Key 用于 Telegram 或反向使用均返回 401。
 - QQ namespace 的 `subject` 只能是机器人从当前事件解析出的真实正整数 QQ 号，不能
-  使用 OpenID，也不能接受用户或 LLM 参数覆盖。ReMail 将 QQ 号作为第三方登录标识，
-  在 `provider_user_id` 中明文保存；QQ namespace 由 Key 配置判定，不硬编码某个
+  使用 OpenID，也不能接受用户或 LLM 参数覆盖。ReMail 将 QQ 号作为对应渠道的第三方
+  登录标识明文保存；QQ namespace 由 Key 配置判定，不硬编码某个
   AstrBot 平台或适配器名称。
-- 完整 Key 只放在 AstrBot 进程环境变量，不放入聊天、URL 或插件配置文件。
+- Telegram namespace 的 `subject` 只能是事件提供的正整数用户 ID；群聊 Chat ID 必须
+  是非零整数，并命中该 Telegram Key 的群白名单。
+- 完整 Key 只放在 AstrBot 的 ReMail 插件配置，不放入聊天或 URL；配置文件权限必须
+  仅允许 AstrBot 运行账号读取。
+- 已连接会话会定期复核 Key；Key 被删除或失效后，连接会关闭并停止主动事件。
 - 非本机 ReMail 地址必须使用 `wss://`。
 - 服务端最大接收帧为 16 KiB、最大内部响应为 2 MiB；每把 Key 允许每秒 10 帧、
   短时突发 30 帧，每连接最多 4 个并行请求。60 秒没有应用帧会关闭连接，单次写入
@@ -65,9 +72,9 @@ X-System-Key: sk_...
 用户身份只能由 AstrBot 当前事件填入 `subject` 和 `scene`；当
 `scene=group` 时，群号只能取自 `event.get_group_id()` 并填入 `groupId`。
 私聊帧不携带 `groupId`，用户命令和 LLM 工具都没有身份或群号参数。
-服务端将帧转换为内部 HTTP 请求，使原有 Bot Key、每 QQ、私聊限制、输入校验和错误
-脱敏继续生效。
-普通 HTTP 模式使用同样的可信事件值：群聊发送 `X-Bot-Group`，私聊不发送。
+服务端将帧转换为内部 HTTP 请求，并沿用握手时已经与 Key 类型核对过的渠道，使原有
+Bot Key、每平台用户、私聊限制、输入校验和错误脱敏继续生效。普通 HTTP 模式同样发送
+`X-Bot-Channel`，群聊再发送 `X-Bot-Group`，私聊不发送群号。
 
 ```json
 {
@@ -98,6 +105,11 @@ X-System-Key: sk_...
 `GET /v1/bot/context` 是无业务数据的事件来源门禁。AstrBot 在返回本地或公开缓存内容
 （接口文档、公告、常见问题）前也必须先调用它；群内执行 `/绑定` 时也先验证
 Key 的群号白名单，通过后才提示改用私聊。
+
+诊断命令使用“邮箱 + 用户问题描述”。服务端只接收邮箱，并始终附带由 Bot 身份解析出的
+用户 ID，从该用户自己的订单反查公开项目 ID/名称；用户描述只交给 AstrBot AI，邮箱
+不能扩大查询范围。给模型的安全诊断不包含邮箱、订单号、验证码、邮件内容、凭证、
+内部状态名或拉取实现。
 
 ## 主动推送事件
 
@@ -167,17 +179,15 @@ AstrBot 为每个 `unified_msg_origin` 单独保存同一套全局 `(after, afte
 JSON 整数，新客户端应原样保存字符串。
 
 客户端 renderer 只读取上表字段并限制条数与总长度，未知 topic 和未知字段不输出；
-输出前还会清除邮箱地址、凭证、System Key、授权令牌及含凭证的数据库 URL。QQ
-Official 的主动群消息能力由腾讯/AstrBot 适配器决定；要求可靠主动广播时使用明确
-支持 `send_by_session` 的适配器。
+输出前还会清除邮箱地址、凭证、System Key、授权令牌及含凭证的数据库 URL。QQ 使用
+NapCat / OneBot v11 对应的 `aiocqhttp` 适配器主动发送群消息。
 
 新目标没有游标时不发送 `after`，由 ReMail 在订阅确认帧中返回当前服务端游标，
-不使用 AstrBot 主机时钟。项目上线事件直接来自现有 `operation_logs`，不修改
-`projects`、不维护专用上线时间或补发表；通知属于尽力而为。所有订阅主题继续共享
-一条服务端事件顺序。
+不使用 AstrBot 主机时钟。项目上线通知不新增项目字段、专用上线时间或补发状态；通知
+属于尽力而为。所有订阅主题继续共享一条服务端事件顺序。
 
 ## 反向代理
 
-反向代理必须为 `/v1/bot/ws` 保留 `Upgrade`、`Connection` 和 `X-System-Key` 请求头，
-关闭响应缓冲，并将空闲超时设置为大于 60 秒。TLS 在代理终止时，代理到 ReMail 的
-网络也必须处于可信私网。
+反向代理必须为 `/v1/bot/ws` 保留 `Upgrade`、`Connection`、`X-System-Key` 和
+`X-Bot-Channel` 请求头，关闭响应缓冲，并将空闲超时设置为大于 60 秒。TLS 在代理
+终止时，代理到 ReMail 的网络也必须处于可信私网。

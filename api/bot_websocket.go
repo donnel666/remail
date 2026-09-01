@@ -29,6 +29,7 @@ const (
 	botWebSocketFramesPerMinute   = 600
 	botWebSocketFrameBurst        = 30
 	botWebSocketMaxInFlight       = 4
+	botWebSocketReauthInterval    = time.Minute
 )
 
 type botWebSocketInbound struct {
@@ -120,7 +121,12 @@ func (l *botWebSocketConnectionLimiter) takeFrame(keyID uint, now time.Time) boo
 	return true
 }
 
-func registerBotWebSocketRoute(rg *gin.RouterGroup, dispatch http.Handler, eventSources ...botWebSocketEventSource) {
+func registerBotWebSocketRoute(
+	rg *gin.RouterGroup,
+	dispatch http.Handler,
+	authenticator middleware.BotSystemKeyAuthenticator,
+	eventSources ...botWebSocketEventSource,
+) {
 	connections := &botWebSocketConnectionLimiter{}
 	var events botWebSocketEventSource
 	if len(eventSources) > 0 {
@@ -129,7 +135,7 @@ func registerBotWebSocketRoute(rg *gin.RouterGroup, dispatch http.Handler, event
 	rg.GET("/ws", func(c *gin.Context) {
 		integration, ok := middleware.GetCurrentBotIntegration(c)
 		plainKey := strings.TrimSpace(c.GetHeader(middleware.SystemKeyHeaderName))
-		if !ok || plainKey == "" || dispatch == nil {
+		if !ok || plainKey == "" || dispatch == nil || authenticator == nil {
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
 				"message": "Service is temporarily unavailable.", "requestId": middleware.GetRequestID(c),
 			})
@@ -149,7 +155,7 @@ func registerBotWebSocketRoute(rg *gin.RouterGroup, dispatch http.Handler, event
 			// cannot supply it through the WebSocket API, so Origin is not an auth input.
 			Handshake: func(_ *websocket.Config, _ *http.Request) error { return nil },
 			Handler: func(conn *websocket.Conn) {
-				session := newBotWebSocketSession(conn, dispatch, plainKey, integration, connections, events)
+				session := newBotWebSocketSession(conn, dispatch, plainKey, integration, connections, authenticator, events)
 				session.serve()
 			},
 		}
@@ -170,10 +176,20 @@ type botWebSocketSession struct {
 	subGeneration uint64
 	requestSlots  chan struct{}
 	limits        *botWebSocketConnectionLimiter
+	authenticator middleware.BotSystemKeyAuthenticator
+	authenticated time.Time
 	events        botWebSocketEventSource
 }
 
-func newBotWebSocketSession(conn *websocket.Conn, dispatch http.Handler, plainKey string, integration middleware.BotIntegration, limits *botWebSocketConnectionLimiter, eventSources ...botWebSocketEventSource) *botWebSocketSession {
+func newBotWebSocketSession(
+	conn *websocket.Conn,
+	dispatch http.Handler,
+	plainKey string,
+	integration middleware.BotIntegration,
+	limits *botWebSocketConnectionLimiter,
+	authenticator middleware.BotSystemKeyAuthenticator,
+	eventSources ...botWebSocketEventSource,
+) *botWebSocketSession {
 	ctx, cancel := context.WithCancel(conn.Request().Context())
 	var events botWebSocketEventSource
 	if len(eventSources) > 0 {
@@ -181,7 +197,8 @@ func newBotWebSocketSession(conn *websocket.Conn, dispatch http.Handler, plainKe
 	}
 	return &botWebSocketSession{
 		conn: conn, dispatch: dispatch, plainKey: plainKey, integration: integration,
-		ctx: ctx, cancel: cancel, requestSlots: make(chan struct{}, botWebSocketMaxInFlight), limits: limits, events: events,
+		ctx: ctx, cancel: cancel, requestSlots: make(chan struct{}, botWebSocketMaxInFlight),
+		limits: limits, authenticator: authenticator, authenticated: time.Now(), events: events,
 	}
 }
 
@@ -198,6 +215,9 @@ func (s *botWebSocketSession) serve() {
 		_ = s.conn.SetReadDeadline(time.Now().Add(botWebSocketIdleTimeout))
 		var frame botWebSocketInbound
 		if err := websocket.JSON.Receive(s.conn, &frame); err != nil {
+			return
+		}
+		if !s.reauthenticate(time.Now()) {
 			return
 		}
 		if s.limits == nil || !s.limits.takeFrame(s.integration.SystemKeyID, time.Now()) {
@@ -217,6 +237,22 @@ func (s *botWebSocketSession) serve() {
 			s.sendProtocolError(frame.ID, "invalid_frame", "Unsupported WebSocket frame type.")
 		}
 	}
+}
+
+func (s *botWebSocketSession) reauthenticate(now time.Time) bool {
+	if s == nil || s.authenticator == nil {
+		return false
+	}
+	if !s.authenticated.IsZero() && now.Sub(s.authenticated) < botWebSocketReauthInterval {
+		return true
+	}
+	key, err := s.authenticator.AuthenticateBotSystemKey(s.ctx, s.plainKey)
+	if err != nil || key == nil || key.ID != s.integration.SystemKeyID ||
+		key.Platform != s.integration.Platform || key.SubjectNamespace != s.integration.SubjectNamespace {
+		return false
+	}
+	s.authenticated = now
+	return true
 }
 
 func (s *botWebSocketSession) startRequest(frame botWebSocketInbound) {
@@ -262,7 +298,9 @@ func (s *botWebSocketSession) handleRequest(frame botWebSocketInbound) {
 		s.sendProtocolError(frame.ID, "invalid_request", "Unsupported Bot API request.")
 		return
 	}
-	status, body, retryAfter, err := dispatchBotWebSocketRequest(s.ctx, s.dispatch, s.plainKey, frame)
+	status, body, retryAfter, err := dispatchBotWebSocketRequest(
+		s.ctx, s.dispatch, s.plainKey, s.integration.Platform, frame,
+	)
 	if err != nil {
 		s.sendProtocolError(frame.ID, "invalid_request", "Invalid Bot API request.")
 		return
@@ -361,6 +399,7 @@ func dispatchBotWebSocketRequest(
 	ctx context.Context,
 	dispatch http.Handler,
 	plainKey string,
+	channel string,
 	frame botWebSocketInbound,
 ) (int, json.RawMessage, string, error) {
 	method := strings.ToUpper(strings.TrimSpace(frame.Method))
@@ -385,6 +424,7 @@ func dispatchBotWebSocketRequest(
 	}
 	request = middleware.WithTrustedBotDispatch(request)
 	request.Header.Set(middleware.SystemKeyHeaderName, plainKey)
+	request.Header.Set(middleware.BotChannelHeaderName, channel)
 	if frame.Subject != "" {
 		request.Header.Set(middleware.BotSubjectHeaderName, frame.Subject)
 	}

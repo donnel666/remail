@@ -32,7 +32,7 @@ type botBindingKeyAuth struct{}
 func (botBindingKeyAuth) AuthenticateBotSystemKey(context.Context, string) (*settingsdomain.SystemKey, error) {
 	return &settingsdomain.SystemKey{
 		ID: 7, Purpose: settingsdomain.SystemKeyPurposeBot,
-		Platform: "aiocqhttp", SubjectNamespace: "qq:main", AllowedGroupIDs: []string{"123456"},
+		Platform: "qq", SubjectNamespace: "qq:main", AllowedGroupIDs: []string{"123456"},
 	}, nil
 }
 
@@ -63,6 +63,7 @@ func botBindingRouter(t *testing.T) (*gin.Engine, *iamapp.BotBindingUseCase) {
 	router := gin.New()
 	bot := router.Group("/v1/bot")
 	bot.Use(middleware.BotSystemKeyRequired(botBindingKeyAuth{}))
+	bot.Use(middleware.BotChannelRequired())
 	RegisterBotBindingRoutes(bot, mod, rdb)
 	return router, bindings
 }
@@ -71,6 +72,7 @@ func botBindingHTTPRequest(method, path, subject, body string) *http.Request {
 	request := httptest.NewRequest(method, path, bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set(middleware.SystemKeyHeaderName, "sk_test")
+	request.Header.Set(middleware.BotChannelHeaderName, "qq")
 	request.Header.Set(middleware.BotSubjectHeaderName, subject)
 	request.Header.Set(middleware.BotSceneHeaderName, middleware.BotScenePrivate)
 	return request
@@ -83,12 +85,13 @@ func TestBotBindingRoutesUseOnlyHeaderSubjectAndReturnMaskedEmail(t *testing.T) 
 
 	require.Equal(t, http.StatusOK, response.Code)
 	require.Contains(t, response.Body.String(), `"accountDisplay":"u***@example.com"`)
+	require.NotContains(t, response.Body.String(), "requestId")
 	require.NotContains(t, response.Body.String(), "correct-password")
 	require.NotContains(t, response.Body.String(), `"user@example.com"`)
-	bound, err := bindings.Get(context.Background(), "aiocqhttp", "qq:main", "123456789")
+	bound, err := bindings.Get(context.Background(), "qq", "qq:main", "123456789")
 	require.NoError(t, err)
 	require.True(t, bound.Bound)
-	attacker, err := bindings.Get(context.Background(), "aiocqhttp", "qq:main", "987654321")
+	attacker, err := bindings.Get(context.Background(), "qq", "qq:main", "987654321")
 	require.NoError(t, err)
 	require.False(t, attacker.Bound)
 

@@ -81,12 +81,12 @@ func TestAdminBotSystemKeyRequiresAndListsScope(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, invalid.Code)
 
 	createdResponse := httptest.NewRecorder()
-	router.ServeHTTP(createdResponse, requestWithSession(http.MethodPost, "/v1/admin/system-keys", `{"name":"QQ main","purpose":"bot","platform":"qq_official","subjectNamespace":"qq:main","allowedGroupIds":["123456","234567"]}`))
+	router.ServeHTTP(createdResponse, requestWithSession(http.MethodPost, "/v1/admin/system-keys", `{"name":"QQ main","purpose":"bot","platform":"qq","subjectNamespace":"qq:main","allowedGroupIds":["123456","234567"]}`))
 	require.Equal(t, http.StatusCreated, createdResponse.Code)
 	var created systemKeyDTO
 	require.NoError(t, json.Unmarshal(createdResponse.Body.Bytes(), &created))
 	require.Equal(t, "bot", created.Purpose)
-	require.Equal(t, "qq_official", created.Platform)
+	require.Equal(t, "qq", created.Platform)
 	require.Equal(t, "qq:main", created.SubjectNamespace)
 	require.Equal(t, []string{"123456", "234567"}, created.AllowedGroupIDs)
 	require.NotEmpty(t, created.KeyPlain)

@@ -13,7 +13,7 @@ type codeDiagnosisRepoStub struct {
 	calls   int
 }
 
-func (r *codeDiagnosisRepoStub) LookupCodeDiagnosis(context.Context, uint, string, uint) (CodeDiagnosisLookup, error) {
+func (r *codeDiagnosisRepoStub) LookupCodeDiagnosis(context.Context, uint, string) (CodeDiagnosisLookup, error) {
 	index := min(r.calls, len(r.lookups)-1)
 	r.calls++
 	return r.lookups[index], nil
@@ -22,6 +22,7 @@ func (r *codeDiagnosisRepoStub) LookupCodeDiagnosis(context.Context, uint, strin
 type codeDiagnosisRefreshStub struct {
 	calls      int
 	orderNo    string
+	email      string
 	resourceID uint
 }
 
@@ -49,10 +50,34 @@ func (f *diagnosisGmailFetchStub) FetchLocalCodeMail(context.Context, string) er
 	return nil
 }
 
-func (r *codeDiagnosisRefreshStub) RefreshCodeDiagnosis(_ context.Context, orderNo, _ string, resourceID uint) error {
+func (r *codeDiagnosisRefreshStub) RefreshCodeDiagnosis(_ context.Context, orderNo, email string, resourceID uint) error {
 	r.calls++
-	r.orderNo, r.resourceID = orderNo, resourceID
+	r.orderNo, r.email, r.resourceID = orderNo, email, resourceID
 	return nil
+}
+
+func TestBotCodeDiagnosisReturnsProjectResolvedFromTheUsersOrder(t *testing.T) {
+	now := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)
+	active := CodeDiagnosisOrderFact{
+		OrderNo: "ORDER-1", ProjectID: 10, ProjectName: "GitHub",
+		ServiceMode: "code", Status: "active", EmailResourceID: 8,
+	}
+	repo := &codeDiagnosisRepoStub{lookups: []CodeDiagnosisLookup{{Orders: []CodeDiagnosisOrderFact{active}}}}
+	refresh := &codeDiagnosisRefreshStub{}
+	service := NewBotDiagnosisService(repo, refresh)
+	service.now = func() time.Time { return now }
+
+	result, err := service.DiagnoseCode(context.Background(), 2, "private@example.com")
+
+	require.NoError(t, err)
+	require.Equal(t, "cause_not_confirmed", result.Result)
+	require.Equal(t, uint(10), result.ProjectID)
+	require.Equal(t, "GitHub", result.ProjectName)
+	require.Equal(t, 1, refresh.calls)
+	require.Equal(t, "private@example.com", refresh.email)
+	for _, internal := range []string{"pickup", "缓存", "凭证", "拉取"} {
+		require.NotContains(t, result.Reason+result.Action, internal)
+	}
 }
 
 func TestBotCodeDiagnosisUsesExistingPickupFactsAndOnlyThreeCauses(t *testing.T) {
@@ -66,7 +91,6 @@ func TestBotCodeDiagnosisUsesExistingPickupFactsAndOnlyThreeCauses(t *testing.T)
 		want         string
 		refreshCalls int
 	}{
-		{name: "project mismatch", lookups: []CodeDiagnosisLookup{{EmailOrderExists: true}}, want: "project_mismatch"},
 		{name: "resource abnormal and refunded", lookups: []CodeDiagnosisLookup{{Orders: []CodeDiagnosisOrderFact{{ServiceMode: "code", ResourceAbnormalRefunded: true}}}}, want: "resource_abnormal_refunded"},
 		{name: "matched for one minute", lookups: []CodeDiagnosisLookup{{Orders: []CodeDiagnosisOrderFact{{ServiceMode: "code", DeliveryStoredAt: &oldMail}}}}, want: "pickup_not_requested"},
 		{name: "matched inside grace", lookups: []CodeDiagnosisLookup{{Orders: []CodeDiagnosisOrderFact{{ServiceMode: "code", DeliveryStoredAt: &newMail}}}}, want: "pickup_grace_period"},
@@ -91,7 +115,7 @@ func TestBotCodeDiagnosisUsesExistingPickupFactsAndOnlyThreeCauses(t *testing.T)
 			service := NewBotDiagnosisService(repo, refresh)
 			service.now = func() time.Time { return now }
 
-			result, err := service.DiagnoseCode(context.Background(), 2, "user@example.com", 10)
+			result, err := service.DiagnoseCode(context.Background(), 2, "user@example.com")
 
 			require.NoError(t, err)
 			require.Equal(t, test.want, result.Result)

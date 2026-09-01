@@ -8,7 +8,15 @@ from typing import Any
 
 import pytest
 
-from .security import redact_message_outline, validated_base_url, websocket_url
+from .security import (
+    adapter_channel,
+    channel_system_keys,
+    normalize_adapter_identity,
+    redact_message_outline,
+    redact_message_text,
+    validated_base_url,
+    websocket_url,
+)
 
 
 PLUGIN_DIR = Path(__file__).parent
@@ -54,6 +62,51 @@ def test_redact_message_outline() -> None:
         == "/绑定 [REDACTED]"
     )
     assert redact_message_outline("怎么绑定账号") == "怎么绑定账号"
+    assert redact_message_text("绑定 user@example.com secret") == "绑定 [REDACTED]"
+    assert redact_message_text("bind user@example.com secret") == "bind [REDACTED]"
+    assert redact_message_text("/绑定 user@example.com secret") == "/绑定 [REDACTED]"
+    assert (
+        redact_message_outline("/诊断 order@example.com 一直没收到")
+        == "/诊断 [REDACTED]"
+    )
+    assert redact_message_text("诊断 order@example.com 一直没收到") == "诊断 [REDACTED]"
+
+
+def test_adapter_identity_uses_real_qq_and_telegram_ids() -> None:
+    assert normalize_adapter_identity("aiocqhttp", "123456789", "987654321") == (
+        "123456789",
+        "987654321",
+    )
+    with pytest.raises(ValueError, match="真实 QQ 号"):
+        normalize_adapter_identity("aiocqhttp", "openid-user", "987654321")
+    with pytest.raises(ValueError, match="真实QQ群号"):
+        normalize_adapter_identity("aiocqhttp", "123456789", "group-openid")
+
+    assert normalize_adapter_identity("telegram", "123456789", "-1001234567890#42") == (
+        "123456789",
+        "-1001234567890",
+    )
+    assert normalize_adapter_identity("telegram", "123456789", "") == (
+        "123456789",
+        "",
+    )
+    with pytest.raises(ValueError, match="用户 ID"):
+        normalize_adapter_identity("telegram", "telegram-user", "-1001234567890")
+
+
+def test_channel_keys_are_optional_but_cannot_be_shared() -> None:
+    assert adapter_channel("aiocqhttp") == "qq"
+    assert adapter_channel("telegram") == "telegram"
+    with pytest.raises(ValueError, match="没有配置"):
+        adapter_channel("qq_official")
+    assert channel_system_keys(" sk_qq ", "") == {"qq": "sk_qq"}
+    assert channel_system_keys("", " sk_tg ") == {"telegram": "sk_tg"}
+    assert channel_system_keys("sk_qq", "sk_tg") == {
+        "qq": "sk_qq",
+        "telegram": "sk_tg",
+    }
+    with pytest.raises(ValueError, match="不能使用同一把"):
+        channel_system_keys("sk_shared", "sk_shared")
 
 
 def test_commands_and_llm_tools_cannot_accept_platform_identity() -> None:
@@ -83,9 +136,7 @@ def test_commands_and_llm_tools_cannot_accept_platform_identity() -> None:
         assert not forbidden, (node.name, forbidden)
 
 
-def test_event_key_requires_exact_platform_id_and_binding_stops_after_direct_send() -> (
-    None
-):
+def test_event_key_uses_channel_key_and_binding_stops_after_direct_send() -> None:
     source = (PLUGIN_DIR / "main.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     functions = {
@@ -93,24 +144,27 @@ def test_event_key_requires_exact_platform_id_and_binding_stops_after_direct_sen
         for node in ast.walk(tree)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
-    key_source = ast.unparse(functions["_system_key"])
-    assert "get_platform_id" in key_source
-    assert "get_platform_name" not in key_source
-    assert "_service_key" not in key_source
-    assert "REMAIL_BOT_[A-Z0-9_]+" in source
+    assert "os.getenv" not in source
     assert "logger=_WEBSOCKET_LOGGER" in source
     assert "priority=sys.maxsize - 1" in source
-    assert "CoreMessageEvent.get_messages = redacted_messages" in source
+    assert "AstrMessageEvent.get_message_str = redacted_text" in source
+    assert "AstrMessageEvent.get_messages = redacted_messages" in source
 
     headers_source = ast.unparse(functions["_bot_headers"])
+    assert "event.get_platform_name()" in headers_source
+    assert "event.get_platform_id()" not in headers_source
+    assert "event.get_sender_id()" in headers_source
     assert "event.get_group_id()" in headers_source
+    assert "normalize_adapter_identity" in headers_source
+    assert "_channel_system_keys" in headers_source
     assert "X-Bot-Group" in headers_source
+    assert "X-Bot-Channel" in headers_source
     assert "scene == 'group'" in headers_source
-    group_block = headers_source.split("if scene == 'group':", 1)[1].split(
-        "if require_subject:", 1
-    )[0]
+    group_block = headers_source.split("if scene == 'group':", 1)[1]
     assert "X-Bot-Group" in group_block
     assert headers_source.count("X-Bot-Group") == 1
+    assert "X-Bot-Subject" in headers_source
+    assert "require_subject" not in headers_source
 
     request_source = ast.unparse(functions["_websocket_request"])
     assert "groupId" in request_source
@@ -143,6 +197,8 @@ def test_event_key_requires_exact_platform_id_and_binding_stops_after_direct_sen
     )
     bind_source = ast.unparse(bind)
     assert "event.send" in bind_source
+    assert "event.message_str" in bind_source
+    assert "event.get_message_str" not in bind_source
     assert bind_source.index("event.send") < bind_source.index("event.stop_event")
     assert "_authorize_event" in bind_source
     assert bind_source.index("_authorize_event") < bind_source.index(
@@ -152,13 +208,30 @@ def test_event_key_requires_exact_platform_id_and_binding_stops_after_direct_sen
         "绑定只允许在私聊中执行"
     ), bind_source
 
+    result_source = ast.unparse(functions["_result_text"])
+    assert "payload.get('message')" in result_source
+    assert "requestId" not in result_source
+    diagnosis_source = ast.unparse(functions["diagnose_code"])
+    assert "格式：/诊断 邮箱 原因" in diagnosis_source
+    assert "_DIAGNOSIS_ARGUMENTS" in diagnosis_source
+    assert "body={'email': email}" in diagnosis_source
+    assert "event.request_llm" in diagnosis_source
+    assert "用户描述：" in diagnosis_source
+    assert "ReMail诊断：" in diagnosis_source
+    tool_source = ast.unparse(functions["remail_code_diagnosis"])
+    assert "description.strip()" in tool_source
+    assert "body={'email': email}" in tool_source
+    assert "project_id" not in tool_source
 
-def test_system_keys_are_read_from_environment() -> None:
+
+def test_system_keys_are_read_from_plugin_config() -> None:
     schema = json.loads((PLUGIN_DIR / "_conf_schema.json").read_text(encoding="utf-8"))
-    assert "default_system_key" not in schema
-    fields = schema["platform_system_keys"]["templates"]["system_key"]["items"]
-    assert "system_key" not in fields
-    assert fields["system_key_env"]["default"] == ""
+    assert "launch_system_key" not in schema
+    assert "platform_system_keys" not in schema
+    for field in ("qq_system_key", "telegram_system_key"):
+        assert schema[field]["default"] == ""
+        assert schema[field]["obvious_hint"] is True
+        assert schema[field]["secret"] is True
     assert "launch_poll_seconds" not in schema
 
 
@@ -201,8 +274,12 @@ def test_push_subscription_topics_cursor_order_and_safe_renderer() -> None:
     )
 
     run_source = ast.unparse(functions["_run_websocket"])
+    assert "X-Bot-Channel" in run_source
     assert "'topic': 'project.launched'" in run_source
     assert "'topics': list(_PUSH_TOPICS)" in run_source
+    assert (
+        run_source.count("contextlib.suppress(asyncio.CancelledError, Exception)") == 2
+    )
     assert "/v1/bot/projects/launches" not in source
     handler_source = ast.unparse(functions["_handle_websocket_message"])
     assert "payload.get('topic') or payload.get('event')" in handler_source
@@ -211,6 +288,31 @@ def test_push_subscription_topics_cursor_order_and_safe_renderer() -> None:
     assert "after_id = int(raw_after_id)" in event_source
     delivery_source = ast.unparse(functions["_deliver_push_to_destinations"])
     assert delivery_source.index("send_message") < delivery_source.index("put_kv_data")
+
+    oldest = functions["_oldest_launch_cursor"]
+    namespace = {"datetime": datetime, "timezone": timezone}
+    exec(
+        compile(ast.Module(body=[oldest], type_ignores=[]), "main.py", "exec"),
+        namespace,
+    )
+
+    class CursorPlugin:
+        launch_cursors = {
+            "existing": (
+                datetime(2026, 8, 31, tzinfo=timezone.utc),
+                7,
+                "2026-08-31T00:00:00Z",
+            ),
+            "new": (datetime.min.replace(tzinfo=timezone.utc), 0, ""),
+        }
+
+        async def _load_launch_cursors(self):
+            return None
+
+    assert asyncio.run(namespace["_oldest_launch_cursor"](CursorPlugin())) == (
+        "2026-08-31T00:00:00Z",
+        7,
+    )
 
     render = _load_push_renderer()
     unsafe = "user@example.com\npassword=hunter2\npostgresql://root:pw@db/remail\nsk_1234567890\nBearer abcdefghijk"
@@ -260,7 +362,10 @@ def test_push_subscription_topics_cursor_order_and_safe_renderer() -> None:
             assert secret not in rendered, (topic, rendered)
         assert len(rendered) <= 4000
     assert render("database.dumped", {"message": "raw-db-row"}) == ""
-    assert "json.dumps" not in ast.unparse(functions["_render_push_text"])
+    renderer_source = ast.unparse(functions["_render_push_text"])
+    assert "json.dumps" not in renderer_source
+    assert "filter(" not in renderer_source
+    assert "filter(" not in ast.unparse(functions["_format_announcements"])
 
 
 def test_push_cursor_advances_only_for_successful_destination() -> None:

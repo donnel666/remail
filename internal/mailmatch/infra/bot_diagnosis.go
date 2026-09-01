@@ -10,6 +10,8 @@ import (
 
 type codeDiagnosisOrderRow struct {
 	OrderNo                  string
+	ProjectID                uint
+	ProjectName              string
 	ServiceMode              string
 	Status                   string
 	EmailResourceID          uint
@@ -17,11 +19,13 @@ type codeDiagnosisOrderRow struct {
 	ResourceAbnormalRefunded bool
 }
 
-func (r *Repo) LookupCodeDiagnosis(ctx context.Context, userID uint, email string, projectID uint) (app.CodeDiagnosisLookup, error) {
+func (r *Repo) LookupCodeDiagnosis(ctx context.Context, userID uint, email string) (app.CodeDiagnosisLookup, error) {
 	var rows []codeDiagnosisOrderRow
 	if err := r.dbFor(ctx).Raw(`
 SELECT
     o.order_no,
+	o.project_id,
+	project.name AS project_name,
     o.service_mode,
     o.status,
     COALESCE(ma.resource_id, da.resource_id, ga.resource_id, ia.resource_id, 0) AS email_resource_id,
@@ -35,14 +39,10 @@ SELECT
 			WHERE refund_event.order_no = o.order_no
 			  AND refund_event.event_type = 'order.refunded'
 			  AND refund_event.operator_type = 'system'
-			  AND refund_event.reason IN (
-				  'Microsoft resource is permanently unavailable.',
-				  '自有 Gmail 资源不可用，订单已退款。',
-				  '自有 Gmail 凭据失效，订单已退款。'
-			  )
 		)
     ) AS resource_abnormal_refunded
 FROM orders o
+JOIN projects project ON project.id = o.project_id
 LEFT JOIN microsoft_allocations ma
     ON ma.order_no = o.order_no AND o.allocation_type = 'microsoft'
 LEFT JOIN domain_allocations da
@@ -55,34 +55,22 @@ LEFT JOIN mailmatch_order_delivery_heads h ON h.order_id = o.id
 LEFT JOIN mailmatch_messages message ON message.id = h.message_id
 WHERE o.user_id = ?
   AND o.delivery_email = ?
-  AND o.project_id = ?
   AND o.order_no NOT LIKE 'HIST-%'
 ORDER BY
     CASE WHEN o.status IN ('pending_payment', 'paid', 'active') THEN 0 ELSE 1 END ASC,
     o.created_at DESC,
     o.id DESC
-LIMIT 2`, userID, email, projectID).Scan(&rows).Error; err != nil {
+LIMIT 2`, userID, email).Scan(&rows).Error; err != nil {
 		return app.CodeDiagnosisLookup{}, fmt.Errorf("lookup code diagnosis orders: %w", err)
 	}
 	lookup := app.CodeDiagnosisLookup{Orders: make([]app.CodeDiagnosisOrderFact, len(rows))}
 	for i, row := range rows {
 		lookup.Orders[i] = app.CodeDiagnosisOrderFact{
-			OrderNo: row.OrderNo, ServiceMode: row.ServiceMode, Status: row.Status,
+			OrderNo: row.OrderNo, ProjectID: row.ProjectID, ProjectName: row.ProjectName,
+			ServiceMode: row.ServiceMode, Status: row.Status,
 			EmailResourceID: row.EmailResourceID, DeliveryStoredAt: row.DeliveryStoredAt,
 			ResourceAbnormalRefunded: row.ResourceAbnormalRefunded,
 		}
 	}
-	if len(rows) > 0 {
-		lookup.EmailOrderExists = true
-		return lookup, nil
-	}
-	var count int64
-	if err := r.dbFor(ctx).Table("orders").
-		Where("user_id = ? AND delivery_email = ? AND order_no NOT LIKE 'HIST-%'", userID, email).
-		Limit(1).
-		Count(&count).Error; err != nil {
-		return app.CodeDiagnosisLookup{}, fmt.Errorf("check code diagnosis email orders: %w", err)
-	}
-	lookup.EmailOrderExists = count > 0
 	return lookup, nil
 }

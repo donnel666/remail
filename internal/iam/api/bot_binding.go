@@ -33,7 +33,6 @@ type botBindingResponse struct {
 	Result         string `json:"result"`
 	Reason         string `json:"reason"`
 	AccountDisplay string `json:"accountDisplay,omitempty"`
-	RequestID      string `json:"requestId"`
 }
 
 type botBindingHandler struct {
@@ -77,7 +76,7 @@ func (h *botBindingHandler) post(c *gin.Context) {
 	var req botBindingRequest
 	if err := bindBotBindingJSON(c, &req); err != nil {
 		c.JSON(http.StatusBadRequest, botBindingResponse{
-			Result: "invalid_request", Reason: "Invalid request body.", RequestID: middleware.GetRequestID(c),
+			Result: "invalid_request", Reason: "Invalid request body.",
 		})
 		return
 	}
@@ -110,7 +109,7 @@ func (h *botBindingHandler) post(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, botBindingResponse{
 		Result: "bound", Reason: "The current bot account is bound to remail.",
-		AccountDisplay: info.MaskedEmail, RequestID: middleware.GetRequestID(c),
+		AccountDisplay: info.MaskedEmail,
 	})
 }
 
@@ -142,7 +141,7 @@ func (h *botBindingHandler) get(c *gin.Context) {
 		writeBotBindingError(c, err)
 		return
 	}
-	response := botBindingResponse{Result: "unbound", Reason: "The current bot account is not bound to remail.", RequestID: middleware.GetRequestID(c)}
+	response := botBindingResponse{Result: "unbound", Reason: "The current bot account is not bound to remail."}
 	if info.Bound && !info.Available {
 		response.Result = "account_unavailable"
 		response.Reason = "The bound remail account is unavailable."
@@ -168,7 +167,7 @@ func (h *botBindingHandler) delete(c *gin.Context) {
 }
 
 func writeBotBindingError(c *gin.Context, err error) {
-	response := botBindingResponse{Result: "service_unavailable", Reason: "Service is temporarily unavailable.", RequestID: middleware.GetRequestID(c)}
+	response := botBindingResponse{Result: "service_unavailable", Reason: "Service is temporarily unavailable."}
 	status := http.StatusServiceUnavailable
 	switch {
 	case errors.Is(err, domain.ErrAccountOrPasswordIncorrect):

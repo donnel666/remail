@@ -14,9 +14,9 @@ func RegisterRoutes(rg *gin.RouterGroup, mod *Module) {
 	rg.GET("/pickup/messages/:messageId", h.GetPickupMessage)
 }
 
-// RegisterBotRoutes expects the caller to install bot-key, subject and
-// private-scene middleware before this handler. The resolver must only return
-// a user ID derived from the authenticated bot subject, never from the body.
+// RegisterBotRoutes expects the caller to install bot-key, channel, subject and
+// scene middleware before this handler. The resolver must only return a user ID
+// derived from the authenticated bot subject, never from the body.
 func RegisterBotRoutes(rg *gin.RouterGroup, mod *Module, resolveUserID BotUserIDResolver) {
 	var service *mailmatchapp.BotDiagnosisService
 	if mod != nil {

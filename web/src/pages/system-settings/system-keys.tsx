@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useState } from "react";
-import { Button, Empty, Input, Modal, Radio, RadioGroup, Table, Tag, TextArea, Toast, Tooltip, Typography } from "@douyinfe/semi-ui";
+import { Button, Empty, Input, Modal, Radio, RadioGroup, Select, Table, Tag, TextArea, Toast, Tooltip, Typography } from "@douyinfe/semi-ui";
 import { KeyRound, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -17,6 +17,11 @@ import type { SectionProps } from "./index";
 import { SettingsCardHeader, SettingsSection } from "./settings-layout";
 
 const { Text } = Typography;
+type BotType = "qq" | "telegram";
+const BOT_SCOPES = {
+  qq: { platform: "qq", subjectNamespace: "qq:main" },
+  telegram: { platform: "telegram", subjectNamespace: "telegram:main" },
+} as const;
 
 function formatDateTime(value?: string | null) {
   if (!value) return "-";
@@ -31,8 +36,7 @@ function parseAllowedGroupIds(value: string) {
 export default function SystemKeysSection({ canSensitive, canWrite }: SectionProps) {
   const { t } = useTranslation();
   const nameInputId = useId();
-  const platformInputId = useId();
-  const namespaceInputId = useId();
+  const botTypeInputId = useId();
   const allowedGroupsInputId = useId();
   const purposeLabelId = useId();
   const [keys, setKeys] = useState<AdminSystemKey[]>([]);
@@ -42,8 +46,7 @@ export default function SystemKeysSection({ canSensitive, canWrite }: SectionPro
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [purpose, setPurpose] = useState<SystemKeyPurpose>("smtp_submission");
-  const [platform, setPlatform] = useState("");
-  const [subjectNamespace, setSubjectNamespace] = useState("");
+  const [botType, setBotType] = useState<BotType>("qq");
   const [allowedGroups, setAllowedGroups] = useState("");
   const [createdKey, setCreatedKey] = useState<AdminSystemKey | null>(null);
 
@@ -70,13 +73,7 @@ export default function SystemKeysSection({ canSensitive, canWrite }: SectionPro
       Toast.warning(t("Please enter system key name."));
       return;
     }
-    const nextPlatform = platform.trim();
-    const nextNamespace = subjectNamespace.trim();
     const allowedGroupIds = parseAllowedGroupIds(allowedGroups);
-    if (purpose === "bot" && (!nextPlatform || !nextNamespace)) {
-      Toast.warning(t("Please enter bot platform and subject namespace."));
-      return;
-    }
     if (purpose === "bot" && allowedGroupIds.length === 0) {
       Toast.warning(t("Please enter at least one allowed group ID."));
       return;
@@ -84,15 +81,14 @@ export default function SystemKeysSection({ canSensitive, canWrite }: SectionPro
     setCreating(true);
     try {
       const result = purpose === "bot"
-        ? await createSystemKey(nextName, purpose, { platform: nextPlatform, subjectNamespace: nextNamespace, allowedGroupIds })
+        ? await createSystemKey(nextName, purpose, { ...BOT_SCOPES[botType], allowedGroupIds })
         : await createSystemKey(nextName, purpose);
       if (!result.keyPlain) throw new Error("System key plaintext was not returned.");
       setKeys((current) => [{ ...result, keyPlain: undefined }, ...current]);
       setCreateOpen(false);
       setName("");
       setPurpose("smtp_submission");
-      setPlatform("");
-      setSubjectNamespace("");
+      setBotType("qq");
       setAllowedGroups("");
       setCreatedKey(result);
       Toast.success(t("System key created."));
@@ -252,26 +248,18 @@ export default function SystemKeysSection({ canSensitive, canWrite }: SectionPro
         </RadioGroup>
       </div>
       {purpose === "bot" ? <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label className="block" htmlFor={platformInputId}>
-          <span className="mb-1.5 block text-sm font-medium">{t("Bot platform")}</span>
-          <Input
-            id={platformInputId}
-            maxLength={32}
-            onChange={setPlatform}
-            placeholder="aiocqhttp"
-            showClear
-            value={platform}
-          />
-        </label>
-        <label className="block" htmlFor={namespaceInputId}>
-          <span className="mb-1.5 block text-sm font-medium">{t("Subject namespace")}</span>
-          <Input
-            id={namespaceInputId}
-            maxLength={50}
-            onChange={setSubjectNamespace}
-            placeholder="qq:main"
-            showClear
-            value={subjectNamespace}
+        <label className="block sm:col-span-2" htmlFor={botTypeInputId}>
+          <span className="mb-1.5 block text-sm font-medium">{t("Robot type")}</span>
+          <Select
+            aria-label={t("Robot type")}
+            id={botTypeInputId}
+            onChange={(value) => setBotType(String(value) as BotType)}
+            optionList={[
+              { label: t("QQ robot"), value: "qq" },
+              { label: t("Telegram robot"), value: "telegram" },
+            ]}
+            style={{ width: "100%" }}
+            value={botType}
           />
         </label>
         <label className="block sm:col-span-2" htmlFor={allowedGroupsInputId}>
@@ -281,7 +269,7 @@ export default function SystemKeysSection({ canSensitive, canWrite }: SectionPro
             autosize={{ minRows: 2, maxRows: 4 }}
             id={allowedGroupsInputId}
             onChange={setAllowedGroups}
-            placeholder={t("Allowed group IDs placeholder")}
+            placeholder={t(botType === "telegram" ? "Telegram group IDs placeholder" : "QQ group IDs placeholder")}
             value={allowedGroups}
           />
           <Text className="mt-1 block" size="small" type="tertiary">{t("Allowed group IDs hint")}</Text>

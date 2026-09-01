@@ -174,7 +174,13 @@ func normalizeSystemKeyScope(purpose domain.SystemKeyPurpose, platform, subjectN
 	}
 	groups, groupsOK := normalizeBotGroupIDs(subjectNamespace, allowedGroupIDs)
 	return platform, subjectNamespace, groups,
-		validScopeToken(platform, 32, false) && validScopeToken(subjectNamespace, 50, true) && groupsOK
+		validScopeToken(platform, 32, false) && validScopeToken(subjectNamespace, 50, true) &&
+			validBotKeyScope(platform, subjectNamespace) && groupsOK
+}
+
+func validBotKeyScope(platform, namespace string) bool {
+	return (platform == "qq" && (namespace == "qq" || strings.HasPrefix(namespace, "qq:"))) ||
+		(platform == "telegram" && (namespace == "telegram" || strings.HasPrefix(namespace, "telegram:")))
 }
 
 func normalizeBotGroupIDs(namespace string, values []string) ([]string, bool) {
@@ -184,6 +190,7 @@ func normalizeBotGroupIDs(namespace string, values []string) ([]string, bool) {
 	groups := make([]string, 0, len(values))
 	seen := make(map[string]struct{}, len(values))
 	qq := namespace == "qq" || strings.HasPrefix(namespace, "qq:")
+	telegram := namespace == "telegram" || strings.HasPrefix(namespace, "telegram:")
 	for _, value := range values {
 		value = strings.TrimSpace(value)
 		if value == "" || len(value) > 128 || !utf8.ValidString(value) {
@@ -200,6 +207,12 @@ func normalizeBotGroupIDs(namespace string, values []string) ([]string, bool) {
 				return nil, false
 			}
 			value = strconv.FormatUint(parsed, 10)
+		} else if telegram {
+			parsed, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || parsed == 0 {
+				return nil, false
+			}
+			value = strconv.FormatInt(parsed, 10)
 		}
 		if _, exists := seen[value]; !exists {
 			seen[value] = struct{}{}

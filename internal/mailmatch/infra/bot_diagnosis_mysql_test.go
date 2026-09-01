@@ -36,14 +36,18 @@ INSERT INTO microsoft_allocations(
 	}))
 	require.NoError(t, db.Table("mailmatch_messages").Where("id = ?", messageID).Update("created_at", now.Add(-time.Minute)).Error)
 
-	lookup, err := repo.LookupCodeDiagnosis(context.Background(), 2, "main@example.com", 10)
+	lookup, err := repo.LookupCodeDiagnosis(context.Background(), 2, "main@example.com")
 	require.NoError(t, err)
-	require.True(t, lookup.EmailOrderExists)
 	require.Len(t, lookup.Orders, 1)
+	require.Equal(t, uint(10), lookup.Orders[0].ProjectID)
+	require.NotEmpty(t, lookup.Orders[0].ProjectName)
 	require.Equal(t, uint(100), lookup.Orders[0].EmailResourceID)
 	require.NotNil(t, lookup.Orders[0].DeliveryStoredAt)
 	require.WithinDuration(t, now.Add(-time.Minute), *lookup.Orders[0].DeliveryStoredAt, time.Millisecond)
 	require.False(t, lookup.Orders[0].ResourceAbnormalRefunded)
+	otherUser, err := repo.LookupCodeDiagnosis(context.Background(), 3, "main@example.com")
+	require.NoError(t, err)
+	require.Empty(t, otherUser.Orders)
 
 	require.NoError(t, db.Exec(`
 INSERT INTO wallet_transactions(
@@ -58,9 +62,9 @@ INSERT INTO wallet_transactions(
 	require.NoError(t, db.Exec(`
 INSERT INTO order_events(event_no, order_no, event_type, from_status, to_status, operator_type, reason)
 VALUES ('EV_BOT_DIAGNOSIS_REFUND', 'OR_BOT_DIAGNOSIS', 'order.refunded', 'active', 'refunded', 'system',
-        'Microsoft resource is permanently unavailable.')`).Error)
+        '接码失败')`).Error)
 
-	lookup, err = repo.LookupCodeDiagnosis(context.Background(), 2, "main@example.com", 10)
+	lookup, err = repo.LookupCodeDiagnosis(context.Background(), 2, "main@example.com")
 	require.NoError(t, err)
 	require.True(t, lookup.Orders[0].ResourceAbnormalRefunded)
 }

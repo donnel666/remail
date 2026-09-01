@@ -36,6 +36,7 @@ func registerBotRoutes(
 	bot := v1.Group("/bot")
 	bot.Use(middleware.RateLimitPerClientIP(rdb, "bot_auth", 600, 60))
 	bot.Use(middleware.BotSystemKeyRequired(systemKeys))
+	bot.Use(middleware.BotChannelRequired())
 	bot.Use(middleware.RateLimitPerSystemKey(rdb, "bot_all", botIntegrationRequestsPerMinute, 60))
 	bot.Use(func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
@@ -56,12 +57,8 @@ func registerBotRoutes(
 
 	diagnostic := bot.Group("")
 	diagnostic.Use(middleware.BotIdentityRequired())
-	diagnostic.Use(middleware.BotPrivateRequired())
 	diagnostic.Use(middleware.RateLimitPerBotSubject(rdb, "code_diagnosis", botDiagnosesPerMinute, 60))
-	mailmatchapi.RegisterBotRoutes(diagnostic, mailmatchMod, func(c *gin.Context) (uint, bool) {
-		viewer, ok := resolveUser(c)
-		return viewer.UserID, ok
-	})
+	mailmatchapi.RegisterBotRoutes(diagnostic, mailmatchMod, botDiagnosisUserResolver(iamMod))
 
 	rankings := bot.Group("")
 	rankings.Use(middleware.BotIdentityRequired())
@@ -69,7 +66,33 @@ func registerBotRoutes(
 	dashboardapi.RegisterBotRoutes(rankings, dashboardMod)
 	billingapi.RegisterBotRoutes(rankings, billingMod)
 
-	registerBotWebSocketRoute(bot, dispatch, eventSources...)
+	registerBotWebSocketRoute(bot, dispatch, systemKeys, eventSources...)
+}
+
+func botDiagnosisUserResolver(iamMod *iamapi.IAMModule) mailmatchapi.BotUserIDResolver {
+	return func(c *gin.Context) (uint, bool) {
+		identity, ok := middleware.GetCurrentBotIdentity(c)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"message": "Authentication is required."})
+			return 0, false
+		}
+		if iamMod == nil || iamMod.BotBindingUseCase == nil {
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"message": "Service is temporarily unavailable."})
+			return 0, false
+		}
+		userID, found, err := iamMod.BotBindingUseCase.ResolveActiveUserID(
+			c.Request.Context(), identity.Platform, identity.SubjectNamespace, identity.Subject,
+		)
+		if err != nil {
+			slog.Error("bot diagnosis identity resolution failed", "request_id", middleware.GetRequestID(c), "error", err)
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"message": "Service is temporarily unavailable."})
+			return 0, false
+		}
+		if !found {
+			return 0, true
+		}
+		return userID, true
+	}
 }
 
 func getBotContext(c *gin.Context) {

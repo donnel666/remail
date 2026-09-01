@@ -4,35 +4,21 @@
     "description": "ReMail API 地址",
     "default": "https://remail.aishop6.com"
   },
-  "launch_system_key_env": {
+  "qq_system_key": {
     "type": "string",
-    "description": "WebSocket 主动推送使用的 System Key 环境变量名",
-    "hint": "必须以 REMAIL_BOT_ 开头；AstrBot 配置只保存变量名，完整 Key 不进入配置文件或管理页面。",
-    "default": "REMAIL_BOT_SYSTEM_KEY"
+    "description": "QQ 机器人 ReMail System Key",
+    "hint": "填写在 ReMail 中创建的 QQ（NapCat / OneBot v11）机器人 Key；只使用 QQ 时仅填写此项。",
+    "obvious_hint": true,
+    "secret": true,
+    "default": ""
   },
-  "platform_system_keys": {
-    "type": "template_list",
-    "description": "按 AstrBot 唯一 platform id 配置 System Key 环境变量",
-    "templates": {
-      "system_key": {
-        "name": "平台 ReMail System Key",
-        "display_item": "platform_id",
-        "items": {
-          "platform_id": {
-            "type": "string",
-            "description": "AstrBot 唯一 platform id",
-            "default": ""
-          },
-          "system_key_env": {
-            "type": "string",
-            "description": "保存该平台 ReMail Bot System Key 的环境变量名",
-            "hint": "必须以 REMAIL_BOT_ 开头，例如 REMAIL_BOT_QQ_SYSTEM_KEY。",
-            "default": ""
-          }
-        }
-      }
-    },
-    "default": []
+  "telegram_system_key": {
+    "type": "string",
+    "description": "Telegram 机器人 ReMail System Key",
+    "hint": "填写在 ReMail 中创建的 Telegram 机器人 Key；尚未接入 Telegram 时留空。",
+    "obvious_hint": true,
+    "secret": true,
+    "default": ""
   },
   "request_timeout_seconds": {
     "type": "int",
@@ -54,5 +40,39 @@
     "type": "string",
     "description": "用户可访问的 ReMail API 文档地址",
     "default": "https://remail.aishop6.com/docs"
+  },
+  "feedback_enabled": {
+    "type": "bool",
+    "description": "收集白名单群的反馈、建议和未解决问题，并在每天 20:00 生成群主日报",
+    "hint": "启用后，白名单群中经过脱敏和截断的文本会保存在插件 KV，并可能交给已配置的外部大模型生成日报。",
+    "default": true
+  },
+  "feedback_report_targets": {
+    "type": "template_list",
+    "description": "Telegram 等无法自动识别群主时的私聊投递目标；QQ OneBot 自动识别群主",
+    "templates": {
+      "target": {
+        "name": "反馈日报接收目标",
+        "display_item": "group_id",
+        "items": {
+          "platform_id": {
+            "type": "string",
+            "description": "AstrBot /sid 显示的 Bot ID",
+            "default": ""
+          },
+          "group_id": {
+            "type": "string",
+            "description": "QQ群号或 TG Chat ID",
+            "default": ""
+          },
+          "owner_umo": {
+            "type": "string",
+            "description": "群主私聊中的 /sid 所显示 UMO",
+            "default": ""
+          }
+        }
+      }
+    },
+    "default": []
   }
 }

@@ -125,7 +125,9 @@ func normalizeBotIdentity(platform, namespace, subject string) (string, string, 
 			return "", "", false
 		}
 	}
-	if (platform == "aiocqhttp" || strings.HasPrefix(platform, "qq") || strings.HasPrefix(platform, "onebot") || namespace == "qq" || strings.HasPrefix(namespace, "qq:")) && !isPositiveDecimalBotSubject(subject) {
+	if (platform == "aiocqhttp" || strings.HasPrefix(platform, "qq") || strings.HasPrefix(platform, "onebot") ||
+		platform == "telegram" || namespace == "qq" || strings.HasPrefix(namespace, "qq:") ||
+		namespace == "telegram" || strings.HasPrefix(namespace, "telegram:")) && !isPositiveDecimalBotSubject(subject) {
 		return "", "", false
 	}
 	scopeHash := sha256.Sum256([]byte(platform + "\x00" + namespace))

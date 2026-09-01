@@ -4,7 +4,7 @@ import type { components } from "./openapi/schema";
 export type AdminSystemKey = components["schemas"]["AdminSystemKey"];
 export type SystemKeyPurpose = NonNullable<components["schemas"]["AdminSystemKeyCreateRequest"]["purpose"]>;
 export type BotSystemKeyScope = {
-  platform: string;
+  platform: NonNullable<components["schemas"]["AdminSystemKeyCreateRequest"]["platform"]>;
   subjectNamespace: string;
   allowedGroupIds: string[];
 };

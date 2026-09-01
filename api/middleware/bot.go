@@ -12,6 +12,7 @@ import (
 )
 
 const (
+	BotChannelHeaderName = "X-Bot-Channel"
 	BotSubjectHeaderName = "X-Bot-Subject"
 	BotSceneHeaderName   = "X-Bot-Scene"
 	BotGroupHeaderName   = "X-Bot-Group"
@@ -70,6 +71,20 @@ func BotSystemKeyRequired(authenticator BotSystemKeyAuthenticator) gin.HandlerFu
 		}
 		c.Set(contextKeySystemKeyID, key.ID)
 		c.Set(contextKeyBotIntegration, integration)
+		c.Next()
+	}
+}
+
+// BotChannelRequired verifies the trusted AstrBot event channel after key authentication.
+// The request channel is only an assertion; the System Key remains the source of truth.
+func BotChannelRequired() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		integration, ok := GetCurrentBotIntegration(c)
+		channel := strings.ToLower(strings.TrimSpace(c.GetHeader(BotChannelHeaderName)))
+		if !ok || channel == "" || channel != strings.ToLower(integration.Platform) {
+			abortBotIdentity(c)
+			return
+		}
 		c.Next()
 	}
 }
@@ -165,7 +180,9 @@ func validBotSubject(platform, namespace, subject string) bool {
 	}
 	platform = strings.ToLower(strings.TrimSpace(platform))
 	namespace = strings.ToLower(strings.TrimSpace(namespace))
-	if platform == "aiocqhttp" || strings.HasPrefix(platform, "qq") || strings.HasPrefix(platform, "onebot") || namespace == "qq" || strings.HasPrefix(namespace, "qq:") {
+	if platform == "aiocqhttp" || strings.HasPrefix(platform, "qq") || strings.HasPrefix(platform, "onebot") ||
+		platform == "telegram" || namespace == "qq" || strings.HasPrefix(namespace, "qq:") ||
+		namespace == "telegram" || strings.HasPrefix(namespace, "telegram:") {
 		return validPositiveDecimalID(subject)
 	}
 	return true

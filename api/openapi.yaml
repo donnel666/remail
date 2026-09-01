@@ -2183,6 +2183,8 @@ paths:
       tags: [Bot]
       security:
         - systemKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BotChannel"
       responses:
         "101":
           description: WebSocket connection established
@@ -2207,6 +2209,7 @@ paths:
       security:
         - systemKeyAuth: []
       parameters:
+        - $ref: "#/components/parameters/BotChannel"
         - $ref: "#/components/parameters/BotSubject"
         - $ref: "#/components/parameters/BotScene"
         - $ref: "#/components/parameters/BotGroup"
@@ -2233,6 +2236,7 @@ paths:
       security:
         - systemKeyAuth: []
       parameters:
+        - $ref: "#/components/parameters/BotChannel"
         - $ref: "#/components/parameters/BotSubject"
         - $ref: "#/components/parameters/BotPrivateScene"
       requestBody:
@@ -2287,6 +2291,7 @@ paths:
       security:
         - systemKeyAuth: []
       parameters:
+        - $ref: "#/components/parameters/BotChannel"
         - $ref: "#/components/parameters/BotSubject"
         - $ref: "#/components/parameters/BotPrivateScene"
       responses:
@@ -2315,6 +2320,7 @@ paths:
       security:
         - systemKeyAuth: []
       parameters:
+        - $ref: "#/components/parameters/BotChannel"
         - $ref: "#/components/parameters/BotSubject"
         - $ref: "#/components/parameters/BotPrivateScene"
       responses:
@@ -2342,6 +2348,7 @@ paths:
       security:
         - systemKeyAuth: []
       parameters:
+        - $ref: "#/components/parameters/BotChannel"
         - $ref: "#/components/parameters/BotSubject"
         - $ref: "#/components/parameters/BotScene"
         - $ref: "#/components/parameters/BotGroup"
@@ -2397,7 +2404,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProjectListResponse"
+                $ref: "#/components/schemas/BotProjectListResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -2415,6 +2422,7 @@ paths:
       security:
         - systemKeyAuth: []
       parameters:
+        - $ref: "#/components/parameters/BotChannel"
         - $ref: "#/components/parameters/BotSubject"
         - $ref: "#/components/parameters/BotScene"
         - $ref: "#/components/parameters/BotGroup"
@@ -2430,7 +2438,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProjectDetailResponse"
+                $ref: "#/components/schemas/BotProjectDetailResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -2450,6 +2458,7 @@ paths:
       security:
         - systemKeyAuth: []
       parameters:
+        - $ref: "#/components/parameters/BotChannel"
         - $ref: "#/components/parameters/BotSubject"
         - $ref: "#/components/parameters/BotScene"
         - $ref: "#/components/parameters/BotGroup"
@@ -2488,6 +2497,7 @@ paths:
       security:
         - systemKeyAuth: []
       parameters:
+        - $ref: "#/components/parameters/BotChannel"
         - $ref: "#/components/parameters/BotSubject"
         - $ref: "#/components/parameters/BotScene"
         - $ref: "#/components/parameters/BotGroup"
@@ -2522,6 +2532,7 @@ paths:
       security:
         - systemKeyAuth: []
       parameters:
+        - $ref: "#/components/parameters/BotChannel"
         - $ref: "#/components/parameters/BotSubject"
         - $ref: "#/components/parameters/BotScene"
         - $ref: "#/components/parameters/BotGroup"
@@ -2551,14 +2562,16 @@ paths:
   /v1/bot/diagnoses/code:
     post:
       operationId: postBotCodeDiagnosis
-      summary: Diagnose why a bound user's project email has not delivered a code
-      description: Resolves the order from the authenticated bot identity, delivery email and project. It first reuses the normal local pickup cache and, when no matching mail is cached, performs one fetch through the resource's existing Domain, Gmail, Microsoft, or iCloud pickup path. It returns only safe reason text and never returns an order number, message, mailbox credential or verification code.
+      summary: Safely diagnose why the current bound user has not received a code
+      description: Uses the current bound identity and delivery email to locate only that user's recent order, derive the public project id/name, and return a safe order assessment. The email cannot widen the query to another user. The response never includes the email, order number, message content, credentials or verification codes; AstrBot may combine the safe result with the user's own problem description.
       tags: [Bot]
       security:
         - systemKeyAuth: []
       parameters:
+        - $ref: "#/components/parameters/BotChannel"
         - $ref: "#/components/parameters/BotSubject"
-        - $ref: "#/components/parameters/BotPrivateScene"
+        - $ref: "#/components/parameters/BotScene"
+        - $ref: "#/components/parameters/BotGroup"
       requestBody:
         required: true
         content:
@@ -2567,7 +2580,7 @@ paths:
               $ref: "#/components/schemas/BotCodeDiagnosisRequest"
       responses:
         "200":
-          description: Safe diagnosis result, reason and recommended action
+          description: Privacy-safe user-facing diagnosis message
           content:
             application/json:
               schema:
@@ -15064,20 +15077,29 @@ components:
       schema:
         type: integer
         default: 20
+    BotChannel:
+      name: X-Bot-Channel
+      in: header
+      required: true
+      description: Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument.
+      schema:
+        type: string
+        enum: [qq, telegram]
     BotSubject:
       name: X-Bot-Subject
       in: header
       required: true
-      description: Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument.
+      description: Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument.
       schema:
         type: string
         minLength: 1
         maxLength: 255
+        pattern: "^[1-9][0-9]*$"
     BotScene:
       name: X-Bot-Scene
       in: header
       required: true
-      description: Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only.
+      description: Private scenes may use the current bound account and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group; binding remains private-only, while diagnosis is available for the current sender's own bound account.
       schema:
         type: string
         enum: [private, group]
@@ -15085,11 +15107,12 @@ components:
       name: X-Bot-Group
       in: header
       required: false
-      description: Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument.
+      description: Trusted platform group id supplied by the bot adapter. QQ values are positive decimal group numbers and Telegram values are non-zero decimal Chat IDs (normally negative). Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument.
       schema:
         type: string
         minLength: 1
         maxLength: 128
+        pattern: "^-?[1-9][0-9]*$"
     BotPrivateScene:
       name: X-Bot-Scene
       in: header
@@ -18827,8 +18850,9 @@ components:
           description: Limits the key to iCloud forwarding, SMTP submission, or the Bot integration API.
         platform:
           type: string
+          enum: [qq, telegram]
           maxLength: 32
-          description: Required only for purpose=bot; normalized platform scope such as qq or telegram. It does not tell ReMail how the bot resolved the trusted platform identity.
+          description: Required only for purpose=bot. This immutable Key type is either qq or telegram and must match the trusted X-Bot-Channel on every Bot request.
         subjectNamespace:
           type: string
           maxLength: 50
@@ -18837,11 +18861,12 @@ components:
           type: array
           minItems: 1
           maxItems: 100
-          description: Required only for purpose=bot. Trusted platform group ids allowed to use this integration; QQ values are normalized positive decimal group numbers.
+          description: Required only for purpose=bot. Trusted platform group ids allowed to use this integration; QQ values are normalized positive decimal group numbers and Telegram values are normalized non-zero decimal Chat IDs.
           items:
             type: string
             minLength: 1
             maxLength: 128
+            pattern: "^-?[1-9][0-9]*$"
       additionalProperties: false
 
     AdminSystemKey:
@@ -18916,7 +18941,7 @@ components:
 
     BotBindingResponse:
       type: object
-      required: [result, reason, requestId]
+      required: [result, reason]
       properties:
         result:
           type: string
@@ -18926,8 +18951,6 @@ components:
         accountDisplay:
           type: string
           description: Masked remail account display; never a complete email address.
-        requestId:
-          type: string
       additionalProperties: false
 
     BotLeaderboardItem:
@@ -19010,41 +19033,189 @@ components:
             $ref: "#/components/schemas/BotLeaderboardRewardItem"
       additionalProperties: false
 
+    BotProjectListResponse:
+      type: object
+      required: [items, total, offset, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BotProjectItem"
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
+          type: integer
+        facets:
+          $ref: "#/components/schemas/ProjectListFacets"
+      additionalProperties: false
+
+    BotProjectDetailResponse:
+      type: object
+      required: [project, products]
+      properties:
+        project:
+          $ref: "#/components/schemas/BotProjectItem"
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/BotProjectProduct"
+      additionalProperties: false
+
+    BotProjectItem:
+      type: object
+      required:
+        - id
+        - name
+        - targetPlatform
+        - status
+        - accessType
+        - looseMatch
+        - productCount
+        - mailRuleCount
+        - supportsDotAlias
+        - supportsPlusAlias
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        targetPlatform:
+          type: string
+        logoUrl:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [listed]
+        accessType:
+          type: string
+          enum: [public, private]
+        looseMatch:
+          type: boolean
+        productCount:
+          type: integer
+        mailRuleCount:
+          type: integer
+        supportsDotAlias:
+          type: boolean
+        supportsPlusAlias:
+          type: boolean
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectProductSummary"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    BotProjectProduct:
+      type: object
+      required:
+        - projectId
+        - type
+        - status
+        - codeEnabled
+        - purchaseEnabled
+        - codePrice
+        - purchasePrice
+        - priceMultiplier
+        - codeWindowMinutes
+        - activationWindowMinutes
+        - warrantyMinutes
+        - createdAt
+        - updatedAt
+      properties:
+        projectId:
+          type: integer
+        type:
+          type: string
+          enum: [microsoft, domain, gmail, gmail_variant, icloud]
+        status:
+          type: string
+          enum: [enabled, disabled]
+        codeEnabled:
+          type: boolean
+        purchaseEnabled:
+          type: boolean
+        codePrice:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        purchasePrice:
+          $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        effectiveCodePrice:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        effectivePurchasePrice:
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
+        priceMultiplier:
+          $ref: "#/components/schemas/UserGroupDiscountRatio"
+        codeWindowMinutes:
+          type: integer
+        activationWindowMinutes:
+          type: integer
+        warrantyMinutes:
+          type: integer
+        totalAvailable:
+          type: integer
+          format: int64
+        publicAvailable:
+          type: integer
+          format: int64
+        codeAvailable:
+          type: integer
+          format: int64
+        codePublicAvailable:
+          type: integer
+          format: int64
+        purchaseAvailable:
+          type: integer
+          format: int64
+        purchasePublicAvailable:
+          type: integer
+          format: int64
+        suffixes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductSuffixInventory"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
     BotCodeDiagnosisRequest:
       type: object
-      required: [email, projectId]
+      required: [email]
       properties:
         email:
           type: string
           format: email
           maxLength: 254
-        projectId:
-          type: integer
-          minimum: 1
       additionalProperties: false
 
     BotDiagnosisResponse:
       type: object
-      required: [result, reason, action, requestId]
+      required: [message]
       properties:
-        result:
+        message:
           type: string
-          enum:
-            - binding_required
-            - invalid_request
-            - order_not_found
-            - project_mismatch
-            - pickup_not_requested
-            - resource_abnormal_refunded
-            - pickup_grace_period
-            - cause_not_confirmed
-            - manual_support_required
-        reason:
+          description: User-facing diagnosis only; never includes email, order number, message content, credentials, codes, internal status names or implementation steps.
+        projectId:
+          type: integer
+          minimum: 1
+          description: Public project id resolved from the current user's matching order; omitted when no order was found.
+        projectName:
           type: string
-        action:
-          type: string
-        requestId:
-          type: string
+          description: Public project name resolved from the current user's matching order; omitted when no order was found.
       additionalProperties: false
 
     AdminUpdateUserRequest:

@@ -14,15 +14,13 @@ import (
 type BotUserIDResolver func(*gin.Context) (uint, bool)
 
 type BotCodeDiagnosisRequest struct {
-	Email     string `json:"email"`
-	ProjectID uint   `json:"projectId"`
+	Email string `json:"email"`
 }
 
 type BotCodeDiagnosisResponse struct {
-	Result    string `json:"result"`
-	Reason    string `json:"reason"`
-	Action    string `json:"action"`
-	RequestID string `json:"requestId"`
+	Message     string `json:"message"`
+	ProjectID   uint   `json:"projectId,omitempty"`
+	ProjectName string `json:"projectName,omitempty"`
 }
 
 type botDiagnosisHandler struct {
@@ -31,10 +29,8 @@ type botDiagnosisHandler struct {
 }
 
 func (h botDiagnosisHandler) PostCodeDiagnosis(c *gin.Context) {
-	requestID := middleware.GetRequestID(c)
 	if h.userID == nil || h.service == nil {
-		writeBotDiagnosis(c, http.StatusServiceUnavailable, "manual_support_required",
-			"诊断服务暂时不可用。", "请稍后重试；持续失败时请联系人工客服。")
+		writeBotDiagnosis(c, http.StatusServiceUnavailable, "诊断服务暂时不可用，请稍后重试。", 0, "")
 		return
 	}
 	userID, ok := h.userID(c)
@@ -42,44 +38,42 @@ func (h botDiagnosisHandler) PostCodeDiagnosis(c *gin.Context) {
 		return
 	}
 	if !ok {
-		writeBotDiagnosis(c, http.StatusServiceUnavailable, "manual_support_required",
-			"诊断服务暂时不可用。", "请稍后重试；持续失败时请联系人工客服。")
+		writeBotDiagnosis(c, http.StatusServiceUnavailable, "诊断服务暂时不可用，请稍后重试。", 0, "")
+		return
+	}
+	identity, ok := middleware.GetCurrentBotIdentity(c)
+	if !ok {
+		writeBotDiagnosis(c, http.StatusUnauthorized, "身份验证失败。", 0, "")
 		return
 	}
 	if userID == 0 {
-		writeBotDiagnosis(c, http.StatusOK, "binding_required",
-			"当前机器人账号尚未绑定 remail 账号。", "请先在私聊中绑定 remail 账号。")
+		writeBotDiagnosis(c, http.StatusOK, "当前账号尚未绑定 ReMail，请先完成绑定。", 0, "")
 		return
 	}
 	var req BotCodeDiagnosisRequest
-	if err := bindPickupBatchJSON(c, &req); err != nil || !validBotCodeDiagnosisRequest(req) {
-		writeBotDiagnosis(c, http.StatusBadRequest, "invalid_request",
-			"请求参数不正确。", "请提供有效的邮箱和项目编号。")
+	if err := bindPickupBatchJSON(c, &req); err != nil || !validBotCodeDiagnosisRequest(req, identity.Scene) {
+		writeBotDiagnosis(c, http.StatusBadRequest, "请提供有效的订单邮箱。", 0, "")
 		return
 	}
-	result, err := h.service.DiagnoseCode(c.Request.Context(), userID, req.Email, req.ProjectID)
+	result, err := h.service.DiagnoseCode(c.Request.Context(), userID, req.Email)
 	if err != nil {
 		platform.Logger(c.Request.Context()).Error("bot code diagnosis failed", "error", err)
-		writeBotDiagnosis(c, http.StatusServiceUnavailable, "manual_support_required",
-			"诊断服务暂时不可用。", "请稍后重试；持续失败时请联系人工客服。")
+		writeBotDiagnosis(c, http.StatusServiceUnavailable, "诊断服务暂时不可用，请稍后重试。", 0, "")
 		return
 	}
-	c.JSON(http.StatusOK, BotCodeDiagnosisResponse{
-		Result: result.Result, Reason: result.Reason, Action: result.Action, RequestID: requestID,
-	})
+	message := strings.TrimSpace(result.Reason + " " + result.Action)
+	writeBotDiagnosis(c, http.StatusOK, message, result.ProjectID, result.ProjectName)
 }
 
-func validBotCodeDiagnosisRequest(req BotCodeDiagnosisRequest) bool {
+func validBotCodeDiagnosisRequest(req BotCodeDiagnosisRequest, scene string) bool {
 	email := strings.ToLower(strings.TrimSpace(req.Email))
-	if req.ProjectID == 0 || email == "" || len(email) > 254 {
+	if (scene != middleware.BotScenePrivate && scene != middleware.BotSceneGroup) || email == "" || len(email) > 254 {
 		return false
 	}
 	address, err := stdmail.ParseAddress(email)
 	return err == nil && strings.EqualFold(address.Address, email)
 }
 
-func writeBotDiagnosis(c *gin.Context, status int, result, reason, action string) {
-	c.JSON(status, BotCodeDiagnosisResponse{
-		Result: result, Reason: reason, Action: action, RequestID: middleware.GetRequestID(c),
-	})
+func writeBotDiagnosis(c *gin.Context, status int, message string, projectID uint, projectName string) {
+	c.JSON(status, BotCodeDiagnosisResponse{Message: message, ProjectID: projectID, ProjectName: projectName})
 }

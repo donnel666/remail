@@ -52,6 +52,11 @@ vi.mock("@douyinfe/semi-ui", async () => {
     Modal,
     Radio: ({ children, value }: any) => <label><input type="radio" value={value} />{children}</label>,
     RadioGroup: ({ children, onChange }: any) => <div onChange={onChange}>{children}</div>,
+    Select: ({ onChange, optionList, value, ...props }: any) => (
+      <select onChange={(event) => onChange(event.target.value)} value={value} {...props}>
+        {optionList.map((option: any) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    ),
     Table: ({ columns, dataSource }: any) => <div>{dataSource.map((item: any) => <div key={item.id}>{columns.map((column: any, index: number) => <React.Fragment key={index}>{column.render ? column.render(item[column.dataIndex], item) : item[column.dataIndex]}</React.Fragment>)}</div>)}</div>,
     Tag: ({ children }: any) => <span>{children}</span>,
     Toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
@@ -107,7 +112,7 @@ describe("SystemKeysSection", () => {
       id: 3,
       name: "QQ Bot",
       purpose: "bot",
-      platform: "qq_official",
+      platform: "qq",
       subjectNamespace: "qq:main",
       allowedGroupIds: ["123456", "234567", "345678"],
       keyPrefix: "sk_bot",
@@ -121,8 +126,6 @@ describe("SystemKeysSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create system key" }));
     fireEvent.click(screen.getByLabelText("Bot integration"));
     fireEvent.change(screen.getByLabelText("System key name"), { target: { value: "QQ Bot" } });
-    fireEvent.change(screen.getByLabelText("Bot platform"), { target: { value: "qq_official" } });
-    fireEvent.change(screen.getByLabelText("Subject namespace"), { target: { value: "qq:main" } });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
     expect(mocks.create).not.toHaveBeenCalled();
@@ -130,10 +133,28 @@ describe("SystemKeysSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
     await waitFor(() => expect(mocks.create).toHaveBeenCalledWith("QQ Bot", "bot", {
-      platform: "qq_official",
+      platform: "qq",
       subjectNamespace: "qq:main",
       allowedGroupIds: ["123456", "234567", "345678"],
     }));
     expect(screen.getByText("123456, 234567, 345678")).toBeInTheDocument();
+  });
+
+  it("maps the Telegram robot type to its own key scope", async () => {
+    render(<SystemKeysSection {...props} />);
+
+    await screen.findByText("Existing");
+    fireEvent.click(screen.getByRole("button", { name: "Create system key" }));
+    fireEvent.click(screen.getByLabelText("Bot integration"));
+    fireEvent.change(screen.getByLabelText("Robot type"), { target: { value: "telegram" } });
+    fireEvent.change(screen.getByLabelText("System key name"), { target: { value: "TG Bot" } });
+    fireEvent.change(screen.getByLabelText("Allowed group IDs"), { target: { value: "-1001234567890" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith("TG Bot", "bot", {
+      platform: "telegram",
+      subjectNamespace: "telegram:main",
+      allowedGroupIds: ["-1001234567890"],
+    }));
   });
 });

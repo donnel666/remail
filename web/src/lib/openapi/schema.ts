@@ -1106,8 +1106,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Diagnose why a bound user's project email has not delivered a code
-         * @description Resolves the order from the authenticated bot identity, delivery email and project. It first reuses the normal local pickup cache and, when no matching mail is cached, performs one fetch through the resource's existing Domain, Gmail, Microsoft, or iCloud pickup path. It returns only safe reason text and never returns an order number, message, mailbox credential or verification code.
+         * Safely diagnose why the current bound user has not received a code
+         * @description Uses the current bound identity and delivery email to locate only that user's recent order, derive the public project id/name, and return a safe order assessment. The email cannot widen the query to another user. The response never includes the email, order number, message content, credentials or verification codes; AstrBot may combine the safe result with the user's own problem description.
          */
         post: operations["postBotCodeDiagnosis"];
         delete?: never;
@@ -7160,11 +7160,14 @@ export interface components {
              * @enum {string}
              */
             purpose: "icloud_forwarding" | "smtp_submission" | "bot";
-            /** @description Required only for purpose=bot; normalized platform scope such as qq or telegram. It does not tell ReMail how the bot resolved the trusted platform identity. */
-            platform?: string;
+            /**
+             * @description Required only for purpose=bot. This immutable Key type is either qq or telegram and must match the trusted X-Bot-Channel on every Bot request.
+             * @enum {string}
+             */
+            platform?: "qq" | "telegram";
             /** @description Required only for purpose=bot; stable identity namespace such as qq:appid or telegram:botid. Key rotation reuses this value. */
             subjectNamespace?: string;
-            /** @description Required only for purpose=bot. Trusted platform group ids allowed to use this integration; QQ values are normalized positive decimal group numbers. */
+            /** @description Required only for purpose=bot. Trusted platform group ids allowed to use this integration; QQ values are normalized positive decimal group numbers and Telegram values are normalized non-zero decimal Chat IDs. */
             allowedGroupIds?: string[];
         };
         AdminSystemKey: {
@@ -7205,7 +7208,6 @@ export interface components {
             reason: string;
             /** @description Masked remail account display; never a complete email address. */
             accountDisplay?: string;
-            requestId: string;
         };
         BotLeaderboardItem: {
             rank: number;
@@ -7240,17 +7242,83 @@ export interface components {
             settledAt: string | null;
             items: components["schemas"]["BotLeaderboardRewardItem"][];
         };
+        BotProjectListResponse: {
+            items: components["schemas"]["BotProjectItem"][];
+            total: number;
+            offset: number;
+            limit: number;
+            facets?: components["schemas"]["ProjectListFacets"];
+        };
+        BotProjectDetailResponse: {
+            project: components["schemas"]["BotProjectItem"];
+            products: components["schemas"]["BotProjectProduct"][];
+        };
+        BotProjectItem: {
+            id: number;
+            name: string;
+            targetPlatform: string;
+            logoUrl?: string;
+            description?: string;
+            /** @enum {string} */
+            status: "listed";
+            /** @enum {string} */
+            accessType: "public" | "private";
+            looseMatch: boolean;
+            productCount: number;
+            mailRuleCount: number;
+            supportsDotAlias: boolean;
+            supportsPlusAlias: boolean;
+            products?: components["schemas"]["ProjectProductSummary"][];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        BotProjectProduct: {
+            projectId: number;
+            /** @enum {string} */
+            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud";
+            /** @enum {string} */
+            status: "enabled" | "disabled";
+            codeEnabled: boolean;
+            purchaseEnabled: boolean;
+            codePrice: components["schemas"]["NonNegativeLedgerAmount"];
+            purchasePrice: components["schemas"]["NonNegativeLedgerAmount"];
+            effectiveCodePrice?: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            effectivePurchasePrice?: components["schemas"]["NonNegativeLedgerAmountResponse"];
+            priceMultiplier: components["schemas"]["UserGroupDiscountRatio"];
+            codeWindowMinutes: number;
+            activationWindowMinutes: number;
+            warrantyMinutes: number;
+            /** Format: int64 */
+            totalAvailable?: number;
+            /** Format: int64 */
+            publicAvailable?: number;
+            /** Format: int64 */
+            codeAvailable?: number;
+            /** Format: int64 */
+            codePublicAvailable?: number;
+            /** Format: int64 */
+            purchaseAvailable?: number;
+            /** Format: int64 */
+            purchasePublicAvailable?: number;
+            suffixes?: components["schemas"]["ProductSuffixInventory"][];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         BotCodeDiagnosisRequest: {
             /** Format: email */
             email: string;
-            projectId: number;
         };
         BotDiagnosisResponse: {
-            /** @enum {string} */
-            result: "binding_required" | "invalid_request" | "order_not_found" | "project_mismatch" | "pickup_not_requested" | "resource_abnormal_refunded" | "pickup_grace_period" | "cause_not_confirmed" | "manual_support_required";
-            reason: string;
-            action: string;
-            requestId: string;
+            /** @description User-facing diagnosis only; never includes email, order number, message content, credentials, codes, internal status names or implementation steps. */
+            message: string;
+            /** @description Public project id resolved from the current user's matching order; omitted when no order was found. */
+            projectId?: number;
+            /** @description Public project name resolved from the current user's matching order; omitted when no order was found. */
+            projectName?: string;
         };
         AdminUpdateUserRequest: {
             enabled?: boolean;
@@ -10245,11 +10313,13 @@ export interface components {
         /** @description Last ticket id from the previous page. */
         AfterIdQuery: number;
         LimitQuery: number;
-        /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+        /** @description Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument. */
+        BotChannel: "qq" | "telegram";
+        /** @description Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument. */
         BotSubject: string;
-        /** @description Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only. */
+        /** @description Private scenes may use the current bound account and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group; binding remains private-only, while diagnosis is available for the current sender's own bound account. */
         BotScene: "private" | "group";
-        /** @description Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+        /** @description Trusted platform group id supplied by the bot adapter. QQ values are positive decimal group numbers and Telegram values are non-zero decimal Chat IDs (normally negative). Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
         BotGroup: string;
         /** @description Credential and account-specific operations are private-chat only; X-Bot-Group must be omitted. */
         BotPrivateScene: "private";
@@ -12970,7 +13040,10 @@ export interface operations {
     connectBotWebSocket: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument. */
+                "X-Bot-Channel": components["parameters"]["BotChannel"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -12992,11 +13065,13 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                /** @description Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument. */
+                "X-Bot-Channel": components["parameters"]["BotChannel"];
+                /** @description Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument. */
                 "X-Bot-Subject": components["parameters"]["BotSubject"];
-                /** @description Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only. */
+                /** @description Private scenes may use the current bound account and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group; binding remains private-only, while diagnosis is available for the current sender's own bound account. */
                 "X-Bot-Scene": components["parameters"]["BotScene"];
-                /** @description Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+                /** @description Trusted platform group id supplied by the bot adapter. QQ values are positive decimal group numbers and Telegram values are non-zero decimal Chat IDs (normally negative). Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
                 "X-Bot-Group"?: components["parameters"]["BotGroup"];
             };
             path?: never;
@@ -13022,7 +13097,9 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                /** @description Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument. */
+                "X-Bot-Channel": components["parameters"]["BotChannel"];
+                /** @description Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument. */
                 "X-Bot-Subject": components["parameters"]["BotSubject"];
                 /** @description Credential and account-specific operations are private-chat only; X-Bot-Group must be omitted. */
                 "X-Bot-Scene": components["parameters"]["BotPrivateScene"];
@@ -13089,7 +13166,9 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                /** @description Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument. */
+                "X-Bot-Channel": components["parameters"]["BotChannel"];
+                /** @description Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument. */
                 "X-Bot-Subject": components["parameters"]["BotSubject"];
                 /** @description Credential and account-specific operations are private-chat only; X-Bot-Group must be omitted. */
                 "X-Bot-Scene": components["parameters"]["BotPrivateScene"];
@@ -13125,7 +13204,9 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                /** @description Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument. */
+                "X-Bot-Channel": components["parameters"]["BotChannel"];
+                /** @description Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument. */
                 "X-Bot-Subject": components["parameters"]["BotSubject"];
                 /** @description Credential and account-specific operations are private-chat only; X-Bot-Group must be omitted. */
                 "X-Bot-Scene": components["parameters"]["BotPrivateScene"];
@@ -13173,11 +13254,13 @@ export interface operations {
                 limit?: number;
             };
             header: {
-                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                /** @description Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument. */
+                "X-Bot-Channel": components["parameters"]["BotChannel"];
+                /** @description Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument. */
                 "X-Bot-Subject": components["parameters"]["BotSubject"];
-                /** @description Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only. */
+                /** @description Private scenes may use the current bound account and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group; binding remains private-only, while diagnosis is available for the current sender's own bound account. */
                 "X-Bot-Scene": components["parameters"]["BotScene"];
-                /** @description Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+                /** @description Trusted platform group id supplied by the bot adapter. QQ values are positive decimal group numbers and Telegram values are non-zero decimal Chat IDs (normally negative). Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
                 "X-Bot-Group"?: components["parameters"]["BotGroup"];
             };
             path?: never;
@@ -13191,7 +13274,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProjectListResponse"];
+                    "application/json": components["schemas"]["BotProjectListResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -13204,11 +13287,13 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                /** @description Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument. */
+                "X-Bot-Channel": components["parameters"]["BotChannel"];
+                /** @description Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument. */
                 "X-Bot-Subject": components["parameters"]["BotSubject"];
-                /** @description Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only. */
+                /** @description Private scenes may use the current bound account and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group; binding remains private-only, while diagnosis is available for the current sender's own bound account. */
                 "X-Bot-Scene": components["parameters"]["BotScene"];
-                /** @description Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+                /** @description Trusted platform group id supplied by the bot adapter. QQ values are positive decimal group numbers and Telegram values are non-zero decimal Chat IDs (normally negative). Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
                 "X-Bot-Group"?: components["parameters"]["BotGroup"];
             };
             path: {
@@ -13224,7 +13309,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProjectDetailResponse"];
+                    "application/json": components["schemas"]["BotProjectDetailResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -13238,11 +13323,13 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                /** @description Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument. */
+                "X-Bot-Channel": components["parameters"]["BotChannel"];
+                /** @description Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument. */
                 "X-Bot-Subject": components["parameters"]["BotSubject"];
-                /** @description Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only. */
+                /** @description Private scenes may use the current bound account and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group; binding remains private-only, while diagnosis is available for the current sender's own bound account. */
                 "X-Bot-Scene": components["parameters"]["BotScene"];
-                /** @description Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+                /** @description Trusted platform group id supplied by the bot adapter. QQ values are positive decimal group numbers and Telegram values are non-zero decimal Chat IDs (normally negative). Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
                 "X-Bot-Group"?: components["parameters"]["BotGroup"];
             };
             path: {
@@ -13275,11 +13362,13 @@ export interface operations {
                 limit?: number;
             };
             header: {
-                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                /** @description Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument. */
+                "X-Bot-Channel": components["parameters"]["BotChannel"];
+                /** @description Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument. */
                 "X-Bot-Subject": components["parameters"]["BotSubject"];
-                /** @description Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only. */
+                /** @description Private scenes may use the current bound account and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group; binding remains private-only, while diagnosis is available for the current sender's own bound account. */
                 "X-Bot-Scene": components["parameters"]["BotScene"];
-                /** @description Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+                /** @description Trusted platform group id supplied by the bot adapter. QQ values are positive decimal group numbers and Telegram values are non-zero decimal Chat IDs (normally negative). Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
                 "X-Bot-Group"?: components["parameters"]["BotGroup"];
             };
             path?: never;
@@ -13308,11 +13397,13 @@ export interface operations {
                 limit?: number;
             };
             header: {
-                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                /** @description Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument. */
+                "X-Bot-Channel": components["parameters"]["BotChannel"];
+                /** @description Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument. */
                 "X-Bot-Subject": components["parameters"]["BotSubject"];
-                /** @description Private scenes may use bound-account projections and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group and always use public projections; account binding and diagnosis remain private-only. */
+                /** @description Private scenes may use the current bound account and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group; binding remains private-only, while diagnosis is available for the current sender's own bound account. */
                 "X-Bot-Scene": components["parameters"]["BotScene"];
-                /** @description Trusted platform group id supplied by the bot adapter. Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+                /** @description Trusted platform group id supplied by the bot adapter. QQ values are positive decimal group numbers and Telegram values are non-zero decimal Chat IDs (normally negative). Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
                 "X-Bot-Group"?: components["parameters"]["BotGroup"];
             };
             path?: never;
@@ -13339,10 +13430,14 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description Sender identity supplied only by the authenticated bot adapter. For a qq namespace this must be the positive decimal QQ number resolved from the event, is stored verbatim as third_party_identities.provider_user_id, and is never accepted from a request body or LLM argument. */
+                /** @description Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument. */
+                "X-Bot-Channel": components["parameters"]["BotChannel"];
+                /** @description Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument. */
                 "X-Bot-Subject": components["parameters"]["BotSubject"];
-                /** @description Credential and account-specific operations are private-chat only; X-Bot-Group must be omitted. */
-                "X-Bot-Scene": components["parameters"]["BotPrivateScene"];
+                /** @description Private scenes may use the current bound account and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group; binding remains private-only, while diagnosis is available for the current sender's own bound account. */
+                "X-Bot-Scene": components["parameters"]["BotScene"];
+                /** @description Trusted platform group id supplied by the bot adapter. QQ values are positive decimal group numbers and Telegram values are non-zero decimal Chat IDs (normally negative). Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+                "X-Bot-Group"?: components["parameters"]["BotGroup"];
             };
             path?: never;
             cookie?: never;
@@ -13353,7 +13448,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Safe diagnosis result, reason and recommended action */
+            /** @description Privacy-safe user-facing diagnosis message */
             200: {
                 headers: {
                     [name: string]: unknown;

@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -19,6 +21,27 @@ type botRouterAuthenticator func(context.Context, string) (*settingsdomain.Syste
 
 func (f botRouterAuthenticator) AuthenticateBotSystemKey(ctx context.Context, key string) (*settingsdomain.SystemKey, error) {
 	return f(ctx, key)
+}
+
+func TestBotProjectOpenAPIModelsExcludeInternalFields(t *testing.T) {
+	forbidden := map[string]bool{
+		"owner": true, "applicantUserId": true, "reviewReason": true,
+		"codeSupplierPrice": true, "purchaseSupplierPrice": true,
+		"mainWeight": true, "dotWeight": true, "plusWeight": true,
+		"mailRules": true, "accesses": true, "microsoftSuffixBlacklist": true,
+	}
+	for _, model := range []any{BotProjectItem{}, BotProjectProduct{}, BotProjectDetailResponse{}} {
+		typeOf := reflect.TypeOf(model)
+		for index := 0; index < typeOf.NumField(); index++ {
+			name := typeOf.Field(index).Tag.Get("json")
+			if comma := strings.IndexByte(name, ','); comma >= 0 {
+				name = name[:comma]
+			}
+			if forbidden[name] {
+				t.Fatalf("%s exposes internal field %q", typeOf.Name(), name)
+			}
+		}
+	}
 }
 
 func TestBotRoutesRequireBotSystemKeyAndMatchContract(t *testing.T) {
@@ -61,13 +84,64 @@ func TestBotRoutesRequireBotSystemKeyAndMatchContract(t *testing.T) {
 	}
 }
 
+func TestEveryBotBusinessRouteRequiresSubjectAndGroupContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	redisServer := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	router := gin.New()
+	auth := botRouterAuthenticator(func(context.Context, string) (*settingsdomain.SystemKey, error) {
+		return &settingsdomain.SystemKey{
+			ID: 9, Purpose: settingsdomain.SystemKeyPurposeBot,
+			Platform: "qq", SubjectNamespace: "qq:main", AllowedGroupIDs: []string{"10001"},
+		}, nil
+	})
+	registerBotRoutes(router.Group("/v1"), router, auth, nil, nil, nil, nil, nil, rdb)
+	routes := []struct{ method, path string }{
+		{http.MethodGet, "/v1/bot/context"},
+		{http.MethodPost, "/v1/bot/bindings"},
+		{http.MethodGet, "/v1/bot/binding"},
+		{http.MethodDelete, "/v1/bot/binding"},
+		{http.MethodGet, "/v1/bot/projects"},
+		{http.MethodGet, "/v1/bot/projects/1"},
+		{http.MethodGet, "/v1/bot/projects/1/inventory"},
+		{http.MethodGet, "/v1/bot/rankings/orders"},
+		{http.MethodGet, "/v1/bot/rankings/rewards/latest"},
+		{http.MethodPost, "/v1/bot/diagnoses/code"},
+	}
+	for _, route := range routes {
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			missingSubject := httptest.NewRequest(route.method, route.path, nil)
+			missingSubject.Header.Set(middleware.SystemKeyHeaderName, "sk_test")
+			missingSubject.Header.Set(middleware.BotChannelHeaderName, "qq")
+			missingSubject.Header.Set(middleware.BotSceneHeaderName, middleware.BotScenePrivate)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, missingSubject)
+			if response.Code != http.StatusUnauthorized {
+				t.Fatalf("missing subject = %d %s", response.Code, response.Body.String())
+			}
+
+			missingGroup := httptest.NewRequest(route.method, route.path, nil)
+			missingGroup.Header.Set(middleware.SystemKeyHeaderName, "sk_test")
+			missingGroup.Header.Set(middleware.BotChannelHeaderName, "qq")
+			missingGroup.Header.Set(middleware.BotSubjectHeaderName, "123456789")
+			missingGroup.Header.Set(middleware.BotSceneHeaderName, middleware.BotSceneGroup)
+			response = httptest.NewRecorder()
+			router.ServeHTTP(response, missingGroup)
+			if response.Code != http.StatusUnauthorized {
+				t.Fatalf("missing group = %d %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestBotUserResolverTreatsGroupAsPublicWithoutReadingBinding(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	auth := botRouterAuthenticator(func(context.Context, string) (*settingsdomain.SystemKey, error) {
 		return &settingsdomain.SystemKey{
 			ID: 9, Purpose: settingsdomain.SystemKeyPurposeBot,
-			Platform: "aiocqhttp", SubjectNamespace: "qq:main", AllowedGroupIDs: []string{"10001"},
+			Platform: "qq", SubjectNamespace: "qq:main", AllowedGroupIDs: []string{"10001"},
 		}, nil
 	})
 	router.GET("/resolve", middleware.BotSystemKeyRequired(auth), middleware.BotIdentityRequired(), func(c *gin.Context) {
@@ -77,6 +151,7 @@ func TestBotUserResolverTreatsGroupAsPublicWithoutReadingBinding(t *testing.T) {
 
 	request := httptest.NewRequest(http.MethodGet, "/resolve", nil)
 	request.Header.Set(middleware.SystemKeyHeaderName, "sk_test")
+	request.Header.Set(middleware.BotChannelHeaderName, "qq")
 	request.Header.Set(middleware.BotSubjectHeaderName, "123456789")
 	request.Header.Set(middleware.BotSceneHeaderName, middleware.BotSceneGroup)
 	request.Header.Set(middleware.BotGroupHeaderName, "10001")
@@ -98,14 +173,25 @@ func TestBotContextReturnsOnlyAuthorizationAndUsesSubjectLimit(t *testing.T) {
 	auth := botRouterAuthenticator(func(context.Context, string) (*settingsdomain.SystemKey, error) {
 		return &settingsdomain.SystemKey{
 			ID: 9, Purpose: settingsdomain.SystemKeyPurposeBot,
-			Platform: "aiocqhttp", SubjectNamespace: "qq:main", AllowedGroupIDs: []string{"10001"},
+			Platform: "qq", SubjectNamespace: "qq:main", AllowedGroupIDs: []string{"10001"},
 		}, nil
 	})
 	registerBotRoutes(router.Group("/v1"), router, auth, nil, nil, nil, nil, nil, rdb)
+	wrongChannel := httptest.NewRequest(http.MethodGet, "/v1/bot/context", nil)
+	wrongChannel.Header.Set(middleware.SystemKeyHeaderName, "sk_test")
+	wrongChannel.Header.Set(middleware.BotChannelHeaderName, "telegram")
+	wrongChannel.Header.Set(middleware.BotSubjectHeaderName, "123456789")
+	wrongChannel.Header.Set(middleware.BotSceneHeaderName, middleware.BotScenePrivate)
+	wrongChannelResponse := httptest.NewRecorder()
+	router.ServeHTTP(wrongChannelResponse, wrongChannel)
+	if wrongChannelResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong channel response = %d %s", wrongChannelResponse.Code, wrongChannelResponse.Body.String())
+	}
 
 	for attempt := 1; attempt <= botSubjectReadsPerMinute+1; attempt++ {
 		request := httptest.NewRequest(http.MethodGet, "/v1/bot/context", nil)
 		request.Header.Set(middleware.SystemKeyHeaderName, "sk_test")
+		request.Header.Set(middleware.BotChannelHeaderName, "qq")
 		request.Header.Set(middleware.BotSubjectHeaderName, "123456789")
 		request.Header.Set(middleware.BotSceneHeaderName, middleware.BotScenePrivate)
 		response := httptest.NewRecorder()
