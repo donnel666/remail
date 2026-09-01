@@ -331,7 +331,7 @@ func (uc *RechargeUseCase) Create(ctx context.Context, request CreateRechargeReq
 	if !domain.IsPendingRechargeStatus(created.Status) {
 		return nil, domain.ErrRechargeExpired
 	}
-	if !uc.now().Before(created.CreatedAt.Add(domain.RechargeReconciliationWindow)) {
+	if !uc.now().Before(created.CreatedAt.Add(domain.RechargeReconciliationWindow())) {
 		return nil, domain.ErrRechargeExpired
 	}
 	if created.GatewayConfigHash != rechargeGatewayConfigHash(config) {
@@ -346,7 +346,7 @@ func (uc *RechargeUseCase) Create(ctx context.Context, request CreateRechargeReq
 	return &CreateRechargeResult{
 		Recharge:  *created,
 		PayURL:    payURL,
-		ExpiresAt: created.CreatedAt.Add(domain.RechargeReconciliationWindow),
+		ExpiresAt: created.CreatedAt.Add(domain.RechargeReconciliationWindow()),
 	}, nil
 }
 
@@ -389,7 +389,7 @@ func (uc *RechargeUseCase) Dispatch(ctx context.Context) error {
 		return domain.ErrRechargeQueueUnavailable
 	}
 	now := uc.now()
-	if _, err := uc.repo.ExpirePendingRecharges(ctx, now.Add(-domain.RechargeReconciliationWindow), now); err != nil {
+	if _, err := uc.repo.ExpirePendingRecharges(ctx, now.Add(-domain.RechargeReconciliationWindow()), now); err != nil {
 		return err
 	}
 	recharges, err := uc.repo.ListDueRecharges(ctx, now, defaultRechargeDispatchLimit)
@@ -421,7 +421,7 @@ func (uc *RechargeUseCase) Reconcile(ctx context.Context, task RechargeTask) err
 	if !claimed {
 		return nil
 	}
-	deadline := recharge.CreatedAt.Add(domain.RechargeReconciliationWindow)
+	deadline := recharge.CreatedAt.Add(domain.RechargeReconciliationWindow())
 	if !now.Before(deadline) {
 		return uc.repo.FailRecharge(ctx, recharge.RechargeNo, generation, "query_timeout", now)
 	}

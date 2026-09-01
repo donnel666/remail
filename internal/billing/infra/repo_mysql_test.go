@@ -1378,7 +1378,7 @@ func TestBillingRepoRechargeCallbackAndSchedulingMySQL(t *testing.T) {
 		{RechargeNo: "RC-FAST-DUE", Status: string(domain.RechargeStatusCallback), QueryAttempts: 9, LastQueriedAt: &lastFastDue, CreatedAt: now.Add(-31 * time.Second)},
 		{RechargeNo: "RC-SLOW-WAIT", Status: string(domain.RechargeStatusCallback), QueryAttempts: 10, LastQueriedAt: &lastSlowWait, CreatedAt: now.Add(-90 * time.Second)},
 		{RechargeNo: "RC-SLOW-DUE", Status: string(domain.RechargeStatusCallback), QueryAttempts: 10, LastQueriedAt: &lastSlowDue, CreatedAt: now.Add(-91 * time.Second)},
-		{RechargeNo: "RC-EXPIRED", Status: string(domain.RechargeStatusPaying), CreatedAt: now.Add(-domain.RechargeReconciliationWindow)},
+		{RechargeNo: "RC-EXPIRED", Status: string(domain.RechargeStatusPaying), CreatedAt: now.Add(-10 * time.Minute)},
 	}
 	for index := range models {
 		models[index].UserID = createBillingTestUser(t, db, fmt.Sprintf("recharge-schedule-%d@example.com", index))
@@ -1401,7 +1401,7 @@ func TestBillingRepoRechargeCallbackAndSchedulingMySQL(t *testing.T) {
 	}
 	require.ElementsMatch(t, []string{"RC-PAYING-DUE", "RC-EPUSDT-DUE", "RC-CALLBACK-FIRST", "RC-FAST-DUE", "RC-SLOW-DUE"}, dueNos)
 
-	expiredCount, err := repo.ExpirePendingRecharges(ctx, now.Add(-domain.RechargeReconciliationWindow), now)
+	expiredCount, err := repo.ExpirePendingRecharges(ctx, now.Add(-10*time.Minute), now)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, expiredCount)
 	var expiredModel RechargeModel

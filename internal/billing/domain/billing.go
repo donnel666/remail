@@ -5,6 +5,7 @@ import (
 	"time"
 
 	moneyfmt "github.com/donnel666/remail/internal/money"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/shopspring/decimal"
 )
 
@@ -134,7 +135,6 @@ type Recharge struct {
 }
 
 const (
-	RechargeReconciliationWindow  = 5 * time.Minute
 	RechargeCallbackFallbackDelay = time.Minute
 	// EPUSDT deployments may not have a provider-managed callback URL. Start
 	// polling those orders shortly after creation while keeping the EPay fallback
@@ -145,6 +145,10 @@ const (
 	RechargeFastQueryLimit      = 10
 	RechargeQueryLease          = 40 * time.Second
 )
+
+func RechargeReconciliationWindow() time.Duration {
+	return runtimeconfig.RechargeTimeout()
+}
 
 type CardKey struct {
 	Key             string

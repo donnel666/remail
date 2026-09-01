@@ -598,6 +598,28 @@ export default function Wallet() {
     }
   };
 
+  const handleRechargeClick = (requestedMethod: RechargePaymentMethod) => {
+    setPaymentMethod(requestedMethod);
+    if (requestedMethod !== EPUSDT_PAYMENT_METHOD) {
+      void handleRecharge(requestedMethod);
+      return;
+    }
+    Modal.confirm({
+      cancelText: t("Cancel"),
+      content: (
+        <ol className="list-decimal space-y-2 pl-5 text-sm leading-6">
+          <li>{t("Pay the exact USDT amount shown on the next payment page, including its unique decimal amount.")}</li>
+          <li>{t("Pay withdrawal fees separately. Make sure the amount received exactly matches the payment page and never deduct fees from the payment amount.")}</li>
+          <li>{t("Only use USDT on the TRON (TRC20) network and verify the receiving address before sending.")}</li>
+          <li>{t("Incorrect amount, network, or address may prevent automatic crediting. Any resulting loss is the payer's responsibility.")}</li>
+        </ol>
+      ),
+      okText: t("I understand, continue"),
+      onOk: () => handleRecharge(requestedMethod),
+      title: t("USDT payment notice"),
+    });
+  };
+
   const handleCopyReferral = async () => {
     if (!referralLink) return;
     try {
@@ -902,10 +924,7 @@ export default function Wallet() {
                               : <img alt="" className="size-[18px]" src={tronIcon} />}
                             key={method}
                             loading={recharging && paymentMethod === method}
-                            onClick={() => {
-                              setPaymentMethod(method);
-                              void handleRecharge(method);
-                            }}
+                            onClick={() => handleRechargeClick(method)}
                             style={{ backgroundColor: "#fff", borderColor: "#d9d9d9", color: "#1f2329" }}
                             theme="outline"
                             type="tertiary"

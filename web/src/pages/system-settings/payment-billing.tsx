@@ -10,7 +10,7 @@ import { applyEPayURLDefaults, applyEpusdtURLDefaults, changeEPayVersion, EPAY_G
 import { SettingsAccessBoundary, SettingsCardHeader, SettingsFormGrid, SettingsNumberField, SettingsSection, SettingsSelectField, SettingsTextField, SettingsTextareaField } from "./settings-layout";
 import { parseTopupTiers, serializeTopupTiers, type TopupTier } from "./topup-tiers";
 
-const D: Record<string, unknown> = { epay_enabled: false, epay_version: "v1", epay_gateway_url: "", epay_merchant_id: "", epay_merchant_key: "", epay_private_key: "", epay_platform_public_key: "", epay_notify_url: "", epay_return_url: "", epusdt_enabled: false, epusdt_gateway_url: "", epusdt_pid: "", epusdt_points_per_usdt: 0, epusdt_minimum_payment_amount: 10, epusdt_api_key: "", epusdt_api_secret: "", epusdt_token: "USDT", epusdt_network: "tron", epusdt_notify_url: "", epusdt_return_url: "", epusdt_allowed_hosts: "", points_per_yuan: 1000, min_topup_amount: 10000, topup_fee_rate: 0, topup_fee_cap: 0, topup_amount_presets: "[10000, 20000, 50000, 100000, 200000, 500000]", topup_amount_bonus: "{}", max_pending_recharge_orders: 10, redemption_code_purchase_url: "", async_check_request_timeout_seconds: 5 };
+const D: Record<string, unknown> = { epay_enabled: false, epay_version: "v1", epay_gateway_url: "", epay_merchant_id: "", epay_merchant_key: "", epay_private_key: "", epay_platform_public_key: "", epay_notify_url: "", epay_return_url: "", epusdt_enabled: false, epusdt_gateway_url: "", epusdt_pid: "", epusdt_points_per_usdt: 0, epusdt_minimum_payment_amount: 10, epusdt_api_key: "", epusdt_api_secret: "", epusdt_token: "USDT", epusdt_network: "tron", epusdt_notify_url: "", epusdt_return_url: "", epusdt_allowed_hosts: "", points_per_yuan: 1000, min_topup_amount: 10000, topup_fee_rate: 0, topup_fee_cap: 0, topup_amount_presets: "[10000, 20000, 50000, 100000, 200000, 500000]", topup_amount_bonus: "{}", max_pending_recharge_orders: 10, redemption_code_purchase_url: "", recharge_timeout_minutes: 10, async_check_request_timeout_seconds: 5 };
 const WRITE_ONLY = new Set<string>([...EPAY_WRITE_ONLY_KEYS, ...EPUSDT_WRITE_ONLY_KEYS]);
 
 export default function PaymentSection({ options, onBulkSave, canSensitive }: SectionProps) {
@@ -131,8 +131,9 @@ export default function PaymentSection({ options, onBulkSave, canSensitive }: Se
       <Button icon={<Save size={14} />} loading={savingCard === "topup"} onClick={() => void saveTopup().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>
     </SettingsSection>
 
-    <SettingsSection title={<SettingsCardHeader icon={<RefreshCw size={16} />} title={t("异步查账")} description={t("回调后前 10 次每 5 秒查账，随后每 30 秒；EPUSDT 无回调 10 秒启动，EPay/历史订单无回调 60 秒启动，5 分钟截止")} />}>
+    <SettingsSection title={<SettingsCardHeader icon={<RefreshCw size={16} />} title={t("异步查账")} description={t("回调后前 10 次每 5 秒查账，随后每 30 秒；所有支付方式按统一充值超时时间截止")} />}>
       <SettingsFormGrid className="mt-4">
+        <SettingsNumberField label={t("充值订单统一超时（分钟）")} description={t("支付宝和 USDT 共用；默认 10 分钟。EPUSDT 的 order_expiration_time 必须保持相同")} value={number(form.recharge_timeout_minutes)} onChange={(value) => update("recharge_timeout_minutes", value)} min={1} max={1440} precision={0} />
         <SettingsNumberField label={t("单次查账请求超时（秒）")} value={number(form.async_check_request_timeout_seconds)} onChange={(value) => update("async_check_request_timeout_seconds", value)} min={1} max={30} precision={0} />
       </SettingsFormGrid>
       <Button icon={<Save size={14} />} loading={savingCard === "check"} onClick={() => void save("check", [...RECHARGE_CHECK_KEYS]).catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>

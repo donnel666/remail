@@ -863,7 +863,7 @@ func rechargeResponse(recharge domain.Recharge) RechargeItemResponse {
 		PaymentMethod: recharge.PaymentMethod, CreditedPoints: recharge.RechargeQuota,
 		Status:         string(recharge.Status),
 		GatewayTradeNo: recharge.GatewayTradeNo, FailureReason: recharge.FailureReason,
-		QueryAttempts: recharge.QueryAttempts, ExpiresAt: recharge.CreatedAt.Add(domain.RechargeReconciliationWindow),
+		QueryAttempts: recharge.QueryAttempts, ExpiresAt: recharge.CreatedAt.Add(domain.RechargeReconciliationWindow()),
 		PaidAt: recharge.PaidAt, ReconciledAt: recharge.ReconciledAt,
 		CreatedAt: recharge.CreatedAt, UpdatedAt: recharge.UpdatedAt,
 	}

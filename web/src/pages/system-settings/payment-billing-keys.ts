@@ -41,6 +41,7 @@ export const TOPUP_KEYS = [
 ] as const;
 
 export const RECHARGE_CHECK_KEYS = [
+  "recharge_timeout_minutes",
   "async_check_request_timeout_seconds",
 ] as const;
 

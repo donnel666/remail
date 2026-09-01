@@ -36,7 +36,7 @@ func (queue *RechargeQueue) Enqueue(ctx context.Context, task billingapp.Recharg
 		ctx,
 		asynq.NewTask(TypeRechargeReconcile, payload),
 		asynq.Queue(platform.QueuePaymentReconcile),
-		asynq.Unique(domain.RechargeReconciliationWindow+domain.RechargeQueryLease),
+		asynq.Unique(domain.RechargeReconciliationWindow()+domain.RechargeQueryLease),
 		asynq.MaxRetry(5),
 		asynq.Timeout(domain.RechargeQueryLease),
 		asynq.Retention(0),

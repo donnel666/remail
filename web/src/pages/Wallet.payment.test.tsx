@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getWalletReferrals: vi.fn(),
   listRecharges: vi.fn(),
   listWalletTransactions: vi.fn(),
+  modalConfirm: vi.fn(),
   quoteRecharge: vi.fn(),
   refreshCurrentUser: vi.fn(),
   toastError: vi.fn(),
@@ -81,7 +82,10 @@ vi.mock("@douyinfe/semi-ui", async () => {
   Form.Input = ({ onChange, placeholder, prefix, suffix }: any) => <div>{prefix}<input aria-label={placeholder} onChange={(event) => onChange?.(event.target.value)} />{suffix}</div>;
   Form.Slot = Box;
   const Input = ({ onChange, placeholder, value }: any) => <input aria-label={placeholder} onChange={(event) => onChange?.(event.target.value)} value={value} />;
-  const Modal = ({ children, footer, onCancel, title, visible }: any) => visible ? <div aria-label={title} role="dialog"><button aria-label={`close-${title}`} onClick={onCancel}>close</button>{children}{footer}</div> : null;
+  const Modal = Object.assign(
+    ({ children, footer, onCancel, title, visible }: any) => visible ? <div aria-label={title} role="dialog"><button aria-label={`close-${title}`} onClick={onCancel}>close</button>{children}{footer}</div> : null,
+    { confirm: mocks.modalConfirm },
+  );
   const Table = ({ columns = [], dataSource = [], pagination }: any) => {
     const currentPage = pagination?.currentPage ?? 1;
     const pageSize = pagination?.pageSize ?? dataSource.length;
@@ -119,9 +123,19 @@ const payingRecharge = {
   creditedPoints: "1000.00",
   status: "paying",
   queryAttempts: 0,
-  expiresAt: "2026-07-26T00:05:00Z",
+  expiresAt: "2026-07-26T00:10:00Z",
   createdAt: "2026-07-26T00:00:00Z",
   updatedAt: "2026-07-26T00:00:00Z",
+};
+
+const epusdtRechargeConfig = {
+  enabled: true,
+  paymentMethods: ["alipay", "epusdt_usdt_tron"],
+  minPoints: "1000.00",
+  feeRate: "0.6",
+  feeCapPoints: "0",
+  redemptionCodePurchaseUrl: "",
+  tiers: [{ points: "1000.00", bonusPoints: "0.00", feePoints: "6.00", creditedPoints: "1000.00" }],
 };
 
 function redemptionTransaction(id: number, transactionNo: string) {
@@ -157,6 +171,7 @@ describe("wallet payment modal", () => {
     mocks.quoteRecharge.mockResolvedValue({ points: "1000.00", bonusPoints: "0.00", feePoints: "6.00", creditedPoints: "1000.00" });
     mocks.listRecharges.mockResolvedValue({ items: [], total: 0, offset: 0, limit: 100 });
     mocks.listWalletTransactions.mockResolvedValue({ items: [], hasNext: false, limit: 100 });
+    mocks.modalConfirm.mockImplementation(({ onOk }) => onOk?.());
     mocks.getRecharge.mockResolvedValue(payingRecharge);
     mocks.refreshCurrentUser.mockResolvedValue(null);
   });
@@ -168,7 +183,7 @@ describe("wallet payment modal", () => {
   });
 
   it("lets the return page check while open, then confirms after it closes", async () => {
-    mocks.createRecharge.mockResolvedValue({ recharge: payingRecharge, payUrl: "https://pay.example.com/qr", expiresAt: "2026-07-26T00:05:00Z" });
+    mocks.createRecharge.mockResolvedValue({ recharge: payingRecharge, payUrl: "https://pay.example.com/qr", expiresAt: "2026-07-26T00:10:00Z" });
     render(<Wallet />);
 
     const payButton = await screen.findByRole("button", { name: "Alipay" });
@@ -208,7 +223,7 @@ describe("wallet payment modal", () => {
   });
 
   it("continues polling after opening payment in a new window", async () => {
-    mocks.createRecharge.mockResolvedValue({ recharge: payingRecharge, payUrl: "https://pay.example.com/qr", expiresAt: "2026-07-26T00:05:00Z" });
+    mocks.createRecharge.mockResolvedValue({ recharge: payingRecharge, payUrl: "https://pay.example.com/qr", expiresAt: "2026-07-26T00:10:00Z" });
     const openWindow = vi.spyOn(window, "open").mockReturnValue({} as Window);
     render(<Wallet />);
 
@@ -224,20 +239,31 @@ describe("wallet payment modal", () => {
     await waitFor(() => expect(mocks.getRecharge).toHaveBeenCalledWith(payingRecharge.rechargeNo));
   });
 
+  it("shows every EPUSDT warning and does not create an order when dismissed", async () => {
+    mocks.getRechargeConfig.mockResolvedValue(epusdtRechargeConfig);
+    mocks.modalConfirm.mockImplementationOnce(() => undefined);
+    render(<Wallet />);
+
+    const payButton = await screen.findByRole("button", { name: "USDT" });
+    await waitFor(() => expect(payButton).toBeEnabled());
+    fireEvent.click(payButton);
+
+    expect(mocks.modalConfirm).toHaveBeenCalledOnce();
+    const warning = render(mocks.modalConfirm.mock.calls[0][0].content);
+    expect(warning.getByText("Pay the exact USDT amount shown on the next payment page, including its unique decimal amount.")).toBeVisible();
+    expect(warning.getByText("Pay withdrawal fees separately. Make sure the amount received exactly matches the payment page and never deduct fees from the payment amount.")).toBeVisible();
+    expect(warning.getByText("Only use USDT on the TRON (TRC20) network and verify the receiving address before sending.")).toBeVisible();
+    expect(warning.getByText("Incorrect amount, network, or address may prevent automatic crediting. Any resulting loss is the payer's responsibility.")).toBeVisible();
+    warning.unmount();
+    expect(mocks.createRecharge).not.toHaveBeenCalled();
+  });
+
   it("creates an EPUSDT recharge with the selected payment method", async () => {
-    mocks.getRechargeConfig.mockResolvedValue({
-      enabled: true,
-      paymentMethods: ["alipay", "epusdt_usdt_tron"],
-      minPoints: "1000.00",
-      feeRate: "0.6",
-      feeCapPoints: "0",
-      redemptionCodePurchaseUrl: "",
-      tiers: [{ points: "1000.00", bonusPoints: "0.00", feePoints: "6.00", creditedPoints: "1000.00" }],
-    });
+    mocks.getRechargeConfig.mockResolvedValue(epusdtRechargeConfig);
     mocks.createRecharge.mockResolvedValue({
       recharge: { ...payingRecharge, paymentMethod: "epusdt_usdt_tron" },
       payUrl: "https://pay.example.com/usdt",
-      expiresAt: "2026-07-26T00:05:00Z",
+      expiresAt: "2026-07-26T00:10:00Z",
     });
     mocks.quoteRecharge.mockResolvedValue({
       points: "1000.00",
@@ -256,7 +282,18 @@ describe("wallet payment modal", () => {
     expect(payButton).toHaveStyle({ backgroundColor: "#fff", borderColor: "#d9d9d9", color: "#1f2329" });
     expect(screen.getByRole("button", { name: "Alipay" })).toHaveStyle({ backgroundColor: "#fff", borderColor: "#d9d9d9", color: "#1f2329" });
     await waitFor(() => expect(payButton).toBeEnabled());
+    mocks.modalConfirm.mockImplementationOnce(() => undefined);
     fireEvent.click(payButton);
+
+    expect(mocks.createRecharge).not.toHaveBeenCalled();
+    expect(mocks.modalConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      cancelText: "Cancel",
+      okText: "I understand, continue",
+      title: "USDT payment notice",
+    }));
+    await act(async () => {
+      await mocks.modalConfirm.mock.calls[0][0].onOk();
+    });
 
     expect((await screen.findAllByText(/Credited points:/)).some((element) => element.classList.contains("block"))).toBe(true);
     expect((await screen.findAllByText(/Payment amount:/)).some((element) => element.classList.contains("block"))).toBe(true);
@@ -266,15 +303,7 @@ describe("wallet payment modal", () => {
   });
 
   it("handles an EPUSDT minimum rejection without opening payment", async () => {
-    mocks.getRechargeConfig.mockResolvedValue({
-      enabled: true,
-      paymentMethods: ["alipay", "epusdt_usdt_tron"],
-      minPoints: "1000.00",
-      feeRate: "0.6",
-      feeCapPoints: "0",
-      redemptionCodePurchaseUrl: "",
-      tiers: [{ points: "1000.00", bonusPoints: "0.00", feePoints: "6.00", creditedPoints: "1000.00" }],
-    });
+    mocks.getRechargeConfig.mockResolvedValue(epusdtRechargeConfig);
     mocks.createRecharge.mockRejectedValue(new IamApiError(422, {
       code: "recharge_payment_below_minimum",
       message: "Recharge payment is below the configured minimum.",
@@ -318,7 +347,7 @@ describe("wallet payment modal", () => {
     expect(mocks.toastWarning).toHaveBeenCalledWith("Amount must be an integer.");
   });
 
-  it("closes the payment page at the five-minute verification deadline", async () => {
+  it("closes the payment page at the configured verification deadline", async () => {
     mocks.createRecharge.mockResolvedValue({ recharge: payingRecharge, payUrl: "https://pay.example.com/qr", expiresAt: "2026-07-26T00:00:01Z" });
     render(<Wallet />);
 
@@ -461,7 +490,7 @@ describe("wallet payment modal", () => {
     mocks.createRecharge.mockResolvedValue({
       recharge: payingRecharge,
       payUrl: "https://pay.example.com/qr",
-      expiresAt: "2026-07-26T00:05:00Z",
+      expiresAt: "2026-07-26T00:10:00Z",
     });
     mocks.listWalletTransactions.mockReturnValueOnce(transactions);
     render(<Wallet />);

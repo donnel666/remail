@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyEPayURLDefaults, applyEpusdtURLDefaults, changeEPayVersion, EPUSDT_GATEWAY_KEYS } from "./payment-billing-keys";
+import { applyEPayURLDefaults, applyEpusdtURLDefaults, changeEPayVersion, EPUSDT_GATEWAY_KEYS, RECHARGE_CHECK_KEYS } from "./payment-billing-keys";
 import { parseTopupTiers, serializeTopupTiers } from "./topup-tiers";
 
 describe("topup tier settings", () => {
@@ -38,5 +38,11 @@ describe("EPUSDT callback settings", () => {
       epusdt_notify_url: "https://app.example.com/v1/payments/webhooks/epusdt/v1",
       epusdt_return_url: "https://app.example.com/payment/return",
     });
+  });
+});
+
+describe("recharge verification settings", () => {
+  it("saves the shared recharge timeout", () => {
+    expect(RECHARGE_CHECK_KEYS).toContain("recharge_timeout_minutes");
   });
 });

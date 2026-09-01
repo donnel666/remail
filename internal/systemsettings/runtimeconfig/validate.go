@@ -39,6 +39,7 @@ var integerRanges = map[string]integerRange{
 	"github_minimum_account_age_days":     {min: 0, max: 36500},
 	"rebate_expiry_days":                  {min: 0, max: 36500},
 	"max_pending_recharge_orders":         positive(100),
+	RechargeTimeoutMinutesKey:             positive(1440),
 	"async_check_request_timeout_seconds": {min: 1, max: 30},
 	SMSBowerNoCodeRefundTimeoutMinutesKey: positive(25),
 

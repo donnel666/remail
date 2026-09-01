@@ -144,6 +144,10 @@ func Duration(key string, fallback, unit time.Duration, minimum int) time.Durati
 	return time.Duration(value) * unit
 }
 
+func RechargeTimeout() time.Duration {
+	return Duration(RechargeTimeoutMinutesKey, 10*time.Minute, time.Minute, 1)
+}
+
 func clone() map[string]string {
 	snapshot := current.Load().(map[string]string)
 	values := make(map[string]string, len(snapshot)+1)

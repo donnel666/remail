@@ -456,7 +456,7 @@ func (r *BillingRepo) CreateRecharge(ctx context.Context, command billingapp.Cre
 			}
 			var pending int64
 			if err := writeTx.WithContext(ctx).Model(&RechargeModel{}).
-				Where("user_id = ? AND status IN ? AND created_at > ?", command.Recharge.UserID, pendingRechargeStatuses(), command.Recharge.CreatedAt.Add(-domain.RechargeReconciliationWindow)).
+				Where("user_id = ? AND status IN ? AND created_at > ?", command.Recharge.UserID, pendingRechargeStatuses(), command.Recharge.CreatedAt.Add(-domain.RechargeReconciliationWindow())).
 				Count(&pending).Error; err != nil {
 				return nil, fmt.Errorf("count pending recharges: %w", err)
 			}
@@ -505,7 +505,7 @@ func (r *BillingRepo) MarkRechargeCallback(ctx context.Context, rechargeNo strin
 	// in-flight query is coalesced instead of issuing a concurrent provider call.
 	result := r.db.WithContext(ctx).
 		Model(&RechargeModel{}).
-		Where("recharge_no = ? AND status = ? AND created_at > ?", rechargeNo, domain.RechargeStatusPaying, callbackAt.Add(-domain.RechargeReconciliationWindow)).
+		Where("recharge_no = ? AND status = ? AND created_at > ?", rechargeNo, domain.RechargeStatusPaying, callbackAt.Add(-domain.RechargeReconciliationWindow())).
 		Updates(map[string]any{
 			"status":          string(domain.RechargeStatusCallback),
 			"last_queried_at": nil,
@@ -522,7 +522,7 @@ func (r *BillingRepo) ListDueRecharges(ctx context.Context, now time.Time, limit
 	if err := r.db.WithContext(ctx).
 		Where(
 			"created_at > ? AND (status IN ? OR (status = ? AND ((payment_method = ? AND created_at <= ?) OR ((payment_method IS NULL OR payment_method <> ?) AND created_at <= ?)))) AND (query_lease_until IS NULL OR query_lease_until <= ?) AND (last_queried_at IS NULL OR (query_attempts < ? AND last_queried_at <= ?) OR (query_attempts >= ? AND last_queried_at <= ?))",
-			now.Add(-domain.RechargeReconciliationWindow),
+			now.Add(-domain.RechargeReconciliationWindow()),
 			[]string{string(domain.RechargeStatusCallback), string(domain.RechargeStatusReconciled)},
 			domain.RechargeStatusPaying,
 			domain.RechargePaymentMethodEpusdtUSDTTron,
@@ -573,7 +573,7 @@ func (r *BillingRepo) ClaimRechargeQuery(ctx context.Context, rechargeNo string,
 			Where(
 				"recharge_no = ? AND created_at > ? AND (status IN ? OR (status = ? AND ((payment_method = ? AND created_at <= ?) OR ((payment_method IS NULL OR payment_method <> ?) AND created_at <= ?)))) AND (query_lease_until IS NULL OR query_lease_until <= ?) AND (last_queried_at IS NULL OR (query_attempts < ? AND last_queried_at <= ?) OR (query_attempts >= ? AND last_queried_at <= ?))",
 				rechargeNo,
-				claimedAt.Add(-domain.RechargeReconciliationWindow),
+				claimedAt.Add(-domain.RechargeReconciliationWindow()),
 				[]string{string(domain.RechargeStatusCallback), string(domain.RechargeStatusReconciled)},
 				domain.RechargeStatusPaying,
 				domain.RechargePaymentMethodEpusdtUSDTTron,
@@ -687,7 +687,7 @@ func (r *BillingRepo) CreditRecharge(ctx context.Context, command billingapp.Cre
 			credited = rechargeModelToDomain(model)
 			return nil
 		}
-		queriedInTime := command.QueriedAt.Before(model.CreatedAt.Add(domain.RechargeReconciliationWindow))
+		queriedInTime := command.QueriedAt.Before(model.CreatedAt.Add(domain.RechargeReconciliationWindow()))
 		verifiedFailureRace := domain.RechargeStatus(model.Status) == domain.RechargeStatusFailed && queriedInTime
 		if (!domain.IsPendingRechargeStatus(domain.RechargeStatus(model.Status)) && !verifiedFailureRace) ||
 			!queriedInTime || strings.TrimSpace(command.GatewayTradeNo) == "" {

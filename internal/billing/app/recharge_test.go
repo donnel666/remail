@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/internal/billing/domain"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 )
 
@@ -59,7 +60,7 @@ func TestRechargeAmountsAndActiveReconciliation(t *testing.T) {
 		{name: "gateway rejection retries", now: createdAt.Add(time.Minute), queryErr: ErrRechargeGatewayRejected, wantRecord: 1, wantQuery: 1},
 		{name: "duplicate gateway trade fails", now: createdAt.Add(time.Minute), query: RechargeGatewayQuery{Paid: true, GatewayTrade: "GW1"}, creditErr: domain.ErrRechargeQueryMismatch, wantCredit: 1, wantFail: "query_mismatch", wantQuery: 1},
 		{name: "timeout race is already terminal", now: createdAt.Add(time.Minute), query: RechargeGatewayQuery{Paid: true, GatewayTrade: "GW1"}, creditErr: domain.ErrRechargeExpired, wantCredit: 1, wantQuery: 1},
-		{name: "five minute deadline fails without query", now: createdAt.Add(5 * time.Minute), wantFail: "query_timeout"},
+		{name: "configured deadline fails without query", now: createdAt.Add(10 * time.Minute), wantFail: "query_timeout"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			repo := &rechargeRepoStub{creditErr: test.creditErr, recharge: domain.Recharge{
@@ -85,7 +86,7 @@ func TestRechargeAmountsAndActiveReconciliation(t *testing.T) {
 		}}
 		gateway := &rechargeGatewayStub{query: RechargeGatewayQuery{Paid: true, GatewayTrade: "GW1"}}
 		useCase := NewRechargeUseCase(repo, rechargeConfigStub{config}, gateway, &rechargeQueueStub{})
-		times := []time.Time{createdAt.Add(4*time.Minute + 59*time.Second), createdAt.Add(5*time.Minute + time.Second)}
+		times := []time.Time{createdAt.Add(10*time.Minute - time.Second), createdAt.Add(10*time.Minute + time.Second)}
 		useCase.now = func() time.Time {
 			now := times[0]
 			times = times[1:]
@@ -96,6 +97,62 @@ func TestRechargeAmountsAndActiveReconciliation(t *testing.T) {
 		require.Equal(t, 0, repo.creditCalls)
 		require.Equal(t, "query_timeout", repo.failReason)
 		require.Equal(t, 1, gateway.calls)
+	})
+}
+
+func TestRechargeConfiguredTimeoutControlsCreateDispatchAndReconcile(t *testing.T) {
+	previous, existed := runtimeconfig.Snapshot()[runtimeconfig.RechargeTimeoutMinutesKey]
+	runtimeconfig.Set(runtimeconfig.RechargeTimeoutMinutesKey, "12")
+	t.Cleanup(func() {
+		if existed {
+			runtimeconfig.Set(runtimeconfig.RechargeTimeoutMinutesKey, previous)
+		} else {
+			runtimeconfig.Delete(runtimeconfig.RechargeTimeoutMinutesKey)
+		}
+	})
+
+	createdAt := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
+	config := validRechargeConfig()
+	recharge := domain.Recharge{
+		RechargeNo: "RC1", UserID: 1, PaymentAmount: "10.00", RechargeQuota: "10.00",
+		Status: domain.RechargeStatusPaying, GatewayConfigHash: rechargeGatewayConfigHash(config), CreatedAt: createdAt,
+	}
+
+	t.Run("create response", func(t *testing.T) {
+		useCase := NewRechargeUseCase(&rechargeRepoStub{recharge: recharge}, rechargeConfigStub{config}, &rechargeGatewayStub{}, &rechargeQueueStub{})
+		useCase.now = func() time.Time { return createdAt }
+
+		result, err := useCase.Create(context.Background(), CreateRechargeRequest{UserID: 1, Points: "10", IdempotencyKey: "configured-timeout"})
+		require.NoError(t, err)
+		require.Equal(t, createdAt.Add(12*time.Minute), result.ExpiresAt)
+	})
+
+	t.Run("dispatcher cutoff", func(t *testing.T) {
+		now := createdAt.Add(20 * time.Minute)
+		repo := &rechargeRepoStub{}
+		useCase := NewRechargeUseCase(repo, nil, nil, &rechargeQueueStub{})
+		useCase.now = func() time.Time { return now }
+
+		require.NoError(t, useCase.Dispatch(context.Background()))
+		require.Equal(t, now.Add(-12*time.Minute), repo.expiredBefore)
+	})
+
+	t.Run("reconciliation boundary", func(t *testing.T) {
+		beforeRepo := &rechargeRepoStub{recharge: recharge}
+		beforeGateway := &rechargeGatewayStub{}
+		before := NewRechargeUseCase(beforeRepo, rechargeConfigStub{config}, beforeGateway, &rechargeQueueStub{})
+		before.now = func() time.Time { return createdAt.Add(12*time.Minute - time.Second) }
+		require.NoError(t, before.Reconcile(context.Background(), RechargeTask{RechargeNo: recharge.RechargeNo}))
+		require.Equal(t, 1, beforeGateway.calls)
+		require.Equal(t, 1, beforeRepo.recordCalls)
+
+		atRepo := &rechargeRepoStub{recharge: recharge}
+		atGateway := &rechargeGatewayStub{}
+		at := NewRechargeUseCase(atRepo, rechargeConfigStub{config}, atGateway, &rechargeQueueStub{})
+		at.now = func() time.Time { return createdAt.Add(12 * time.Minute) }
+		require.NoError(t, at.Reconcile(context.Background(), RechargeTask{RechargeNo: recharge.RechargeNo}))
+		require.Equal(t, "query_timeout", atRepo.failReason)
+		require.Zero(t, atGateway.calls)
 	})
 }
 
@@ -281,7 +338,7 @@ func TestRechargeCreateInputAndConfigReplaySafety(t *testing.T) {
 		}}
 		gateway := &rechargeGatewayStub{}
 		useCase := NewRechargeUseCase(repo, rechargeConfigStub{config}, gateway, &rechargeQueueStub{})
-		useCase.now = func() time.Time { return createdAt.Add(domain.RechargeReconciliationWindow) }
+		useCase.now = func() time.Time { return createdAt.Add(10 * time.Minute) }
 
 		_, err := useCase.Create(context.Background(), CreateRechargeRequest{UserID: 1, Points: "10", IdempotencyKey: "expired-replay"})
 		require.ErrorIs(t, err, domain.ErrRechargeExpired)
@@ -436,7 +493,7 @@ func TestRechargeCallbackAndDispatchScheduling(t *testing.T) {
 		require.NoError(t, useCase.Dispatch(context.Background()))
 		require.Equal(t, 2, queueCalls)
 		require.Equal(t, now, repo.listedAt)
-		require.Equal(t, now.Add(-domain.RechargeReconciliationWindow), repo.expiredBefore)
+		require.Equal(t, now.Add(-10*time.Minute), repo.expiredBefore)
 	})
 
 	t.Run("invalid callback is an opaque no-op", func(t *testing.T) {

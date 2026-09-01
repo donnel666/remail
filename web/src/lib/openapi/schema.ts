@@ -2556,7 +2556,7 @@ export interface paths {
         put?: never;
         /**
          * Create a recharge order
-         * @description Credit is granted only after the server actively confirms the payment within five minutes.
+         * @description Credit is granted only after the server actively confirms the payment within the configured recharge timeout, which defaults to ten minutes for every payment method.
          */
         post: operations["postRecharge"];
         delete?: never;

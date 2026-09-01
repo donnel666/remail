@@ -221,6 +221,9 @@ func TestValidateRechargePaymentSettings(t *testing.T) {
 	require.NoError(t, Validate("max_pending_recharge_orders", "10"))
 	require.ErrorIs(t, Validate("max_pending_recharge_orders", "0"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("max_pending_recharge_orders", "101"), domain.ErrInvalidValue)
+	require.NoError(t, Validate(RechargeTimeoutMinutesKey, "10"))
+	require.ErrorIs(t, Validate(RechargeTimeoutMinutesKey, "0"), domain.ErrInvalidValue)
+	require.ErrorIs(t, Validate(RechargeTimeoutMinutesKey, "1441"), domain.ErrInvalidValue)
 	err := ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{{Key: "epay_enabled", Value: "true"}})
 	require.ErrorIs(t, err, domain.ErrInvalidValue)
 	var fieldError *domain.InvalidValueFieldsError
