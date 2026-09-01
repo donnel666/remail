@@ -7,15 +7,20 @@ import { Switch as Sw, Label, FormDescription } from "./ui";
 
 const { Text } = Typography;
 
-export function SettingsCardHeader({ icon, title, description, enabled, onToggle, statusText }: {
+export function SettingsCardHeader({ icon, title, description, enabled, onToggle, statusText, action }: {
   icon: ReactNode;
   title: string;
   description: string;
   enabled?: boolean;
   onToggle?: (enabled: boolean) => void;
   statusText?: string;
+  action?: ReactNode;
 }) {
-  return <div className="flex w-full items-start justify-between gap-4">
+  const showControls = (enabled !== undefined && Boolean(onToggle)) || Boolean(action);
+  return <div className={cn(
+    "flex w-full justify-between",
+    action ? "flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:gap-4" : "items-start gap-4",
+  )}>
     <div className="flex min-w-0 items-start">
       <span className="mr-2 mt-0.5 shrink-0">{icon}</span>
       <div className="min-w-0">
@@ -23,9 +28,12 @@ export function SettingsCardHeader({ icon, title, description, enabled, onToggle
         <div><Text type="secondary" size="small">{description}</Text></div>
       </div>
     </div>
-    {enabled !== undefined && onToggle ? <div className="flex shrink-0 items-center gap-2">
-      <SemiSwitch aria-label={title} checked={enabled} onChange={onToggle} />
-      <Text>{statusText}</Text>
+    {showControls ? <div className="flex shrink-0 items-center gap-2">
+      {enabled !== undefined && onToggle ? <>
+        <SemiSwitch aria-label={title} checked={enabled} onChange={onToggle} />
+        <Text>{statusText}</Text>
+      </> : null}
+      {action}
     </div> : null}
   </div>;
 }
