@@ -94,3 +94,41 @@ func TestGrantRegistrationRewardBuildsIdempotentCredit(t *testing.T) {
 		t.Fatal("invalid reward must not reach the wallet repository")
 	}
 }
+
+func TestGrantInvitationRewardBuildsIdempotentCredits(t *testing.T) {
+	var commands []AdjustConsumerBalanceCommand
+	repo := stubWalletRepo{adjust: func(req AdjustConsumerBalanceCommand) (*AdjustBalanceResult, error) {
+		commands = append(commands, req)
+		return &AdjustBalanceResult{}, nil
+	}}
+	uc := NewWalletUseCase(repo)
+
+	for i := 0; i < 2; i++ {
+		if err := uc.GrantInvitationReward(context.Background(), 7, 42, "500.000000"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if len(commands) != 4 {
+		t.Fatalf("want four commands, got %d", len(commands))
+	}
+	inviter, invitee := commands[0], commands[1]
+	if inviter.UserID != 7 || invitee.UserID != 42 || inviter.Amount != "500.00" || invitee.Amount != "500.00" {
+		t.Fatalf("unexpected invitation reward commands: %+v %+v", inviter, invitee)
+	}
+	if inviter.BizType != "invitation_reward" || inviter.IdempotencyKey != "invitation_reward:42:inviter" {
+		t.Fatalf("unexpected inviter reward identity: %+v", inviter)
+	}
+	if invitee.BizType != "invitation_reward" || invitee.IdempotencyKey != "invitation_reward:42:invitee" {
+		t.Fatalf("unexpected invitee reward identity: %+v", invitee)
+	}
+	if inviter.IdempotencyKey != commands[2].IdempotencyKey || inviter.RequestFingerprint != commands[2].RequestFingerprint ||
+		invitee.IdempotencyKey != commands[3].IdempotencyKey || invitee.RequestFingerprint != commands[3].RequestFingerprint {
+		t.Fatal("invitation reward retries must be stable")
+	}
+	if err := uc.GrantInvitationReward(context.Background(), 7, 42, "0"); err == nil {
+		t.Fatal("zero invitation reward should be rejected")
+	}
+	if len(commands) != 4 {
+		t.Fatal("invalid reward must not reach the wallet repository")
+	}
+}

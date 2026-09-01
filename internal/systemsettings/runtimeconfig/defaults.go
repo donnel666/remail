@@ -3,7 +3,7 @@ package runtimeconfig
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
 const (
-	DefaultSettingsCount                         = 266
+	DefaultSettingsCount                         = 267
 	NodeLocCallbackURL                           = "https://remail.aishop6.com/oauth/nodeloc"
 	SMSBowerNoCodeRefundTimeoutMinutesKey        = "smsbower_no_code_refund_timeout_minutes"
 	MicrosoftPriceMultiplierKey                  = "product_price_multiplier_microsoft"
@@ -45,6 +45,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "register_enabled", Value: "true"},
 	{Key: "registration_email_whitelist", Value: "qq.com,foxmail.com,gmail.com,proton.me,protonmail.com,pm.me,mail.com"},
 	{Key: "registration_reward_amount", Value: "0"},
+	{Key: "invitation_reward_amount", Value: "0"},
 	{Key: "captcha_enabled", Value: "true"},
 	{Key: "login_email_limit", Value: "10"},
 	{Key: "login_ip_limit", Value: "60"},

@@ -106,22 +106,23 @@ func TestAdminTransactionBusinessCategoriesMySQL(t *testing.T) {
 	seedFinanceTxn(t, db, userID, "CAT-CHECKIN", "credit", "in", "daily_checkin", "18.000000", "1.000000", at)
 	seedFinanceTxn(t, db, userID, "CAT-LEADERBOARD", "credit", "in", "leaderboard_reward", "19.000000", "2.000000", at)
 	seedFinanceTxn(t, db, userID, "CAT-REGISTRATION", "credit", "in", "registration_reward", "21.000000", "3.000000", at)
+	seedFinanceTxn(t, db, userID, "CAT-INVITATION", "credit", "in", "invitation_reward", "24.000000", "3.000000", at)
 	seedFinanceTxn(t, db, userID, "CAT-REGISTRATION-OLD", "credit", "in", "registration_reward", "24.000000", "3.000000", at.Add(-2*time.Hour))
 	seedFinanceTxn(t, db, userID, "CAT-ADMIN", "credit", "in", "admin_wallet_adjustment", "27.000000", "4.000000", at)
 
 	repo := NewBillingRepo(db)
 	expectedFacets := billingapp.AdminTransactionFacets{
-		All: 9, Recharge: 2, Spend: 1, Refund: 1, ReferralCashback: 1, Activity: 4,
+		All: 10, Recharge: 2, Spend: 1, Refund: 1, ReferralCashback: 2, Activity: 4,
 	}
 	tests := []struct {
 		category billingapp.AdminTransactionCategory
 		nos      []string
 	}{
-		{billingapp.AdminTransactionCategoryAll, []string{"CAT-ALIPAY", "CAT-CARD", "CAT-SPEND", "CAT-REFUND", "CAT-REFERRAL", "CAT-CHECKIN", "CAT-LEADERBOARD", "CAT-REGISTRATION", "CAT-REGISTRATION-OLD"}},
+		{billingapp.AdminTransactionCategoryAll, []string{"CAT-ALIPAY", "CAT-CARD", "CAT-SPEND", "CAT-REFUND", "CAT-REFERRAL", "CAT-CHECKIN", "CAT-LEADERBOARD", "CAT-REGISTRATION", "CAT-INVITATION", "CAT-REGISTRATION-OLD"}},
 		{billingapp.AdminTransactionCategoryRecharge, []string{"CAT-ALIPAY", "CAT-CARD"}},
 		{billingapp.AdminTransactionCategorySpend, []string{"CAT-SPEND"}},
 		{billingapp.AdminTransactionCategoryRefund, []string{"CAT-REFUND"}},
-		{billingapp.AdminTransactionCategoryReferralCashback, []string{"CAT-REFERRAL"}},
+		{billingapp.AdminTransactionCategoryReferralCashback, []string{"CAT-REFERRAL", "CAT-INVITATION"}},
 		{billingapp.AdminTransactionCategoryActivity, []string{"CAT-CHECKIN", "CAT-LEADERBOARD", "CAT-REGISTRATION", "CAT-REGISTRATION-OLD"}},
 	}
 	for _, tt := range tests {

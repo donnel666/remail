@@ -66,7 +66,7 @@ const TRANSACTION_CATEGORIES: {
   { facet: "refund", label: "Refund", value: "refund" },
   {
     facet: "referralCashback",
-    label: "Invitation cashback",
+    label: "Referral Rewards",
     value: "referral_cashback",
   },
   { facet: "activity", label: "Activity", value: "activity" },

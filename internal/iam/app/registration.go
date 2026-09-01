@@ -87,12 +87,20 @@ func (uc *RegistrationUseCase) Register(ctx context.Context, email, password, ni
 		TokenVersion: 0,
 	}
 
+	var inviterID *uint
 	if strings.TrimSpace(inviteCode) != "" {
 		if err := uc.repo.CreateWithInvite(ctx, user, strings.TrimSpace(inviteCode)); err != nil {
 			if errors.Is(err, domain.ErrEmailAlreadyExists) {
 				err = domain.ErrVerificationCodeIncorrect
 			}
 			return nil, restore(err)
+		}
+		lookupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		inviterID, err = uc.repo.FindInviterID(lookupCtx, user.ID)
+		cancel()
+		if err != nil {
+			slog.Warn("find registration inviter", "user_id", user.ID, "error", err)
+			inviterID = nil
 		}
 	} else if err := uc.repo.Create(ctx, user); err != nil {
 		if errors.Is(err, domain.ErrEmailAlreadyExists) {
@@ -107,8 +115,36 @@ func (uc *RegistrationUseCase) Register(ctx context.Context, email, password, ni
 		slog.Warn("commit registration code", "error", commitErr, "committed", committed)
 	}
 	grantRegistrationReward(ctx, uc.wallet, user.ID)
+	if inviterID != nil {
+		grantInvitationReward(ctx, uc.wallet, *inviterID, user.ID)
+	}
 
 	return user, nil
+}
+
+func grantInvitationReward(ctx context.Context, wallet RegistrationRewardWallet, inviterID, inviteeID uint) {
+	amount, err := money.Parse(runtimeconfig.String("invitation_reward_amount", "0"))
+	if err != nil {
+		slog.Warn("parse invitation reward amount", "error", err)
+		return
+	}
+	if !amount.IsPositive() || inviterID == 0 || inviteeID == 0 || inviterID == inviteeID {
+		return
+	}
+	if wallet == nil {
+		slog.Warn("grant invitation reward", "inviter_id", inviterID, "invitee_id", inviteeID, "amount", money.Format(amount), "error", "wallet is not configured")
+		return
+	}
+	rewardCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	formattedAmount := money.Format(amount)
+	for attempt := 1; attempt <= 2; attempt++ {
+		if err := wallet.GrantInvitationReward(rewardCtx, inviterID, inviteeID, formattedAmount); err == nil {
+			return
+		} else if attempt == 2 {
+			slog.Warn("grant invitation reward", "inviter_id", inviterID, "invitee_id", inviteeID, "amount", formattedAmount, "error", err)
+		}
+	}
 }
 
 func grantRegistrationReward(ctx context.Context, wallet RegistrationRewardWallet, userID uint) {

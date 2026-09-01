@@ -131,7 +131,7 @@ const (
 	adminTransactionRechargeCondition = "transaction_type IN ('recharge', 'card_redeem')"
 	adminTransactionSpendCondition    = "transaction_type = 'debit'"
 	adminTransactionRefundCondition   = "transaction_type = 'refund'"
-	adminTransactionReferralCondition = "transaction_type = 'credit' AND biz_type = 'referral_transfer'"
+	adminTransactionReferralCondition = "transaction_type = 'credit' AND biz_type IN ('referral_transfer', 'invitation_reward')"
 	adminTransactionActivityCondition = "transaction_type = 'credit' AND biz_type IN ('daily_checkin', 'leaderboard_reward', 'registration_reward')"
 	adminTransactionAllCondition      = "((" + adminTransactionRechargeCondition + ") OR (" + adminTransactionSpendCondition + ") OR (" + adminTransactionRefundCondition + ") OR (" + adminTransactionReferralCondition + ") OR (" + adminTransactionActivityCondition + "))"
 	adminTransactionFacetSelect       = "COUNT(*) AS all_count, " +

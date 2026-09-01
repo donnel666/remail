@@ -2374,6 +2374,8 @@
   "Payment amount": "Payment amount",
   "赠送积分": "Bonus points",
   "新用户注册奖励积分": "New-user registration reward points",
+  "邀请注册奖励积分（邀请双方各得）": "Invited-registration reward points (awarded to both users)",
+  "配置邀请注册双方奖励，以及被邀请用户充值后的返利比例、积分上限和有效期": "Configure rewards for both users on invited registration, plus the rebate rate, point caps, and validity period after the invited user recharges.",
   "配置被邀请用户首次充值后的返利比例、积分上限和有效期": "Configure the rebate rate, point caps, and validity period after an invited user's first recharge.",
   "单笔充值返利积分上限（0 = 不限制）": "Per-recharge rebate point cap (0 = unlimited)",
   "累计充值返利积分上限（0 = 不限制）": "Cumulative rebate point cap (0 = unlimited)",

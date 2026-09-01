@@ -84,6 +84,8 @@ func TestValidateAuthSecuritySettings(t *testing.T) {
 	require.NoError(t, Validate("registration_reward_amount", "12.345678"))
 	require.ErrorIs(t, Validate("registration_reward_amount", "-0.01"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("registration_reward_amount", "0.0000001"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("invitation_reward_amount", "500"))
+	require.ErrorIs(t, Validate("invitation_reward_amount", "-0.01"), domain.ErrInvalidValue)
 	require.NoError(t, Validate("default_project_microsoft_code_price", "0.000001"))
 	require.ErrorIs(t, Validate("default_project_microsoft_code_price", "-0.01"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("default_project_microsoft_code_price", "0.0000001"), domain.ErrInvalidValue)

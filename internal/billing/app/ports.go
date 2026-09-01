@@ -378,6 +378,35 @@ func (uc *WalletUseCase) GrantRegistrationReward(ctx context.Context, userID uin
 	return err
 }
 
+// GrantInvitationReward idempotently credits both sides of an invited registration.
+func (uc *WalletUseCase) GrantInvitationReward(ctx context.Context, inviterID, inviteeID uint, amount string) error {
+	if inviterID == 0 || inviteeID == 0 || inviterID == inviteeID {
+		return domain.ErrInvalidFilter
+	}
+	amount, err := domain.NormalizePositiveMoney(amount)
+	if err != nil {
+		return err
+	}
+	const bizType = "invitation_reward"
+	var grantErr error
+	// ponytail: per-user idempotency makes retries safe; use one repository transaction if strict crash-atomic settlement is required.
+	for _, reward := range []struct {
+		userID uint
+		role   string
+	}{{inviterID, "inviter"}, {inviteeID, "invitee"}} {
+		key := fmt.Sprintf("%s:%d:%s", bizType, inviteeID, reward.role)
+		_, err := uc.CreditConsumer(ctx, AdjustConsumerBalanceRequest{
+			UserID:         reward.userID,
+			Amount:         amount,
+			Reason:         key,
+			BizType:        bizType,
+			IdempotencyKey: key,
+		})
+		grantErr = errors.Join(grantErr, err)
+	}
+	return grantErr
+}
+
 func (uc *WalletUseCase) DebitConsumer(ctx context.Context, req AdjustConsumerBalanceRequest) (*AdjustBalanceResult, error) {
 	req.TransactionType = domain.TransactionTypeDebit
 	return uc.adjustConsumer(ctx, req, domain.TransactionDirectionOut, false)

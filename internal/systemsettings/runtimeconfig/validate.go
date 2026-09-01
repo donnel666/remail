@@ -147,7 +147,7 @@ func Validate(key, value string) error {
 		if len(rawValue) > maxSystemNoticeBytes {
 			return domain.ErrInvalidValue
 		}
-	case "registration_reward_amount", "single_rebate_cap", "cumulative_rebate_cap", "topup_fee_cap",
+	case "registration_reward_amount", "invitation_reward_amount", "single_rebate_cap", "cumulative_rebate_cap", "topup_fee_cap",
 		"default_project_microsoft_code_price", "default_project_microsoft_code_supplier_price",
 		"default_project_microsoft_purchase_price", "default_project_microsoft_purchase_supplier_price",
 		"default_project_domain_code_price", "default_project_domain_code_supplier_price",

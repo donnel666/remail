@@ -253,6 +253,7 @@ type Hasher interface {
 // RegistrationRewardWallet credits the one-time reward configured for a new user.
 type RegistrationRewardWallet interface {
 	GrantRegistrationReward(ctx context.Context, userID uint, amount string) error
+	GrantInvitationReward(ctx context.Context, inviterID, inviteeID uint, amount string) error
 }
 
 // PermissionChecker checks fine-grained admin permissions.

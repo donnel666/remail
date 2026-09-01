@@ -1,4 +1,5 @@
 export const RECHARGE_REBATE_KEYS = [
+  "invitation_reward_amount",
   "first_order_rebate_ratio",
   "single_rebate_cap",
   "cumulative_rebate_cap",
