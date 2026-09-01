@@ -41,38 +41,63 @@
     "description": "用户可访问的 ReMail API 文档地址",
     "default": "https://remail.aishop6.com/docs"
   },
+  "auto_approve_join_requests": {
+    "type": "bool",
+    "description": "自动批准加群",
+    "hint": "仅处理 QQ 白名单群的主动加群申请；资料查询失败或等级不足时保留人工审核。",
+    "default": false
+  },
+  "minimum_qq_level": {
+    "type": "int",
+    "description": "最低QQ等级",
+    "hint": "达到该等级才自动批准，默认 16；设为 0 表示允许已成功查询到等级的所有申请人。",
+    "default": 16
+  },
+  "keyword_blacklist_enabled": {
+    "type": "bool",
+    "description": "关键词黑名单",
+    "hint": "启用后，QQ 白名单群中包含任一黑名单关键词的消息会被撤回。",
+    "default": false
+  },
+  "keyword_blacklist": {
+    "type": "list",
+    "description": "黑名单关键词",
+    "hint": "不区分大小写，按包含关系匹配；空项会被忽略。",
+    "default": []
+  },
+  "url_whitelist_enabled": {
+    "type": "bool",
+    "description": "URL白名单",
+    "hint": "启用后，只允许下方域名及其子域名；名单为空时会撤回所有检测到 URL 的消息。",
+    "default": false
+  },
+  "url_whitelist_domains": {
+    "type": "list",
+    "description": "允许的域名",
+    "hint": "每项填写一个域名，例如 remail.aishop6.com；无需填写协议或通配符。",
+    "default": []
+  },
+  "welcome_enabled": {
+    "type": "bool",
+    "description": "新人欢迎",
+    "hint": "启用后，新成员进入已授权群时，机器人会 @该成员并发送欢迎文本。",
+    "default": false
+  },
+  "welcome_text": {
+    "type": "text",
+    "description": "欢迎文本",
+    "default": "欢迎加入 ReMail 交流群。\n\n官网：https://remail.aishop6.com\n兑换码购买：https://catfk.com/shop/aishop6\n\n目前已支持 Outlook、iCloud 和域名邮箱。\n新用户注册可领取积分，邀请好友也有积分奖励，具体活动规则以官网为准。\n\n接码、邮箱购买或 API 对接遇到问题，直接 @红夜；账号、订单等个人问题请私聊红夜。\n发送 /help 查看机器人支持的指令。"
+  },
   "feedback_enabled": {
     "type": "bool",
-    "description": "收集白名单群的反馈、建议和未解决问题，并在每天 20:00 生成群主日报",
-    "hint": "启用后，白名单群中经过脱敏和截断的文本会保存在插件 KV，并可能交给已配置的外部大模型生成日报。",
+    "description": "工作日报",
+    "hint": "收集 QQ 白名单群的反馈、建议和未解决问题，并在设定时间私聊发送给群主。",
     "default": true
   },
-  "feedback_report_targets": {
-    "type": "template_list",
-    "description": "Telegram 等无法自动识别群主时的私聊投递目标；QQ OneBot 自动识别群主",
-    "templates": {
-      "target": {
-        "name": "反馈日报接收目标",
-        "display_item": "group_id",
-        "items": {
-          "platform_id": {
-            "type": "string",
-            "description": "AstrBot /sid 显示的 Bot ID",
-            "default": ""
-          },
-          "group_id": {
-            "type": "string",
-            "description": "QQ群号或 TG Chat ID",
-            "default": ""
-          },
-          "owner_umo": {
-            "type": "string",
-            "description": "群主私聊中的 /sid 所显示 UMO",
-            "default": ""
-          }
-        }
-      }
-    },
-    "default": []
+  "feedback_report_time": {
+    "type": "string",
+    "description": "发送时间",
+    "hint": "工作日报发送时间，使用北京时间 HH:MM 格式。",
+    "default": "20:00"
   }
 }

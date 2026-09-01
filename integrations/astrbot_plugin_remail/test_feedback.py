@@ -2,7 +2,7 @@ import ast
 import asyncio
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -20,9 +20,11 @@ from .feedback import (
     fallback_report,
     feedback_day,
     next_report_at,
+    parse_report_time,
     sanitize_feedback_text,
     sanitize_report,
 )
+from .security import adapter_channel
 
 
 PLUGIN_DIR = Path(__file__).parent
@@ -74,6 +76,7 @@ def _main_feedback_functions():
         "Plain": lambda text: text,
         "ReMailError": _ReMailError,
         "UNRESOLVED_ACK": UNRESOLVED_ACK,
+        "adapter_channel": adapter_channel,
         "logger": SimpleNamespace(warning=lambda *_args: None),
         "re": re,
         "sanitize_feedback_text": sanitize_feedback_text,
@@ -131,13 +134,26 @@ def test_redaction_and_limits() -> None:
     assert sanitize_feedback_text(normal_problem) == normal_problem
 
 
-def test_report_day_and_next_report_use_shanghai_20_oclock() -> None:
+def test_report_schedule_uses_configured_shanghai_time() -> None:
     before = datetime(2026, 9, 1, 11, 59, tzinfo=timezone.utc)  # 19:59 Shanghai
     at_report = datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc)
     assert feedback_day(before) == "2026-09-01"
     assert feedback_day(at_report) == "2026-09-02"
     assert next_report_at(before).isoformat() == "2026-09-01T20:00:00+08:00"
     assert next_report_at(at_report).isoformat() == "2026-09-02T20:00:00+08:00"
+    configured = parse_report_time("09:30")
+    before_custom = datetime(2026, 9, 1, 1, 29, tzinfo=timezone.utc)
+    at_custom = datetime(2026, 9, 1, 1, 30, tzinfo=timezone.utc)
+    assert feedback_day(before_custom, configured) == "2026-09-01"
+    assert feedback_day(at_custom, configured) == "2026-09-02"
+    assert next_report_at(before_custom, configured).isoformat() == (
+        "2026-09-01T09:30:00+08:00"
+    )
+    assert next_report_at(at_custom, configured).isoformat() == (
+        "2026-09-02T09:30:00+08:00"
+    )
+    with pytest.raises(ValueError, match="HH:MM"):
+        parse_report_time("24:00")
     with pytest.raises(ValueError, match="timezone"):
         next_report_at(datetime(2026, 9, 1, 19, 0))
 
@@ -206,6 +222,8 @@ def test_prompt_and_fallback_have_counts_without_identity_or_sensitive_data() ->
         assert "prompt-secret" not in value
     assert "未解决 1 条" in prompt
     assert "未解决 1 条" in report
+    assert "工作日报" in prompt
+    assert "工作日报" not in report
     assert "另有 3 条未纳入明细" in prompt
 
     large = DailyFeedback()
@@ -287,6 +305,7 @@ def test_same_message_id_is_recorded_once() -> None:
         config={"feedback_enabled": True},
         feedback_lock=asyncio.Lock(),
         feedback_seen=set(),
+        feedback_report_time=time(20),
         _feedback_enabled=lambda: True,
         _feedback_authorized=AsyncMock(return_value=(True, "")),
         _feedback_group_metadata=AsyncMock(
@@ -333,6 +352,7 @@ def test_full_day_does_not_mark_an_unstored_message_as_duplicate_success() -> No
     plugin = SimpleNamespace(
         feedback_lock=asyncio.Lock(),
         feedback_seen=set(),
+        feedback_report_time=time(20),
         _feedback_enabled=lambda: True,
         _feedback_authorized=AsyncMock(return_value=(True, "")),
         _feedback_group_metadata=AsyncMock(
@@ -368,6 +388,7 @@ def test_feedback_without_a_valid_owner_is_not_stored() -> None:
     plugin = SimpleNamespace(
         feedback_lock=asyncio.Lock(),
         feedback_seen=set(),
+        feedback_report_time=time(20),
         _feedback_enabled=lambda: True,
         _feedback_authorized=AsyncMock(return_value=(True, "")),
         _feedback_group_metadata=AsyncMock(
@@ -395,6 +416,7 @@ def test_non_whitelisted_group_is_not_recorded() -> None:
     event = SimpleNamespace(
         message_obj=SimpleNamespace(message_id="denied-message"),
         get_message_type=lambda: _MessageType.GROUP_MESSAGE,
+        get_platform_name=lambda: "aiocqhttp",
     )
     get_value = AsyncMock()
     put_value = AsyncMock()
@@ -420,6 +442,21 @@ def test_non_whitelisted_group_is_not_recorded() -> None:
     group_metadata.assert_not_awaited()
     get_value.assert_not_awaited()
     put_value.assert_not_awaited()
+
+
+def test_work_report_is_qq_only() -> None:
+    authorize = _main_feedback_functions()["_feedback_authorized"]
+    event = SimpleNamespace(
+        get_message_type=lambda: _MessageType.GROUP_MESSAGE,
+        get_platform_name=lambda: "telegram",
+    )
+    plugin = SimpleNamespace(_authorize_event=AsyncMock())
+
+    assert asyncio.run(authorize(plugin, event)) == (
+        False,
+        "工作日报仅支持 QQ 群。",
+    )
+    plugin._authorize_event.assert_awaited_once_with(event)
 
 
 def test_empty_feedback_command_checks_group_authorization_before_format_help() -> None:
@@ -470,7 +507,7 @@ def test_daily_report_discards_only_after_success(sent: bool) -> None:
             }
         },
         feedback_lock=asyncio.Lock(),
-        _feedback_target_overrides=lambda: {},
+        feedback_report_time=time(20),
         _feedback_store_key=lambda _group: "feedback:test",
         _feedback_report=AsyncMock(return_value="日报"),
         _valid_feedback_umo=lambda *_args: True,

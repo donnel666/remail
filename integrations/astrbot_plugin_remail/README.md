@@ -77,12 +77,37 @@ Telegram 用户需要先主动私聊机器人 `/start`，否则平台可能拒�
 用户的数据。插件只把用户描述和 ReMail 返回的安全项目/诊断信息交给 AstrBot AI，
 不会把邮箱、订单号、验证码、邮件内容或凭证放进模型提示词或最终回复。
 
-## 反馈与 FAE 未解决问题
+## 新人欢迎
 
-开启 `feedback_enabled` 后，插件只在 ReMail System Key 白名单群中收集反馈。用户可用
+启用 `welcome_enabled` 并设置 `welcome_text` 后，新成员进入已授权群时，插件会先校验
+当前群来源，再使用平台消息组件 @该成员并发送欢迎文本。未授权群、机器人自身加入事件
+或空欢迎文本不会触发消息。欢迎文本最多发送 2000 个字符。
+
+## 自动批准加群
+
+启用 `auto_approve_join_requests` 后，插件只处理 QQ OneBot 白名单群中用户主动发起的加群
+申请。NapCat 成功返回申请人的 QQ 等级且达到 `minimum_qq_level` 时自动批准；等级不足、
+资料缺失、来源鉴权失败或批准动作失败时均保持待审核，不会自动拒绝。群邀请事件不参与
+自动批准。机器人必须具有对应 QQ 群的审批权限。
+
+## 群消息审核
+
+`keyword_blacklist_enabled` 启用后，QQ OneBot 白名单群中包含
+`keyword_blacklist` 任一关键词的消息会被撤回。关键词先做 Unicode 规范化，再按不区分
+大小写的包含关系匹配；空关键词会被忽略。
+
+`url_whitelist_enabled` 启用后，只允许 `url_whitelist_domains` 中的域名及其子域名。名单
+为空时会撤回所有检测到 HTTP(S) URL 的消息。审核覆盖普通文本、Markdown、分享卡片和
+JSON/XML 卡片中的当前消息内容，不检查回复引用的旧消息，也不把图片、语音、视频和文件
+自身的下载地址当成用户发布的 URL。未授权群不会被插件撤回消息；机器人必须具有对应群
+的消息撤回权限。撤回失败不会禁言、踢人或追加其他处罚。
+
+## 工作日报
+
+开启 `feedback_enabled` 后，插件只在 QQ OneBot 的 ReMail System Key 白名单群中收集反馈。用户可用
 `/反馈 内容`、`/建议 内容` 显式提交；普通非命令、非 FAE 唤醒的群消息只会在通过
-`GET /v1/bot/context` 鉴权后，以脱敏、截断后的文本作为日报候选，不会逐条回复或逐条
-调用模型。每个 AstrBot 机器人实例、每个群分别保存，QQ 和 Telegram 不会混用。
+`GET /v1/bot/context` 鉴权后，以脱敏、截断后的文本作为工作日报候选，不会逐条回复或逐条
+调用模型。每个 AstrBot 机器人实例、每个 QQ 群分别保存。
 
 FAE 已尝试 ReMail 常见问题、API 文档和诊断工具仍无法可靠回答群内问题时，应调用无
 业务参数的 `remail_record_unresolved` Tool。Tool 重新校验当前事件和群白名单，只记录
@@ -91,19 +116,16 @@ FAE 已尝试 ReMail 常见问题、API 文档和诊断工具仍无法可靠回�
 Tool 加入白名单；模型和 Provider 必须支持 function calling。AstrBot 默认可能显示
 工具调用状态，如不希望用户看到该状态，可在全局设置中关闭 `show_tool_use_status`。
 
-插件按北京时间（`Asia/Shanghai`）每天 20:00 为每个群生成一份 AI 日报，并私聊投递
-给该群自己的群主。QQ OneBot 默认通过 AstrBot `event.get_group()` 自动识别群主；也可
-在 `feedback_report_targets` 中按 `platform_id + group_id` 配置 Telegram 私聊目标。
-Telegram 群主必须先私聊机器人 `/start`、执行 `/sid`，再把同一 Bot Platform ID 的
-`FriendMessage` UMO 配入目标列表；Telegram 不允许机器人主动开启从未建立过的私聊。
-日报发送失败时不会回退到来源群、`launch_destinations` 或其他接收人，而是保留数据并
+插件按 `feedback_report_time` 配置的北京时间（`Asia/Shanghai`，`HH:MM`）每天生成一份
+工作日报，并私聊投递给对应 QQ 群主。插件通过 AstrBot `event.get_group()` 自动识别群主，
+不提供 Telegram 工作日报。发送失败时不会回退到来源群、`launch_destinations` 或其他接收人，而是保留数据并
 每五分钟重试，插件重启后也会补发。发送与插件 KV 之间没有事务，因此极端崩溃窗口下
-同一日期的日报可能重复一次，但不会为了避免重复而静默丢失。
+同一日期的工作日报可能重复一次，但不会为了避免重复而静默丢失。
 
-反馈条目和日报不保存发送者 QQ/TG 号、昵称、原始邮箱、订单号、验证码、密码、System
+反馈条目和工作日报不保存发送者 QQ号、昵称、原始邮箱、订单号、验证码、密码、System
 Key、数据库地址或 ReMail 原始响应；路由元数据只保存投递所需的群号和群主私聊 UMO，
-日报会向该群主显示来源群号。单条候选、每日条数、模型提示词和日报都有上限。如果使用
-外部大模型，只有经过上述脱敏和截断的候选文本会在 20:00 汇总时发送给该模型。
+工作日报会向该群主显示来源群号。单条候选、每日条数、模型提示词和工作日报都有上限。
+如果使用外部大模型，只有经过上述脱敏和截断的候选文本会在配置时间汇总时发送给该模型。
 
 ## 敏感命令
 

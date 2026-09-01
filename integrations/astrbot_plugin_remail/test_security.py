@@ -6,12 +6,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
 from .security import (
     adapter_channel,
     channel_system_keys,
+    has_disallowed_url,
+    keyword_blacklist_match,
     normalize_adapter_identity,
     redact_message_outline,
     redact_message_text,
@@ -151,6 +154,67 @@ def _load_profile_formatter():
     return namespace["_format_profile"]
 
 
+def _load_welcome_functions():
+    tree = ast.parse((PLUGIN_DIR / "main.py").read_text(encoding="utf-8"))
+    helpers = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name
+        in {
+            "_joined_group_members",
+            "_qq_group_join_request",
+            "_structured_strings",
+            "_qq_moderation_text",
+        }
+    ]
+    main_class = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "Main"
+    )
+    handlers = [
+        node
+        for node in main_class.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name
+        in {
+            "welcome_new_members",
+            "auto_approve_qq_join_request",
+            "moderate_qq_group_message",
+        }
+    ]
+    for handler in handlers:
+        handler.decorator_list = []
+
+    class ReMailError(RuntimeError):
+        pass
+
+    namespace = {
+        "AstrMessageEvent": object,
+        "Any": Any,
+        "At": lambda **values: ("at", values),
+        "has_disallowed_url": has_disallowed_url,
+        "json": json,
+        "keyword_blacklist_match": keyword_blacklist_match,
+        "MessageChain": lambda items: items,
+        "Plain": lambda text: ("plain", text),
+        "ReMailError": ReMailError,
+        "logger": SimpleNamespace(warning=lambda *_args: None),
+    }
+    exec(
+        compile(
+            ast.fix_missing_locations(
+                ast.Module(body=[*helpers, *handlers], type_ignores=[])
+            ),
+            "main.py",
+            "exec",
+        ),
+        namespace,
+    )
+    return namespace, ReMailError
+
+
 def test_redact_message_outline() -> None:
     assert redact_message_outline("/绑定 user@example.com secret") == "/绑定 [REDACTED]"
     assert (
@@ -178,6 +242,24 @@ def test_redact_message_outline() -> None:
         == "/诊断 [REDACTED]"
     )
     assert redact_message_text("诊断 order@example.com 一直没收到") == "诊断 [REDACTED]"
+
+
+def test_group_moderation_keyword_and_url_rules() -> None:
+    assert keyword_blacklist_match("ＳＰＡ\u200bＭ message", ["spam"])
+    assert keyword_blacklist_match("这是黑名单内容", ["黑名单"])
+    assert not keyword_blacklist_match("ordinary message", ["", 123, "spam"])
+
+    allowed = ["example.com", "例子.公司"]
+    assert not has_disallowed_url("https://example.com/path", allowed)
+    assert not has_disallowed_url("https://docs.example.com/path", allowed)
+    assert not has_disallowed_url("https://例子.公司/帮助", allowed)
+    assert not has_disallowed_url("联系 user@example.com", [])
+    assert has_disallowed_url("https://evil.example/path", allowed)
+    assert has_disallowed_url("https://example.com.evil.test/path", allowed)
+    assert has_disallowed_url("https://example.com@evil.test/path", allowed)
+    assert has_disallowed_url("www.evil.test/path", allowed)
+    assert has_disallowed_url("https://example.com", [])
+    assert not has_disallowed_url("malformed http://[", allowed)
 
 
 def test_adapter_identity_uses_real_qq_and_telegram_ids() -> None:
@@ -779,6 +861,251 @@ def test_system_keys_are_read_from_plugin_config() -> None:
         assert schema[field]["obvious_hint"] is True
         assert schema[field]["secret"] is True
     assert "launch_poll_seconds" not in schema
+    assert schema["auto_approve_join_requests"]["description"] == "自动批准加群"
+    assert schema["auto_approve_join_requests"]["default"] is False
+    assert schema["minimum_qq_level"]["default"] == 16
+    assert schema["keyword_blacklist_enabled"]["default"] is False
+    assert schema["keyword_blacklist"]["default"] == []
+    assert schema["url_whitelist_enabled"]["default"] is False
+    assert schema["url_whitelist_domains"]["default"] == []
+    assert schema["welcome_enabled"]["description"] == "新人欢迎"
+    assert schema["welcome_enabled"]["default"] is False
+    assert schema["welcome_text"]["type"] == "text"
+    welcome = schema["welcome_text"]["default"]
+    assert "https://remail.aishop6.com" in welcome
+    assert "https://catfk.com/shop/aishop6" in welcome
+    assert "Outlook、iCloud 和域名邮箱" in welcome
+    assert "@红夜" in welcome
+    assert schema["feedback_enabled"]["description"] == "工作日报"
+    assert schema["feedback_report_time"]["default"] == "20:00"
+    assert "feedback_report_targets" not in schema
+
+
+def test_group_join_welcome_uses_trusted_event_and_whitelist() -> None:
+    functions, remail_error = _load_welcome_functions()
+    joined = functions["_joined_group_members"]
+    handler = functions["welcome_new_members"]
+
+    def qq_event(raw, self_id="999"):
+        return SimpleNamespace(
+            get_platform_name=lambda: "aiocqhttp",
+            get_self_id=lambda: self_id,
+            message_obj=SimpleNamespace(raw_message=raw),
+        )
+
+    notice = {
+        "post_type": "notice",
+        "notice_type": "group_increase",
+        "user_id": 123456789,
+    }
+    assert joined(qq_event(notice)) == [("123456789", "")]
+    assert joined(qq_event(notice, self_id="123456789")) == []
+    assert joined(qq_event({"post_type": "message"})) == []
+
+    telegram_member = SimpleNamespace(id=456789, username="new_user", is_bot=False)
+    telegram_event = SimpleNamespace(
+        get_platform_name=lambda: "telegram",
+        message_obj=SimpleNamespace(
+            raw_message=SimpleNamespace(
+                message=SimpleNamespace(new_chat_members=[telegram_member])
+            )
+        ),
+    )
+    assert joined(telegram_event) == [("456789", "new_user")]
+
+    sent = AsyncMock()
+    event = qq_event(notice)
+    event.send = sent
+    authorize = AsyncMock()
+    plugin = SimpleNamespace(
+        config={"welcome_enabled": True, "welcome_text": "欢迎加入"},
+        _authorize_event=authorize,
+    )
+    asyncio.run(handler(plugin, event))
+    authorize.assert_awaited_once_with(event)
+    sent.assert_awaited_once_with(
+        [("at", {"qq": "123456789", "name": ""}), ("plain", "欢迎加入")]
+    )
+
+    denied = qq_event(notice)
+    denied.send = AsyncMock()
+    plugin._authorize_event = AsyncMock(side_effect=remail_error("denied"))
+    asyncio.run(handler(plugin, denied))
+    denied.send.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("level", "returned_user_id", "approved"),
+    [
+        (15, 123456789, False),
+        (16, 123456789, True),
+        (80, 987654321, False),
+        (None, 123456789, False),
+    ],
+)
+def test_qq_join_request_approval_enforces_level_and_identity(
+    level: int | None, returned_user_id: int, approved: bool
+) -> None:
+    functions, _ = _load_welcome_functions()
+    parse_request = functions["_qq_group_join_request"]
+    handler = functions["auto_approve_qq_join_request"]
+    raw = {
+        "post_type": "request",
+        "request_type": "group",
+        "sub_type": "add",
+        "group_id": 529642597,
+        "user_id": 123456789,
+        "flag": "request-flag",
+    }
+    bot = SimpleNamespace(call_action=AsyncMock())
+    bot.call_action.side_effect = [
+        {"user_id": returned_user_id, "qqLevel": level},
+        None,
+    ]
+    event = SimpleNamespace(
+        bot=bot,
+        get_platform_name=lambda: "aiocqhttp",
+        get_group_id=lambda: "529642597",
+        get_sender_id=lambda: "123456789",
+        message_obj=SimpleNamespace(raw_message=raw),
+    )
+    authorize = AsyncMock()
+    plugin = SimpleNamespace(
+        config={
+            "auto_approve_join_requests": True,
+            "minimum_qq_level": 16,
+        },
+        _authorize_event=authorize,
+    )
+
+    assert parse_request(event) == ("123456789", "request-flag")
+    asyncio.run(handler(plugin, event))
+    authorize.assert_awaited_once_with(event)
+    assert bot.call_action.await_args_list[0].args == ("get_stranger_info",)
+    assert bot.call_action.await_args_list[0].kwargs == {
+        "user_id": 123456789,
+        "no_cache": True,
+    }
+    assert bot.call_action.await_count == (2 if approved else 1)
+    if approved:
+        assert bot.call_action.await_args_list[1].args == ("set_group_add_request",)
+        assert bot.call_action.await_args_list[1].kwargs == {
+            "flag": "request-flag",
+            "approve": True,
+        }
+
+
+def test_qq_join_request_ignores_invites_and_unauthorized_groups() -> None:
+    functions, remail_error = _load_welcome_functions()
+    parse_request = functions["_qq_group_join_request"]
+    handler = functions["auto_approve_qq_join_request"]
+    raw = {
+        "post_type": "request",
+        "request_type": "group",
+        "sub_type": "invite",
+        "group_id": 529642597,
+        "user_id": 123456789,
+        "flag": "request-flag",
+    }
+    event = SimpleNamespace(
+        bot=SimpleNamespace(call_action=AsyncMock()),
+        get_platform_name=lambda: "aiocqhttp",
+        get_group_id=lambda: "529642597",
+        get_sender_id=lambda: "123456789",
+        message_obj=SimpleNamespace(raw_message=raw),
+    )
+    assert parse_request(event) is None
+
+    raw["sub_type"] = "add"
+    plugin = SimpleNamespace(
+        config={"auto_approve_join_requests": True, "minimum_qq_level": 16},
+        _authorize_event=AsyncMock(side_effect=remail_error("denied")),
+    )
+    asyncio.run(handler(plugin, event))
+    plugin._authorize_event.assert_awaited_once_with(event)
+    event.bot.call_action.assert_not_awaited()
+
+
+def test_qq_group_moderation_extracts_cards_and_recalls_violations() -> None:
+    functions, remail_error = _load_welcome_functions()
+    extract = functions["_qq_moderation_text"]
+    handler = functions["moderate_qq_group_message"]
+
+    def make_event(segments):
+        stopped = []
+        event = SimpleNamespace(
+            bot=SimpleNamespace(call_action=AsyncMock()),
+            get_platform_name=lambda: "aiocqhttp",
+            message_obj=SimpleNamespace(
+                message_id="42",
+                raw_message={"message": segments},
+            ),
+            stop_event=lambda: stopped.append(True),
+        )
+        return event, stopped
+
+    segments = [
+        {"type": "reply", "data": {"text": "旧消息 spam https://evil.test"}},
+        {"type": "image", "data": {"url": "https://cdn.evil.test/a.jpg"}},
+        {"type": "text", "data": {"text": "普通正文"}},
+        {
+            "type": "share",
+            "data": {
+                "url": "https://docs.example.com/help",
+                "title": "产品说明",
+                "content": "查看文档",
+            },
+        },
+        {
+            "type": "json",
+            "data": {
+                "data": json.dumps({"meta": {"jumpUrl": "https://outside.test/path"}})
+            },
+        },
+    ]
+    event, _ = make_event(segments)
+    text = extract(event)
+    assert "普通正文" in text
+    assert "https://docs.example.com/help" in text
+    assert "https://outside.test/path" in text
+    assert "旧消息 spam" not in text
+    assert "cdn.evil.test" not in text
+
+    authorize = AsyncMock()
+    plugin = SimpleNamespace(
+        config={
+            "keyword_blacklist_enabled": False,
+            "url_whitelist_enabled": True,
+            "url_whitelist_domains": ["example.com"],
+        },
+        _authorize_event=authorize,
+    )
+    event, stopped = make_event(segments)
+    asyncio.run(handler(plugin, event))
+    authorize.assert_awaited_once_with(event)
+    event.bot.call_action.assert_awaited_once_with("delete_msg", message_id=42)
+    assert stopped == [True]
+
+    safe_event, safe_stopped = make_event(
+        [{"type": "text", "data": {"text": "https://sub.example.com/path"}}]
+    )
+    authorize.reset_mock()
+    asyncio.run(handler(plugin, safe_event))
+    authorize.assert_not_awaited()
+    safe_event.bot.call_action.assert_not_awaited()
+    assert not safe_stopped
+
+    denied_event, denied_stopped = make_event(
+        [{"type": "text", "data": {"text": "spam"}}]
+    )
+    plugin.config = {
+        "keyword_blacklist_enabled": True,
+        "keyword_blacklist": ["spam"],
+    }
+    plugin._authorize_event = AsyncMock(side_effect=remail_error("denied"))
+    asyncio.run(handler(plugin, denied_event))
+    denied_event.bot.call_action.assert_not_awaited()
+    assert not denied_stopped
 
 
 def test_remote_base_url_requires_tls() -> None:

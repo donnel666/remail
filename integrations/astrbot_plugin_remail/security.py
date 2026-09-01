@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from urllib.parse import urlsplit, urlunsplit
 
 _BINDING_COMMAND = re.compile(
@@ -9,6 +10,15 @@ _BINDING_COMMAND = re.compile(
 _DIAGNOSIS_COMMAND = re.compile(
     r"(?:^|\s)\W*/?(?:诊断|接码排查|查码)(?:@[a-z0-9_]+)?(?=\s|$)", re.IGNORECASE
 )
+_URL = re.compile(
+    r"(?ix)(?<![\w@])(?:"
+    r"(?:https?://|www\.)[^\s<>\"']+|"
+    r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
+    r"(?:[a-z]{2,63}|xn--[a-z0-9-]{2,59})"
+    r"(?::\d{1,5})?(?:/[^\s<>\"']*)?"
+    r")"
+)
+_URL_TRAILING = ".,;:!?)]}，。；：！？》】"
 
 
 def contains_binding_command(*values: str) -> bool:
@@ -85,6 +95,69 @@ def channel_system_keys(qq_key: str, telegram_key: str) -> dict[str, str]:
         for channel, key in (("qq", qq_key), ("telegram", telegram_key))
         if key
     }
+
+
+def _moderation_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return "".join(char for char in normalized if unicodedata.category(char) != "Cf")
+
+
+def keyword_blacklist_match(text: str, values: object) -> bool:
+    """Case-insensitive substring matching with basic Unicode normalization."""
+    if not isinstance(text, str) or not isinstance(values, (list, tuple, set)):
+        return False
+    haystack = _moderation_text(text)
+    for value in list(values)[:200]:
+        if not isinstance(value, str):
+            continue
+        keyword = _moderation_text(value.strip())
+        if keyword and keyword in haystack:
+            return True
+    return False
+
+
+def _normalized_domain(value: str) -> str:
+    candidate = value.strip().casefold().removeprefix("*.").lstrip(".")
+    try:
+        parsed = urlsplit(candidate if "://" in candidate else f"//{candidate}")
+        host = (parsed.hostname or "").rstrip(".")
+    except ValueError:
+        return ""
+    if parsed.scheme and parsed.scheme not in {"http", "https"}:
+        return ""
+    try:
+        host = host.encode("idna").decode("ascii").casefold()
+    except UnicodeError:
+        return ""
+    if not host or len(host) > 253:
+        return ""
+    if ":" not in host and any(
+        not label
+        or len(label) > 63
+        or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label)
+        for label in host.split(".")
+    ):
+        return ""
+    return host
+
+
+def has_disallowed_url(text: str, allowed_domains: object) -> bool:
+    """Return true when an HTTP(S) URL does not match an allowed domain."""
+    if not isinstance(text, str):
+        return False
+    values = allowed_domains if isinstance(allowed_domains, (list, tuple, set)) else []
+    allowed = {
+        domain
+        for value in list(values)[:200]
+        if isinstance(value, str) and (domain := _normalized_domain(value))
+    }
+    for match in _URL.finditer(text):
+        host = _normalized_domain(match.group(0).rstrip(_URL_TRAILING))
+        if host and not any(
+            host == domain or host.endswith(f".{domain}") for domain in allowed
+        ):
+            return True
+    return False
 
 
 def validated_base_url(value: str) -> str:
