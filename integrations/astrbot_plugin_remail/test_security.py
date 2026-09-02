@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from .feedback import sanitize_feedback_text
 from .security import (
     adapter_channel,
     channel_system_keys,
@@ -156,16 +157,29 @@ def _load_profile_formatter():
 
 def _load_welcome_functions():
     tree = ast.parse((PLUGIN_DIR / "main.py").read_text(encoding="utf-8"))
+    intent_prompt = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "_REMAIL_INTENT_SYSTEM_PROMPT"
+            for target in node.targets
+        )
+    )
     helpers = [
         node
         for node in tree.body
-        if isinstance(node, ast.FunctionDef)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         and node.name
         in {
             "_joined_group_members",
             "_qq_group_join_request",
             "_structured_strings",
             "_qq_moderation_text",
+            "_group_support_text",
+            "_is_remail_intent_result",
+            "_mentioned_qq_ids",
+            "_qq_group_role",
         }
     ]
     main_class = next(
@@ -182,6 +196,8 @@ def _load_welcome_functions():
             "welcome_new_members",
             "auto_approve_qq_join_request",
             "moderate_qq_group_message",
+            "handoff_group_manager_mentions",
+            "proactively_answer_remail_questions",
         }
     ]
     for handler in handlers:
@@ -198,14 +214,17 @@ def _load_welcome_functions():
         "json": json,
         "keyword_blacklist_match": keyword_blacklist_match,
         "MessageChain": lambda items: items,
+        "normalize_adapter_identity": normalize_adapter_identity,
         "Plain": lambda text: ("plain", text),
+        "re": re,
         "ReMailError": ReMailError,
+        "sanitize_feedback_text": sanitize_feedback_text,
         "logger": SimpleNamespace(warning=lambda *_args: None),
     }
     exec(
         compile(
             ast.fix_missing_locations(
-                ast.Module(body=[*helpers, *handlers], type_ignores=[])
+                ast.Module(body=[intent_prompt, *helpers, *handlers], type_ignores=[])
             ),
             "main.py",
             "exec",
@@ -260,6 +279,22 @@ def test_group_moderation_keyword_and_url_rules() -> None:
     assert has_disallowed_url("www.evil.test/path", allowed)
     assert has_disallowed_url("https://example.com", [])
     assert not has_disallowed_url("malformed http://[", allowed)
+
+
+def test_remail_intent_result_requires_an_exact_label() -> None:
+    functions, _ = _load_welcome_functions()
+    classify = functions["_is_remail_intent_result"]
+    assert classify("REMAIL")
+    assert classify("  remail\n")
+    for value in (
+        "IGNORE",
+        "REMAIL。",
+        "REMAIL because relevant",
+        "```REMAIL```",
+        "",
+        None,
+    ):
+        assert not classify(value)
 
 
 def test_adapter_identity_uses_real_qq_and_telegram_ids() -> None:
@@ -337,12 +372,18 @@ def test_llm_request_requires_remail_event_authorization() -> None:
     )
     handler.decorator_list = []
     helpers = _load_user_error_helpers()
+
+    class TextPart:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
     namespace = {
         "AstrMessageEvent": object,
         "ProviderRequest": object,
         "MessageChain": lambda items: items,
         "Plain": lambda text: text,
         "ReMailError": helpers["ReMailError"],
+        "TextPart": TextPart,
         "_safe_user_error": helpers["_safe_user_error"],
     }
     exec(
@@ -360,10 +401,65 @@ def test_llm_request_requires_remail_event_authorization() -> None:
     async def send(message):
         sent.append(message)
 
-    event = SimpleNamespace(send=send, stop_event=lambda: stopped.append(True))
-    asyncio.run(namespace["authorize_llm"](Plugin(), event, object()))
+    event = SimpleNamespace(
+        get_extra=lambda _key, default="": default,
+        send=send,
+        stop_event=lambda: stopped.append(True),
+    )
+    request = SimpleNamespace(extra_user_content_parts=[])
+    asyncio.run(namespace["authorize_llm"](Plugin(), event, request))
     assert sent == [["当前会话未获授权。"]]
     assert stopped == [True]
+    assert not request.extra_user_content_parts
+
+    authorized = SimpleNamespace(_authorize_event=AsyncMock())
+    handoff_event = SimpleNamespace(
+        get_extra=lambda key, default="": (
+            "群主" if key == "_remail_admin_handoff_role" else default
+        ),
+        send=AsyncMock(),
+        stop_event=lambda: pytest.fail("authorized handoff must continue"),
+    )
+    handoff_request = SimpleNamespace(extra_user_content_parts=[])
+    asyncio.run(namespace["authorize_llm"](authorized, handoff_event, handoff_request))
+    authorized._authorize_event.assert_not_awaited()
+    assert len(handoff_request.extra_user_content_parts) == 1
+    context = handoff_request.extra_user_content_parts[0].text
+    assert "红夜应主动代接" in context
+    assert "非必要不要打扰群主" in context
+    assert "QQ" not in context
+
+    proactive = SimpleNamespace(_authorize_event=AsyncMock())
+    proactive_event = SimpleNamespace(
+        get_extra=lambda key, default="": (
+            True if key == "_remail_proactive_support" else default
+        ),
+        send=AsyncMock(),
+        stop_event=lambda: pytest.fail("authorized proactive support must continue"),
+    )
+    proactive_request = SimpleNamespace(extra_user_content_parts=[])
+    asyncio.run(
+        namespace["authorize_llm"](proactive, proactive_event, proactive_request)
+    )
+    proactive._authorize_event.assert_not_awaited()
+    assert len(proactive_request.extra_user_content_parts) == 1
+    proactive_context = proactive_request.extra_user_content_parts[0].text
+    assert "红夜应主动接待" in proactive_context
+    assert "不要等待用户再次 @" in proactive_context
+    assert "识别规则" in proactive_context
+
+    ordinary = SimpleNamespace(_authorize_event=AsyncMock())
+    ordinary_event = SimpleNamespace(
+        get_extra=lambda key, default="": (
+            "伪造角色" if key == "_remail_admin_handoff_role" else default
+        ),
+        send=AsyncMock(),
+        stop_event=lambda: pytest.fail("authorized request must continue"),
+    )
+    ordinary_request = SimpleNamespace(extra_user_content_parts=[])
+    asyncio.run(namespace["authorize_llm"](ordinary, ordinary_event, ordinary_request))
+    ordinary._authorize_event.assert_awaited_once_with(ordinary_event)
+    assert not ordinary_request.extra_user_content_parts
 
 
 def test_personal_info_formatter_handles_binding_states() -> None:
@@ -927,8 +1023,20 @@ def test_group_join_welcome_uses_trusted_event_and_whitelist() -> None:
         [("at", {"qq": "123456789", "name": ""}), ("plain", "欢迎加入")]
     )
 
+    sent.reset_mock()
+    authorize.reset_mock()
+    plugin.config = {
+        "welcome_enabled": False,
+        "auto_approve_join_requests": True,
+        "welcome_text": "欢迎加入",
+    }
+    asyncio.run(handler(plugin, event))
+    authorize.assert_not_awaited()
+    sent.assert_not_awaited()
+
     denied = qq_event(notice)
     denied.send = AsyncMock()
+    plugin.config = {"welcome_enabled": True, "welcome_text": "欢迎加入"}
     plugin._authorize_event = AsyncMock(side_effect=remail_error("denied"))
     asyncio.run(handler(plugin, denied))
     denied.send.assert_not_awaited()
@@ -1106,6 +1214,219 @@ def test_qq_group_moderation_extracts_cards_and_recalls_violations() -> None:
     asyncio.run(handler(plugin, denied_event))
     denied_event.bot.call_action.assert_not_awaited()
     assert not denied_stopped
+
+
+@pytest.mark.parametrize(
+    ("target_role", "expected_label"),
+    [("owner", "群主"), ("admin", "管理员")],
+)
+def test_member_mentions_group_management_wake_remail_fae(
+    target_role: str, expected_label: str
+) -> None:
+    functions, _ = _load_welcome_functions()
+    mentioned_ids = functions["_mentioned_qq_ids"]
+    handler = functions["handoff_group_manager_mentions"]
+    extras = {}
+    event = SimpleNamespace(
+        bot=SimpleNamespace(call_action=AsyncMock()),
+        get_platform_name=lambda: "aiocqhttp",
+        get_sender_id=lambda: "123456789",
+        get_group_id=lambda: "529642597",
+        get_self_id=lambda: "999999999",
+        message_obj=SimpleNamespace(
+            raw_message={
+                "message": [
+                    {"type": "at", "data": {"qq": "888888888"}},
+                    {"type": "at", "data": {"qq": "999999999"}},
+                    {"type": "text", "data": {"text": "接码怎么使用？"}},
+                ]
+            }
+        ),
+        message_str="@管理成员(888888888) 接码怎么使用？",
+        set_extra=lambda key, value: extras.__setitem__(key, value),
+        is_wake=False,
+        is_at_or_wake_command=False,
+    )
+    event.bot.call_action.side_effect = [
+        {"user_id": 123456789, "role": "member"},
+        {"user_id": 888888888, "role": target_role},
+    ]
+    authorize = AsyncMock()
+    plugin = SimpleNamespace(_authorize_event=authorize)
+
+    assert mentioned_ids(event) == ["888888888"]
+    asyncio.run(handler(plugin, event))
+
+    authorize.assert_awaited_once_with(event)
+    assert event.message_str == "接码怎么使用？"
+    assert "888888888" not in event.message_str
+    assert extras == {"_remail_admin_handoff_role": expected_label}
+    assert event.is_wake is True
+    assert event.is_at_or_wake_command is True
+    assert event.bot.call_action.await_args_list[0].kwargs == {
+        "group_id": 529642597,
+        "user_id": 123456789,
+        "no_cache": False,
+    }
+    assert event.bot.call_action.await_args_list[1].kwargs == {
+        "group_id": 529642597,
+        "user_id": 888888888,
+        "no_cache": False,
+    }
+
+
+def test_group_management_handoff_ignores_privileged_senders_and_unauthorized_groups() -> (
+    None
+):
+    functions, remail_error = _load_welcome_functions()
+    handler = functions["handoff_group_manager_mentions"]
+
+    def make_event():
+        extras = {}
+        event = SimpleNamespace(
+            bot=SimpleNamespace(call_action=AsyncMock()),
+            get_platform_name=lambda: "aiocqhttp",
+            get_sender_id=lambda: "123456789",
+            get_group_id=lambda: "529642597",
+            get_self_id=lambda: "999999999",
+            message_obj=SimpleNamespace(
+                raw_message={"message": [{"type": "at", "data": {"qq": "888888888"}}]}
+            ),
+            message_str="@群主(888888888)",
+            set_extra=lambda key, value: extras.__setitem__(key, value),
+            is_wake=False,
+            is_at_or_wake_command=False,
+        )
+        return event, extras
+
+    event, extras = make_event()
+    event.bot.call_action.side_effect = [{"user_id": 123456789, "role": "admin"}]
+    plugin = SimpleNamespace(_authorize_event=AsyncMock())
+    asyncio.run(handler(plugin, event))
+    assert not extras
+    assert event.is_at_or_wake_command is False
+    assert event.bot.call_action.await_count == 1
+
+    event, extras = make_event()
+    event.bot.call_action.side_effect = [
+        {"user_id": 123456789, "role": "member"},
+        {"user_id": 888888888, "role": "member"},
+    ]
+    plugin = SimpleNamespace(_authorize_event=AsyncMock())
+    asyncio.run(handler(plugin, event))
+    assert not extras
+    assert event.is_at_or_wake_command is False
+
+    event, extras = make_event()
+    plugin = SimpleNamespace(
+        _authorize_event=AsyncMock(side_effect=remail_error("denied"))
+    )
+    asyncio.run(handler(plugin, event))
+    event.bot.call_action.assert_not_awaited()
+    assert not extras
+    assert event.is_at_or_wake_command is False
+
+
+def test_group_remail_question_wakes_fae_without_at_and_avoids_duplicate_wakes() -> (
+    None
+):
+    functions, remail_error = _load_welcome_functions()
+    handler = functions["proactively_answer_remail_questions"]
+
+    def make_event(text: str, *, already_wake: bool = False):
+        extras = {}
+        event = SimpleNamespace(
+            get_platform_name=lambda: "aiocqhttp",
+            unified_msg_origin="bot:GroupMessage:529642597",
+            message_obj=SimpleNamespace(
+                raw_message={"message": [{"type": "text", "data": {"text": text}}]}
+            ),
+            message_str=text,
+            set_extra=lambda key, value: extras.__setitem__(key, value),
+            is_wake=already_wake,
+            is_at_or_wake_command=already_wake,
+        )
+        return event, extras
+
+    def make_plugin(decision: str = "REMAIL"):
+        context = SimpleNamespace(
+            get_current_chat_provider_id=AsyncMock(return_value="provider"),
+            llm_generate=AsyncMock(
+                return_value=SimpleNamespace(completion_text=decision)
+            ),
+        )
+        return SimpleNamespace(_authorize_event=AsyncMock(), context=context)
+
+    event, extras = make_event(
+        "接码 user@example.com API Key prompt-secret 一直没收到验证码"
+    )
+    plugin = make_plugin()
+    asyncio.run(handler(plugin, event))
+    plugin._authorize_event.assert_awaited_once_with(event)
+    plugin.context.get_current_chat_provider_id.assert_awaited_once_with(
+        event.unified_msg_origin
+    )
+    call = plugin.context.llm_generate.await_args.kwargs
+    assert call["chat_provider_id"] == "provider"
+    assert call["tools"] is None
+    assert call["contexts"] is None
+    assert "只允许输出一个大写单词" in call["system_prompt"]
+    classifier_payload = json.loads(call["prompt"])
+    classifier_text = classifier_payload["untrustedMessage"]
+    assert "user@example.com" not in classifier_text
+    assert "prompt-secret" not in classifier_text
+    assert "[邮箱已隐藏]" in classifier_text
+    assert extras == {"_remail_proactive_support": True}
+    assert event.is_wake is True
+    assert event.is_at_or_wake_command is True
+
+    chat_event, chat_extras = make_event("今天晚上吃什么")
+    plugin = make_plugin("IGNORE")
+    asyncio.run(handler(plugin, chat_event))
+    plugin._authorize_event.assert_awaited_once_with(chat_event)
+    plugin.context.llm_generate.assert_awaited_once()
+    assert not chat_extras
+    assert chat_event.is_at_or_wake_command is False
+
+    verbose_event, verbose_extras = make_event("API 怎么调用？")
+    plugin = make_plugin("REMAIL because it is related")
+    asyncio.run(handler(plugin, verbose_event))
+    assert not verbose_extras
+    assert verbose_event.is_at_or_wake_command is False
+
+    failed_event, failed_extras = make_event("邮箱为什么收不到邮件？")
+    plugin = make_plugin()
+    plugin.context.llm_generate.side_effect = RuntimeError("private provider error")
+    asyncio.run(handler(plugin, failed_event))
+    assert not failed_extras
+    assert failed_event.is_at_or_wake_command is False
+
+    command_event, command_extras = make_event("/项目 github")
+    plugin = make_plugin()
+    asyncio.run(handler(plugin, command_event))
+    plugin._authorize_event.assert_not_awaited()
+    plugin.context.llm_generate.assert_not_awaited()
+    assert not command_extras
+
+    awake_event, awake_extras = make_event("API 怎么调用？", already_wake=True)
+    plugin = make_plugin()
+    asyncio.run(handler(plugin, awake_event))
+    plugin._authorize_event.assert_not_awaited()
+    plugin.context.llm_generate.assert_not_awaited()
+    assert not awake_extras
+
+    denied_event, denied_extras = make_event("订单失败了怎么办？")
+    context = SimpleNamespace(
+        get_current_chat_provider_id=AsyncMock(), llm_generate=AsyncMock()
+    )
+    plugin = SimpleNamespace(
+        _authorize_event=AsyncMock(side_effect=remail_error("denied")),
+        context=context,
+    )
+    asyncio.run(handler(plugin, denied_event))
+    context.llm_generate.assert_not_awaited()
+    assert not denied_extras
+    assert denied_event.is_at_or_wake_command is False
 
 
 def test_remote_base_url_requires_tls() -> None:
