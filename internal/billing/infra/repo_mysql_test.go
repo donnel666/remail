@@ -1187,11 +1187,11 @@ func TestBillingRepoCreditRechargeExactlyOnceMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "75.00", summary.Wallet.ConsumerBalance)
 	require.Equal(t, "75.00", summary.TotalRecharged)
-	var transactionCount int64
-	require.NoError(t, db.Model(&WalletTransactionModel{}).
+	var rechargeTransaction WalletTransactionModel
+	require.NoError(t, db.
 		Where("user_id = ? AND transaction_type = ? AND biz_id = ?", userID, domain.TransactionTypeRecharge, created.RechargeNo).
-		Count(&transactionCount).Error)
-	require.EqualValues(t, 1, transactionCount)
+		First(&rechargeTransaction).Error)
+	require.Equal(t, "recharge_alipay", rechargeTransaction.BizType)
 	var warningState WalletModel
 	require.NoError(t, db.Select("balance_warning_level", "balance_warning_cycle").First(&warningState, "user_id = ?", userID).Error)
 	require.Equal(t, 0, warningState.BalanceWarningLevel)
@@ -1199,7 +1199,7 @@ func TestBillingRepoCreditRechargeExactlyOnceMySQL(t *testing.T) {
 
 	second, err := repo.CreateRecharge(ctx, billingapp.CreateRechargeCommand{
 		Recharge: domain.Recharge{
-			RechargeNo: "RC-DUPLICATE-GATEWAY", UserID: userID, PaymentMethod: "alipay",
+			RechargeNo: "RC-DUPLICATE-GATEWAY", UserID: userID, PaymentMethod: domain.RechargePaymentMethodAlipay,
 			RechargeQuota: "20.00", PaymentAmount: "20.00", Status: domain.RechargeStatusPaying,
 			GatewayConfigHash: "hash", CreatedAt: now, UpdatedAt: now,
 		},
@@ -1213,7 +1213,7 @@ func TestBillingRepoCreditRechargeExactlyOnceMySQL(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrRechargeQueryMismatch)
 	third, err := repo.CreateRecharge(ctx, billingapp.CreateRechargeCommand{
 		Recharge: domain.Recharge{
-			RechargeNo: "RC-SECOND-PENDING", UserID: userID, PaymentMethod: "alipay",
+			RechargeNo: "RC-SECOND-PENDING", UserID: userID, PaymentMethod: domain.RechargePaymentMethodEpusdtUSDTTron,
 			RechargeQuota: "30.00", PaymentAmount: "30.00", Status: domain.RechargeStatusPaying,
 			GatewayConfigHash: "hash", CreatedAt: now, UpdatedAt: now,
 		},
@@ -1244,6 +1244,13 @@ func TestBillingRepoCreditRechargeExactlyOnceMySQL(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "95.00", summary.Wallet.ConsumerBalance)
 	require.Equal(t, "95.00", summary.TotalRecharged)
+	_, err = repo.CreditRecharge(ctx, billingapp.CreditRechargeCommand{
+		RechargeNo: third.RechargeNo, GatewayTradeNo: "GW-USDT-SOURCE", QueriedAt: now.Add(3 * time.Minute),
+	})
+	require.NoError(t, err)
+	rechargeTransaction = WalletTransactionModel{}
+	require.NoError(t, db.Where("biz_id = ?", third.RechargeNo).First(&rechargeTransaction).Error)
+	require.Equal(t, "recharge_epusdt_usdt_tron", rechargeTransaction.BizType)
 }
 
 func TestBillingRepoRechargeLegacyEpayFingerprintAliasMySQL(t *testing.T) {

@@ -1119,7 +1119,7 @@ function WalletTab({
           title: t("Type"),
           width: 135,
           render: (_: unknown, record: AdminTransaction) =>
-            renderTransactionTypeTag(record.transactionType, record.direction, t),
+            renderTransactionTypeTag(record.transactionType, record.direction, t, record.bizType),
         },
         {
           dataIndex: "amount",

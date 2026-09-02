@@ -707,7 +707,7 @@ func (r *BillingRepo) CreditRecharge(ctx context.Context, command billingapp.Cre
 			Amount:          model.RechargeQuota,
 			Direction:       domain.TransactionDirectionIn,
 			TransactionType: domain.TransactionTypeRecharge,
-			BizType:         "recharge",
+			BizType:         "recharge_" + strings.TrimSpace(model.PaymentMethod),
 			BizID:           model.RechargeNo,
 			IdempotencyKey:  "recharge:" + model.RechargeNo,
 		})

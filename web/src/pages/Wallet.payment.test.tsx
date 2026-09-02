@@ -290,6 +290,7 @@ describe("wallet payment modal", () => {
       cancelText: "Cancel",
       okText: "I understand, continue",
       title: "USDT payment notice",
+      width: "min(672px, calc(100vw - 32px))",
     }));
     await act(async () => {
       await mocks.modalConfirm.mock.calls[0][0].onOk();

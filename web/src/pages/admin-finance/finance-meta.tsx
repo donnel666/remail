@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { TFunction } from "i18next";
 
 import { formatPointsValue } from "@/lib/points";
+import { transactionTypeLabel } from "@/lib/transaction-type-label";
 
 import type {
   FinanceCardKeyStatus,
@@ -66,7 +67,8 @@ export function renderCardKeyStatusTag(
 export function renderTransactionTypeTag(
   type: FinanceTransactionType,
   direction: FinanceTransactionDirection,
-  t: TFunction
+  t: TFunction,
+  bizType = "",
 ) {
   return (
     <Tag
@@ -74,7 +76,7 @@ export function renderTransactionTypeTag(
       shape="circle"
       size="small"
     >
-      {t(TRANSACTION_TYPE_LABEL[type] ?? type)}
+      {t(transactionTypeLabel(TRANSACTION_TYPE_LABEL[type] ?? type, bizType))}
     </Tag>
   );
 }

@@ -1,6 +1,8 @@
 import { Tag } from "@douyinfe/semi-ui";
 import type { TFunction } from "i18next";
 
+import { transactionTypeLabel } from "@/lib/transaction-type-label";
+
 import type {
   AdminTransactionType,
   AdminUserRole,
@@ -60,11 +62,12 @@ const TRANSACTION_DIRECTION_COLOR: Record<"in" | "out", TagColor> = {
 export function renderTransactionTypeTag(
   type: AdminTransactionType,
   direction: "in" | "out",
-  t: TFunction
+  t: TFunction,
+  bizType = "",
 ) {
   return (
     <Tag color={TRANSACTION_DIRECTION_COLOR[direction]} shape="circle" size="small">
-      {t(type)}
+      {t(transactionTypeLabel(type, bizType))}
     </Tag>
   );
 }

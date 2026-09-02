@@ -228,7 +228,7 @@ export function TransactionsPanel({ tabsArea }: { tabsArea: ReactNode }) {
         dataIndex: "transactionType",
         width: 150,
         render: (value: FinanceTransactionType, record: FinanceTransaction) =>
-          renderTransactionTypeTag(value, record.direction, t),
+          renderTransactionTypeTag(value, record.direction, t, record.bizType),
       },
       {
         title: t("Direction"),

@@ -85,7 +85,8 @@ export function TransactionDetailSheet({
                 value={renderTransactionTypeTag(
                   transaction.transactionType,
                   transaction.direction,
-                  t
+                  t,
+                  transaction.bizType,
                 )}
               />
               <InfoItem

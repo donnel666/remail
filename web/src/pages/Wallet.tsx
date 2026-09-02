@@ -617,6 +617,7 @@ export default function Wallet() {
       okText: t("I understand, continue"),
       onOk: () => handleRecharge(requestedMethod),
       title: t("USDT payment notice"),
+      width: "min(672px, calc(100vw - 32px))",
     });
   };
 
