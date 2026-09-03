@@ -1999,17 +1999,6 @@ export default function AdminGmailEmails() {
       ),
     },
     {
-      dataIndex: "bindingEmail",
-      title: t("Binding email"),
-      width: 250,
-      render: (value: unknown) =>
-        value ? (
-          <CopyableTableText copiedText={t("Copied")} text={String(value)} />
-        ) : (
-          "-"
-        ),
-    },
-    {
       dataIndex: "owner",
       title: t("Owner"),
       width: 310,

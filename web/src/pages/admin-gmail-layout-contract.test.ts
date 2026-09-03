@@ -71,6 +71,12 @@ describe("admin Gmail page layout", () => {
     )?.[1];
     expect(basicTabBody).toBeDefined();
     expect(basicTabBody).not.toContain("ConfiguredTag");
+    const resourceTableColumns = gmailSource.match(
+      /\n  const columns = \[([\s\S]*?)\n  \];\n\n  const tableColumns =/,
+    )?.[1];
+    expect(resourceTableColumns).toBeDefined();
+    expect(resourceTableColumns).not.toContain('dataIndex: "bindingEmail"');
+    expect(gmailSource).toContain('label={t("Binding email")}');
     expect(gmailSource).not.toContain("<ReplaceGmailCredentialsModal");
     expect(gmailSource).not.toContain('t("Replace credentials")');
     expect(gmailSource).toContain(
