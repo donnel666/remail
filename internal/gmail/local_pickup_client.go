@@ -106,7 +106,7 @@ func (c *localGmailPickupClient) Fetch(
 		if err := ctx.Err(); err != nil {
 			return nil, cursors, err
 		}
-		proxyConfig, err := c.acquireProxy(ctx, email, requestID, fullHistory, attempt, avoidServerIDs)
+		proxyConfig, err := c.acquireProxy(ctx, email, requestID, attempt, avoidServerIDs)
 		if err != nil {
 			return nil, cursors, fmt.Errorf("acquire Gmail pickup proxy: %w", err)
 		}
@@ -151,20 +151,15 @@ func (c *localGmailPickupClient) Fetch(
 func (c *localGmailPickupClient) acquireProxy(
 	ctx context.Context,
 	email, requestID string,
-	fullHistory bool,
 	attempt int,
 	avoidServerIDs []uint,
 ) (*proxyapp.ProxyConfig, error) {
 	if c == nil || c.proxies == nil {
 		return &proxyapp.ProxyConfig{Direct: true}, nil
 	}
-	ipVersion := proxydomain.ProxyIPv4
-	if fullHistory {
-		ipVersion = proxydomain.ProxyIPv6
-	}
 	return c.proxies.Acquire(ctx, proxyapp.AcquireProxyRequest{
 		Key:                 strings.ToLower(strings.TrimSpace(email)),
-		IPVersion:           ipVersion,
+		IPVersion:           proxydomain.ProxyIPv4,
 		Purpose:             proxydomain.ProxyPurposeFetch,
 		AllowSystemFallback: true,
 		Attempt:             attempt,

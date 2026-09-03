@@ -109,7 +109,7 @@ func TestLocalGmailPickupClientTreatsAuthenticationAsHealthyProxy(t *testing.T) 
 	require.Equal(t, []uint{31}, proxies.successes)
 }
 
-func TestLocalGmailPickupFullHistoryUsesIPv6AndRetriesTimedOutProxy(t *testing.T) {
+func TestLocalGmailPickupFullHistoryUsesIPv4AndRetriesTimedOutProxy(t *testing.T) {
 	setGmailRuntime(t, map[string]string{"max_proxy_attempts": "2"})
 	proxies := &localGmailPickupProxyStub{configs: []*proxyapp.ProxyConfig{
 		{ID: 41, ProxyServerID: 40, URL: "socks5://first.invalid:1080"},
@@ -131,7 +131,7 @@ func TestLocalGmailPickupFullHistoryUsesIPv6AndRetriesTimedOutProxy(t *testing.T
 
 	require.NoError(t, err)
 	require.Len(t, proxies.requests, 2)
-	require.Equal(t, proxydomain.ProxyIPv6, proxies.requests[0].IPVersion)
+	require.Equal(t, proxydomain.ProxyIPv4, proxies.requests[0].IPVersion)
 	require.Equal(t, []uint{41}, proxies.failures)
 	require.Equal(t, []uint{51}, proxies.successes)
 	require.Equal(t, []uint{40}, proxies.requests[1].AvoidProxyServerIDs)
