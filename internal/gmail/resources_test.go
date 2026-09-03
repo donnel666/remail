@@ -2,6 +2,7 @@ package gmail
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -309,7 +310,26 @@ INSERT INTO project_products(
 	)
 	plusAllocation := mustLocalGmailAllocation(t, db, plus.ID)
 	require.Equal(t, GmailMailboxPlus, plusAllocation.Mailbox)
-	require.Contains(t, plusAllocation.Email, "+p")
+	parts := strings.SplitN(plusAllocation.Email, "@", 2)
+	require.Len(t, parts, 2)
+	plusIndex := strings.LastIndexByte(parts[0], '+')
+	require.Greater(t, plusIndex, 0)
+	suffix := parts[0][plusIndex+1:]
+	require.GreaterOrEqual(t, len(suffix), 4)
+	require.LessOrEqual(t, len(suffix), 12)
+	hasLetter, hasDigit := false, false
+	for _, character := range suffix {
+		switch {
+		case character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z':
+			hasLetter = true
+		case character >= '0' && character <= '9':
+			hasDigit = true
+		default:
+			t.Fatalf("Gmail plus suffix contains non-alphanumeric character: %q", plusAllocation.Email)
+		}
+	}
+	require.True(t, hasLetter)
+	require.True(t, hasDigit)
 }
 
 func newLocalGmailAllocationTestDB(t *testing.T, name string) *gorm.DB {
