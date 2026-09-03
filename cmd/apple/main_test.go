@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -70,6 +71,8 @@ func TestAppleAccountRegionUsesSessionCountryCode(t *testing.T) {
 		{name: "ds info", profile: map[string]any{"dsInfo": map[string]any{"countryCode": "us"}}, want: "美国区"},
 		{name: "account", profile: map[string]any{"account": map[string]any{"countryCode": "HK"}}, want: "香港区"},
 		{name: "apple id", profile: map[string]any{"appleID": map[string]any{"countryCode": "GB"}}, want: "英国区"},
+		{name: "alpha-3", profile: map[string]any{"dsInfo": map[string]any{"countryCode": "HKG"}}, want: "香港区"},
+		{name: "alpha-3 extra", profile: map[string]any{"dsInfo": map[string]any{"countryCode": "DOM"}}, want: "多米尼加区"},
 		{name: "root", profile: map[string]any{"countryCode": "ZZ"}, want: "ZZ"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -86,6 +89,43 @@ func TestAppleAccountRegionUsesSessionCountryCode(t *testing.T) {
 	require.Equal(t, "美国区", got)
 	_, err = appleAccountRegion(map[string]any{"account": map[string]any{}}, "", "")
 	require.EqualError(t, err, "account profile did not return countryCode")
+}
+
+func TestRegionOnlyConfigAndLineReplacement(t *testing.T) {
+	input := filepath.Join(t.TempDir(), "地区不对.txt")
+	cfg, err := parseCommandConfig([]string{"-region-only", input}, io.Discard)
+	require.NoError(t, err)
+	require.True(t, cfg.regionOnly)
+	require.Equal(t, input[:len(input)-len(filepath.Ext(input))]+".region-fixed.txt", cfg.outputPath)
+	require.Equal(t, input[:len(input)-len(filepath.Ext(input))]+".region-fixed.failed.txt", cfg.failedPath)
+
+	raw := "\ufeff美国区----否----Owner@Example.com----Password!----问题一(remail1)----问题二(remail2)----问题三(remail3)----1984-10-04\r\n"
+	got, err := replaceRegionInLine(raw, "香港区")
+	require.NoError(t, err)
+	require.Equal(t, "\ufeff香港区----否----Owner@Example.com----Password!----问题一(remail1)----问题二(remail2)----问题三(remail3)----1984-10-04\r\n", got)
+}
+
+func TestWriteRegionOutputAddsBOMAndRemovesEmptyStaleFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "region.txt")
+	require.NoError(t, writeRegionOutput(path, []string{"香港区----否----owner@example.com\n"}, true))
+	contents, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, "\ufeff香港区----否----owner@example.com\n", string(contents))
+	require.NoError(t, writeRegionOutput(path, nil, true))
+	_, err = os.Stat(path)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestLoadRegionRecordsPreservesBlankAndLineEndings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "regions.txt")
+	input := "\ufeff美国区----否----owner@example.com----Password!----问题一(remail1)----问题二(remail2)----问题三(remail3)----1984-10-04\r\n\r\n"
+	require.NoError(t, os.WriteFile(path, []byte(input), 0o600))
+	records, err := loadRegionRecords(path)
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	require.True(t, records[0].queued)
+	require.False(t, records[1].queued)
+	require.Equal(t, "\r\n", records[1].raw)
 }
 
 func TestGeneratedChangesAreDifferentAndRecoverable(t *testing.T) {

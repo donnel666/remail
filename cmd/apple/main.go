@@ -37,7 +37,9 @@ var errTwoFactorEnabled = errors.New("apple account has two-factor authenticatio
 type commandConfig struct {
 	inputPaths  []string
 	outputPath  string
+	failedPath  string
 	pendingPath string
+	regionOnly  bool
 	concurrency int
 	offset      int
 	limit       int
@@ -108,8 +110,10 @@ func parseCommandConfig(args []string, stderr io.Writer) (commandConfig, error) 
 	answers := "remail1,remail2,remail3"
 	fs := flag.NewFlagSet("apple", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.StringVar(&cfg.outputPath, "output", "apple_ok.txt", "successful account output path")
+	fs.StringVar(&cfg.outputPath, "output", "", "successful account output path")
+	fs.StringVar(&cfg.failedPath, "failed-output", "", "region-only failed account output path")
 	fs.StringVar(&cfg.pendingPath, "pending", "", "password and birthday recovery path; defaults to output path plus .pending")
+	fs.BoolVar(&cfg.regionOnly, "region-only", false, "only refresh the first region field in a text output file")
 	fs.IntVar(&cfg.concurrency, "concurrency", 1, "number of accounts processed concurrently")
 	fs.IntVar(&cfg.offset, "offset", 0, "skip this many accounts after filtering and deduplication")
 	fs.IntVar(&cfg.limit, "limit", 0, "process at most this many accounts; zero means all")
@@ -128,9 +132,31 @@ func parseCommandConfig(args []string, stderr io.Writer) (commandConfig, error) 
 	if cfg.timeout <= 0 {
 		return commandConfig{}, errors.New("timeout must be positive")
 	}
+	cfg.inputPaths = fs.Args()
 	cfg.outputPath = strings.TrimSpace(cfg.outputPath)
 	cfg.pendingPath = strings.TrimSpace(cfg.pendingPath)
 	cfg.proxyURL = strings.TrimSpace(cfg.proxyURL)
+	if cfg.regionOnly {
+		if len(cfg.inputPaths) != 1 {
+			return commandConfig{}, errors.New("region-only requires exactly one text input file")
+		}
+		if cfg.outputPath == "" {
+			cfg.outputPath = defaultRegionOutputPath(cfg.inputPaths[0])
+		}
+		if cfg.failedPath == "" {
+			cfg.failedPath = defaultRegionFailedPath(cfg.outputPath)
+		}
+		inputPath, inputErr := filepath.Abs(cfg.inputPaths[0])
+		outputPath, outputErr := filepath.Abs(cfg.outputPath)
+		failedPath, failedErr := filepath.Abs(cfg.failedPath)
+		if inputErr != nil || outputErr != nil || failedErr != nil || filepath.Clean(inputPath) == filepath.Clean(outputPath) || filepath.Clean(inputPath) == filepath.Clean(failedPath) || filepath.Clean(outputPath) == filepath.Clean(failedPath) {
+			return commandConfig{}, errors.New("region-only output must differ from input")
+		}
+		return cfg, nil
+	}
+	if cfg.outputPath == "" {
+		cfg.outputPath = "apple_ok.txt"
+	}
 	if cfg.outputPath == "" {
 		return commandConfig{}, errors.New("output path is required")
 	}
@@ -150,11 +176,13 @@ func parseCommandConfig(args []string, stderr io.Writer) (commandConfig, error) 
 			return commandConfig{}, errors.New("answers contain an unsupported value")
 		}
 	}
-	cfg.inputPaths = fs.Args()
 	return cfg, nil
 }
 
 func run(ctx context.Context, cfg commandConfig) error {
+	if cfg.regionOnly {
+		return runRegionOnly(ctx, cfg)
+	}
 	paths := cfg.inputPaths
 	if len(paths) == 0 {
 		var err error
@@ -220,7 +248,7 @@ func run(ctx context.Context, cfg commandConfig) error {
 			defer workers.Done()
 			for account := range jobs {
 				accountCtx, cancel := context.WithTimeout(ctx, cfg.timeout)
-				result, processErr := processAccountWithProxy(accountCtx, provider, cfg.proxyURL, account, cfg.newAnswers)
+				result, processErr := processAccountWithProxy(accountCtx, provider, cfg.proxyURL, account, cfg.newAnswers, false)
 				cancel()
 				if errors.Is(processErr, errTwoFactorEnabled) {
 					runtimeTwoFactor.Add(1)
@@ -262,6 +290,228 @@ func run(ctx context.Context, cfg commandConfig) error {
 		return fmt.Errorf("%d accounts failed", failed.Load())
 	}
 	return nil
+}
+
+type regionRecord struct {
+	raw     string
+	account accountInput
+	queued  bool
+}
+
+func runRegionOnly(ctx context.Context, cfg commandConfig) error {
+	records, err := loadRegionRecords(cfg.inputPaths[0])
+	if err != nil {
+		return err
+	}
+	if len(records) == 0 {
+		return errors.New("region-only input file is empty")
+	}
+
+	var provider proxyProvider
+	cleanup := func() {}
+	if cfg.proxyURL == "" {
+		provider, cleanup, err = openProductionProxyProvider(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	defer cleanup()
+
+	successLines := make([]string, 0, len(records))
+	failedLines := make([]string, 0, len(records))
+	successByRecord := make([]string, len(records))
+	failedByRecord := make([]bool, len(records))
+	queued := 0
+	for index := range records {
+		if records[index].queued {
+			queued++
+		}
+	}
+	jobs := make(chan int)
+	var workers sync.WaitGroup
+	var succeeded atomic.Int64
+	var failed atomic.Int64
+	var runtimeTwoFactor atomic.Int64
+	workerCount := min(cfg.concurrency, queued)
+	workers.Add(workerCount)
+	for worker := 0; worker < workerCount; worker++ {
+		go func() {
+			defer workers.Done()
+			for index := range jobs {
+				record := records[index]
+				accountCtx, cancel := context.WithTimeout(ctx, cfg.timeout)
+				result, processErr := processAccountWithProxy(accountCtx, provider, cfg.proxyURL, record.account, cfg.newAnswers, true)
+				cancel()
+				if errors.Is(processErr, errTwoFactorEnabled) {
+					runtimeTwoFactor.Add(1)
+					failedByRecord[index] = true
+					log.Printf("region_skip_2fa source=%s record=%d", filepath.Base(cfg.inputPaths[0]), index+1)
+					continue
+				}
+				if processErr != nil {
+					failed.Add(1)
+					failedByRecord[index] = true
+					log.Printf("region_failed source=%s record=%d error=%v", filepath.Base(cfg.inputPaths[0]), index+1, processErr)
+					continue
+				}
+				line, replaceErr := replaceRegionInLine(record.raw, result.Region)
+				if replaceErr != nil {
+					failed.Add(1)
+					failedByRecord[index] = true
+					log.Printf("region_failed source=%s record=%d error=%v", filepath.Base(cfg.inputPaths[0]), index+1, replaceErr)
+					continue
+				}
+				successByRecord[index] = line
+				succeeded.Add(1)
+				log.Printf("region_success source=%s record=%d", filepath.Base(cfg.inputPaths[0]), index+1)
+			}
+		}()
+	}
+	for index := range records {
+		if !records[index].queued {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			close(jobs)
+			workers.Wait()
+			return ctx.Err()
+		case jobs <- index:
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	inputHasBOM := len(records) > 0 && strings.HasPrefix(records[0].raw, "\ufeff")
+	for index, record := range records {
+		if successByRecord[index] != "" {
+			successLines = append(successLines, successByRecord[index])
+		} else if failedByRecord[index] {
+			failedLines = append(failedLines, record.raw)
+		}
+	}
+	if err := writeRegionOutput(cfg.outputPath, successLines, inputHasBOM); err != nil {
+		return err
+	}
+	if err := writeRegionOutput(cfg.failedPath, failedLines, inputHasBOM); err != nil {
+		return err
+	}
+	log.Printf("region_completed lines=%d queued=%d succeeded=%d failed=%d runtime_2fa_skipped=%d output=%s failed_output=%s failed_output_lines=%d", len(records), queued, succeeded.Load(), failed.Load(), runtimeTwoFactor.Load(), cfg.outputPath, cfg.failedPath, len(failedLines))
+	if failed.Load() != 0 {
+		return fmt.Errorf("%d region lookups failed; failed lines were written to %s", failed.Load(), cfg.failedPath)
+	}
+	return nil
+}
+
+func loadRegionRecords(path string) ([]regionRecord, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read region input %s: %w", path, err)
+	}
+	chunks := strings.SplitAfter(string(data), "\n")
+	if len(chunks) > 0 && chunks[len(chunks)-1] == "" {
+		chunks = chunks[:len(chunks)-1]
+	}
+	records := make([]regionRecord, 0, len(chunks))
+	for index, raw := range chunks {
+		content := strings.TrimSuffix(raw, "\n")
+		content = strings.TrimSuffix(content, "\r")
+		if strings.TrimSpace(content) == "" {
+			records = append(records, regionRecord{raw: raw})
+			continue
+		}
+		parseContent := content
+		if index == 0 {
+			parseContent = strings.TrimPrefix(parseContent, "\ufeff")
+		}
+		account, parseErr := parseOutputAccountLine(parseContent)
+		if parseErr != nil {
+			return nil, fmt.Errorf("region input %s line %d: %w", path, index+1, parseErr)
+		}
+		account.SourcePath = path
+		account.SourceRecord = index + 1
+		records = append(records, regionRecord{raw: raw, account: account, queued: true})
+	}
+	return records, nil
+}
+
+func replaceRegionInLine(raw, region string) (string, error) {
+	region = sanitizeOutputField(region)
+	if region == "" || strings.Contains(region, outputSeparator) || strings.ContainsAny(region, "\r\n") {
+		return "", errors.New("actual account region is invalid")
+	}
+	ending := ""
+	content := raw
+	if strings.HasSuffix(content, "\n") {
+		ending = "\n"
+		content = strings.TrimSuffix(content, "\n")
+		if strings.HasSuffix(content, "\r") {
+			ending = "\r\n"
+			content = strings.TrimSuffix(content, "\r")
+		}
+	}
+	prefix := ""
+	if strings.HasPrefix(content, "\ufeff") {
+		prefix = "\ufeff"
+		content = strings.TrimPrefix(content, prefix)
+	}
+	parts := strings.Split(content, outputSeparator)
+	if len(parts) != 8 {
+		return "", fmt.Errorf("region output line must contain eight fields, got %d", len(parts))
+	}
+	parts[0] = region
+	return prefix + strings.Join(parts, outputSeparator) + ending, nil
+}
+
+func writeRegionOutput(path string, lines []string, preserveBOM bool) error {
+	if len(lines) == 0 {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove empty region output: %w", err)
+		}
+		return nil
+	}
+	directory := filepath.Dir(path)
+	temporary, err := os.CreateTemp(directory, "."+filepath.Base(path)+".*")
+	if err != nil {
+		return fmt.Errorf("create region output: %w", err)
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(0o600); err != nil {
+		temporary.Close()
+		return fmt.Errorf("protect region output: %w", err)
+	}
+	for index, line := range lines {
+		if index == 0 && preserveBOM {
+			line = "\ufeff" + strings.TrimPrefix(line, "\ufeff")
+		}
+		if _, err := temporary.WriteString(line); err != nil {
+			temporary.Close()
+			return fmt.Errorf("write region output: %w", err)
+		}
+	}
+	if err := temporary.Sync(); err != nil {
+		temporary.Close()
+		return fmt.Errorf("sync region output: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("close region output: %w", err)
+	}
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return fmt.Errorf("replace region output: %w", err)
+	}
+	return os.Chmod(path, 0o600)
+}
+
+func defaultRegionOutputPath(input string) string {
+	extension := filepath.Ext(input)
+	base := strings.TrimSuffix(input, extension)
+	return base + ".region-fixed" + extension
+}
+
+func defaultRegionFailedPath(output string) string {
+	extension := filepath.Ext(output)
+	base := strings.TrimSuffix(output, extension)
+	return base + ".failed" + extension
 }
 
 func loadAccounts(paths []string, completed map[string]struct{}) ([]accountInput, int, int, int, error) {
@@ -592,8 +842,12 @@ func processAccountWithProxy(
 	explicitProxy string,
 	account accountInput,
 	newAnswers [3]string,
+	regionOnly bool,
 ) (accountOutput, error) {
 	if explicitProxy != "" {
+		if regionOnly {
+			return processAppleAccountRegionOnly(ctx, explicitProxy, account)
+		}
 		return processAppleAccount(ctx, explicitProxy, account, newAnswers)
 	}
 	if provider == nil {
@@ -621,7 +875,13 @@ func processAccountWithProxy(
 		if route != nil && !route.Direct {
 			proxyURL = strings.TrimSpace(route.URL)
 		}
-		result, processErr := processAppleAccount(ctx, proxyURL, account, newAnswers)
+		var result accountOutput
+		var processErr error
+		if regionOnly {
+			result, processErr = processAppleAccountRegionOnly(ctx, proxyURL, account)
+		} else {
+			result, processErr = processAppleAccount(ctx, proxyURL, account, newAnswers)
+		}
 		proxyFailure := msacl.IsProxyTransportError(processErr)
 		appleTransient := isAppleTransientError(processErr)
 		retryable := proxyFailure || appleTransient

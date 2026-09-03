@@ -94,14 +94,18 @@ func processAppleAccount(ctx context.Context, proxyURL string, account accountIn
 	if account.NewPassword == "" || account.NewBirthday == "" {
 		return accountOutput{}, fmt.Errorf("account change targets are missing")
 	}
-	result, err := processAppleAccountOnce(ctx, proxyURL, account, newAnswers, account.Password, false)
+	result, err := processAppleAccountOnce(ctx, proxyURL, account, newAnswers, account.Password, false, false)
 	if errors.Is(err, errPasswordRejected) && account.Recovering && account.NewPassword != account.Password {
-		return processAppleAccountOnce(ctx, proxyURL, account, newAnswers, account.NewPassword, true)
+		return processAppleAccountOnce(ctx, proxyURL, account, newAnswers, account.NewPassword, true, false)
 	}
 	return result, err
 }
 
-func processAppleAccountOnce(ctx context.Context, proxyURL string, account accountInput, newAnswers [3]string, loginPassword string, passwordAlreadyChanged bool) (accountOutput, error) {
+func processAppleAccountRegionOnly(ctx context.Context, proxyURL string, account accountInput) (accountOutput, error) {
+	return processAppleAccountOnce(ctx, proxyURL, account, [3]string{}, account.Password, true, true)
+}
+
+func processAppleAccountOnce(ctx context.Context, proxyURL string, account accountInput, newAnswers [3]string, loginPassword string, passwordAlreadyChanged, regionOnly bool) (accountOutput, error) {
 	flow, err := newAppleFlow(ctx, proxyURL)
 	if err != nil {
 		return accountOutput{}, err
@@ -292,9 +296,16 @@ func processAppleAccountOnce(ctx context.Context, proxyURL string, account accou
 	if appleAccountUsesHSA2(profile) {
 		return accountOutput{}, errTwoFactorEnabled
 	}
-	region, err := appleAccountRegion(profile, flow.accountCountry, account.Region)
+	fallbackRegion := account.Region
+	if regionOnly {
+		fallbackRegion = ""
+	}
+	region, err := appleAccountRegion(profile, flow.accountCountry, fallbackRegion)
 	if err != nil {
 		return accountOutput{}, err
+	}
+	if regionOnly {
+		return accountOutput{Region: region}, nil
 	}
 	questions, err := updateAppleQuestions(flow, profile, loginPassword, newAnswers)
 	if err != nil {
@@ -543,14 +554,26 @@ func appleAccountRegion(profile map[string]any, sessionCountry, fallback string)
 
 func normalizeAppleCountryCode(value string) string {
 	value = strings.ToUpper(strings.TrimSpace(value))
+	if code, ok := appleCountryCodeAliases[value]; ok {
+		return code
+	}
 	switch value {
-	case "USA":
-		return "US"
 	case "UK":
 		return "GB"
 	default:
 		return value
 	}
+}
+
+var appleCountryCodeAliases = map[string]string{
+	"USA": "US", "CAN": "CA", "CHN": "CN", "HKG": "HK", "TWN": "TW", "MAC": "MO",
+	"JPN": "JP", "KOR": "KR", "GBR": "GB", "AUS": "AU", "NZL": "NZ", "SGP": "SG",
+	"MYS": "MY", "THA": "TH", "VNM": "VN", "PHL": "PH", "IDN": "ID", "IND": "IN",
+	"DEU": "DE", "FRA": "FR", "ITA": "IT", "ESP": "ES", "PRT": "PT", "NLD": "NL",
+	"BEL": "BE", "AUT": "AT", "CHE": "CH", "SWE": "SE", "NOR": "NO", "DNK": "DK",
+	"FIN": "FI", "POL": "PL", "IRL": "IE", "TUR": "TR", "MEX": "MX", "BRA": "BR",
+	"ARG": "AR", "SAU": "SA", "ARE": "AE", "DOM": "DO", "KWT": "KW", "PAK": "PK",
+	"VEN": "VE",
 }
 
 var appleCountryRegionLabels = map[string]string{
@@ -560,7 +583,7 @@ var appleCountryRegionLabels = map[string]string{
 	"DE": "德国", "FR": "法国", "IT": "意大利", "ES": "西班牙", "PT": "葡萄牙", "NL": "荷兰",
 	"BE": "比利时", "AT": "奥地利", "CH": "瑞士", "SE": "瑞典", "NO": "挪威", "DK": "丹麦",
 	"FI": "芬兰", "PL": "波兰", "IE": "爱尔兰", "TR": "土耳其", "MX": "墨西哥", "BR": "巴西",
-	"AR": "阿根廷", "SA": "沙特", "AE": "阿联酋",
+	"AR": "阿根廷", "SA": "沙特", "AE": "阿联酋", "DO": "多米尼加", "KW": "科威特", "PK": "巴基斯坦", "VE": "委内瑞拉",
 }
 
 func updateAppleQuestions(flow *appleFlow, profile map[string]any, password string, replacements [3]string) ([3]securityAnswer, error) {
