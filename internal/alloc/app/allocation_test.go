@@ -853,6 +853,50 @@ func TestGmailDotAllocationScansPastFragmentedHistoryWindow(t *testing.T) {
 	}
 }
 
+func TestGmailPlusAliasVariantsUseShortAlphanumericSuffixes(t *testing.T) {
+	runtimeconfig.Set("alias_generation_window", "32")
+	t.Cleanup(func() { runtimeconfig.Delete("alias_generation_window") })
+
+	variants := gmailPlusAliasVariants("User.Name@GMAIL.COM")
+	if len(variants) != 32 {
+		t.Fatalf("got %d Gmail plus aliases, want 32", len(variants))
+	}
+	seen := make(map[string]struct{}, len(variants))
+	for _, email := range variants {
+		parts := strings.SplitN(email, "@", 2)
+		if len(parts) != 2 {
+			t.Fatalf("invalid Gmail plus alias %q", email)
+		}
+		local, domainPart := parts[0], strings.ToLower(parts[1])
+		plus := strings.IndexByte(local, '+')
+		if plus <= 0 || plus == len(local)-1 || domainPart != "gmail.com" {
+			t.Fatalf("invalid Gmail plus alias %q", email)
+		}
+		suffix := local[plus+1:]
+		if len(suffix) < 4 || len(suffix) > 12 {
+			t.Fatalf("Gmail plus suffix length = %d, want 4..12: %q", len(suffix), email)
+		}
+		hasLetter, hasDigit := false, false
+		for _, character := range suffix {
+			switch {
+			case character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z':
+				hasLetter = true
+			case character >= '0' && character <= '9':
+				hasDigit = true
+			default:
+				t.Fatalf("Gmail plus suffix contains non-alphanumeric character: %q", email)
+			}
+		}
+		if !hasLetter || !hasDigit {
+			t.Fatalf("Gmail plus suffix must contain letters and digits: %q", email)
+		}
+		if _, exists := seen[email]; exists {
+			t.Fatalf("duplicate Gmail plus alias %q", email)
+		}
+		seen[email] = struct{}{}
+	}
+}
+
 type historicalGmailReplayRepo struct {
 	Repository
 	existing domain.UnifiedAllocation

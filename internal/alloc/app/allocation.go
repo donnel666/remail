@@ -1716,7 +1716,7 @@ func (uc *UseCase) tryGmailCandidate(
 		}
 		return nil, errCandidateUnavailable
 	case domain.GmailMailboxPlus:
-		emails = plusAliasVariants(candidate.Email, config.ProjectID, cmd.OrderNo)
+		emails = gmailPlusAliasVariants(candidate.Email)
 	default:
 		return nil, domain.ErrInvalidAllocationRequest
 	}
@@ -2589,6 +2589,38 @@ func plusAliasVariants(email string, projectID uint, orderNo string) []string {
 	result := make([]string, 0, window)
 	for i := 0; i < window; i++ {
 		result = append(result, local+"+p"+base+strconv.FormatInt(int64(i), 36)+"@"+domainPart)
+	}
+	return result
+}
+
+const (
+	gmailPlusAliasLetters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	gmailPlusAliasDigits  = "0123456789"
+	gmailPlusAliasChars   = gmailPlusAliasLetters + gmailPlusAliasDigits
+)
+
+func gmailPlusAliasVariants(email string) []string {
+	local, domainPart, ok := splitEmail(email)
+	if !ok || local == "" {
+		return nil
+	}
+	window := aliasGenerationWindowValue()
+	result := make([]string, 0, window)
+	seen := make(map[string]struct{}, window)
+	for len(result) < window {
+		suffix := make([]byte, rand.IntN(9)+4)
+		suffix[0] = gmailPlusAliasLetters[rand.IntN(len(gmailPlusAliasLetters))]
+		suffix[1] = gmailPlusAliasDigits[rand.IntN(len(gmailPlusAliasDigits))]
+		for i := 2; i < len(suffix); i++ {
+			suffix[i] = gmailPlusAliasChars[rand.IntN(len(gmailPlusAliasChars))]
+		}
+		rand.Shuffle(len(suffix), func(i, j int) { suffix[i], suffix[j] = suffix[j], suffix[i] })
+		alias := local + "+" + string(suffix) + "@" + domainPart
+		if _, exists := seen[alias]; exists {
+			continue
+		}
+		seen[alias] = struct{}{}
+		result = append(result, alias)
 	}
 	return result
 }
