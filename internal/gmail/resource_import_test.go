@@ -150,6 +150,30 @@ func TestGmailResourceImportAcceptsSupportedCredentialFormats(t *testing.T) {
 	require.Equal(t, "ponmlkjihgfedcba", byEmail["four.fields@gmail.com"].AppPassword)
 }
 
+func TestGmailResourceImportAcceptsSemicolonCredentialFormats(t *testing.T) {
+	for _, test := range []struct {
+		raw          string
+		email        string
+		password     string
+		bindingEmail string
+		twoFactor    string
+		appPassword  string
+	}{
+		{raw: "two.fields@gmail.com;mnop qrst uvwx yzab", email: "two.fields@gmail.com", appPassword: "mnopqrstuvwxyzab"},
+		{raw: "three.fields@gmail.com;password-3;qrst uvwx yzab cdef", email: "three.fields@gmail.com", password: "password-3", appPassword: "qrstuvwxyzabcdef"},
+		{raw: "binding.fields@gmail.com;password-binding;Backup.Only@Example.NET;abcd efgh ijkl mnop", email: "binding.fields@gmail.com", password: "password-binding", bindingEmail: "backup.only@example.net", appPassword: "abcdefghijklmnop"},
+		{raw: "five.fields@gmail.com;password-5;Backup.Address@Example.COM;JBSW Y3DP EHPK 3PXP;ghsf peof qvby aqiq", email: "five.fields@gmail.com", password: "password-5", bindingEmail: "backup.address@example.com", twoFactor: "JBSWY3DPEHPK3PXP", appPassword: "ghsfpeofqvbyaqiq"},
+	} {
+		line, valid := parseLocalResourceImportLine(test.raw)
+		require.True(t, valid, test.raw)
+		require.Equal(t, test.email, line.email)
+		require.Equal(t, test.password, line.password)
+		require.Equal(t, test.bindingEmail, line.bindingEmail)
+		require.Equal(t, test.twoFactor, line.twoFactorSecret)
+		require.Equal(t, test.appPassword, line.appPassword)
+	}
+}
+
 func TestGmailResourceImportRejectsFormatsWithoutFinalAppPassword(t *testing.T) {
 	for _, raw := range []string{
 		"owner@gmail.com----login-password",

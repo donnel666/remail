@@ -65,12 +65,13 @@ function normalizeAdminGmailImportContent(content: string) {
   return content
     .split(/\r?\n/)
     .map((line) => {
-      const parts = line.split("----");
+      const separator = line.includes("----") ? "----" : ";";
+      const parts = line.split(separator);
       if (parts.length < 2) return line;
       parts[parts.length - 1] = normalizeAdminGmailAppPassword(
         parts[parts.length - 1] ?? "",
       );
-      return parts.join("----");
+      return parts.join(separator);
     })
     .join("\n");
 }

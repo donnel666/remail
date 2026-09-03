@@ -782,8 +782,11 @@ func skippedGmailResourceImportSummary(count int) string {
 }
 
 func gmailResourceImportFailureEmail(raw string) string {
-	email, _, _ := strings.Cut(raw, "----")
-	return strings.TrimSpace(email)
+	parts := splitLocalResourceImportFields(raw)
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(parts[0])
 }
 
 func normalizeGmailImportErrorStrategy(value string) (string, bool) {

@@ -117,6 +117,24 @@ describe("admin Gmail API adapter", () => {
     });
   });
 
+  it("normalizes App Password whitespace with the semicolon delimiter", async () => {
+    apiMocks.POST.mockResolvedValueOnce({ data: IMPORT_RESPONSE });
+
+    await expect(
+      importAdminGmailResources({
+        content: "mail@gmail.com;password;abcd efgh ijkl mnop",
+        ownerId: 101,
+        errorStrategy: "skip",
+      }),
+    ).resolves.toEqual(IMPORT_RESPONSE);
+
+    const formData = callOptions(apiMocks.POST).body as FormData;
+    const file = formData.get("file") as File;
+    expect(await file.text()).toBe(
+      "mail@gmail.com;password;abcdefghijklmnop",
+    );
+  });
+
   it("polls Redis-backed status and preserves POST reuse metadata", async () => {
     apiMocks.POST.mockResolvedValueOnce({
       data: {

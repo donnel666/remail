@@ -63,6 +63,10 @@ describe("admin Gmail page layout", () => {
       "batchAllMatchingAdminGmailResources",
       'activeTab === "validation"',
       'activeTab === "other"',
+      'aria-label={t("Import mode")}',
+      't("Manual input")',
+      't("TXT file")',
+      'type="file"',
     ]) {
       expect(gmailSource).toContain(fragment);
     }

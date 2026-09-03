@@ -317,7 +317,7 @@ func (s *Service) localResourceFacets(ctx context.Context, filter LocalResourceL
 }
 
 func parseLocalResourceImportLine(raw string) (localResourceImportLine, bool) {
-	parts := strings.Split(raw, "----")
+	parts := splitLocalResourceImportFields(raw)
 	if len(parts) < 2 || len(parts) > 5 {
 		return localResourceImportLine{}, false
 	}
@@ -362,6 +362,14 @@ func parseLocalResourceImportLine(raw string) (localResourceImportLine, bool) {
 		email: email, identity: identity, password: password,
 		bindingEmail: bindingEmail, twoFactorSecret: twoFactorSecret, appPassword: appPassword,
 	}, true
+}
+
+func splitLocalResourceImportFields(raw string) []string {
+	separator := "----"
+	if !strings.Contains(raw, separator) {
+		separator = ";"
+	}
+	return strings.Split(raw, separator)
 }
 
 func localGmailIdentity(email string) (string, bool) {

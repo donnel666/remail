@@ -12137,7 +12137,7 @@ type PostAdminGmailResourcesValidateParams struct {
 type PostAdminGmailResourceImportMultipartBody struct {
 	ErrorStrategy PostAdminGmailResourceImportMultipartBodyErrorStrategy `json:"errorStrategy"`
 
-	// File UTF-8 TXT with one Gmail account per non-empty line in one of the five documented `----`-delimited formats. The final field is always an App Password and its whitespace is ignored; a third field containing an email address is parsed as the optional binding email.
+	// File UTF-8 TXT with one Gmail account per non-empty line in one of the five documented formats, using either `----` or `;` as the field delimiter. The final field is always an App Password and its whitespace is ignored; a third field containing an email address is parsed as the optional binding email.
 	File    openapi_types.File `json:"file"`
 	OwnerId int                `json:"ownerId"`
 }

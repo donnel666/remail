@@ -747,6 +747,7 @@
   "Cancel": "Cancel",
   "Continue in background": "Continue in background",
   "Supported format": "Supported format",
+  "Use ---- or ; between fields.": "Use ---- or ; between fields.",
   "Importing": "Importing...",
   "Resource import accepted.": "Upload accepted. Import is processing.",
   "Resource import continues in background.": "Import will continue in the background.",

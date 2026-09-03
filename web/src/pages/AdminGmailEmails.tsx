@@ -21,7 +21,7 @@ import {
   IllustrationNoResult,
   IllustrationNoResultDark,
 } from "@douyinfe/semi-illustrations";
-import { History, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { FileText, History, ShieldCheck, SlidersHorizontal, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CardPro } from "@/components/semi/card-pro";
@@ -240,7 +240,7 @@ function OwnerSelect({
   );
 }
 
-function ImportGmailModal({
+export function ImportGmailModal({
   onCancel,
   onImported,
   owners,
@@ -252,11 +252,14 @@ function ImportGmailModal({
   visible: boolean;
 }) {
   const { t } = useTranslation();
+  const [mode, setMode] = useState<"paste" | "file">("paste");
   const [content, setContent] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const [ownerId, setOwnerId] = useState<number | undefined>();
   const [errorStrategy, setErrorStrategy] =
     useState<AdminGmailImportErrorStrategy>("skip");
   const [submitting, setSubmitting] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const previousVisible = useRef(false);
   const lineCount = useMemo(
     () => content.split(/\r?\n/).filter((line) => line.trim()).length,
@@ -267,7 +270,10 @@ function ImportGmailModal({
     const opened = visible && !previousVisible.current;
     previousVisible.current = visible;
     if (!opened) return;
+    setMode("paste");
     setContent("");
+    setFile(null);
+    if (fileRef.current) fileRef.current.value = "";
     setOwnerId(undefined);
     setErrorStrategy("skip");
   }, [visible]);
@@ -282,45 +288,53 @@ function ImportGmailModal({
       Toast.warning(t("Please select an owner."));
       return;
     }
-    if (!lineCount) {
+    if (mode === "paste" && !lineCount) {
       Toast.warning(t("Please enter Gmail accounts."));
       return;
     }
+    if (mode === "file" && !file) {
+      Toast.warning(t("Please select a TXT file."));
+      return;
+    }
     setSubmitting(true);
-    let result: Awaited<ReturnType<typeof importAdminGmailResources>>;
     try {
-      result = await importAdminGmailResources({
-        content,
+      const sourceContent = mode === "file" ? await file!.text() : content;
+      if (!sourceContent.split(/\r?\n/).some((line) => line.trim())) {
+        Toast.warning(t("Please enter Gmail accounts."));
+        return;
+      }
+      const result = await importAdminGmailResources({
+        content: sourceContent,
         errorStrategy,
         ownerId,
       });
       if (result.status === "failed") {
         throw new Error(result.lastSafeError || "Gmail import failed.");
       }
-    } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Gmail import failed."));
-      setSubmitting(false);
-      return;
-    }
-    Toast.success(
-      t("Gmail accounts imported.", {
-        count: result.imported,
-      }),
-    );
-    if (result.skipped) {
-      Toast.warning(
-        t("Gmail import skipped entries.", {
-          count: result.skipped,
+      Toast.success(
+        t("Gmail accounts imported.", {
+          count: result.imported,
         }),
       );
-    }
-    onCancel();
-    try {
-      await onImported();
+      if (result.skipped) {
+        Toast.warning(
+          t("Gmail import skipped entries.", {
+            count: result.skipped,
+          }),
+        );
+      }
+      onCancel();
+      try {
+        await onImported();
+      } catch (error) {
+        Toast.error(getIamErrorMessage(t, error, "Gmail resources load failed."));
+      }
     } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Gmail resources load failed."));
+      Toast.error(getIamErrorMessage(t, error, "Gmail import failed."));
+      return;
+    } finally {
+      setSubmitting(false);
     }
-    setSubmitting(false);
   };
 
   return (
@@ -330,6 +344,7 @@ function ImportGmailModal({
       confirmLoading={submitting}
       onCancel={onCancel}
       onOk={() => void submit()}
+      okButtonProps={{ disabled: mode === "paste" ? !lineCount : !file }}
       okText={t("Import")}
       title={t("Import Gmail Accounts")}
       visible={visible}
@@ -348,6 +363,38 @@ function ImportGmailModal({
           />
         </label>
 
+        <div
+          aria-label={t("Import mode")}
+          className="grid grid-cols-2 gap-2"
+          role="group"
+        >
+          <button
+            aria-pressed={mode === "paste"}
+            className={switchButtonClass(mode === "paste")}
+            onClick={() => {
+              setMode("paste");
+              setFile(null);
+              if (fileRef.current) fileRef.current.value = "";
+            }}
+            type="button"
+          >
+            <FileText size={16} />
+            {t("Manual input")}
+          </button>
+          <button
+            aria-pressed={mode === "file"}
+            className={switchButtonClass(mode === "file")}
+            onClick={() => {
+              setMode("file");
+              setContent("");
+            }}
+            type="button"
+          >
+            <Upload size={16} />
+            {t("TXT file")}
+          </button>
+        </div>
+
         <div className="grid grid-cols-2 gap-2">
           <button
             className={switchButtonClass(errorStrategy === "skip")}
@@ -365,33 +412,64 @@ function ImportGmailModal({
           </button>
         </div>
 
-        <label className="block">
-          <span className="mb-1.5 flex items-center justify-between text-sm font-medium text-[var(--semi-color-text-0)]">
-            <span>{t("Gmail resource entries")} *</span>
-            <Text size="small" type="tertiary">
-              {t("Parsed entries", { count: lineCount })}
-            </Text>
-          </span>
-          <TextArea
-            className="font-mono"
-            onChange={setContent}
-            placeholder="email@gmail.com----app-password"
-            rows={8}
-            style={{ height: IMPORT_ENTRY_AREA_HEIGHT, resize: "none" }}
-            value={content}
-          />
-        </label>
+        {mode === "paste" ? (
+          <label className="block">
+            <span className="mb-1.5 flex items-center justify-between text-sm font-medium text-[var(--semi-color-text-0)]">
+              <span>{t("Gmail resource entries")} *</span>
+              <Text size="small" type="tertiary">
+                {t("Parsed entries", { count: lineCount })}
+              </Text>
+            </span>
+            <TextArea
+              aria-label={t("Gmail resource entries")}
+              className="font-mono"
+              onChange={setContent}
+              placeholder="email@gmail.com----app-password"
+              rows={8}
+              style={{ height: IMPORT_ENTRY_AREA_HEIGHT, resize: "none" }}
+              value={content}
+            />
+          </label>
+        ) : (
+          <>
+            <input
+              accept=".txt,text/plain"
+              aria-label={t("Select TXT file")}
+              className="hidden"
+              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+              ref={fileRef}
+              type="file"
+            />
+            <button
+              className="flex w-full cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-5 text-center transition-colors hover:bg-[var(--semi-color-fill-1)]"
+              onClick={() => fileRef.current?.click()}
+              style={{ height: IMPORT_ENTRY_AREA_HEIGHT }}
+              type="button"
+            >
+              <FileText className="mb-2 size-8 text-[var(--semi-color-text-2)]" />
+              <Text strong>{file ? file.name : t("Select TXT file")}</Text>
+              <Text size="small" type="tertiary">
+                {file
+                  ? `${(file.size / 1024).toFixed(1)} KB`
+                  : t("Supports .txt files, one entry per line")}
+              </Text>
+            </button>
+          </>
+        )}
 
         <div className="rounded-xl border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-3">
           <div className="mb-1 text-xs font-medium text-[var(--semi-color-text-0)]">
             {t("Supported format")}
           </div>
           <pre className="overflow-x-auto font-mono text-xs leading-relaxed text-[var(--semi-color-text-2)]">
-            {`email@gmail.com----app-password
+            {`${t("Use ---- or ; between fields.")}
+email@gmail.com----app-password
+email@gmail.com;app-password
 email@gmail.com----password----app-password
 email@gmail.com----password----binding-email----app-password
 email@gmail.com----password----2FA----app-password
-email@gmail.com----password----binding-email----2FA----app-password`}
+email@gmail.com----password----binding-email----2FA----app-password
+email@gmail.com;password;binding-email;2FA;app-password`}
           </pre>
         </div>
 

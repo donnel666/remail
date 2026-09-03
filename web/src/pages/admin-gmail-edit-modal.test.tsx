@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdminGmailResourceItem } from "@/lib/admin-gmail-api";
 
 const mocks = vi.hoisted(() => ({
+  importResources: vi.fn(),
   replaceCredentials: vi.fn(),
   toastError: vi.fn(),
   toastInfo: vi.fn(),
@@ -21,12 +22,12 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@douyinfe/semi-ui", () => {
   const passthrough = ({ children }: any) => <>{children}</>;
-  const Modal = ({ children, confirmLoading, onCancel, onOk, okText, title, visible }: any) =>
+  const Modal = ({ children, confirmLoading, okButtonProps, onCancel, onOk, okText, title, visible }: any) =>
     visible ? (
       <section aria-label={title} role="dialog">
         {children}
         <button onClick={onCancel} type="button">Cancel</button>
-        <button disabled={confirmLoading} onClick={onOk} type="button">{okText}</button>
+        <button disabled={confirmLoading || okButtonProps?.disabled} onClick={onOk} type="button">{okText}</button>
       </section>
     ) : null;
   (Modal as any).confirm = vi.fn();
@@ -74,6 +75,7 @@ vi.mock("@/components/semi/admin-user-select", () => ({
 
 vi.mock("@/lib/admin-gmail-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/admin-gmail-api")>()),
+  importAdminGmailResources: mocks.importResources,
   replaceAdminGmailCredentials: mocks.replaceCredentials,
   updateAdminGmailResource: mocks.updateResource,
 }));
@@ -82,7 +84,7 @@ vi.mock("@/lib/iam-errors", () => ({
   getIamErrorMessage: () => "safe-error",
 }));
 
-import { EditGmailModal } from "./AdminGmailEmails";
+import { EditGmailModal, ImportGmailModal } from "./AdminGmailEmails";
 
 const target = {
   id: 7,
@@ -163,6 +165,45 @@ describe("Gmail edit modal permissions", () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
     expect(onCancel).toHaveBeenCalledOnce();
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Gmail resource updated.");
+  });
+
+  it("reads a selected TXT file and submits its contents", async () => {
+    mocks.importResources.mockResolvedValue({
+      accepted: 1,
+      imported: 1,
+      skipped: 0,
+      status: "imported",
+    });
+    const onCancel = vi.fn();
+    const onImported = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ImportGmailModal
+        onCancel={onCancel}
+        onImported={onImported}
+        owners={[target.owner]}
+        visible
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Import" })).toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "TXT file" }));
+    const content = "mail@gmail.com;password;abcdefghijklmnop";
+    const file = new File([content], "gmail.txt", { type: "text/plain" });
+    Object.defineProperty(file, "text", { value: vi.fn().mockResolvedValue(content) });
+    fireEvent.change(screen.getByLabelText("Select TXT file"), {
+      target: { files: [file] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+
+    await waitFor(() =>
+      expect(mocks.importResources).toHaveBeenCalledWith({
+        content,
+        errorStrategy: "skip",
+        ownerId: target.owner.id,
+      }),
+    );
+    await waitFor(() => expect(onImported).toHaveBeenCalledOnce());
+    expect(onCancel).toHaveBeenCalledOnce();
   });
 
   it("keeps the modal open and clears loading when credential replacement fails", async () => {

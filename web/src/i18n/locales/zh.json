@@ -736,6 +736,7 @@
   "Click to select or drag file here": "点击选择文件或拖拽到此处",
   "Supports .txt files, one entry per line": "支持 .txt 格式，每行一条",
   "Supported format": "支持格式",
+  "Use ---- or ; between fields.": "字段之间可使用 ---- 或 ; 分隔。",
   "Scope": "范围",
   "Private": "私有",
   "Private only": "仅自用",
