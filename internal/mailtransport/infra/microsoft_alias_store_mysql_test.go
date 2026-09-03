@@ -1287,7 +1287,7 @@ func TestMicrosoftAliasStorePermanentPauseWakesOnlyAfterResourceChangeMySQL(t *t
 	assert.Equal(t, "pending", status)
 }
 
-func TestMicrosoftAliasStoreReusesConfirmedUnattemptedCandidatesMySQL(t *testing.T) {
+func TestMicrosoftAliasStoreReusesOnlyUnattemptedCandidatesFromCurrentDomainMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftAliasTestResource(t, db, 1008, "normal")
 	createVerifiedMicrosoftAliasBinding(t, db, 1008)
@@ -1308,7 +1308,7 @@ func TestMicrosoftAliasStoreReusesConfirmedUnattemptedCandidatesMySQL(t *testing
 	require.NoError(t, err)
 	require.True(t, claimed)
 	first, _, err := store.Reserve(ctx, 1008, account.ClaimToken,
-		[]string{"david123456@outlook.com", "liming654321@outlook.com"},
+		[]string{"david123456@outlook.com", "liming654321@hotmail.com"},
 		yearStart, yearEnd, weekStart, weekEnd, now)
 	require.NoError(t, err)
 	require.Len(t, first, 2)
@@ -1322,11 +1322,13 @@ func TestMicrosoftAliasStoreReusesConfirmedUnattemptedCandidatesMySQL(t *testing
 		yearStart, yearEnd, weekStart, weekEnd, now.Add(2*time.Minute))
 	require.NoError(t, err)
 	require.Len(t, reused, 2)
-	assert.ElementsMatch(t, []uint{first[0].ID, first[1].ID}, []uint{reused[0].ID, reused[1].ID})
-	assert.ElementsMatch(t, []string{first[0].Alias, first[1].Alias}, []string{reused[0].Alias, reused[1].Alias})
+	assert.Equal(t, first[0].ID, reused[0].ID)
+	assert.NotEqual(t, first[1].ID, reused[1].ID)
+	assert.Equal(t, "david123456@outlook.com", reused[0].Alias)
+	assert.Equal(t, "other111111@outlook.com", reused[1].Alias)
 	var attemptCount int64
 	require.NoError(t, db.Model(&MicrosoftAliasAttemptModel{}).Where("resource_id = 1008").Count(&attemptCount).Error)
-	assert.EqualValues(t, 2, attemptCount)
+	assert.EqualValues(t, 3, attemptCount)
 }
 
 func TestMicrosoftAliasStorePersistsConservativeUncertainReconciliationMySQL(t *testing.T) {

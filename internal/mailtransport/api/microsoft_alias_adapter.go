@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
@@ -13,6 +14,21 @@ import (
 )
 
 const maxAliasProxyAttempts = 1
+
+// TODO(alias-domain-probe): outlook.be, outlook.co.il, outlook.co.id,
+// outlook.ie, outlook.hu, outlook.kr, outlook.sg, and outlook.co.th had no
+// normal resources to test on 2026-09-02. They intentionally fall back to
+// outlook.com until a 10-account AddAssocId probe confirms self-provisioning.
+var microsoftAliasSelfProvisioningDomains = map[string]struct{}{
+	"outlook.com":    {},
+	"outlook.com.au": {},
+	"outlook.cl":     {},
+	"outlook.de":     {},
+	"outlook.es":     {},
+	"outlook.jp":     {},
+	"outlook.my":     {},
+	"outlook.pt":     {},
+}
 
 type MicrosoftAliasCreationAdapter struct {
 	proxies                 microsoftProxyProvider
@@ -34,7 +50,19 @@ func NewMicrosoftAliasCreationAdapter(proxies *proxyapp.ProxyUseCase) *Microsoft
 }
 
 func (a *MicrosoftAliasCreationAdapter) GenerateMicrosoftAliasCandidates(count int, accountEmail string) ([]string, error) {
-	return msacl.GenerateExplicitAliasCandidates(count, accountEmail)
+	return msacl.GenerateExplicitAliasCandidates(count, microsoftAliasCandidateAccountEmail(accountEmail))
+}
+
+func microsoftAliasCandidateAccountEmail(accountEmail string) string {
+	normalized := strings.ToLower(strings.TrimSpace(accountEmail))
+	local, domain, ok := strings.Cut(normalized, "@")
+	if !ok || local == "" || strings.Count(normalized, "@") != 1 || !coredomain.IsMicrosoftEmailDomain(normalized) {
+		return accountEmail
+	}
+	if _, supported := microsoftAliasSelfProvisioningDomains[strings.TrimSuffix(domain, ".")]; !supported {
+		return local + "@outlook.com"
+	}
+	return accountEmail
 }
 
 func (a *MicrosoftAliasCreationAdapter) PrepareMicrosoftAliasBinding(ctx context.Context, req mailapp.MicrosoftAliasCreationRequest) (mailapp.MicrosoftAliasBindingPreparationResult, error) {

@@ -192,9 +192,8 @@ func (a *ResourceValidationAdapter) validateMicrosoftHardReauthorize(
 }
 
 func microsoftValidationAliasCandidates() ([]string, error) {
-	// Microsoft accepts Hotmail as an account domain but no longer provisions
-	// new @hotmail.com aliases. Keep this override validation-only so the
-	// independent weekly alias workflow is unchanged.
+	// Validation uses the universally available outlook.com namespace; the
+	// independent alias workflow preserves proven regional suffixes separately.
 	return msacl.GenerateExplicitAliasCandidates(microsoftValidationAliasCount, microsoftValidationAliasSeed)
 }
 

@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
@@ -19,6 +20,37 @@ import (
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMicrosoftAliasAdapterUsesActiveOutlookCandidateDomain(t *testing.T) {
+	adapter := NewMicrosoftAliasCreationAdapter(nil)
+	for _, test := range []struct {
+		account string
+		suffix  string
+	}{
+		{account: "owner@hotmail.com", suffix: "@outlook.com"},
+		{account: "owner@outlook.com", suffix: "@outlook.com"},
+		{account: "owner@outlook.fr", suffix: "@outlook.com"},
+		{account: "owner@outlook.com.au", suffix: "@outlook.com.au"},
+		{account: "owner@outlook.cl", suffix: "@outlook.cl"},
+		{account: "owner@outlook.de", suffix: "@outlook.de"},
+		{account: "owner@outlook.es", suffix: "@outlook.es"},
+		{account: "owner@outlook.jp", suffix: "@outlook.jp"},
+		{account: "owner@outlook.my", suffix: "@outlook.my"},
+		{account: "owner@outlook.pt", suffix: "@outlook.pt"},
+		{account: "owner@outlook.sa", suffix: "@outlook.com"},
+		{account: "owner@outlook.com.br", suffix: "@outlook.com"},
+		{account: "owner@outlook.be", suffix: "@outlook.com"},
+	} {
+		candidates, err := adapter.GenerateMicrosoftAliasCandidates(2, test.account)
+		require.NoError(t, err)
+		require.Len(t, candidates, 2)
+		for _, candidate := range candidates {
+			require.Truef(t, strings.HasSuffix(candidate, test.suffix), "candidate=%q suffix=%q", candidate, test.suffix)
+		}
+	}
+	_, err := adapter.GenerateMicrosoftAliasCandidates(2, "bad@address@outlook.fr")
+	require.Error(t, err)
+}
 
 func TestAuthorizeAliasBindingAvoidsFailedProxyServerOnRetry(t *testing.T) {
 	proxies := &microsoftProxyProviderStub{acquireFn: func(request proxyapp.AcquireProxyRequest) (*proxyapp.ProxyConfig, error) {

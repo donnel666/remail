@@ -509,7 +509,7 @@ func (s *MicrosoftAliasService) completeAliasResult(
 	}
 	resultCategory := strings.TrimSpace(result.Category)
 	message := safeAliasMessage(result.SafeMessage)
-	if message == "" && (resultCategory != "" || len(confirmed) != len(attempts)) {
+	if message == "" && len(confirmed) != len(attempts) {
 		message = defaultAliasSafeMessage(resultCategory)
 	}
 	completedAt := s.now().UTC()

@@ -490,7 +490,8 @@ func TestMicrosoftAliasProcessCreatesTwoAndWaitsForNextCalendarWeek(t *testing.T
 	}
 	creator := &fakeMicrosoftAliasCreator{
 		result: MicrosoftAliasCreationResult{
-			Aliases: []string{"first123456@outlook.com", "second123456@outlook.com"},
+			Aliases:  []string{"first123456@outlook.com", "second123456@outlook.com"},
+			Category: "added",
 		},
 	}
 	service := NewMicrosoftAliasService(store, nil, creator)

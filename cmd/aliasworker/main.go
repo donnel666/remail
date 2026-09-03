@@ -56,6 +56,7 @@ type config struct {
 	credentialTypeRPS   int
 	credentialTypeBurst int
 	startupInterval     time.Duration
+	maxTasks            int
 }
 
 type aliasTaskResult struct {
@@ -93,6 +94,7 @@ func parseFlags() config {
 	flag.IntVar(&cfg.credentialTypeRPS, "credential-type-rps", defaultCredentialTypeRPS, "CMD-wide GetCredentialType requests per second; zero disables the gate")
 	flag.IntVar(&cfg.credentialTypeBurst, "credential-type-burst", defaultCredentialTypeBurst, "maximum immediate GetCredentialType burst")
 	flag.DurationVar(&cfg.startupInterval, "startup-interval", defaultStartupInterval, "delay between starting alias workers")
+	flag.IntVar(&cfg.maxTasks, "max-tasks", 0, "stop after processing this many tasks; zero means unlimited")
 	flag.Parse()
 	return cfg
 }
@@ -138,7 +140,7 @@ func run(ctx context.Context, cfg config) error {
 	if info.Active != 0 {
 		return fmt.Errorf("queue %s has %d active tasks; stop existing consumers and recover them before starting", queue, info.Active)
 	}
-	log.Printf("aliasworker attached queue=%s paused=true pending=%d scheduled=%d retry=%d concurrency=%d", queue, info.Pending, info.Scheduled, info.Retry, cfg.concurrency)
+	log.Printf("aliasworker attached queue=%s paused=true pending=%d scheduled=%d retry=%d concurrency=%d max_tasks=%d", queue, info.Pending, info.Scheduled, info.Retry, cfg.concurrency, cfg.maxTasks)
 
 	store := mailinfra.NewMicrosoftAliasStore(p.DB)
 	proxyModule, err := proxyapi.NewProxyModule(p.DB, p.Asynq)
@@ -165,8 +167,8 @@ func validateConfig(cfg config) error {
 	if cfg.pollInterval <= 0 || cfg.shutdownTimeout <= 0 || cfg.startupInterval < 0 {
 		return errors.New("poll-interval and shutdown-timeout must be positive; startup-interval cannot be negative")
 	}
-	if cfg.credentialTypeRPS < 0 || cfg.credentialTypeRPS > 1000 || cfg.credentialTypeBurst < 1 || cfg.credentialTypeBurst > 100 {
-		return errors.New("credential-type-rps must be between 0 and 1000 and credential-type-burst between 1 and 100")
+	if cfg.credentialTypeRPS < 0 || cfg.credentialTypeRPS > 1000 || cfg.credentialTypeBurst < 1 || cfg.credentialTypeBurst > 100 || cfg.maxTasks < 0 {
+		return errors.New("credential-type-rps must be between 0 and 1000, credential-type-burst between 1 and 100, and max-tasks cannot be negative")
 	}
 	if cfg.bufferSize < cfg.concurrency || cfg.bufferSize > 100000 {
 		return fmt.Errorf("buffer-size must be between concurrency (%d) and 100000", cfg.concurrency)
@@ -260,11 +262,20 @@ func drainPausedQueue(
 			lastProcessed = current
 			lastLog = now
 		}
+		if cfg.maxTasks > 0 && stats.processed.Load() >= int64(cfg.maxTasks) && len(assigned) == 0 && len(work) == 0 {
+			return nil
+		}
 		if cfg.exitWhenEmpty && info.Pending == 0 && info.Active == 0 && info.Scheduled == 0 && info.Retry == 0 && len(assigned) == 0 && len(work) == 0 {
 			return nil
 		}
 
 		available := cfg.bufferSize - len(assigned)
+		if cfg.maxTasks > 0 {
+			remaining := cfg.maxTasks - int(stats.processed.Load()) - len(assigned)
+			if remaining < available {
+				available = remaining
+			}
+		}
 		if available > 0 {
 			batchSize := min(available, 200)
 			tasks, listErr := inspector.ListPendingTasks(platform.QueueBackgroundAlias, asynq.PageSize(batchSize), asynq.Page(1))

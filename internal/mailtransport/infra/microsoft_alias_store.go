@@ -1051,6 +1051,8 @@ func (s *MicrosoftAliasStore) Reserve(
 	candidates []string,
 	yearStart, yearEnd, weekStart, weekEnd, now time.Time,
 ) ([]mailapp.MicrosoftAliasAttempt, mailapp.MicrosoftAliasUsage, error) {
+	candidates = normalizeAliasRows(candidates)
+	candidateDomains := microsoftAliasCandidateDomains(candidates)
 	var attempts []mailapp.MicrosoftAliasAttempt
 	var usage mailapp.MicrosoftAliasUsage
 	err := withAliasDeadlockRetry(ctx, s.db, func(tx *gorm.DB) error {
@@ -1118,11 +1120,14 @@ func (s *MicrosoftAliasStore) Reserve(
 		}
 
 		var reusable []MicrosoftAliasAttemptModel
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		reusableQuery := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("resource_id = ? AND status = ? AND was_attempted = ?", resourceID, mailapp.MicrosoftAliasAttemptFailed, false).
 			Order("id ASC").
-			Limit(remaining).
-			Find(&reusable).Error; err != nil {
+			Limit(remaining)
+		if len(candidateDomains) > 0 {
+			reusableQuery = reusableQuery.Where("LOWER(SUBSTRING_INDEX(candidate, '@', -1)) IN ?", candidateDomains)
+		}
+		if err := reusableQuery.Find(&reusable).Error; err != nil {
 			return fmt.Errorf("load reusable microsoft alias attempts: %w", err)
 		}
 		for _, attempt := range reusable {
@@ -1157,7 +1162,6 @@ func (s *MicrosoftAliasStore) Reserve(
 			usage.WeekCount += len(attempts)
 			return nil
 		}
-		candidates = normalizeAliasRows(candidates)
 		if len(candidates) > remaining {
 			candidates = candidates[:remaining]
 		}
@@ -1191,6 +1195,23 @@ func (s *MicrosoftAliasStore) Reserve(
 		return nil
 	})
 	return attempts, usage, err
+}
+
+func microsoftAliasCandidateDomains(candidates []string) []string {
+	seen := make(map[string]struct{}, len(candidates))
+	domains := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		_, domain, ok := strings.Cut(candidate, "@")
+		if !ok {
+			continue
+		}
+		if _, exists := seen[domain]; exists {
+			continue
+		}
+		seen[domain] = struct{}{}
+		domains = append(domains, domain)
+	}
+	return domains
 }
 
 func (s *MicrosoftAliasStore) Complete(ctx context.Context, resourceID uint, claimToken string, outcomes []mailapp.MicrosoftAliasAttemptOutcome, completedAt time.Time) error {
