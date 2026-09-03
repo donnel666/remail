@@ -101,46 +101,63 @@ func (c *localGmailPickupClient) Fetch(
 	var (
 		avoidServerIDs []uint
 		lastErr        error
+		ipVersion      = proxydomain.ProxyIPv6
 	)
 	for attempt := 0; attempt < proxyAttempts; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return nil, cursors, err
-		}
-		proxyConfig, err := c.acquireProxy(ctx, email, requestID, attempt, avoidServerIDs)
-		if err != nil {
-			return nil, cursors, fmt.Errorf("acquire Gmail pickup proxy: %w", err)
-		}
-		proxyURL := ""
-		proxyID := uint(0)
-		if proxyConfig != nil && !proxyConfig.Direct {
-			proxyURL = proxyConfig.URL
-			proxyID = proxyConfig.ID
-		}
-		attemptCtx, cancelAttempt := context.WithTimeout(ctx, attemptTimeout)
-		messages, nextCursors, err := c.fetch(
-			attemptCtx, email, appPassword, cursors, since, proxyURL, fingerprint, fullHistory,
-		)
-		attemptErr := attemptCtx.Err()
-		cancelAttempt()
-		if err == nil {
+		for {
+			if err := ctx.Err(); err != nil {
+				return nil, cursors, err
+			}
+			proxyConfig, err := c.acquireProxy(ctx, email, requestID, ipVersion, attempt, avoidServerIDs)
+			if err != nil && ipVersion == proxydomain.ProxyIPv6 && errors.Is(err, proxydomain.ErrProxyUnavailable) {
+				ipVersion = proxydomain.ProxyIPv4
+				continue
+			}
+			if err != nil {
+				return nil, cursors, fmt.Errorf("acquire Gmail pickup proxy: %w", err)
+			}
+			if ipVersion == proxydomain.ProxyIPv6 && c.proxies != nil && (proxyConfig == nil || proxyConfig.Direct) {
+				// Keep the family fallback in this proxy attempt so IPv4 resource bindings remain eligible.
+				ipVersion = proxydomain.ProxyIPv4
+				continue
+			}
+			proxyURL := ""
+			proxyID := uint(0)
+			if proxyConfig != nil && !proxyConfig.Direct {
+				proxyURL = proxyConfig.URL
+				proxyID = proxyConfig.ID
+			}
+			attemptCtx, cancelAttempt := context.WithTimeout(ctx, attemptTimeout)
+			messages, nextCursors, err := c.fetch(
+				attemptCtx, email, appPassword, cursors, since, proxyURL, fingerprint, fullHistory,
+			)
+			attemptErr := attemptCtx.Err()
+			cancelAttempt()
+			if err == nil {
+				_ = c.reportProxySuccess(ctx, proxyID)
+				return messages, nextCursors, nil
+			}
+			lastErr = errors.Join(err, attemptErr)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, cursors, errors.Join(err, ctxErr)
+			}
+			if errors.Is(err, errLocalGmailAuthentication) {
+				_ = c.reportProxySuccess(ctx, proxyID)
+				return nil, cursors, err
+			}
+			if proxyURL != "" && (errors.Is(attemptErr, context.DeadlineExceeded) || isLocalGmailPickupProxyFailure(err, proxyURL)) {
+				avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
+				_ = c.reportProxyFailure(ctx, proxyID, "Gmail IMAP transport failed.")
+				if ipVersion == proxydomain.ProxyIPv6 {
+					// Try IPv4 before this task consumes another proxy attempt.
+					ipVersion = proxydomain.ProxyIPv4
+					continue
+				}
+				break
+			}
 			_ = c.reportProxySuccess(ctx, proxyID)
-			return messages, nextCursors, nil
+			return nil, cursors, lastErr
 		}
-		lastErr = errors.Join(err, attemptErr)
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, cursors, errors.Join(err, ctxErr)
-		}
-		if errors.Is(err, errLocalGmailAuthentication) {
-			_ = c.reportProxySuccess(ctx, proxyID)
-			return nil, cursors, err
-		}
-		if proxyURL != "" && (errors.Is(attemptErr, context.DeadlineExceeded) || isLocalGmailPickupProxyFailure(err, proxyURL)) {
-			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
-			_ = c.reportProxyFailure(ctx, proxyID, "Gmail IMAP transport failed.")
-			continue
-		}
-		_ = c.reportProxySuccess(ctx, proxyID)
-		return nil, cursors, lastErr
 	}
 	if lastErr != nil {
 		return nil, cursors, lastErr
@@ -151,6 +168,7 @@ func (c *localGmailPickupClient) Fetch(
 func (c *localGmailPickupClient) acquireProxy(
 	ctx context.Context,
 	email, requestID string,
+	ipVersion proxydomain.ProxyIPVersion,
 	attempt int,
 	avoidServerIDs []uint,
 ) (*proxyapp.ProxyConfig, error) {
@@ -159,7 +177,7 @@ func (c *localGmailPickupClient) acquireProxy(
 	}
 	return c.proxies.Acquire(ctx, proxyapp.AcquireProxyRequest{
 		Key:                 strings.ToLower(strings.TrimSpace(email)),
-		IPVersion:           proxydomain.ProxyIPv4,
+		IPVersion:           ipVersion,
 		Purpose:             proxydomain.ProxyPurposeFetch,
 		AllowSystemFallback: true,
 		Attempt:             attempt,

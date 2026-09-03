@@ -69,10 +69,10 @@ func TestLocalGmailPickupClientCopiesMicrosoftProxyRetryContractWithGmailFingerp
 	require.Len(t, proxies.requests, 2)
 	for attempt, request := range proxies.requests {
 		require.Equal(t, "owner.name@gmail.com", request.Key)
-		require.Equal(t, proxydomain.ProxyIPv4, request.IPVersion)
+		require.Equal(t, []proxydomain.ProxyIPVersion{proxydomain.ProxyIPv6, proxydomain.ProxyIPv4}[attempt], request.IPVersion)
 		require.Equal(t, proxydomain.ProxyPurposeFetch, request.Purpose)
 		require.True(t, request.AllowSystemFallback)
-		require.Equal(t, attempt, request.Attempt)
+		require.Zero(t, request.Attempt)
 		require.Equal(t, "gmail-pickup-request", request.RequestID)
 	}
 	require.Empty(t, proxies.requests[0].AvoidProxyServerIDs)
@@ -105,12 +105,13 @@ func TestLocalGmailPickupClientTreatsAuthenticationAsHealthyProxy(t *testing.T) 
 
 	require.ErrorIs(t, err, errLocalGmailAuthentication)
 	require.Len(t, proxies.requests, 1)
+	require.Equal(t, proxydomain.ProxyIPv6, proxies.requests[0].IPVersion)
 	require.Empty(t, proxies.failures)
 	require.Equal(t, []uint{31}, proxies.successes)
 }
 
-func TestLocalGmailPickupFullHistoryUsesIPv4AndRetriesTimedOutProxy(t *testing.T) {
-	setGmailRuntime(t, map[string]string{"max_proxy_attempts": "2"})
+func TestLocalGmailPickupFullHistoryFallsBackToIPv4InSameAttempt(t *testing.T) {
+	setGmailRuntime(t, map[string]string{"max_proxy_attempts": "1"})
 	proxies := &localGmailPickupProxyStub{configs: []*proxyapp.ProxyConfig{
 		{ID: 41, ProxyServerID: 40, URL: "socks5://first.invalid:1080"},
 		{ID: 51, ProxyServerID: 50, URL: "socks5://second.invalid:1080"},
@@ -131,8 +132,37 @@ func TestLocalGmailPickupFullHistoryUsesIPv4AndRetriesTimedOutProxy(t *testing.T
 
 	require.NoError(t, err)
 	require.Len(t, proxies.requests, 2)
-	require.Equal(t, proxydomain.ProxyIPv4, proxies.requests[0].IPVersion)
+	require.Equal(t, proxydomain.ProxyIPv6, proxies.requests[0].IPVersion)
+	require.Equal(t, proxydomain.ProxyIPv4, proxies.requests[1].IPVersion)
+	require.Zero(t, proxies.requests[0].Attempt)
+	require.Zero(t, proxies.requests[1].Attempt)
 	require.Equal(t, []uint{41}, proxies.failures)
 	require.Equal(t, []uint{51}, proxies.successes)
 	require.Equal(t, []uint{40}, proxies.requests[1].AvoidProxyServerIDs)
+}
+
+func TestLocalGmailPickupFallsBackToIPv4WhenIPv6RouteIsUnavailable(t *testing.T) {
+	proxies := &localGmailPickupProxyStub{configs: []*proxyapp.ProxyConfig{
+		{Direct: true},
+		{ID: 61, ProxyServerID: 60, URL: "socks5://ipv4.invalid:1080"},
+	}}
+	client := newLocalGmailPickupClient(proxies)
+	var proxyURL string
+	client.fetch = func(
+		_ context.Context, _, _ string, _ localGmailFolderCursors, _ time.Time, routedProxyURL string, _ localGmailClientFingerprint, _ bool,
+	) ([]localGmailFetchedMessage, localGmailFolderCursors, error) {
+		proxyURL = routedProxyURL
+		return nil, localGmailFolderCursors{Inbox: 1, Spam: 2}, nil
+	}
+
+	_, _, err := client.Fetch(context.Background(), "owner@gmail.com", "app-password", localGmailFolderCursors{}, time.Time{}, true)
+
+	require.NoError(t, err)
+	require.Equal(t, "socks5://ipv4.invalid:1080", proxyURL)
+	require.Len(t, proxies.requests, 2)
+	require.Equal(t, proxydomain.ProxyIPv6, proxies.requests[0].IPVersion)
+	require.Equal(t, proxydomain.ProxyIPv4, proxies.requests[1].IPVersion)
+	require.Equal(t, 0, proxies.requests[0].Attempt)
+	require.Equal(t, 0, proxies.requests[1].Attempt)
+	require.Equal(t, []uint{61}, proxies.successes)
 }
