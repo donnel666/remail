@@ -20,6 +20,24 @@
     "secret": true,
     "default": ""
   },
+  "qq_group_owner_id": {
+    "type": "string",
+    "description": "群主QQ号",
+    "hint": "手工填写真实群主 QQ 号，应用于所有已授权 QQ 群；用于 @群主代接和工作日报私聊投递，留空时不自动猜测群主。",
+    "default": ""
+  },
+  "qq_group_admin_ids": {
+    "type": "list",
+    "description": "管理员QQ号",
+    "hint": "每项填写一个真实管理员 QQ 号，应用于所有已授权 QQ 群；只有名单中的管理员被 @时才触发红夜代接。",
+    "default": []
+  },
+  "qq_group_management": {
+    "type": "list",
+    "description": "分群管理QQ号",
+    "hint": "可选。每项格式：群号|群主QQ号|管理员QQ号1,管理员QQ号2。匹配时优先于上方全局群主和管理员；适合多个白名单群使用不同管理成员。",
+    "default": []
+  },
   "request_timeout_seconds": {
     "type": "int",
     "description": "ReMail 请求超时秒数",

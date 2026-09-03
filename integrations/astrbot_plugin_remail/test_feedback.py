@@ -5,6 +5,7 @@ import re
 from datetime import datetime, time, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -58,6 +59,12 @@ def _main_feedback_functions():
     ]
     for node in body:
         node.decorator_list = []
+    helpers = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {"_positive_platform_id", "_configured_qq_management"}
+    ]
     argument_patterns = [
         node
         for node in tree.body
@@ -70,6 +77,7 @@ def _main_feedback_functions():
     ]
     namespace = {
         "AstrMessageEvent": object,
+        "Any": Any,
         "DailyFeedback": DailyFeedback,
         "MessageChain": lambda items: items,
         "MessageType": _MessageType,
@@ -84,7 +92,7 @@ def _main_feedback_functions():
     exec(
         compile(
             ast.fix_missing_locations(
-                ast.Module(body=[*argument_patterns, *body], type_ignores=[])
+                ast.Module(body=[*argument_patterns, *helpers, *body], type_ignores=[])
             ),
             "main.py",
             "exec",
@@ -411,6 +419,47 @@ def test_feedback_without_a_valid_owner_is_not_stored() -> None:
     put_value.assert_not_awaited()
 
 
+def test_feedback_owner_change_does_not_drop_new_items() -> None:
+    record_feedback = _main_feedback_functions()["_record_feedback"]
+    old = DailyFeedback()
+    assert old.add("feedback", "旧反馈", owner_umo="bot:FriendMessage:11111")
+    storage = {"feedback:test": old.dump()}
+
+    async def get_value(key, default):
+        return storage.get(key, default)
+
+    async def put_value(key, value):
+        storage[key] = value
+
+    plugin = SimpleNamespace(
+        feedback_lock=asyncio.Lock(),
+        feedback_seen=set(),
+        feedback_report_time=time(20),
+        _feedback_enabled=lambda: True,
+        _feedback_authorized=AsyncMock(return_value=(True, "")),
+        _feedback_group_metadata=AsyncMock(
+            return_value=(
+                "bot:group",
+                {
+                    "platformId": "bot",
+                    "ownerUmo": "bot:FriendMessage:9845248",
+                },
+            )
+        ),
+        _valid_feedback_umo=lambda *_args: True,
+        _feedback_store_key=lambda _group: "feedback:test",
+        get_kv_data=AsyncMock(side_effect=get_value),
+        put_kv_data=AsyncMock(side_effect=put_value),
+    )
+    event = SimpleNamespace(message_obj=SimpleNamespace(message_id="new-owner"))
+
+    assert asyncio.run(
+        record_feedback(plugin, event, "feedback", "新群主接手后的反馈")
+    ) == (True, "")
+    items = DailyFeedback(storage["feedback:test"]).snapshot(feedback_day())["items"]
+    assert [item["text"] for item in items][-1] == "新群主接手后的反馈"
+
+
 def test_non_whitelisted_group_is_not_recorded() -> None:
     functions = _main_feedback_functions()
     event = SimpleNamespace(
@@ -496,7 +545,7 @@ def test_daily_report_discards_only_after_success(sent: bool) -> None:
 
     send_message = AsyncMock(return_value=sent)
     plugin = SimpleNamespace(
-        config={},
+        config={"qq_group_owner_id": "99999"},
         context=SimpleNamespace(send_message=send_message),
         feedback_groups={
             "bot:group": {
@@ -517,7 +566,7 @@ def test_daily_report_discards_only_after_success(sent: bool) -> None:
 
     assert asyncio.run(send_reports(plugin)) is (not sent)
     send_message.assert_awaited_once()
-    assert send_message.await_args.args[0] == "bot:FriendMessage:12345"
+    assert send_message.await_args.args[0] == "bot:FriendMessage:99999"
     remaining = DailyFeedback(storage["feedback:test"]).snapshot("2020-01-01")["items"]
     assert bool(remaining) is (not sent)
     assert plugin.put_kv_data.await_count == int(sent)
