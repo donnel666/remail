@@ -51,12 +51,14 @@ func (s *announcementDeliveryStub) Send(_ context.Context, message maildomain.Ou
 	return nil
 }
 
-func TestAnnouncementBroadcastHonorsActiveWindowAndGlobalSwitch(t *testing.T) {
+func TestAnnouncementBroadcastHonorsActiveWindowAndSwitches(t *testing.T) {
 	oldAnnouncements := runtimeconfig.String("announcements", "[]")
 	oldEnabled := runtimeconfig.String("announcement_enabled", "true")
+	oldEmailEnabled := runtimeconfig.String("announcement_email_enabled", "false")
 	t.Cleanup(func() {
 		runtimeconfig.Set("announcements", oldAnnouncements)
 		runtimeconfig.Set("announcement_enabled", oldEnabled)
+		runtimeconfig.Set("announcement_email_enabled", oldEmailEnabled)
 	})
 
 	now := time.Date(2026, time.July, 26, 12, 0, 0, 0, time.UTC)
@@ -66,6 +68,7 @@ func TestAnnouncementBroadcastHonorsActiveWindowAndGlobalSwitch(t *testing.T) {
 	require.NoError(t, err)
 	runtimeconfig.Set("announcements", string(payload))
 	runtimeconfig.Set("announcement_enabled", "true")
+	runtimeconfig.Set("announcement_email_enabled", "true")
 
 	delivery := &announcementDeliveryStub{}
 	mailer := announcementMailer{
@@ -78,6 +81,11 @@ func TestAnnouncementBroadcastHonorsActiveWindowAndGlobalSwitch(t *testing.T) {
 	require.NoError(t, mailer.processAnnouncementBroadcast(context.Background(), announcementBroadcastTask{ID: active.ID, StartTime: active.StartTime}, now))
 	require.Len(t, delivery.messages, 1)
 
+	runtimeconfig.Set("announcement_email_enabled", "false")
+	require.NoError(t, mailer.processAnnouncementBroadcast(context.Background(), announcementBroadcastTask{ID: future.ID, StartTime: future.StartTime}, now.Add(2*time.Hour)))
+	require.Len(t, delivery.messages, 1)
+
+	runtimeconfig.Set("announcement_email_enabled", "true")
 	runtimeconfig.Set("announcement_enabled", "false")
 	require.NoError(t, mailer.processAnnouncementBroadcast(context.Background(), announcementBroadcastTask{ID: future.ID, StartTime: future.StartTime}, now.Add(2*time.Hour)))
 	require.Len(t, delivery.messages, 1)
@@ -111,6 +119,8 @@ func TestProjectApplicationNotificationEmailsActiveSuperAdmins(t *testing.T) {
 }
 
 func TestAnnouncementPublisherSchedulesFutureBroadcastAtStartTime(t *testing.T) {
+	oldEmailEnabled := runtimeconfig.String("announcement_email_enabled", "false")
+	t.Cleanup(func() { runtimeconfig.Set("announcement_email_enabled", oldEmailEnabled) })
 	server := miniredis.RunT(t)
 	redisOptions := asynq.RedisClientOpt{Addr: server.Addr()}
 	client := asynq.NewClient(redisOptions)
@@ -119,11 +129,16 @@ func TestAnnouncementPublisherSchedulesFutureBroadcastAtStartTime(t *testing.T) 
 	t.Cleanup(func() { require.NoError(t, inspector.Close()) })
 
 	start := time.Now().Add(time.Hour).Truncate(time.Second)
+	runtimeconfig.Set("announcement_email_enabled", "false")
+	require.NoError(t, (announcementMailer{}).PublishAnnouncements(context.Background(), []runtimeconfig.Announcement{{
+		ID: 9, StartTime: start.Format(time.RFC3339), Enabled: true,
+	}}))
+
+	runtimeconfig.Set("announcement_email_enabled", "true")
 	mailer := announcementMailer{client: client}
 	require.NoError(t, mailer.PublishAnnouncements(context.Background(), []runtimeconfig.Announcement{{
 		ID: 9, StartTime: start.Format(time.RFC3339), Enabled: true,
 	}}))
-
 	tasks, err := inspector.ListScheduledTasks(platform.QueueMailtransport)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)

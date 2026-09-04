@@ -104,7 +104,7 @@ var removedKeys = map[string]struct{}{
 }
 
 var booleanKeys = map[string]struct{}{
-	"register_enabled": {}, "captcha_enabled": {}, "announcement_enabled": {}, "faq_enabled": {}, "epay_enabled": {}, "epusdt_enabled": {},
+	"register_enabled": {}, "captcha_enabled": {}, "announcement_enabled": {}, "announcement_email_enabled": {}, "faq_enabled": {}, "epay_enabled": {}, "epusdt_enabled": {},
 	"daily_checkin_enabled": {}, "leaderboard_reward_enabled": {}, "linuxdo_oauth_enabled": {}, "github_oauth_enabled": {}, "nodeloc_oauth_enabled": {},
 	"default_project_microsoft_code_enabled": {}, "default_project_microsoft_purchase_enabled": {},
 	"default_project_domain_code_enabled": {}, "default_project_domain_purchase_enabled": {},

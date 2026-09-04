@@ -48,6 +48,7 @@ const emailServiceGroups = [
 const frontendGroups = [
   [
     "announcement_enabled",
+    "announcement_email_enabled",
     "announcements",
     "global_notice",
     "faq_enabled",

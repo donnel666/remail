@@ -3,7 +3,7 @@ package runtimeconfig
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
 const (
-	DefaultSettingsCount                         = 281
+	DefaultSettingsCount                         = 282
 	NodeLocCallbackURL                           = "https://remail.aishop6.com/oauth/nodeloc"
 	RechargeTimeoutMinutesKey                    = "recharge_timeout_minutes"
 	MicrosoftPriceMultiplierKey                  = "product_price_multiplier_microsoft"
@@ -75,6 +75,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "nodeloc_callback_url", Value: NodeLocCallbackURL},
 	{Key: "nodeloc_minimum_trust_level", Value: "0"},
 	{Key: "announcement_enabled", Value: "true"},
+	{Key: "announcement_email_enabled", Value: "false"},
 	{Key: "announcements", Value: "[]"},
 	{Key: "global_notice", Value: ""},
 	{Key: "faq_enabled", Value: "true"},

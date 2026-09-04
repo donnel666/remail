@@ -653,6 +653,8 @@
   "系统通知": "System notice",
   "通知内容": "Notice content",
   "通知内容不能超过 1 MiB": "Notice content cannot exceed 1 MiB.",
+  "公告邮件通知": "Announcement email notifications",
+  "开启后，新发布的公告会同时发送邮件，建议仅用于紧急通知": "When enabled, newly published announcements are also sent by email. Recommended only for urgent notices.",
   "将在顶部通知中心展示，支持换行并按纯文本安全显示": "Shown in the header notification center. Line breaks are preserved and content is displayed as safe plain text.",
   "保存通知": "Save notice",
   "Millions of email resources online, ready to use!": "Millions of email resources online, ready to use!",

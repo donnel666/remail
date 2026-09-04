@@ -78,6 +78,20 @@ const baseProps = {
 describe("SiteContentSection saves", () => {
   afterEach(() => cleanup());
 
+  it("defaults announcement email notifications off and saves the switch", async () => {
+    const onBulkSave = vi.fn().mockResolvedValue(undefined);
+    render(<SiteContentSection {...baseProps} onBulkSave={onBulkSave} />);
+
+    const emailSwitch = screen.getByRole("switch", { name: "公告邮件通知" });
+    expect(emailSwitch).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(emailSwitch);
+
+    await waitFor(() => expect(onBulkSave).toHaveBeenCalledWith([
+      { key: "announcement_email_enabled", value: "true" },
+    ]));
+    expect(emailSwitch).toHaveAttribute("aria-checked", "true");
+  });
+
   it("refreshes the global customer service widget after saving", async () => {
     const onBulkSave = vi.fn().mockResolvedValue(undefined);
     const onUpdated = vi.fn();

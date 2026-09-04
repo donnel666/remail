@@ -345,6 +345,9 @@ return redis.call("DEL", KEYS[1])
 `)
 
 func (m announcementMailer) PublishAnnouncements(ctx context.Context, announcements []runtimeconfig.Announcement) error {
+	if !runtimeconfig.Bool("announcement_email_enabled", false) {
+		return nil
+	}
 	if m.client == nil {
 		return fmt.Errorf("announcement queue is unavailable")
 	}
@@ -430,7 +433,7 @@ func (m announcementMailer) processAnnouncementBroadcast(ctx context.Context, ta
 }
 
 func (m announcementMailer) sendAnnouncements(ctx context.Context, announcements []runtimeconfig.Announcement) error {
-	if m.users == nil || m.delivery == nil {
+	if !runtimeconfig.Bool("announcement_email_enabled", false) || m.users == nil || m.delivery == nil {
 		return nil
 	}
 	enabled := true

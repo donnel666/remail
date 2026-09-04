@@ -68,6 +68,7 @@ const D = {
   maintenance_mode: false,
   maintenance_allow_ips: "",
   announcement_enabled: true,
+  announcement_email_enabled: false,
   faq_enabled: true,
   faq_list: "[]",
   customer_service_qq_group_number: "",
@@ -369,6 +370,17 @@ export default function SiteContentSection({ options, loading, onBulkSave }: Sec
 
   return <div className="space-y-6">
     <SettingsSection title={announcementHeader}>
+      <SettingsSwitchField
+        checked={form.announcement_email_enabled}
+        disabled={loading}
+        label={t("公告邮件通知")}
+        description={t("开启后，新发布的公告会同时发送邮件，建议仅用于紧急通知")}
+        onChange={(value) => {
+          const previous = form.announcement_email_enabled;
+          update("announcement_email_enabled", value);
+          void onBulkSave([{ key: "announcement_email_enabled", value: String(value) }]).catch(() => update("announcement_email_enabled", previous));
+        }}
+      />
       <Table
         columns={announcementColumns as never}
         dataSource={announcements}
