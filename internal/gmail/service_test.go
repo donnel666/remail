@@ -15,33 +15,14 @@ import (
 type localAllocationGuardModel = allocinfra.OrderGuardModel
 
 type gmailTradeSpy struct {
-	activations   []tradeapp.ActivateGmailOrderRequest
-	completed     []string
-	failed        []string
-	history       []tradeapp.HistoricalGmailUsage
-	release       func(context.Context, string) error
-	importHistory func(context.Context, []tradeapp.HistoricalGmailUsage) error
+	history             []tradeapp.HistoricalGmailUsage
+	refundedResourceIDs []uint
+	importHistory       func(context.Context, []tradeapp.HistoricalGmailUsage) error
 }
 
-func (s *gmailTradeSpy) ActivateGmailOrder(_ context.Context, req tradeapp.ActivateGmailOrderRequest) error {
-	s.activations = append(s.activations, req)
-	return nil
-}
-
-func (s *gmailTradeSpy) CompleteGmailOrder(ctx context.Context, orderNo, _ string) error {
-	s.completed = append(s.completed, orderNo)
-	if s.release != nil {
-		return s.release(ctx, orderNo)
-	}
-	return nil
-}
-
-func (s *gmailTradeSpy) FailGmailOrder(ctx context.Context, orderNo, _ string) error {
-	s.failed = append(s.failed, orderNo)
-	if s.release != nil {
-		return s.release(ctx, orderNo)
-	}
-	return nil
+func (s *gmailTradeSpy) RefundUnavailableGmailOrders(_ context.Context, resourceID uint, _ string) (int, error) {
+	s.refundedResourceIDs = append(s.refundedResourceIDs, resourceID)
+	return 1, nil
 }
 
 func (s *gmailTradeSpy) ImportHistoricalGmailUsage(ctx context.Context, history []tradeapp.HistoricalGmailUsage) error {

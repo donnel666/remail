@@ -67,7 +67,7 @@ func (r *ResourceFetchRepo) operationKinds() []string {
 	if r.kind == domain.ResourceFetchJobHistory {
 		return []string{"resource_history"}
 	}
-	return []string{"resource_fetch", "icloud_resource_fetch"}
+	return []string{"resource_fetch", "gmail_resource_fetch", "icloud_resource_fetch"}
 }
 
 func (r *ResourceFetchRepo) withTx(ctx context.Context, fn func(context.Context, *gorm.DB) error) error {
@@ -97,8 +97,8 @@ func (r *ResourceFetchRepo) CreateOrReuseResourceFetch(ctx context.Context, job 
 	if job.ResourceType == "" {
 		job.ResourceType = domain.ResourceTypeMicrosoft
 	}
-	if (job.ResourceType != domain.ResourceTypeMicrosoft && job.ResourceType != domain.ResourceTypeICloud) ||
-		(job.ResourceType == domain.ResourceTypeICloud && job.Kind != domain.ResourceFetchJobFetch) {
+	if (job.ResourceType != domain.ResourceTypeMicrosoft && job.ResourceType != domain.ResourceTypeGmail && job.ResourceType != domain.ResourceTypeICloud) ||
+		(job.ResourceType != domain.ResourceTypeMicrosoft && job.Kind != domain.ResourceFetchJobFetch) {
 		return false, domain.ErrInvalidRequest
 	}
 	reused := false
@@ -303,6 +303,19 @@ func (r *ResourceFetchRepo) AssertResourceFetchFence(ctx context.Context, resour
 	})
 }
 
+func (r *ResourceFetchRepo) AssertGmailResourceFetchFence(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64) error {
+	return r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
+		if err := r.lockResourceFetchState(tx, resourceID, generation); err != nil {
+			return err
+		}
+		scope, err := r.lockResourceFetchScope(txCtx, resourceID, domain.ResourceTypeGmail)
+		if err != nil {
+			return err
+		}
+		return validateResourceFetchScope(scope, expectedCredentialRevision)
+	})
+}
+
 func (r *ResourceFetchRepo) AssertICloudResourceFetchFence(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64) error {
 	return r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
 		if err := r.lockResourceFetchState(tx, resourceID, generation); err != nil {
@@ -358,6 +371,26 @@ func (r *ResourceFetchRepo) CompleteICloudResourceFetch(ctx context.Context, res
 			return err
 		}
 		scope, err := r.lockResourceFetchScope(txCtx, resourceID, domain.ResourceTypeICloud)
+		if err != nil {
+			return err
+		}
+		if err := validateResourceFetchScope(scope, expectedCredentialRevision); err != nil {
+			return err
+		}
+		return r.finishResourceFetchState(txCtx, tx, resourceID, generation, map[string]any{
+			"status": string(domain.ResourceFetchJobSucceeded), "failures": 0,
+			"fetched_count": max(fetched, 0), "stored_count": max(stored, 0), "matched_count": max(matched, 0),
+			"last_safe_error": "", "finished_at": now,
+		}, log)
+	})
+}
+
+func (r *ResourceFetchRepo) CompleteGmailResourceFetch(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64, fetched int, stored int, matched int, now time.Time, log *governancedomain.SystemLog) error {
+	return r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
+		if err := r.lockResourceFetchState(tx, resourceID, generation); err != nil {
+			return err
+		}
+		scope, err := r.lockResourceFetchScope(txCtx, resourceID, domain.ResourceTypeGmail)
 		if err != nil {
 			return err
 		}
@@ -458,6 +491,9 @@ func (r *ResourceFetchRepo) lockResourceFetchState(tx *gorm.DB, resourceID uint,
 }
 
 func (r *ResourceFetchRepo) lockResourceFetchScope(ctx context.Context, resourceID uint, resourceType domain.ResourceType) (*domain.ResourceFetchScope, error) {
+	if resourceType == domain.ResourceTypeGmail {
+		return r.lockGmailResourceFetchScope(ctx, resourceID)
+	}
 	if resourceType == domain.ResourceTypeICloud {
 		return r.lockICloudResourceFetchScope(ctx, resourceID)
 	}
@@ -472,6 +508,26 @@ func (r *ResourceFetchRepo) lockResourceFetchScope(ctx context.Context, resource
 		ResourceID: scope.ResourceID, ResourceType: domain.ResourceTypeMicrosoft, Status: scope.Status, EmailAddress: scope.EmailAddress,
 		ClientID: scope.ClientID, RefreshToken: scope.RefreshToken, GraphAvailable: scope.GraphAvailable, CredentialRevision: scope.CredentialRevision,
 	}, nil
+}
+
+func (r *ResourceFetchRepo) lockGmailResourceFetchScope(ctx context.Context, resourceID uint) (*domain.ResourceFetchScope, error) {
+	if r == nil || r.db == nil || resourceID == 0 {
+		return nil, domain.ErrResourceFetchNotFound
+	}
+	var scope domain.ResourceFetchScope
+	err := r.dbFor(ctx).Table("gmail_resources AS resource").
+		Select("resource.id AS resource_id, resource.status, resource.email AS email_address, resource.credential_revision, resource.app_password <> '' AS credentials_configured").
+		Joins("JOIN email_resources AS root ON root.id = resource.id AND root.type = ?", string(domain.ResourceTypeGmail)).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("resource.id = ?", resourceID).Take(&scope).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrResourceFetchNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load Gmail resource fetch scope: %w", err)
+	}
+	scope.ResourceType = domain.ResourceTypeGmail
+	return &scope, nil
 }
 
 func (r *ResourceFetchRepo) lockICloudResourceFetchScope(ctx context.Context, resourceID uint) (*domain.ResourceFetchScope, error) {
@@ -532,6 +588,12 @@ func validateResourceFetchScope(row *domain.ResourceFetchScope, expectedCredenti
 		}
 		return nil
 	}
+	if row.ResourceType == domain.ResourceTypeGmail {
+		if strings.TrimSpace(row.EmailAddress) == "" || !row.CredentialsConfigured {
+			return domain.ErrResourceFetchCredentialsMissing
+		}
+		return nil
+	}
 	if strings.TrimSpace(row.EmailAddress) == "" || strings.TrimSpace(row.ClientID) == "" || strings.TrimSpace(row.RefreshToken) == "" {
 		return domain.ErrResourceFetchCredentialsMissing
 	}
@@ -544,6 +606,8 @@ func resourceFetchStateToDomain(state FetchStateModel) domain.ResourceFetchJob {
 	switch state.OperationKind {
 	case "resource_history":
 		kind = domain.ResourceFetchJobHistory
+	case "gmail_resource_fetch":
+		resourceType = domain.ResourceTypeGmail
 	case "icloud_resource_fetch":
 		resourceType = domain.ResourceTypeICloud
 	}
@@ -576,6 +640,9 @@ func resourceFetchOperationKind(kind domain.ResourceFetchJobKind, resourceType d
 	if resourceType == domain.ResourceTypeICloud {
 		return "icloud_resource_fetch"
 	}
+	if resourceType == domain.ResourceTypeGmail {
+		return "gmail_resource_fetch"
+	}
 	return "resource_fetch"
 }
 
@@ -594,6 +661,9 @@ func resourceFetchTaskSource(kind domain.ResourceFetchJobKind) string {
 }
 
 func resourceFetchResourceLabel(resourceType domain.ResourceType) string {
+	if resourceType == domain.ResourceTypeGmail {
+		return "Gmail"
+	}
 	if resourceType == domain.ResourceTypeICloud {
 		return "iCloud"
 	}

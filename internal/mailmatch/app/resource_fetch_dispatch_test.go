@@ -32,7 +32,15 @@ func (*resourceFetchDispatchRepoStub) AssertResourceFetchFence(context.Context, 
 	return nil
 }
 
+func (*resourceFetchDispatchRepoStub) AssertGmailResourceFetchFence(context.Context, uint, uint64, uint64) error {
+	return nil
+}
+
 func (*resourceFetchDispatchRepoStub) CompleteResourceFetch(context.Context, uint, uint64, uint64, string, *bool, int, int, int, time.Time, *governancedomain.SystemLog) error {
+	return nil
+}
+
+func (*resourceFetchDispatchRepoStub) CompleteGmailResourceFetch(context.Context, uint, uint64, uint64, int, int, int, time.Time, *governancedomain.SystemLog) error {
 	return nil
 }
 
@@ -135,6 +143,7 @@ type resourceFetchProcessRepoStub struct {
 	stored    int
 	matched   int
 	revision  uint64
+	fenceErr  error
 }
 
 func (*resourceFetchProcessRepoStub) MarkResourceFetchProcessing(context.Context, uint, uint64) (bool, error) {
@@ -156,6 +165,19 @@ func (*resourceFetchProcessRepoStub) MarkResourceFetchFailure(context.Context, u
 func (s *resourceFetchProcessRepoStub) CompleteResourceFetchTask(context.Context, uint, uint64, time.Time, *governancedomain.SystemLog) error {
 	s.completed = true
 	return nil
+}
+
+func (s *resourceFetchProcessRepoStub) CompleteGmailResourceFetch(_ context.Context, _ uint, _ uint64, expectedCredentialRevision uint64, fetched, stored, matched int, _ time.Time, _ *governancedomain.SystemLog) error {
+	s.completed = true
+	s.revision = expectedCredentialRevision
+	s.fetched, s.stored, s.matched = fetched, stored, matched
+	return nil
+}
+
+func (s *resourceFetchProcessRepoStub) AssertGmailResourceFetchFence(_ context.Context, _ uint, _ uint64, expectedCredentialRevision uint64) error {
+	s.fenced++
+	s.revision = expectedCredentialRevision
+	return s.fenceErr
 }
 
 func (s *resourceFetchProcessRepoStub) AssertICloudResourceFetchFence(_ context.Context, _ uint, _ uint64, expectedCredentialRevision uint64) error {
@@ -202,6 +224,67 @@ func TestResourceFetchIgnoresLegacyLookbackForUnlimitedAdministratorChannel(t *t
 
 type iCloudPurchaseFetchStub struct {
 	request FetchMessagesRequest
+}
+
+type gmailResourceFetchStub struct {
+	resourceID uint
+	revision   uint64
+	fetched    int
+}
+
+func (s *gmailResourceFetchStub) FetchLocalResourceMailWithFence(ctx context.Context, resourceID uint, revision uint64, fence func(context.Context) error) (int, int, int, error) {
+	s.resourceID, s.revision = resourceID, revision
+	if fence != nil {
+		if err := fence(ctx); err != nil {
+			return 0, 0, 0, err
+		}
+	}
+	return s.fetched, 3, 2, nil
+}
+
+func TestResourceFetchUsesLocalGmailFetcher(t *testing.T) {
+	repo := &resourceFetchProcessRepoStub{
+		job: domain.ResourceFetchJob{
+			ID: 1, ResourceType: domain.ResourceTypeGmail, ResourceID: 100,
+			Generation: 2, ExpectedCredentialRevision: 3,
+		},
+		scope: domain.ResourceFetchScope{
+			ResourceID: 100, ResourceType: domain.ResourceTypeGmail,
+			CredentialRevision: 3, CredentialsConfigured: true,
+		},
+	}
+	gmail := &gmailResourceFetchStub{fetched: 4}
+	uc := NewAdminResourceFetchUseCase(repo, nil, nil, nil, nil)
+	uc.SetGmailResourceFetchPort(gmail)
+
+	require.NoError(t, uc.Process(context.Background(), AdminResourceFetchTask{ResourceID: 100, Generation: 2}))
+	require.Equal(t, uint(100), gmail.resourceID)
+	require.Equal(t, uint64(3), gmail.revision)
+	require.True(t, repo.completed)
+	require.Equal(t, 4, repo.fetched)
+	require.Equal(t, 3, repo.stored)
+	require.Equal(t, 2, repo.matched)
+}
+
+func TestReplacedGmailResourceFetchStopsWithoutRetry(t *testing.T) {
+	repo := &resourceFetchProcessRepoStub{
+		job: domain.ResourceFetchJob{
+			ID: 1, ResourceType: domain.ResourceTypeGmail, ResourceID: 100,
+			Generation: 2, ExpectedCredentialRevision: 3,
+		},
+		scope: domain.ResourceFetchScope{
+			ResourceID: 100, ResourceType: domain.ResourceTypeGmail,
+			CredentialRevision: 3, CredentialsConfigured: true,
+		},
+		fenceErr: domain.ErrResourceFetchInvalidClaim,
+	}
+	gmail := &gmailResourceFetchStub{fetched: 4}
+	uc := NewAdminResourceFetchUseCase(repo, nil, nil, nil, nil)
+	uc.SetGmailResourceFetchPort(gmail)
+
+	require.NoError(t, uc.Process(context.Background(), AdminResourceFetchTask{ResourceID: 100, Generation: 2}))
+	require.False(t, repo.completed)
+	require.Equal(t, 1, repo.fenced)
 }
 
 func (s *iCloudPurchaseFetchStub) FetchICloudMessages(_ context.Context, request FetchMessagesRequest) (*FetchMessagesResult, error) {

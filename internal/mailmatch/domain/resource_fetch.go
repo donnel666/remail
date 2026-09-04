@@ -24,8 +24,8 @@ const (
 	ResourceFetchDefaultMaxAttempts = 3
 )
 
-// ResourceFetchJob is a task snapshot. Credentials are read from Core
-// immediately before the external call and fenced by revision.
+// ResourceFetchJob is a task snapshot. Credentials are read from the owning
+// resource service immediately before the external call and fenced by revision.
 type ResourceFetchJob struct {
 	ID                         uint
 	Generation                 uint64
@@ -62,15 +62,16 @@ func IsValidResourceFetchJobKind(kind ResourceFetchJobKind) bool {
 // never serialized into an HTTP response, task payload, operation log, or
 // system log.
 type ResourceFetchScope struct {
-	ResourceID         uint
-	ResourceType       ResourceType
-	Status             string
-	EmailAddress       string
-	OrderNo            string
-	ClientID           string
-	RefreshToken       string
-	GraphAvailable     bool
-	CredentialRevision uint64
+	ResourceID            uint
+	ResourceType          ResourceType
+	Status                string
+	EmailAddress          string
+	OrderNo               string
+	ClientID              string
+	RefreshToken          string
+	GraphAvailable        bool
+	CredentialsConfigured bool
+	CredentialRevision    uint64
 }
 
 func IsTerminalResourceFetchStatus(status ResourceFetchJobStatus) bool {

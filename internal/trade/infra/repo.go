@@ -944,10 +944,9 @@ func (r *Repo) ListEvents(ctx context.Context, orderNo string, userID uint, isAd
 }
 
 func (r *Repo) ListExpiredCodeOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error) {
-	return r.listOrderNos(ctx, limit, "status = ? AND service_mode = ? AND product_type NOT IN ? AND receive_until IS NOT NULL AND receive_until < ?",
+	return r.listOrderNos(ctx, limit, "status = ? AND service_mode = ? AND receive_until IS NOT NULL AND receive_until < ?",
 		string(domain.OrderStatusActive),
 		string(domain.ServiceModeCode),
-		[]string{string(domain.ProductTypeGmail), string(domain.ProductTypeGmailVariant)},
 		now.UTC(),
 	)
 }
@@ -1014,11 +1013,30 @@ func (r *Repo) ListUnavailableMicrosoftOrderNos(ctx context.Context, resourceID 
 	return orderNos, nil
 }
 
+func (r *Repo) ListUnavailableGmailOrderNos(ctx context.Context, resourceID uint, limit int) ([]string, error) {
+	var orderNos []string
+	query := r.dbFor(ctx).Table("orders AS o").
+		Select("o.order_no").
+		Joins("JOIN gmail_allocations AS ga ON ga.order_no = o.order_no AND ga.source = ? AND ga.status = ?", "local", "allocated").
+		Joins("JOIN gmail_resources AS gr ON gr.id = ga.resource_id AND gr.status = ?", "abnormal").
+		Where("o.allocation_type = ? AND o.status = ? AND o.debit_tx_id IS NOT NULL AND o.refund_tx_id IS NULL", string(domain.AllocationTypeGmail), string(domain.OrderStatusActive)).
+		Order("o.id ASC")
+	if resourceID > 0 {
+		query = query.Where("ga.resource_id = ?", resourceID)
+	}
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if err := query.Scan(&orderNos).Error; err != nil {
+		return nil, fmt.Errorf("list orders on unavailable Gmail resources: %w", err)
+	}
+	return orderNos, nil
+}
+
 func (r *Repo) ListCodeOrderNosReadyForCleanup(ctx context.Context, now time.Time, limit int) ([]string, error) {
-	return r.listOrderNos(ctx, limit, "status IN ? AND service_mode = ? AND product_type NOT IN ? AND service_cleanup_status = ? AND after_sale_until IS NOT NULL AND after_sale_until < ?",
+	return r.listOrderNos(ctx, limit, "status IN ? AND service_mode = ? AND service_cleanup_status = ? AND after_sale_until IS NOT NULL AND after_sale_until < ?",
 		[]string{string(domain.OrderStatusCompleted), string(domain.OrderStatusRefunded)},
 		string(domain.ServiceModeCode),
-		[]string{string(domain.ProductTypeGmail), string(domain.ProductTypeGmailVariant)},
 		"none",
 		now.UTC(),
 	)
@@ -1078,13 +1096,10 @@ func (r *Repo) CompleteCodeOrder(ctx context.Context, orderNo string, matchedAt 
 		}
 		previous := current
 		updates := map[string]any{
-			"status":        string(domain.OrderStatusCompleted),
-			"receive_until": readUntil.UTC(),
-			"version":       gorm.Expr("version + 1"),
-		}
-		// Gmail warranty is fixed by the local session or upstream activation.
-		if !domain.IsGmailProductType(domain.ProductType(model.ProductType)) || model.AfterSaleUntil == nil {
-			updates["after_sale_until"] = readUntil.UTC()
+			"status":           string(domain.OrderStatusCompleted),
+			"receive_until":    readUntil.UTC(),
+			"after_sale_until": readUntil.UTC(),
+			"version":          gorm.Expr("version + 1"),
 		}
 		result := tx.Model(&OrderModel{}).
 			Where("order_no = ? AND service_mode = ? AND status = ?", orderNo, string(domain.ServiceModeCode), string(domain.OrderStatusActive)).

@@ -1,10 +1,13 @@
 package gmail
 
 import (
+	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/platform/testmysql"
@@ -13,7 +16,10 @@ import (
 	"gorm.io/gorm"
 )
 
-var gmailMigrationMySQL = testmysql.New("remail_gmail_migration")
+var (
+	gmailMigrationMySQL       = testmysql.New("remail_gmail_migration")
+	gmailLatestMigrationMySQL = testmysql.New("remail_gmail_latest_migration")
+)
 
 func TestGmailMigrationMySQL(t *testing.T) {
 	db, sqlDB, migrations := newGmailMigrationDB(t, 77)
@@ -263,6 +269,97 @@ id, resource_type, owner_user_id, email, identity, password, two_factor_secret, 
 	require.NoError(t, goose.DownTo(sqlDB, through132, 131))
 	requireMigrationVersion(t, sqlDB, 131)
 	require.Contains(t, migrationCheckClause(t, db, "gmail_resources", "chk_gmail_resources_credentials"), "`password`")
+}
+
+func TestGmailAdminFetchMigrationStartsSafeSharedCursorAndPreservesRollbackMySQL(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	source := filepath.Clean(filepath.Join(filepath.Dir(file), "../..", "migrations"))
+	through132 := testmysql.MigrationsThrough(t, source, 132)
+	through133 := testmysql.MigrationsThrough(t, source, 133)
+	db := gmailLatestMigrationMySQL.Database(t, through132)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	seedGmailMigrationProject(t, db)
+	require.NoError(t, db.Exec(`INSERT INTO email_resources(id, type, owner_user_id) VALUES
+		(990074, 'gmail', 990072),
+		(990075, 'microsoft', 990072),
+		(990076, 'icloud', 990072)`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO mailmatch_admin_resource_fetch_states(
+		email_resource_id, status, generation, operation_kind
+	) VALUES
+		(990075, 'normal', 3, 'resource_fetch'),
+		(990076, 'normal', 4, 'icloud_resource_fetch')`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO gmail_resources(
+		id, resource_type, owner_user_id, email, identity, password, two_factor_secret, app_password, status
+	) VALUES (990074, 'gmail', 990072, 'cursor@gmail.com', 'cursor@gmail.com', '', '', 'abcdefghijklmnop', 'normal')`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO orders(
+		order_no, user_id, project_id, project_product_id, product_type, service_mode,
+		status, pay_amount, client_channel, idempotency_key, request_fingerprint
+	) VALUES ('GMAIL-CURSOR-1', 990072, 990069, 990069, 'gmail', 'code',
+		'pending_payment', 1, 'console', 'cursor-1', REPEAT('a', 64))`).Error)
+	require.NoError(t, db.Exec("INSERT INTO allocation_order_guards(order_no, type) VALUES ('GMAIL-CURSOR-1', 'gmail')").Error)
+	require.NoError(t, db.Exec(`INSERT INTO gmail_allocations(
+		order_no, guard_type, project_id, product_id, source, service_mode, resource_id,
+		supply_scope, mailbox, email, status, cost_points_snapshot, provider_cursor, provider_spam_cursor
+	) VALUES ('GMAIL-CURSOR-1', 'gmail', 990069, 990069, 'local', 'code', 990074,
+		'public', 'plus', 'cursor+one@gmail.com', 'allocated', 1, 123, 456)`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO gmail_code_sessions(
+		order_no, source, source_ref, service_mode, email, status, codes_json, next_poll_at
+	) VALUES ('GMAIL-CURSOR-1', 'local', '1', 'code', 'cursor+one@gmail.com', 'active', JSON_ARRAY(), NOW(3))`).Error)
+
+	require.NoError(t, platform.RunMigrations(sqlDB, through133))
+	requireMigrationVersion(t, sqlDB, 133)
+	var cursor struct {
+		Inbox uint64 `gorm:"column:provider_cursor"`
+		Spam  uint64 `gorm:"column:provider_spam_cursor"`
+	}
+	require.NoError(t, db.Table("gmail_resources").Where("id = ?", 990074).Take(&cursor).Error)
+	require.Zero(t, cursor.Inbox)
+	require.Zero(t, cursor.Spam)
+	var retiredSession struct {
+		Status      string     `gorm:"column:status"`
+		NextPollAt  *time.Time `gorm:"column:next_poll_at"`
+		CompletedAt *time.Time `gorm:"column:completed_at"`
+	}
+	require.NoError(t, db.Table("gmail_code_sessions").Where("order_no = ?", "GMAIL-CURSOR-1").Take(&retiredSession).Error)
+	require.Equal(t, "unknown", retiredSession.Status)
+	require.Nil(t, retiredSession.NextPollAt)
+	require.NotNil(t, retiredSession.CompletedAt)
+	var otherFetchStates int64
+	require.NoError(t, db.Table("mailmatch_admin_resource_fetch_states").
+		Where("email_resource_id IN ?", []uint{990075, 990076}).Count(&otherFetchStates).Error)
+	require.EqualValues(t, 2, otherFetchStates)
+	require.NoError(t, db.Exec(`INSERT INTO mailmatch_admin_resource_fetch_states(
+		email_resource_id, status, generation, operation_kind
+	) VALUES (990074, 'normal', 5, 'gmail_resource_fetch')`).Error)
+	require.NoError(t, db.Table("gmail_resources").Where("id = ?", 990074).Updates(map[string]any{
+		"provider_cursor": 789, "provider_spam_cursor": 987,
+	}).Error)
+
+	require.NoError(t, goose.DownTo(sqlDB, through133, 132))
+	requireMigrationVersion(t, sqlDB, 132)
+	require.False(t, db.Migrator().HasColumn("gmail_resources", "provider_cursor"))
+	require.NoError(t, db.Table("gmail_allocations").Where("order_no = ?", "GMAIL-CURSOR-1").Take(&cursor).Error)
+	require.EqualValues(t, 789, cursor.Inbox)
+	require.EqualValues(t, 987, cursor.Spam)
+	require.NoError(t, db.Table("gmail_code_sessions").Where("order_no = ?", "GMAIL-CURSOR-1").Take(&retiredSession).Error)
+	require.Equal(t, "unknown", retiredSession.Status)
+	require.Nil(t, retiredSession.NextPollAt)
+	require.NoError(t, db.Table("mailmatch_admin_resource_fetch_states").
+		Where("email_resource_id IN ?", []uint{990075, 990076}).Count(&otherFetchStates).Error)
+	require.EqualValues(t, 2, otherFetchStates)
+	var gmailFetchStates int64
+	require.NoError(t, db.Table("mailmatch_admin_resource_fetch_states").
+		Where("email_resource_id = ?", 990074).Count(&gmailFetchStates).Error)
+	require.Zero(t, gmailFetchStates)
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	gmailLatestMigrationMySQL.Close(context.Background())
+	gmailMigrationMySQL.Close(context.Background())
+	os.Exit(code)
 }
 
 func newGmailMigrationDB(t *testing.T, version int) (*gorm.DB, *sql.DB, string) {

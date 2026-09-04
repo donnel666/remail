@@ -70,7 +70,7 @@ func TestOrderResponseDoesNotExposeInternalProductID(t *testing.T) {
 	require.NotContains(t, string(payload), "projectProductId")
 }
 
-func TestOrderResponseHidesUpstreamPickupShape(t *testing.T) {
+func TestOrderResponseKeepsSingleDeliveryShape(t *testing.T) {
 	payload, err := json.Marshal(orderResponse(tradeapp.CheckoutResult{
 		VerificationCode: "654321",
 	}))

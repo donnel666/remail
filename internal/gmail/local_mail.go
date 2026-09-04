@@ -3,7 +3,6 @@ package gmail
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -13,8 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
-	tradedomain "github.com/donnel666/remail/internal/trade/domain"
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 	"gorm.io/gorm"
@@ -31,7 +30,7 @@ const (
 )
 
 type MailIngestPort interface {
-	IngestGmailMail(ctx context.Context, resourceID uint, recipient string, raw []byte, receivedAt time.Time, providerMessageID, folder string) error
+	IngestGmailMail(ctx context.Context, resourceID uint, recipient string, raw []byte, receivedAt time.Time, providerMessageID, folder string, fence func(context.Context) error) (stored int, matched int, err error)
 }
 
 type localGmailFetchedMessage struct {
@@ -134,8 +133,9 @@ func fetchSelectedLocalGmailFolder(
 		return nil, joinLocalGmailCursor(uidValidity, cursorUID), nil
 	}
 	criteria := &imap.SearchCriteria{}
-	if !since.IsZero() {
-		criteria.Since = since.UTC().Add(-2 * time.Minute)
+	effectiveSince := localGmailSearchSince(cursorUID, since)
+	if !effectiveSince.IsZero() {
+		criteria.Since = effectiveSince
 	}
 	if cursorUID > 0 {
 		uidSet := imap.UIDSet{}
@@ -176,7 +176,7 @@ func fetchSelectedLocalGmailFolder(
 		if receivedAt.IsZero() {
 			receivedAt = time.Now().UTC()
 		}
-		if !since.IsZero() && receivedAt.Before(since.UTC().Add(-2*time.Minute)) {
+		if !effectiveSince.IsZero() && receivedAt.Before(effectiveSince) {
 			continue
 		}
 		recipient := localGmailOriginalRecipient(rootEmail, raw)
@@ -193,6 +193,13 @@ func fetchSelectedLocalGmailFolder(
 		return nil, cursor, err
 	}
 	return messages, joinLocalGmailCursor(uidValidity, nextCursorUID), nil
+}
+
+func localGmailSearchSince(cursorUID uint64, since time.Time) time.Time {
+	if cursorUID > 0 || since.IsZero() {
+		return time.Time{}
+	}
+	return since.UTC().Add(-2 * time.Minute)
 }
 
 func oldestLocalGmailUIDs(uids []imap.UID, limit int) []imap.UID {
@@ -346,323 +353,185 @@ func localGmailRecipientBelongsTo(rootEmail, candidate string) bool {
 	return rootOK && candidateOK && rootDots == candidateDots
 }
 
-func (s *Service) RecordMatchedCode(ctx context.Context, orderNo, value string, receivedAt time.Time) error {
-	orderNo = strings.TrimSpace(orderNo)
-	value = strings.TrimSpace(value)
-	if orderNo == "" || value == "" || len(value) > 4096 {
-		return ErrInvalidRoute
-	}
-	if receivedAt.IsZero() {
-		receivedAt = s.now()
-	}
-	receivedAt = receivedAt.UTC()
-	var session sessionModel
-	completed := false
-	err := s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_no = ?", orderNo).Take(&session).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrSessionMissing
-			}
-			return err
-		}
-		if session.Source != SourceLocal || session.ServiceMode != string(tradedomain.ServiceModeCode) {
-			return ErrInvalidRoute
-		}
-		if session.Status != SessionActive || session.ReceivedCount >= MaxCodes {
-			return nil
-		}
-		if session.StartedAt != nil && receivedAt.Before(session.StartedAt.UTC()) ||
-			session.ExpiresAt != nil && !receivedAt.Before(session.ExpiresAt.UTC()) {
-			return nil
-		}
-		codes, err := decodeCodes(session.CodesJSON)
-		if err != nil || len(codes) != int(session.ReceivedCount) {
-			return errors.New("gmail: code session count mismatch")
-		}
-		for _, code := range codes {
-			if code.Code == value && code.ReceivedAt.UTC().Equal(receivedAt) {
-				return nil
-			}
-		}
-		count := int(session.ReceivedCount) + 1
-		codes = append(codes, Code{Seq: count, Code: value, ReceivedAt: receivedAt})
-		payload, err := json.Marshal(codes)
-		if err != nil {
-			return err
-		}
-		now := s.now()
-		updates := map[string]any{
-			"codes_json": string(payload), "received_count": count, "last_safe_error": "",
-			"next_poll_at": now.Add(gmailPollInterval), "version": gorm.Expr("version + 1"),
-		}
-		if count >= MaxCodes {
-			updates["status"] = SessionCompleted
-			updates["completed_at"] = now
-			updates["next_poll_at"] = now
-			completed = true
-		}
-		if err := tx.Model(&sessionModel{}).Where("id = ? AND status = ?", session.ID, SessionActive).Updates(updates).Error; err != nil {
-			return err
-		}
-		session.CodesJSON = string(payload)
-		session.ReceivedCount = uint8(count)
-		if completed {
-			session.Status = SessionCompleted
-			session.CompletedAt = &now
-		}
-		return nil
-	})
-	if err != nil || !completed {
-		return err
-	}
-	return s.finishLocalSession(ctx, session)
+type localOrderMailFetch struct {
+	ResourceID uint
+	Cursors    localGmailFolderCursors
+	Fetched    int
+	Stored     int
+	Matched    int
 }
 
-func (s *Service) pollLocalSession(ctx context.Context, session sessionModel) error {
-	switch session.Status {
-	case SessionCompleted, SessionCancelled, SessionFailed:
-		return s.finishLocalSession(ctx, session)
-	case SessionActive:
-	default:
-		return nil
-	}
-	if err := s.ensureTradeActivation(ctx, session); err != nil {
-		return err
-	}
-	now := s.now()
-	if session.ExpiresAt != nil && !now.Before(session.ExpiresAt.UTC()) {
-		return s.expireLocalSession(ctx, session.ID)
-	}
-	resource, err := s.loadLocalCodeResource(ctx, session.OrderNo)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return s.failLocalSession(ctx, session, "自有 Gmail 资源不可用，订单已退款。")
-		}
-		return s.deferPoll(ctx, session.ID, "自有 Gmail 资源暂时不可用", err)
-	}
-	if s.fetch == nil || s.mail == nil {
-		return s.deferPoll(ctx, session.ID, "自有 Gmail 收件服务不可用", errors.New("gmail: local mail fetch unavailable"))
-	}
-	since := session.CreatedAt
-	if session.StartedAt != nil {
-		since = session.StartedAt.UTC()
-	}
-	messages, cursors, err := s.fetch(ctx, resource.LoginEmail, resource.AppPassword, localGmailFolderCursors{
-		Inbox: session.ProviderCursor, Spam: session.ProviderSpamCursor,
-	}, since, false)
-	if err != nil {
-		if errors.Is(err, errLocalGmailAuthentication) {
-			if markErr := s.markLocalResourceAbnormal(ctx, resource.ID, "Gmail IMAP authentication failed. Check the app password."); markErr != nil {
-				return s.deferPoll(ctx, session.ID, "Gmail 凭据失效，资源状态更新失败", errors.Join(err, markErr))
-			}
-			return s.failLocalSession(ctx, session, "自有 Gmail 凭据失效，订单已退款。")
-		}
-		return s.deferPoll(ctx, session.ID, "Gmail IMAP 暂时不可用", err)
-	}
-	for _, message := range messages {
-		if err := s.mail.IngestGmailMail(
-			ctx, resource.ID, message.Recipient, message.Raw, message.ReceivedAt, message.ProviderMessageID, message.Folder,
-		); err != nil {
-			return s.deferPoll(ctx, session.ID, "Gmail 邮件匹配暂时失败", err)
-		}
-	}
-	return s.dbFor(ctx).Model(&sessionModel{}).Where("id = ? AND status = ?", session.ID, SessionActive).Updates(map[string]any{
-		"provider_cursor": cursors.Inbox, "provider_spam_cursor": cursors.Spam,
-		"next_poll_at": s.now().Add(gmailPollInterval), "last_safe_error": "",
-	}).Error
+// FetchLocalOrderMail is the single IMAP path for local Gmail code and
+// purchase orders. MailMatch applies each order's recipient/time filters.
+func (s *Service) FetchLocalOrderMail(ctx context.Context, orderNo string) error {
+	_, err := s.fetchLocalOrderMail(ctx, orderNo, nil)
+	return err
 }
 
-// FetchLocalCodeMail reuses the ordinary local Gmail session poll for Bot
-// diagnosis. An upstream-backed order has no local session and remains a no-op.
-func (s *Service) FetchLocalCodeMail(ctx context.Context, orderNo string) error {
-	var session sessionModel
-	err := s.dbFor(ctx).Where("order_no = ? AND source = ?", strings.TrimSpace(orderNo), SourceLocal).Take(&session).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("load Gmail code diagnosis session: %w", err)
-	}
-	return s.pollLocalSession(ctx, session)
+func (s *Service) FetchLocalOrderMailWithFence(ctx context.Context, orderNo string, fence func(context.Context) error) error {
+	_, err := s.fetchLocalOrderMail(ctx, orderNo, fence)
+	return err
 }
 
-type localCodeResource struct {
-	ID          uint   `gorm:"column:id"`
-	LoginEmail  string `gorm:"column:login_email"`
-	Recipient   string `gorm:"column:recipient"`
-	AppPassword string `gorm:"column:app_password"`
-}
-
-func (s *Service) FetchLocalPurchaseMail(ctx context.Context, orderNo string) error {
+func (s *Service) fetchLocalOrderMail(ctx context.Context, orderNo string, fence func(context.Context) error) (localOrderMailFetch, error) {
 	orderNo = strings.TrimSpace(orderNo)
 	if orderNo == "" {
-		return ErrLocalResourceMissing
-	}
-	if s.fetch == nil || s.mail == nil {
-		return errors.New("gmail: local mail fetch unavailable")
+		return localOrderMailFetch{}, ErrLocalResourceMissing
 	}
 	var resource struct {
-		ID                 uint      `gorm:"column:id"`
-		AllocationID       uint      `gorm:"column:allocation_id"`
-		LoginEmail         string    `gorm:"column:login_email"`
-		Recipient          string    `gorm:"column:recipient"`
-		AppPassword        string    `gorm:"column:app_password"`
-		ProviderCursor     uint64    `gorm:"column:provider_cursor"`
-		ProviderSpamCursor uint64    `gorm:"column:provider_spam_cursor"`
-		AllocatedAt        time.Time `gorm:"column:allocated_at"`
+		ID                 uint   `gorm:"column:id"`
+		CredentialRevision uint64 `gorm:"column:credential_revision"`
 	}
 	err := s.dbFor(ctx).Table("gmail_allocations AS a").
-		Select("r.id, a.id AS allocation_id, r.email AS login_email, a.email AS recipient, r.app_password, a.provider_cursor, a.provider_spam_cursor, a.created_at AS allocated_at").
+		Select("r.id, r.credential_revision").
 		Joins("JOIN gmail_resources AS r ON r.id = a.resource_id").
-		Where("a.order_no = ? AND a.source = ? AND a.service_mode = ? AND a.status = ?",
-			orderNo, SourceLocal, string(tradedomain.ServiceModePurchase), AllocationStatusAllocated).
+		Where("a.order_no = ? AND a.source = ? AND a.status = ?", orderNo, SourceLocal, AllocationStatusAllocated).
 		Take(&resource).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return ErrLocalResourceMissing
+		return localOrderMailFetch{}, ErrLocalResourceMissing
 	}
 	if err != nil {
-		return fmt.Errorf("load local Gmail purchase mail resource: %w", err)
+		return localOrderMailFetch{}, fmt.Errorf("load local Gmail order mail resource: %w", err)
 	}
-	if resource.ID == 0 || strings.TrimSpace(resource.LoginEmail) == "" || strings.TrimSpace(resource.Recipient) == "" || resource.AppPassword == "" {
-		return ErrLocalResourceMissing
+	return s.fetchLocalResourceMail(ctx, resource.ID, resource.CredentialRevision, fence)
+}
+
+// FetchLocalResourceMail pulls recent mail for an administrator-selected Gmail
+// resource. It resumes from the resource cursor so manual fetches
+// and order fetches do not repeatedly scan the same mailbox range.
+func (s *Service) FetchLocalResourceMail(ctx context.Context, resourceID uint, expectedCredentialRevision uint64) (int, int, int, error) {
+	result, err := s.fetchLocalResourceMail(ctx, resourceID, expectedCredentialRevision, nil)
+	return result.Fetched, result.Stored, result.Matched, err
+}
+
+func (s *Service) FetchLocalResourceMailWithFence(ctx context.Context, resourceID uint, expectedCredentialRevision uint64, fence func(context.Context) error) (int, int, int, error) {
+	result, err := s.fetchLocalResourceMail(ctx, resourceID, expectedCredentialRevision, fence)
+	return result.Fetched, result.Stored, result.Matched, err
+}
+
+func (s *Service) fetchLocalResourceMail(ctx context.Context, resourceID uint, expectedCredentialRevision uint64, fence func(context.Context) error) (localOrderMailFetch, error) {
+	if s == nil || s.db == nil || s.fetch == nil || s.mail == nil || resourceID == 0 {
+		return localOrderMailFetch{}, ErrInvalidLocalResource
 	}
-	messages, cursors, err := s.fetch(ctx, resource.LoginEmail, resource.AppPassword, localGmailFolderCursors{
-		Inbox: resource.ProviderCursor, Spam: resource.ProviderSpamCursor,
-	}, resource.AllocatedAt.UTC(), false)
+	var resource struct {
+		ID                 uint   `gorm:"column:id"`
+		LoginEmail         string `gorm:"column:login_email"`
+		AppPassword        string `gorm:"column:app_password"`
+		Status             string `gorm:"column:status"`
+		CredentialRevision uint64 `gorm:"column:credential_revision"`
+		ProviderCursor     uint64 `gorm:"column:provider_cursor"`
+		ProviderSpamCursor uint64 `gorm:"column:provider_spam_cursor"`
+	}
+	err := s.dbFor(ctx).Table("gmail_resources AS r").
+		Select("r.id, r.email AS login_email, r.app_password, r.status, r.credential_revision, r.provider_cursor, r.provider_spam_cursor").
+		Joins("JOIN email_resources AS root ON root.id = r.id AND root.type = ?", "gmail").
+		Where("r.id = ?", resourceID).Take(&resource).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) || resource.Status == LocalResourceDeleted {
+		return localOrderMailFetch{}, ErrLocalResourceMissing
+	}
 	if err != nil {
-		return fmt.Errorf("fetch local Gmail purchase mail: %w", err)
+		return localOrderMailFetch{}, fmt.Errorf("load local Gmail resource mail: %w", err)
 	}
+	if resource.CredentialRevision != expectedCredentialRevision {
+		return localOrderMailFetch{ResourceID: resource.ID}, ErrLocalValidationConflict
+	}
+	if strings.TrimSpace(resource.LoginEmail) == "" || resource.AppPassword == "" {
+		return localOrderMailFetch{ResourceID: resource.ID}, ErrInvalidLocalResource
+	}
+	if fence != nil {
+		if err := fence(ctx); err != nil {
+			return localOrderMailFetch{ResourceID: resource.ID}, err
+		}
+	}
+	cursor := localGmailFolderCursors{Inbox: resource.ProviderCursor, Spam: resource.ProviderSpamCursor}
+	since := s.now().UTC().Add(-boundedLocalGmailLookback())
+	messages, cursors, err := s.fetch(
+		ctx,
+		resource.LoginEmail,
+		resource.AppPassword,
+		cursor,
+		since,
+		false,
+	)
+	if err != nil {
+		if errors.Is(err, errLocalGmailAuthentication) {
+			handleErr := s.handleLocalGmailAuthenticationFailure(ctx, resource.ID, expectedCredentialRevision, fence)
+			return localOrderMailFetch{ResourceID: resource.ID}, errors.Join(err, handleErr)
+		}
+		return localOrderMailFetch{ResourceID: resource.ID}, fmt.Errorf("fetch local Gmail resource mail: %w", err)
+	}
+	result := localOrderMailFetch{ResourceID: resource.ID, Cursors: cursors, Fetched: len(messages)}
 	for _, message := range messages {
-		if err := s.mail.IngestGmailMail(
-			ctx, resource.ID, message.Recipient, message.Raw, message.ReceivedAt, message.ProviderMessageID, message.Folder,
-		); err != nil {
-			return fmt.Errorf("ingest local Gmail purchase mail: %w", err)
+		storedCount, matchedCount, err := s.mail.IngestGmailMail(
+			ctx, resource.ID, message.Recipient, message.Raw, message.ReceivedAt, message.ProviderMessageID, message.Folder, fence,
+		)
+		if err != nil {
+			return result, fmt.Errorf("ingest local Gmail resource mail: %w", err)
 		}
+		result.Stored += storedCount
+		result.Matched += matchedCount
 	}
-	return s.dbFor(ctx).Model(&allocationModel{}).
-		Where("id = ? AND status = ?", resource.AllocationID, AllocationStatusAllocated).
-		Updates(map[string]any{"provider_cursor": cursors.Inbox, "provider_spam_cursor": cursors.Spam}).Error
-}
-
-func (s *Service) loadLocalCodeResource(ctx context.Context, orderNo string) (*localCodeResource, error) {
-	var resource localCodeResource
-	err := s.dbFor(ctx).Table("gmail_allocations AS a").
-		Select("r.id, r.email AS login_email, a.email AS recipient, r.app_password").
-		Joins("JOIN gmail_resources AS r ON r.id = a.resource_id").
-		Where("a.order_no = ? AND a.source = ? AND a.service_mode = ? AND a.status = ?",
-			orderNo, SourceLocal, string(tradedomain.ServiceModeCode), AllocationStatusAllocated).
-		Take(&resource).Error
-	if err != nil {
-		return nil, fmt.Errorf("load local Gmail code resource: %w", err)
-	}
-	return &resource, nil
-}
-
-func (s *Service) expireLocalSession(ctx context.Context, sessionID uint) error {
-	var session sessionModel
-	err := s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, sessionID).Error; err != nil {
-			return err
-		}
-		if session.Status != SessionActive {
-			return nil
-		}
-		now := s.now()
-		status := SessionCompleted
-		if session.ReceivedCount == 0 {
-			status = SessionCancelled
-		}
-		if err := tx.Model(&sessionModel{}).Where("id = ? AND status = ?", session.ID, SessionActive).Updates(map[string]any{
-			"status": status, "completed_at": now, "next_poll_at": now, "version": gorm.Expr("version + 1"),
-		}).Error; err != nil {
-			return err
-		}
-		session.Status = status
-		session.CompletedAt = &now
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	return s.finishLocalSession(ctx, session)
-}
-
-func (s *Service) failLocalSession(ctx context.Context, session sessionModel, reason string) error {
-	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		reason = "自有 Gmail 收件失败，订单已退款。"
-	}
-	finish := false
-	err := s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
-		var current sessionModel
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, session.ID).Error; err != nil {
-			return err
-		}
-		session = current
-		switch session.Status {
-		case SessionPending, SessionProvisioning, SessionActive:
-			now := s.now()
-			if err := tx.Model(&sessionModel{}).Where("id = ? AND status = ?", session.ID, session.Status).Updates(map[string]any{
-				"status": SessionFailed, "completed_at": now, "next_poll_at": now,
-				"last_safe_error": reason, "version": gorm.Expr("version + 1"),
-			}).Error; err != nil {
+	err = s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
+		txCtx := platform.WithGormTx(ctx, tx)
+		if fence != nil {
+			if err := fence(txCtx); err != nil {
 				return err
 			}
-			session.Status = SessionFailed
-			session.CompletedAt = &now
-			session.LastSafeError = reason
-			finish = true
-		case SessionCompleted, SessionCancelled, SessionFailed:
-			finish = true
 		}
-		return nil
+		var current localResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "status", "credential_revision", "provider_cursor", "provider_spam_cursor").Where("id = ?", resourceID).Take(&current).Error; err != nil {
+			return err
+		}
+		if current.Status == LocalResourceDeleted || current.CredentialRevision != expectedCredentialRevision {
+			return ErrLocalValidationConflict
+		}
+		if current.ProviderCursor != cursor.Inbox || current.ProviderSpamCursor != cursor.Spam {
+			return nil
+		}
+		return tx.Model(&localResourceModel{}).Where("id = ?", resourceID).
+			Updates(map[string]any{"provider_cursor": cursors.Inbox, "provider_spam_cursor": cursors.Spam}).Error
 	})
-	if err != nil || !finish {
-		return err
+	if err != nil {
+		return result, err
 	}
-	return s.finishLocalSession(ctx, session)
+	return result, nil
 }
 
-func (s *Service) finishLocalSession(ctx context.Context, session sessionModel) error {
-	if session.Status != SessionCompleted && session.Status != SessionCancelled && session.Status != SessionFailed {
-		return errors.New("gmail: local session is not terminal")
-	}
-	if s.trade == nil {
-		return errors.New("gmail: trade callback unavailable")
-	}
-	var err error
-	switch session.Status {
-	case SessionCompleted:
-		err = s.trade.CompleteGmailOrder(ctx, session.OrderNo, gmailCompletionReason(session))
-	case SessionCancelled:
-		reason := strings.TrimSpace(session.LastSafeError)
-		if reason == "" {
-			reason = "Gmail 接码窗口结束，订单已退款。"
-		}
-		err = s.trade.FailGmailOrder(ctx, session.OrderNo, reason)
-	case SessionFailed:
-		reason := strings.TrimSpace(session.LastSafeError)
-		if reason == "" {
-			reason = "自有 Gmail 收件失败，订单已退款。"
-		}
-		err = s.trade.FailGmailOrder(ctx, session.OrderNo, reason)
-	}
-	if err != nil {
-		return err
-	}
-	return s.clearNextPoll(ctx, session.ID)
+func boundedLocalGmailLookback() time.Duration {
+	days := runtimeconfig.Int("fetch_lookback_window_days", 90, 1)
+	return time.Duration(min(days, 3650)) * 24 * time.Hour
 }
-func (s *Service) markLocalResourceAbnormal(ctx context.Context, resourceID uint, safeError string) error {
-	return s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
-		resource, err := lockLocalResource(tx, resourceID)
-		if err != nil {
+
+func (s *Service) handleLocalGmailAuthenticationFailure(ctx context.Context, resourceID uint, expectedCredentialRevision uint64, fence func(context.Context) error) error {
+	markedAbnormal := false
+	err := s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
+		txCtx := platform.WithGormTx(ctx, tx)
+		if fence != nil {
+			if err := fence(txCtx); err != nil {
+				return err
+			}
+		}
+		var resource localResourceModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "status", "credential_revision").Where("id = ?", resourceID).Take(&resource).Error; err != nil {
 			return err
+		}
+		if resource.Status == LocalResourceDeleted || resource.CredentialRevision != expectedCredentialRevision {
+			return ErrLocalValidationConflict
 		}
 		if resource.Status == LocalResourceDisabled {
 			return nil
 		}
-		return tx.Model(&localResourceModel{}).Where("id = ?", resource.ID).Updates(map[string]any{
-			"status": LocalResourceAbnormal, "last_safe_error": safeError, "last_checked_at": s.now(),
-		}).Error
+		result := tx.Model(&localResourceModel{}).Where("id = ?", resourceID).Updates(map[string]any{
+			"status": LocalResourceAbnormal, "last_safe_error": "Gmail IMAP authentication failed. Check the app password.", "last_checked_at": s.now(),
+		})
+		markedAbnormal = result.Error == nil && result.RowsAffected == 1
+		return result.Error
 	})
+	if err != nil || !markedAbnormal || s.trade == nil {
+		return err
+	}
+	_, err = s.trade.RefundUnavailableGmailOrders(ctx, resourceID, "")
+	return err
 }

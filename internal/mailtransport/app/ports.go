@@ -128,28 +128,6 @@ func SystemLoadAlertMessage(recipient, hostname, episodeID string, threshold int
 	)
 }
 
-func SMSBowerAlertMessage(recipient, alertID, subject, body string) domain.OutboundMessage {
-	recipient = strings.TrimSpace(recipient)
-	alertID = oneLine(alertID, 128)
-	subject = oneLine(subject, 160)
-	body = bodyValue(body)
-	if subject == "" {
-		subject = "SMSBower 上游告警"
-	}
-	return notificationMessage(
-		domain.PurposeSystemNotice,
-		messageDigest("smsbower_alert", recipient, alertID),
-		recipient,
-		"ReMail "+subject,
-		subject,
-		"Gmail 上游需要管理员关注。",
-		body,
-		notificationPanelContentTemplate,
-		body,
-		"邮件中不会包含 SMSBower API Key 或原始上游响应。",
-	)
-}
-
 func RechargeCreditedMessage(recipient, rechargeNo, amount, balance string) domain.OutboundMessage {
 	recipient = strings.TrimSpace(recipient)
 	details := []notificationDetail{

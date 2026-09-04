@@ -2,12 +2,10 @@ package app
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/donnel666/remail/internal/trade/domain"
-	"github.com/donnel666/remail/internal/upstream"
 	"github.com/stretchr/testify/require"
 )
 
@@ -94,6 +92,14 @@ func (s *unavailableRefundRepoStub) ListUnavailableMicrosoftOrderNos(_ context.C
 	return []string{s.order.OrderNo}, nil
 }
 
+func (s *unavailableRefundRepoStub) ListUnavailableGmailOrderNos(_ context.Context, resourceID uint, limit int) ([]string, error) {
+	if s.resourceID == 0 || s.order.ProductType != domain.ProductTypeGmail || s.order.Status != domain.OrderStatusActive || s.order.RefundTxID != nil || (resourceID != 0 && resourceID != s.resourceID) {
+		return nil, nil
+	}
+	s.unavailableLimit = limit
+	return []string{s.order.OrderNo}, nil
+}
+
 func (*unavailableRefundRepoStub) ListExpiredCodeOrderNos(context.Context, time.Time, int) ([]string, error) {
 	return nil, nil
 }
@@ -129,40 +135,6 @@ func (s *unavailableRefundRepoStub) ListPartialCleanupOrderNos(context.Context, 
 type unavailableRefundWalletStub struct {
 	WalletPort
 	commands []WalletCommand
-}
-
-type orderedRefundWalletStub struct {
-	unavailableRefundWalletStub
-	events *[]string
-}
-
-func (s *orderedRefundWalletStub) RefundConsumer(ctx context.Context, cmd WalletCommand) (*WalletTransaction, error) {
-	*s.events = append(*s.events, "refund")
-	return s.unavailableRefundWalletStub.RefundConsumer(ctx, cmd)
-}
-
-type refundUpstreamStub struct {
-	events    *[]string
-	cancelErr error
-}
-
-func (*refundUpstreamStub) Supply(context.Context, upstream.Demand) (*upstream.SupplyQuote, error) {
-	return nil, nil
-}
-
-func (*refundUpstreamStub) AcceptPaidOrder(context.Context, upstream.PaidOrder) (bool, error) {
-	return false, nil
-}
-
-func (*refundUpstreamStub) OwnsOrder(context.Context, string) (bool, error) { return false, nil }
-
-func (s *refundUpstreamStub) CancelOrder(context.Context, string) (bool, error) {
-	*s.events = append(*s.events, "cancel")
-	return true, s.cancelErr
-}
-
-func (*refundUpstreamStub) Pickup(context.Context, upstream.PickupRequest) (*upstream.PickupResult, bool, error) {
-	return nil, false, nil
 }
 
 func (*unavailableRefundWalletStub) LockConsumer(context.Context, uint) error { return nil }
@@ -211,17 +183,6 @@ type unavailableRefundDeliveryStub struct {
 	delivery *OrderDeliverySummary
 }
 
-type unavailableRefundGmailStub struct {
-	GmailSupplyPort
-	cancelled []string
-	err       error
-}
-
-func (s *unavailableRefundGmailStub) CancelGmailOrder(_ context.Context, orderNo string) error {
-	s.cancelled = append(s.cancelled, orderNo)
-	return s.err
-}
-
 func (s unavailableRefundDeliveryStub) FindOrderDelivery(context.Context, uint) (*OrderDeliverySummary, error) {
 	return s.delivery, nil
 }
@@ -252,9 +213,7 @@ func TestExpireDueOrdersReleasesStalePendingGmailAllocation(t *testing.T) {
 		Status: domain.OrderStatusPendingPayment, CreatedAt: now.Add(-16 * time.Minute),
 	}}
 	allocation := &unavailableRefundAllocationStub{}
-	gmail := &unavailableRefundGmailStub{}
 	uc := NewUseCase(repo, nil, nil, allocation, &unavailableRefundTokenStub{})
-	uc.SetGmailPorts(gmail, nil)
 	uc.now = func() time.Time { return now }
 
 	result, err := uc.ExpireDueOrders(context.Background(), 200)
@@ -284,7 +243,7 @@ func TestExpireDueOrdersResumesPaidGmailPurchaseWithoutSupplyPrecheck(t *testing
 	tokens := &issuedOrderTokenSpy{tokens: map[string]*OrderToken{}}
 	allocation := &unavailableRefundAllocationStub{}
 	uc := NewUseCase(repo, nil, nil, allocation, tokens)
-	uc.SetGmailPorts(supply, supply)
+	uc.SetGmailSupplyPort(supply)
 	uc.now = func() time.Time { return now }
 
 	result, err := uc.ExpireDueOrders(context.Background(), 200)
@@ -293,7 +252,7 @@ func TestExpireDueOrdersResumesPaidGmailPurchaseWithoutSupplyPrecheck(t *testing
 	require.Equal(t, 1, result.CheckoutRecovered)
 	require.Zero(t, result.Failed)
 	require.Zero(t, supply.checks)
-	require.Equal(t, 2, supply.purchases)
+	require.Zero(t, supply.purchases)
 	require.Equal(t, domain.OrderStatusActive, repo.order.Status)
 	require.Equal(t, "buyer@gmail.com", repo.order.DeliveryEmail)
 	require.Equal(t, 1, tokens.issues)
@@ -329,6 +288,31 @@ func TestUnavailableMicrosoftResourceRefundIsImmediateAndIdempotent(t *testing.T
 	require.NoError(t, err)
 	require.Zero(t, result.ResourceUnavailableRefunded)
 	require.Equal(t, 1, repo.refundCalls)
+	require.Len(t, wallet.commands, 1)
+}
+
+func TestUnavailableGmailResourceRefundIsImmediateAndIdempotent(t *testing.T) {
+	debitTxID := uint(8004)
+	repo := &unavailableRefundRepoStub{resourceID: 30046, order: domain.Order{
+		OrderNo: "GMAIL-UNAVAILABLE", UserID: 42, ProductType: domain.ProductTypeGmail,
+		Status: domain.OrderStatusActive, ServiceMode: domain.ServiceModeCode,
+		PayAmount: "0.010000", DebitTxID: &debitTxID,
+	}}
+	wallet := &unavailableRefundWalletStub{}
+	allocation := &unavailableRefundAllocationStub{}
+	tokens := &unavailableRefundTokenStub{}
+	uc := NewUseCase(repo, nil, wallet, allocation, tokens)
+
+	refunded, err := uc.RefundUnavailableGmailOrders(context.Background(), repo.resourceID, "request-gmail")
+
+	require.NoError(t, err)
+	require.Equal(t, 1, refunded)
+	require.Equal(t, domain.OrderStatusRefunded, repo.order.Status)
+	require.Equal(t, []string{repo.order.OrderNo}, allocation.released)
+	require.Equal(t, []string{repo.order.OrderNo}, tokens.disabled)
+	replayed, err := uc.RefundUnavailableGmailOrders(context.Background(), repo.resourceID, "request-gmail")
+	require.NoError(t, err)
+	require.Zero(t, replayed)
 	require.Len(t, wallet.commands, 1)
 }
 
@@ -378,72 +362,14 @@ func TestRefundedOrderWithMissingCleanupIsRecovered(t *testing.T) {
 	require.Equal(t, "succeeded", repo.cleanupStatus)
 }
 
-func TestGmailCleanupCancelsUpstreamAndRecordsFailure(t *testing.T) {
-	for _, test := range []struct {
-		name       string
-		cancelErr  error
-		wantStatus string
-		wantErr    bool
-	}{
-		{name: "success", wantStatus: "succeeded"},
-		{name: "cancel failure", cancelErr: errors.New("upstream unavailable"), wantStatus: "partial_failure", wantErr: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			repo := &unavailableRefundRepoStub{order: domain.Order{OrderNo: "GMAIL-CLEANUP", ProductType: domain.ProductTypeGmail}}
-			allocation := &unavailableRefundAllocationStub{}
-			tokens := &unavailableRefundTokenStub{}
-			gmail := &unavailableRefundGmailStub{err: test.cancelErr}
-			uc := NewUseCase(repo, nil, nil, allocation, tokens)
-			uc.SetGmailPorts(gmail, nil)
+func TestGmailCleanupUsesSharedAllocationAndTokenCleanup(t *testing.T) {
+	repo := &unavailableRefundRepoStub{order: domain.Order{OrderNo: "GMAIL-CLEANUP", ProductType: domain.ProductTypeGmail}}
+	allocation := &unavailableRefundAllocationStub{}
+	tokens := &unavailableRefundTokenStub{}
+	uc := NewUseCase(repo, nil, nil, allocation, tokens)
 
-			err := uc.cleanupOrderService(context.Background(), repo.order, true, "Order refunded.", "request-1")
-			if test.wantErr {
-				require.ErrorIs(t, err, domain.ErrOrderCompensationError)
-			} else {
-				require.NoError(t, err)
-			}
-			require.Equal(t, []string{repo.order.OrderNo}, gmail.cancelled)
-			require.Equal(t, []string{repo.order.OrderNo}, allocation.released)
-			require.Equal(t, []string{repo.order.OrderNo}, tokens.disabled)
-			require.Equal(t, test.wantStatus, repo.cleanupStatus)
-		})
-	}
-}
-
-func TestAdminRefundConfirmsUpstreamBeforeCreditingWallet(t *testing.T) {
-	for _, test := range []struct {
-		name      string
-		cancelErr error
-		wantErr   bool
-	}{
-		{name: "confirmed"},
-		{name: "unconfirmed", cancelErr: errors.New("upstream cancellation unconfirmed"), wantErr: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			events := []string{}
-			repo := &unavailableRefundRepoStub{order: domain.Order{
-				ID: 1, OrderNo: "GMAIL-ADMIN-REFUND", UserID: 42, ProductType: domain.ProductTypeGmail,
-				ServiceMode: domain.ServiceModeCode, Status: domain.OrderStatusActive, PayAmount: "1.00",
-			}}
-			wallet := &orderedRefundWalletStub{events: &events}
-			provider := &refundUpstreamStub{events: &events, cancelErr: test.cancelErr}
-			uc := NewUseCase(repo, nil, wallet, &unavailableRefundAllocationStub{}, &unavailableRefundTokenStub{})
-			uc.SetUpstreams(upstream.NewRouter(provider))
-
-			_, err := uc.AdminRefundOrder(context.Background(), AdminOrderCommandRequest{
-				OrderNo: repo.order.OrderNo, Reason: "manual refund", IdempotencyKey: "admin-refund-1",
-			})
-
-			if test.wantErr {
-				require.ErrorIs(t, err, test.cancelErr)
-				require.Equal(t, []string{"cancel"}, events)
-				require.Empty(t, wallet.commands)
-				require.Equal(t, domain.OrderStatusActive, repo.order.Status)
-				return
-			}
-			require.NoError(t, err)
-			require.Equal(t, []string{"cancel", "refund", "cancel"}, events)
-			require.Equal(t, domain.OrderStatusRefunded, repo.order.Status)
-		})
-	}
+	require.NoError(t, uc.cleanupOrderService(context.Background(), repo.order, true, "Order refunded.", "request-1"))
+	require.Equal(t, []string{repo.order.OrderNo}, allocation.released)
+	require.Equal(t, []string{repo.order.OrderNo}, tokens.disabled)
+	require.Equal(t, "succeeded", repo.cleanupStatus)
 }

@@ -41,7 +41,6 @@ var integerRanges = map[string]integerRange{
 	"max_pending_recharge_orders":         positive(100),
 	RechargeTimeoutMinutesKey:             positive(1440),
 	"async_check_request_timeout_seconds": {min: 1, max: 30},
-	SMSBowerNoCodeRefundTimeoutMinutesKey: positive(25),
 
 	"domain_max_subdomains_per_registrable_domain": positive(1000), "default_plus_daily_limit": positive(2_147_483_647), "default_mailbox_daily_limit": positive(2_147_483_647), "resource_validation_max_failures": positive(100), ICloudCookieKeepaliveMinutesKey: {min: 1, max: 12},
 	DomainSaleQualityMinOrdersKey: positive(1_000_000), DomainSaleQualityMinSuccessPercentKey: {min: 1, max: 100}, DomainSaleQualityWindowHoursKey: positive(8760), DomainSaleQualityCheckIntervalSecondsKey: positive(86400),
@@ -101,6 +100,7 @@ var removedKeys = map[string]struct{}{
 	"icloud_forwarding_mailboxes": {},
 	"smsbower_enabled":            {}, "smsbower_code_enabled": {}, "smsbower_purchase_enabled": {}, "smsbower_api_key": {},
 	"smsbower_sync_interval_minutes": {}, "smsbower_balance_warning_threshold": {}, "smsbower_points_per_unit": {}, "smsbower_min_margin_rate": {},
+	"smsbower_no_code_refund_timeout_minutes": {},
 }
 
 var booleanKeys = map[string]struct{}{

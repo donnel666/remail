@@ -1196,7 +1196,6 @@ export function ResourceMailsPanel({
   );
 
   const fetchMail = async () => {
-    if (resourceType === "gmail") return;
     if (fetchInFlightRef.current) return;
     fetchInFlightRef.current = true;
     setFetchLoading(true);
@@ -1234,7 +1233,11 @@ export function ResourceMailsPanel({
           getIamErrorMessage(
             t,
             lastPollError,
-            resourceType === "icloud" ? "iCloud task load failed." : "Microsoft task load failed."
+            resourceType === "gmail"
+              ? "Gmail task load failed."
+              : resourceType === "icloud"
+                ? "iCloud task load failed."
+                : "Microsoft task load failed."
           )
         );
       }
@@ -1251,9 +1254,11 @@ export function ResourceMailsPanel({
           getIamErrorMessage(
             t,
             error,
-            resourceType === "icloud"
-              ? "iCloud resources load failed."
-              : "Admin Microsoft resources load failed."
+            resourceType === "gmail"
+              ? "Gmail resources load failed."
+              : resourceType === "icloud"
+                ? "iCloud resources load failed."
+                : "Admin Microsoft resources load failed."
           )
         );
       }

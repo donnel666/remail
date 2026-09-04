@@ -93,13 +93,16 @@ type legacyFetchCredentialStub struct {
 	err    error
 }
 
-type gmailPurchaseFetchStub struct {
+type gmailMailFetchStub struct {
 	orderNos []string
 	err      error
 }
 
-func (s *gmailPurchaseFetchStub) FetchLocalPurchaseMail(_ context.Context, orderNo string) error {
+func (s *gmailMailFetchStub) FetchLocalOrderMailWithFence(ctx context.Context, orderNo string, fence func(context.Context) error) error {
 	s.orderNos = append(s.orderNos, orderNo)
+	if fence != nil {
+		return fence(ctx)
+	}
 	return s.err
 }
 
@@ -173,10 +176,10 @@ func TestPickupRequestFetchRoutesLocalGmailPurchaseAndReleasesLease(t *testing.T
 		Recipient: "user@gmail.com",
 	}}
 	state := &pickupFetchStateStub{}
-	gmail := &gmailPurchaseFetchStub{}
+	gmail := &gmailMailFetchStub{}
 	uc := NewUseCase(repo, nil, nil, nil)
 	uc.SetPickupFetchStatePort(state)
-	uc.SetGmailPurchaseFetchPort(gmail)
+	uc.SetGmailMailFetchPort(gmail)
 	uc.now = func() time.Time { return now }
 
 	err := uc.ProcessPickupRequestFetch(context.Background(), PickupRequestFetchTask{

@@ -114,9 +114,15 @@ type resourceTaskRepository interface {
 type AdminResourceFetchRepository interface {
 	resourceTaskRepository
 	AssertResourceFetchFence(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64) error
+	AssertGmailResourceFetchFence(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64) error
 	CompleteResourceFetch(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64, rotatedRefreshToken string, graphAvailable *bool, fetched int, stored int, matched int, now time.Time, log *governancedomain.SystemLog) error
+	CompleteGmailResourceFetch(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64, fetched int, stored int, matched int, now time.Time, log *governancedomain.SystemLog) error
 	AssertICloudResourceFetchFence(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64) error
 	CompleteICloudResourceFetch(ctx context.Context, resourceID uint, generation uint64, expectedCredentialRevision uint64, fetched int, stored int, matched int, now time.Time, log *governancedomain.SystemLog) error
+}
+
+type GmailResourceFetchPort interface {
+	FetchLocalResourceMailWithFence(ctx context.Context, resourceID uint, expectedCredentialRevision uint64, fence func(context.Context) error) (fetched int, stored int, matched int, err error)
 }
 
 type ResourceHistoryRepository interface {
@@ -142,6 +148,7 @@ type resourceTaskUseCase struct {
 	historyQueue ResourceHistoryQueue
 	kind         domain.ResourceFetchJobKind
 	transport    MailTransportFetchPort
+	gmail        GmailResourceFetchPort
 	messages     *UseCase
 	history      *ProjectHistoryScanUseCase
 	systemLogs   governanceapp.SystemLogPort
@@ -169,6 +176,12 @@ func NewAdminResourceFetchUseCase(
 		systemLogs: systemLogs,
 		now:        func() time.Time { return time.Now().UTC() },
 	}}
+}
+
+func (uc *AdminResourceFetchUseCase) SetGmailResourceFetchPort(port GmailResourceFetchPort) {
+	if uc != nil && uc.task != nil {
+		uc.task.gmail = port
+	}
 }
 
 func NewResourceHistoryUseCase(
@@ -217,8 +230,8 @@ func (uc *resourceTaskUseCase) submit(ctx context.Context, cmd resourceTaskSubmi
 	if cmd.ResourceType == "" {
 		cmd.ResourceType = domain.ResourceTypeMicrosoft
 	}
-	if (cmd.ResourceType != domain.ResourceTypeMicrosoft && cmd.ResourceType != domain.ResourceTypeICloud) ||
-		(cmd.ResourceType == domain.ResourceTypeICloud && cmd.Kind != domain.ResourceFetchJobFetch) {
+	if (cmd.ResourceType != domain.ResourceTypeMicrosoft && cmd.ResourceType != domain.ResourceTypeGmail && cmd.ResourceType != domain.ResourceTypeICloud) ||
+		(cmd.ResourceType != domain.ResourceTypeMicrosoft && cmd.Kind != domain.ResourceFetchJobFetch) {
 		return nil, domain.ErrInvalidRequest
 	}
 	now := uc.now()
@@ -300,6 +313,9 @@ func (uc *resourceTaskUseCase) process(ctx context.Context, resourceID uint, gen
 	}
 	if job.Kind == domain.ResourceFetchJobHistory {
 		return uc.processResourceHistory(ctx, *job)
+	}
+	if job.ResourceType == domain.ResourceTypeGmail {
+		return uc.processGmailResourceFetch(ctx, *job)
 	}
 	if job.ResourceType == domain.ResourceTypeICloud {
 		return uc.processICloudResourceFetch(ctx, *job)
@@ -384,6 +400,48 @@ func (uc *resourceTaskUseCase) process(ctx context.Context, resourceID uint, gen
 		if errors.Is(err, domain.ErrResourceFetchInvalidClaim) {
 			return nil
 		}
+		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, err)
+	}
+	return nil
+}
+
+func (uc *resourceTaskUseCase) processGmailResourceFetch(ctx context.Context, job domain.ResourceFetchJob) error {
+	if uc.gmail == nil || uc.adminRepo == nil {
+		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, errors.New("gmail mail fetch service is unavailable"))
+	}
+	fence := func(txCtx context.Context) error {
+		return uc.adminRepo.AssertGmailResourceFetchFence(
+			txCtx, job.ResourceID, job.Generation, job.ExpectedCredentialRevision,
+		)
+	}
+	fetched, stored, matched, err := uc.gmail.FetchLocalResourceMailWithFence(ctx, job.ResourceID, job.ExpectedCredentialRevision, fence)
+	if err != nil {
+		if errors.Is(err, domain.ErrResourceFetchInvalidClaim) {
+			return nil
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, err)
+		}
+		if errors.Is(err, domain.ErrResourceFetchCredentialChanged) || errors.Is(err, domain.ErrResourceFetchDeleted) || errors.Is(err, domain.ErrResourceFetchNotFound) {
+			return uc.cancelResourceFetch(ctx, job, "Gmail resource changed while mail fetch was running.", "credential_changed")
+		}
+		if errors.Is(err, domain.ErrResourceFetchCredentialsMissing) {
+			return uc.retryResourceFetch(ctx, job, "Gmail mail fetch credentials are incomplete.", "missing_token", false, err)
+		}
+		return uc.retryResourceFetch(ctx, job, "Gmail mail service is temporarily unavailable.", "request", true, err)
+	}
+	now := uc.now()
+	err = uc.adminRepo.CompleteGmailResourceFetch(
+		ctx, job.ResourceID, job.Generation, job.ExpectedCredentialRevision, fetched, stored, matched, now,
+		resourceFetchSystemLog(job, "info", "resource_fetch_succeeded", "Gmail resource mail fetch completed.", ""),
+	)
+	if errors.Is(err, domain.ErrResourceFetchInvalidClaim) {
+		return nil
+	}
+	if errors.Is(err, domain.ErrResourceFetchCredentialChanged) || errors.Is(err, domain.ErrResourceFetchDeleted) || errors.Is(err, domain.ErrResourceFetchNotFound) {
+		return uc.cancelResourceFetch(ctx, job, "Gmail resource changed while mail fetch was running.", "credential_changed")
+	}
+	if err != nil {
 		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, err)
 	}
 	return nil
@@ -614,7 +672,7 @@ func (uc *resourceTaskUseCase) finishScopeFailure(ctx context.Context, job domai
 	case errors.Is(err, domain.ErrResourceFetchDeleted), errors.Is(err, domain.ErrResourceFetchNotFound), errors.Is(err, domain.ErrResourceFetchJobConflict):
 		return uc.cancelResourceFetch(ctx, job, "Resource is not available for "+operation+".", "resource_unavailable")
 	case errors.Is(err, domain.ErrResourceFetchCredentialsMissing):
-		return uc.retryResourceFetch(ctx, job, "Microsoft mail fetch credentials are incomplete.", "missing_token", false, err)
+		return uc.retryResourceFetch(ctx, job, resourceFetchResourceLabel(job.ResourceType)+" mail fetch credentials are incomplete.", "missing_token", false, err)
 	default:
 		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, err)
 	}
@@ -761,6 +819,9 @@ func resourceFetchOperationType(resourceType domain.ResourceType, kind domain.Re
 	if kind == domain.ResourceFetchJobHistory {
 		return "mailmatch.admin_resource.history_scan"
 	}
+	if resourceType == domain.ResourceTypeGmail {
+		return "mailmatch.admin_gmail_resource.fetch"
+	}
 	if resourceType == domain.ResourceTypeICloud {
 		return "mailmatch.admin_icloud_resource.fetch"
 	}
@@ -782,6 +843,9 @@ func resourceFetchOperationLabel(kind domain.ResourceFetchJobKind) string {
 }
 
 func resourceFetchBizType(resourceType domain.ResourceType) string {
+	if resourceType == domain.ResourceTypeGmail {
+		return governanceapp.AdminTaskBizGmailResource
+	}
 	if resourceType == domain.ResourceTypeICloud {
 		return governanceapp.AdminTaskBizICloudResource
 	}
@@ -789,6 +853,9 @@ func resourceFetchBizType(resourceType domain.ResourceType) string {
 }
 
 func resourceFetchResourceLabel(resourceType domain.ResourceType) string {
+	if resourceType == domain.ResourceTypeGmail {
+		return "Gmail"
+	}
 	if resourceType == domain.ResourceTypeICloud {
 		return "iCloud"
 	}

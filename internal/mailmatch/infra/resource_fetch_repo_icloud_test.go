@@ -52,3 +52,31 @@ INSERT INTO icloud_allocations(id, resource_id, order_no, status, created_at) VA
 	_, err = repo.LoadResourceFetchScope(context.Background(), 10, 4, domain.ResourceTypeICloud)
 	require.NoError(t, err, "disabled supply must not hide persisted alias mail from administrators")
 }
+
+func TestGmailResourceFetchScopeUsesLocalAppPasswordState(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:mailmatch-gmail-resource-fetch?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(`
+CREATE TABLE email_resources (id INTEGER PRIMARY KEY, type TEXT NOT NULL);
+CREATE TABLE gmail_resources (
+    id INTEGER PRIMARY KEY,
+    status TEXT NOT NULL,
+    email TEXT NOT NULL,
+    app_password TEXT NOT NULL,
+    credential_revision INTEGER NOT NULL
+);
+INSERT INTO email_resources(id, type) VALUES (11, 'gmail');
+INSERT INTO gmail_resources(id, status, email, app_password, credential_revision)
+VALUES (11, 'normal', 'main@gmail.com', 'app-password', 5);
+`).Error)
+
+	repo := NewAdminResourceFetchRepo(db)
+	scope, err := repo.LoadResourceFetchScope(context.Background(), 11, 5, domain.ResourceTypeGmail)
+	require.NoError(t, err)
+	require.Equal(t, domain.ResourceTypeGmail, scope.ResourceType)
+	require.True(t, scope.CredentialsConfigured)
+
+	require.NoError(t, db.Table("gmail_resources").Where("id = ?", 11).Update("app_password", "").Error)
+	_, err = repo.LoadResourceFetchScope(context.Background(), 11, 5, domain.ResourceTypeGmail)
+	require.ErrorIs(t, err, domain.ErrResourceFetchCredentialsMissing)
+}

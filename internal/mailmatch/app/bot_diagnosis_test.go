@@ -44,16 +44,11 @@ func (r *diagnosisRefreshRepoStub) ListDomainMailboxMessages(context.Context, Or
 }
 
 type diagnosisGmailFetchStub struct {
-	codeCalls     int
-	purchaseCalls int
+	calls int
 }
 
-func (f *diagnosisGmailFetchStub) FetchLocalPurchaseMail(context.Context, string) error {
-	f.purchaseCalls++
-	return nil
-}
-func (f *diagnosisGmailFetchStub) FetchLocalCodeMail(context.Context, string) error {
-	f.codeCalls++
+func (f *diagnosisGmailFetchStub) FetchLocalOrderMailWithFence(context.Context, string, func(context.Context) error) error {
+	f.calls++
 	return nil
 }
 
@@ -161,16 +156,16 @@ func TestRefreshCodeDiagnosisUsesDomainAndGmailOwnedFetchPaths(t *testing.T) {
 	gmailRepo.scope.AllocationType = "gmail"
 	gmailFetch := &diagnosisGmailFetchStub{}
 	gmailUseCase := NewUseCase(gmailRepo, nil, nil, nil)
-	gmailUseCase.SetGmailPurchaseFetchPort(gmailFetch)
+	gmailUseCase.SetGmailMailFetchPort(gmailFetch)
 	gmailUseCase.now = func() time.Time { return now }
 	_, err = gmailUseCase.RefreshCodeDiagnosis(context.Background(), "ORDER-1", "user@example.com", 8)
 	require.NoError(t, err)
-	require.Equal(t, 1, gmailFetch.codeCalls)
+	require.Equal(t, 1, gmailFetch.calls)
 
 	gmailRepo.scope.ServiceMode = "purchase"
 	gmailRepo.scope.OrderStatus = "completed"
 	gmailRepo.scope.ReceiveUntil = nil
 	_, err = gmailUseCase.RefreshCodeDiagnosis(context.Background(), "ORDER-1", "user@example.com", 8)
 	require.NoError(t, err)
-	require.Equal(t, 1, gmailFetch.purchaseCalls)
+	require.Equal(t, 2, gmailFetch.calls)
 }

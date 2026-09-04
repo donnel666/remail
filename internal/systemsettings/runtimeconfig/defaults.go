@@ -3,10 +3,9 @@ package runtimeconfig
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
 const (
-	DefaultSettingsCount                         = 282
+	DefaultSettingsCount                         = 281
 	NodeLocCallbackURL                           = "https://remail.aishop6.com/oauth/nodeloc"
 	RechargeTimeoutMinutesKey                    = "recharge_timeout_minutes"
-	SMSBowerNoCodeRefundTimeoutMinutesKey        = "smsbower_no_code_refund_timeout_minutes"
 	MicrosoftPriceMultiplierKey                  = "product_price_multiplier_microsoft"
 	GmailPriceMultiplierKey                      = "product_price_multiplier_gmail"
 	ICloudPriceMultiplierKey                     = "product_price_multiplier_icloud"
@@ -123,7 +122,6 @@ var defaultSettings = []domain.Setting{
 	{Key: "max_pending_recharge_orders", Value: "10"},
 	{Key: "recharge_timeout_minutes", Value: "10"},
 	{Key: "async_check_request_timeout_seconds", Value: "5"},
-	{Key: SMSBowerNoCodeRefundTimeoutMinutesKey, Value: "10"},
 	{Key: "default_project_microsoft_code_price", Value: "8"},
 	{Key: "default_project_microsoft_code_supplier_price", Value: "5"},
 	{Key: "default_project_microsoft_purchase_price", Value: "10"},

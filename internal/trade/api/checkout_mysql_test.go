@@ -24,6 +24,7 @@ import (
 	billinginfra "github.com/donnel666/remail/internal/billing/infra"
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	coreinfra "github.com/donnel666/remail/internal/core/infra"
+	gmailapp "github.com/donnel666/remail/internal/gmail"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	openapiapi "github.com/donnel666/remail/internal/openapi/api"
@@ -360,6 +361,53 @@ INSERT INTO gmail_resources(
 	require.NoError(t, db.Table("wallet_transactions").
 		Where("idempotency_key = ?", "history:"+rollbackOrderNo+":debit").Count(&rollbackDebits).Error)
 	require.Zero(t, rollbackDebits)
+}
+
+func TestGmailVariantCodeUsesSharedTimeoutLifecycleMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "gmail")
+	require.NoError(t, db.Table("project_products").Where("id = ?", 20).Updates(map[string]any{
+		"type": "gmail_variant", "main_weight": 0, "dot_weight": 0, "plus_weight": 1,
+	}).Error)
+	require.NoError(t, db.Exec("INSERT INTO email_resources(id, type, owner_user_id) VALUES (1000, 'gmail', 1)").Error)
+	require.NoError(t, db.Exec(`INSERT INTO gmail_resources(
+		id, resource_type, owner_user_id, email, identity, password,
+		two_factor_secret, app_password, for_sale, status
+	) VALUES (
+		1000, 'gmail', 1, 'variant@gmail.com', 'variant@gmail.com', '',
+		'', 'abcdefghijklmnop', TRUE, 'normal'
+	)`).Error)
+	creditBuyer(t, db, 2, "10.00")
+	module := newTradeModule(db)
+	gmail := gmailapp.NewService(db, nil)
+	module.UseCase.SetGmailSupplyPort(gmail)
+
+	result, err := module.UseCase.Checkout(context.Background(), tradeapp.CheckoutRequest{
+		UserID: 2, ProjectID: 10, ProductID: 20, ServiceMode: "code",
+		SupplyPolicy: "public_only", ClientChannel: tradedomain.ClientChannelConsole,
+		IdempotencyKey: "gmail-variant-timeout", RequestID: "request-gmail-variant-timeout",
+	})
+	require.NoError(t, err)
+	require.Contains(t, result.Order.DeliveryEmail, "+")
+	var sessionCount int64
+	require.NoError(t, db.Table("gmail_code_sessions").Where("order_no = ?", result.Order.OrderNo).Count(&sessionCount).Error)
+	require.Zero(t, sessionCount)
+	past := time.Now().UTC().Add(-time.Minute)
+	require.NoError(t, db.Table("orders").Where("order_no = ?", result.Order.OrderNo).Updates(map[string]any{
+		"receive_until": past, "after_sale_until": past,
+	}).Error)
+
+	expired, err := module.UseCase.ExpireDueOrders(context.Background(), 200)
+	require.NoError(t, err)
+	require.Equal(t, 1, expired.CodeTimedOut)
+	var status string
+	require.NoError(t, db.Table("orders").Where("order_no = ?", result.Order.OrderNo).Pluck("status", &status).Error)
+	require.Equal(t, "refunded", status)
+	require.NoError(t, db.Table("gmail_allocations").Where("order_no = ?", result.Order.OrderNo).Pluck("status", &status).Error)
+	require.Equal(t, "released", status)
+	var tokenEnabled bool
+	require.NoError(t, db.Table("order_tokens").Where("order_no = ?", result.Order.OrderNo).Pluck("enabled", &tokenEnabled).Error)
+	require.False(t, tokenEnabled)
 }
 
 func TestHistoricalImportCommitsSingleEvidenceAliasMySQL(t *testing.T) {

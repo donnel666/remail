@@ -70,7 +70,7 @@ func TestCleanupRecoveryIncludesRefundedOrdersWithNoCleanupAttempt(t *testing.T)
 	require.ElementsMatch(t, []string{"REFUNDED-NONE", "REFUNDED-PARTIAL"}, orderNos)
 }
 
-func TestCompleteGmailCodeOrderPreservesWarrantyDeadline(t *testing.T) {
+func TestCompleteGmailCodeOrderUsesSharedReadDeadline(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:trade-gmail-code-warranty?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&OrderModel{}, &OrderEventModel{}))
@@ -91,5 +91,34 @@ func TestCompleteGmailCodeOrderPreservesWarrantyDeadline(t *testing.T) {
 	require.True(t, changed)
 	require.Equal(t, domain.OrderStatusCompleted, completed.Status)
 	require.Equal(t, readUntil, *completed.ReceiveUntil)
-	require.Equal(t, warrantyUntil, *completed.AfterSaleUntil)
+	require.Equal(t, readUntil, *completed.AfterSaleUntil)
+}
+
+func TestGmailCodeLifecycleIgnoresRetiredSessionRows(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:trade-gmail-code-lifecycle?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&OrderModel{}))
+	require.NoError(t, db.Exec(`CREATE TABLE gmail_code_sessions (
+		order_no TEXT PRIMARY KEY, source TEXT NOT NULL, status TEXT NOT NULL
+	)`).Error)
+	past := time.Now().UTC().Add(-time.Minute)
+	for _, order := range []OrderModel{
+		{OrderNo: "GMAIL-NEW-ACTIVE", ProductType: string(domain.ProductTypeGmail), ServiceMode: string(domain.ServiceModeCode), Status: string(domain.OrderStatusActive), ReceiveUntil: &past},
+		{OrderNo: "GMAIL-RETIRED-ACTIVE", ProductType: string(domain.ProductTypeGmail), ServiceMode: string(domain.ServiceModeCode), Status: string(domain.OrderStatusActive), ReceiveUntil: &past},
+		{OrderNo: "GMAIL-NEW-COMPLETED", ProductType: string(domain.ProductTypeGmail), ServiceMode: string(domain.ServiceModeCode), Status: string(domain.OrderStatusCompleted), ServiceCleanupStatus: "none", AfterSaleUntil: &past},
+		{OrderNo: "GMAIL-RETIRED-COMPLETED", ProductType: string(domain.ProductTypeGmail), ServiceMode: string(domain.ServiceModeCode), Status: string(domain.OrderStatusCompleted), ServiceCleanupStatus: "none", AfterSaleUntil: &past},
+	} {
+		require.NoError(t, db.Create(&order).Error)
+	}
+	require.NoError(t, db.Exec(`INSERT INTO gmail_code_sessions(order_no, source, status)
+		VALUES ('GMAIL-RETIRED-ACTIVE', 'local', 'unknown'),
+		       ('GMAIL-RETIRED-COMPLETED', 'local', 'unknown')`).Error)
+	repo := NewRepo(db)
+
+	expired, err := repo.ListExpiredCodeOrderNos(context.Background(), time.Now().UTC(), 20)
+	require.NoError(t, err)
+	require.Equal(t, []string{"GMAIL-NEW-ACTIVE", "GMAIL-RETIRED-ACTIVE"}, expired)
+	cleanup, err := repo.ListCodeOrderNosReadyForCleanup(context.Background(), time.Now().UTC(), 20)
+	require.NoError(t, err)
+	require.Equal(t, []string{"GMAIL-NEW-COMPLETED", "GMAIL-RETIRED-COMPLETED"}, cleanup)
 }

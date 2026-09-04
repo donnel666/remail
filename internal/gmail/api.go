@@ -666,7 +666,7 @@ func writeGmailError(c *gin.Context, err error) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Resource service is temporarily unavailable.", "requestId": requestID})
 	case errors.Is(err, ErrLocalResourceBusy):
 		c.JSON(http.StatusConflict, gin.H{"message": "Gmail resource is leased or sold.", "requestId": requestID})
-	case errors.Is(err, ErrSessionMissing), errors.Is(err, ErrLocalResourceMissing), errors.Is(err, ErrGmailImportNotFound):
+	case errors.Is(err, ErrLocalResourceMissing), errors.Is(err, ErrGmailImportNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"message": "Resource not found.", "requestId": requestID})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "An unexpected error occurred.", "requestId": requestID})

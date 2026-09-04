@@ -32,11 +32,9 @@ import (
 	openapiapi "github.com/donnel666/remail/internal/openapi/api"
 	"github.com/donnel666/remail/internal/platform"
 	proxyapi "github.com/donnel666/remail/internal/proxy/api"
-	"github.com/donnel666/remail/internal/smsbower"
 	systemsettingsapi "github.com/donnel666/remail/internal/systemsettings/api"
 	settingsdomain "github.com/donnel666/remail/internal/systemsettings/domain"
 	tradeapi "github.com/donnel666/remail/internal/trade/api"
-	"github.com/donnel666/remail/internal/upstream"
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
 )
@@ -269,12 +267,6 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 			owner, err := iamMod.AdminResourceOwners.ValidateTargetOwner(ctx, ownerID)
 			return owner != nil && owner.ID != 0 && owner.Enabled, err
 		})
-		smsbowerMod := smsbower.NewModule(p.DB, p.Asynq)
-		upstreamRouter := upstream.NewRouter(smsbowerMod.Service)
-		smsbowerMod.Service.SetNotifier(smsbowerAlertMailer{users: iamMod.Users, delivery: mailMod.DeliveryUseCase})
-		allocMod.UseCase.SetProductInventoryOverlay(productInventoryOverlayChain{
-			smsbowerInventoryOverlay{smsbower: smsbowerMod.Service},
-		})
 		gmailapi.RegisterRoutes(v1, gmailMod, iamSessionFetcher, iamMod.PermissionChecker)
 		cleanupFuncs = append(cleanupFuncs, gmailapi.RegisterTaskHandlers(taskMux, gmailMod.Service))
 		icloudMod = icloudapi.NewModule(p.DB, p.Asynq, fileStore, p.Redis)
@@ -292,15 +284,10 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		kitesim.RegisterRoutes(v1, kitesimService, iamSessionFetcher, iamMod.PermissionChecker)
 		kitesim.RegisterTaskHandlers(taskMux, kitesimService)
 		cleanupFuncs = append(cleanupFuncs, kitesim.StartOperationDispatcher(kitesimService))
-		smsbower.RegisterRoutes(v1, smsbowerMod, iamSessionFetcher, iamMod.PermissionChecker, systemSettingsMod.Settings)
-		cleanupFuncs = append(cleanupFuncs, smsbower.RegisterTaskHandlers(taskMux, smsbowerMod.Service))
-
 		// Trade module (unified console/API Key checkout and order query).
 		tradeMod := tradeapi.NewModule(p.DB, coreMod.ProjectUseCase, billingMod.WalletUseCase, allocMod.UseCase, openapiMod.UseCase, p.Redis)
-		tradeMod.UseCase.SetGmailPorts(gmailMod.Service, gmailDeliveryComposite{gmail: gmailMod.Service, smsbower: smsbowerMod.Service})
-		tradeMod.UseCase.SetUpstreams(upstreamRouter)
+		tradeMod.UseCase.SetGmailSupplyPort(gmailMod.Service)
 		gmailMod.Service.SetTrade(tradeMod.UseCase)
-		smsbowerMod.Service.SetTrade(tradeMod.UseCase)
 		tradeMod.UseCase.SetOwnerLookupPort(orderOwnerDirectory{owners: iamMod.AdminResourceOwners})
 		tradeapi.RegisterRoutes(v1, tradeMod, iamSessionFetcher, iamMod.PermissionChecker)
 		cleanupFuncs = append(cleanupFuncs, tradeapi.StartLifecycleScanner(tradeMod))
@@ -326,11 +313,10 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		// MailMatch module (order-scoped message cache, async fetch and matching).
 		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Redis, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase, coreMod.ValidationUseCase)
-		mailmatchMod.SetUpstreamPickup(gmailPickupAdapter{upstreams: upstreamRouter, tokens: openapiMod.UseCase})
-		mailmatchMod.SetGmailMatchPort(gmailMod.Service)
-		mailmatchMod.SetGmailPurchaseFetchPort(gmailMod.Service)
+		mailmatchMod.SetGmailMailFetchPort(gmailMod.Service)
+		mailmatchMod.SetGmailResourceFetchPort(gmailResourceFetchAdapter{service: gmailMod.Service})
 		mailmatchMod.SetICloudMailFetchPort(iCloudMailFetchAdapter{service: icloudMod.Service})
-		mailmatchMod.SetBotDiagnosisRefresh(botCodeDiagnosisRefreshAdapter{local: mailmatchMod.UseCase, upstreams: upstreamRouter})
+		mailmatchMod.SetBotDiagnosisRefresh(mailmatchMod.UseCase)
 		gmailMod.Service.SetMailIngest(gmailMailIngestAdapter{mailmatch: mailmatchMod.UseCase})
 		mailmatchMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
 		mailmatchMod.SetBackgroundExecutionGate(p.BackgroundLoad)

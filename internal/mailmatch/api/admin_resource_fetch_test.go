@@ -119,6 +119,24 @@ func TestAdminResourceFetchRouteAcceptsICloudType(t *testing.T) {
 	require.Equal(t, "icloud_resource", body["task"].(map[string]any)["bizType"])
 }
 
+func TestAdminResourceFetchRouteAcceptsGmailType(t *testing.T) {
+	router, repo, _ := newAdminResourceFetchTestRouter(true)
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/resources/100/messages/fetch?type=gmail", nil)
+	req.Header.Set("X-Request-ID", "gmail-fetch-request")
+	req.Header.Set("Idempotency-Key", "gmail-fetch-idempotency")
+	req.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "valid"})
+	req.AddCookie(&http.Cookie{Name: middleware.CSRFCookieName, Value: "csrf"})
+	req.Header.Set(middleware.CSRFHeaderName, "csrf")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+
+	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+	require.Equal(t, "mailmatch.admin_gmail_resource.fetch", repo.operationLog.OperationType)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Equal(t, "gmail_resource", body["task"].(map[string]any)["bizType"])
+}
+
 func TestAdminResourceProjectScanUsesIndependentHistoryTaskIdentity(t *testing.T) {
 	router, repo, checker := newAdminResourceFetchTestRouter(true)
 	response := performAdminResourceHistoryRequest(router)
@@ -302,7 +320,15 @@ func (*adminResourceFetchRepoStub) AssertResourceFetchFence(context.Context, uin
 	return nil
 }
 
+func (*adminResourceFetchRepoStub) AssertGmailResourceFetchFence(context.Context, uint, uint64, uint64) error {
+	return nil
+}
+
 func (*adminResourceFetchRepoStub) CompleteResourceFetch(context.Context, uint, uint64, uint64, string, *bool, int, int, int, time.Time, *governancedomain.SystemLog) error {
+	return nil
+}
+
+func (*adminResourceFetchRepoStub) CompleteGmailResourceFetch(context.Context, uint, uint64, uint64, int, int, int, time.Time, *governancedomain.SystemLog) error {
 	return nil
 }
 

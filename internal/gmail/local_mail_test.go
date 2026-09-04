@@ -3,13 +3,9 @@ package gmail
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
-	allocapp "github.com/donnel666/remail/internal/alloc/app"
-	allocinfra "github.com/donnel666/remail/internal/alloc/infra"
-	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	tradedomain "github.com/donnel666/remail/internal/trade/domain"
 	"github.com/emersion/go-imap/v2"
 	"github.com/glebarez/sqlite"
@@ -17,19 +13,14 @@ import (
 	"gorm.io/gorm"
 )
 
-func newLocalCodeSession(t *testing.T, name string, clock *time.Time, codeWindowMinutes ...int) (*gorm.DB, *Service, sessionModel, uint) {
+func newLocalMailResource(t *testing.T, name string, clock *time.Time) (*gorm.DB, *Service, string, uint) {
 	t.Helper()
-	windowMinutes := 10
-	if len(codeWindowMinutes) > 0 {
-		windowMinutes = codeWindowMinutes[0]
-	}
 	db, err := gorm.Open(sqlite.Open("file:"+name+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
-		&resourceRootModel{}, &localResourceModel{}, &localAllocationGuardModel{}, &allocationModel{}, &sessionModel{},
+		&resourceRootModel{}, &localResourceModel{}, &localAllocationGuardModel{}, &allocationModel{},
 	))
 	require.NoError(t, db.Exec("CREATE UNIQUE INDEX idx_test_local_allocation_order ON gmail_allocations(order_no)").Error)
-	require.NoError(t, db.Exec("CREATE UNIQUE INDEX idx_test_local_session_order ON gmail_code_sessions(order_no)").Error)
 
 	root := resourceRootModel{Type: "gmail", OwnerUserID: 1}
 	require.NoError(t, db.Create(&root).Error)
@@ -51,157 +42,7 @@ func newLocalCodeSession(t *testing.T, name string, clock *time.Time, codeWindow
 		Email: "local+project@gmail.com", Status: AllocationStatusAllocated,
 		CostPointsSnapshot: "1",
 	}).Error)
-	sessionID, err := service.CreateSession(context.Background(), tradeapp.GmailSessionCommand{
-		OrderNo: orderNo, ProjectID: 7, ProductID: 71, CodeWindowMinutes: windowMinutes,
-	})
-	require.NoError(t, err)
-	var session sessionModel
-	require.NoError(t, db.First(&session, sessionID).Error)
-	return db, service, session, root.ID
-}
-
-func TestLocalGmailSessionUsesProjectCodeWindow(t *testing.T) {
-	clock := time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)
-	_, _, session, _ := newLocalCodeSession(t, "gmail-local-project-window", &clock, 17)
-
-	require.NotNil(t, session.StartedAt)
-	require.NotNil(t, session.ExpiresAt)
-	require.Equal(t, 17*time.Minute, session.ExpiresAt.Sub(*session.StartedAt))
-}
-
-func loadGmailSession(t *testing.T, db *gorm.DB, sessionID uint) sessionModel {
-	t.Helper()
-	var session sessionModel
-	require.NoError(t, db.First(&session, sessionID).Error)
-	return session
-}
-
-func newLocalGmailTradeSpy(db *gorm.DB) *gmailTradeSpy {
-	allocator := allocapp.NewUseCase(allocinfra.NewRepo(db))
-	return &gmailTradeSpy{release: func(ctx context.Context, orderNo string) error {
-		_, err := allocator.ReleaseByOrder(ctx, orderNo)
-		return err
-	}}
-}
-
-func TestLocalGmailRecordsThreeCodesAndDeduplicatesReplayedMail(t *testing.T) {
-	clock := time.Date(2026, 8, 3, 1, 2, 3, 0, time.UTC)
-	db, service, session, _ := newLocalCodeSession(t, "gmail-local-three-codes", &clock)
-	trade := newLocalGmailTradeSpy(db)
-	service.SetTrade(trade)
-
-	require.NoError(t, service.RecordMatchedCode(context.Background(), session.OrderNo, "too-early", clock.Add(-time.Second)))
-	require.NoError(t, service.RecordMatchedCode(context.Background(), session.OrderNo, "too-late", clock.Add(10*time.Minute)))
-	firstReceivedAt := clock.Add(time.Minute)
-	require.NoError(t, service.RecordMatchedCode(context.Background(), session.OrderNo, "111111", firstReceivedAt))
-	require.NoError(t, service.RecordMatchedCode(context.Background(), session.OrderNo, "111111", firstReceivedAt))
-
-	session = loadGmailSession(t, db, session.ID)
-	require.EqualValues(t, 1, session.ReceivedCount)
-	require.Equal(t, SessionActive, session.Status)
-	require.NoError(t, service.RecordMatchedCode(context.Background(), session.OrderNo, "111111", firstReceivedAt.Add(time.Minute)))
-	session = loadGmailSession(t, db, session.ID)
-	require.EqualValues(t, 2, session.ReceivedCount, "the same code from a different mail still counts")
-	require.Equal(t, SessionActive, session.Status)
-
-	require.NoError(t, service.RecordMatchedCode(context.Background(), session.OrderNo, "333333", firstReceivedAt.Add(2*time.Minute)))
-	session = loadGmailSession(t, db, session.ID)
-	require.EqualValues(t, MaxCodes, session.ReceivedCount)
-	require.Equal(t, SessionCompleted, session.Status)
-	require.Nil(t, session.NextPollAt)
-	require.Equal(t, []string{session.OrderNo}, trade.completed)
-	require.Empty(t, trade.failed)
-	var allocation allocationModel
-	require.NoError(t, db.Where("order_no = ?", session.OrderNo).Take(&allocation).Error)
-	require.Equal(t, AllocationStatusReleased, allocation.Status)
-	require.NotNil(t, allocation.ReleasedAt)
-}
-
-func TestLocalGmailExpirySettlesByCodeCount(t *testing.T) {
-	for _, test := range []struct {
-		count        int
-		wantStatus   string
-		wantComplete bool
-	}{
-		{count: 0, wantStatus: SessionCancelled},
-		{count: 1, wantStatus: SessionCompleted, wantComplete: true},
-		{count: 2, wantStatus: SessionCompleted, wantComplete: true},
-	} {
-		t.Run(fmt.Sprintf("%d_codes", test.count), func(t *testing.T) {
-			startedAt := time.Date(2026, 8, 3, 2, 0, 0, 0, time.UTC)
-			clock := startedAt
-			db, service, session, _ := newLocalCodeSession(t, fmt.Sprintf("gmail-local-expiry-%d", test.count), &clock)
-			trade := newLocalGmailTradeSpy(db)
-			service.SetTrade(trade)
-			for i := 0; i < test.count; i++ {
-				require.NoError(t, service.RecordMatchedCode(
-					context.Background(), session.OrderNo, fmt.Sprintf("code-%d", i+1), startedAt.Add(time.Duration(i+1)*time.Minute),
-				))
-			}
-			clock = startedAt.Add(10 * time.Minute)
-			require.NoError(t, service.Poll(context.Background(), session.ID))
-
-			session = loadGmailSession(t, db, session.ID)
-			require.Equal(t, test.wantStatus, session.Status)
-			require.Nil(t, session.NextPollAt)
-			require.Len(t, trade.activations, 1)
-			if test.wantComplete {
-				require.Equal(t, []string{session.OrderNo}, trade.completed)
-				require.Empty(t, trade.failed)
-			} else {
-				require.Equal(t, []string{session.OrderNo}, trade.failed)
-				require.Empty(t, trade.completed)
-			}
-			var allocation allocationModel
-			require.NoError(t, db.Where("order_no = ?", session.OrderNo).Take(&allocation).Error)
-			require.Equal(t, AllocationStatusReleased, allocation.Status)
-		})
-	}
-}
-
-type retryGmailTradeSpy struct {
-	gmailTradeSpy
-	completeFailures int
-}
-
-func (s *retryGmailTradeSpy) CompleteGmailOrder(ctx context.Context, orderNo, reason string) error {
-	if s.completeFailures > 0 {
-		s.completed = append(s.completed, orderNo)
-		s.completeFailures--
-		return errors.New("trade temporarily unavailable")
-	}
-	return s.gmailTradeSpy.CompleteGmailOrder(ctx, orderNo, reason)
-}
-
-func TestLocalGmailTerminalCallbackRetriesBeforeAllocationRelease(t *testing.T) {
-	clock := time.Date(2026, 8, 3, 3, 0, 0, 0, time.UTC)
-	db, service, session, _ := newLocalCodeSession(t, "gmail-local-callback-retry", &clock)
-	trade := &retryGmailTradeSpy{gmailTradeSpy: *newLocalGmailTradeSpy(db), completeFailures: 1}
-	service.SetTrade(trade)
-	for i := 0; i < MaxCodes; i++ {
-		err := service.RecordMatchedCode(
-			context.Background(), session.OrderNo, fmt.Sprintf("code-%d", i+1), clock.Add(time.Duration(i+1)*time.Minute),
-		)
-		if i < MaxCodes-1 {
-			require.NoError(t, err)
-		} else {
-			require.Error(t, err)
-		}
-	}
-
-	session = loadGmailSession(t, db, session.ID)
-	require.Equal(t, SessionCompleted, session.Status)
-	require.NotNil(t, session.NextPollAt)
-	var allocation allocationModel
-	require.NoError(t, db.Where("order_no = ?", session.OrderNo).Take(&allocation).Error)
-	require.Equal(t, AllocationStatusAllocated, allocation.Status)
-
-	require.NoError(t, service.Poll(context.Background(), session.ID))
-	session = loadGmailSession(t, db, session.ID)
-	require.Nil(t, session.NextPollAt)
-	require.Equal(t, []string{session.OrderNo, session.OrderNo}, trade.completed)
-	require.NoError(t, db.Where("order_no = ?", session.OrderNo).Take(&allocation).Error)
-	require.Equal(t, AllocationStatusReleased, allocation.Status)
+	return db, service, orderNo, root.ID
 }
 
 type localMailIngestSpy struct {
@@ -209,24 +50,30 @@ type localMailIngestSpy struct {
 	messageIDs  []string
 	recipients  []string
 	folders     []string
+	fences      int
 	failAt      int
 }
 
-func (s *localMailIngestSpy) IngestGmailMail(_ context.Context, resourceID uint, recipient string, _ []byte, _ time.Time, messageID, folder string) error {
+func (s *localMailIngestSpy) IngestGmailMail(ctx context.Context, resourceID uint, recipient string, _ []byte, _ time.Time, messageID, folder string, fence func(context.Context) error) (int, int, error) {
+	if fence != nil {
+		s.fences++
+		if err := fence(ctx); err != nil {
+			return 0, 0, err
+		}
+	}
 	s.resourceIDs = append(s.resourceIDs, resourceID)
 	s.messageIDs = append(s.messageIDs, messageID)
 	s.recipients = append(s.recipients, recipient)
 	s.folders = append(s.folders, folder)
 	if s.failAt > 0 && len(s.messageIDs) == s.failAt {
-		return errors.New("mailmatch temporarily unavailable")
+		return 0, 0, errors.New("mailmatch temporarily unavailable")
 	}
-	return nil
+	return 1, 0, nil
 }
 
 func TestLocalGmailCursorAdvancesOnlyAfterWholeFetchIsIngested(t *testing.T) {
 	clock := time.Date(2026, 8, 3, 4, 0, 0, 0, time.UTC)
-	db, service, session, _ := newLocalCodeSession(t, "gmail-local-cursor", &clock)
-	service.SetTrade(newLocalGmailTradeSpy(db))
+	db, service, orderNo, resourceID := newLocalMailResource(t, "gmail-local-cursor", &clock)
 	cursors := make([]localGmailFolderCursors, 0, 2)
 	service.fetch = func(_ context.Context, email, _ string, cursor localGmailFolderCursors, _ time.Time, fullHistory bool) ([]localGmailFetchedMessage, localGmailFolderCursors, error) {
 		require.Equal(t, "local@gmail.com", email)
@@ -239,19 +86,20 @@ func TestLocalGmailCursorAdvancesOnlyAfterWholeFetchIsIngested(t *testing.T) {
 	}
 	mail := &localMailIngestSpy{failAt: 2}
 	service.SetMailIngest(mail)
-	require.Error(t, service.Poll(context.Background(), session.ID))
-	session = loadGmailSession(t, db, session.ID)
-	require.Zero(t, session.ProviderCursor)
-	require.Zero(t, session.ProviderSpamCursor)
+	require.Error(t, service.FetchLocalOrderMail(context.Background(), orderNo))
+	var resource localResourceModel
+	require.NoError(t, db.First(&resource, resourceID).Error)
+	require.Zero(t, resource.ProviderCursor)
+	require.Zero(t, resource.ProviderSpamCursor)
 
 	mail.failAt = 0
 	mail.messageIDs = nil
 	mail.recipients = nil
 	mail.folders = nil
-	require.NoError(t, service.Poll(context.Background(), session.ID))
-	session = loadGmailSession(t, db, session.ID)
-	require.EqualValues(t, joinLocalGmailCursor(77, 11), session.ProviderCursor)
-	require.EqualValues(t, joinLocalGmailCursor(88, 12), session.ProviderSpamCursor)
+	require.NoError(t, service.FetchLocalOrderMail(context.Background(), orderNo))
+	require.NoError(t, db.First(&resource, resourceID).Error)
+	require.EqualValues(t, joinLocalGmailCursor(77, 11), resource.ProviderCursor)
+	require.EqualValues(t, joinLocalGmailCursor(88, 12), resource.ProviderSpamCursor)
 	require.Equal(t, []localGmailFolderCursors{{}, {}}, cursors)
 	require.Equal(t, []string{"local+one@gmail.com", "local+two@gmail.com"}, mail.recipients)
 	require.Equal(t, []string{localGmailInboxFolder, localGmailSpamFolder}, mail.folders)
@@ -279,6 +127,12 @@ func TestLocalGmailCursorIncludesUIDValidity(t *testing.T) {
 	require.NotEqual(t, localGmailProviderMessageID(localGmailSpamFolder, uidValidity, uid), localGmailProviderMessageID(localGmailInboxFolder, uidValidity, uid))
 	require.EqualValues(t, 456, localGmailCursorUID(cursor, 123))
 	require.Zero(t, localGmailCursorUID(cursor, 124), "a new UIDVALIDITY must reset the mailbox cursor")
+}
+
+func TestLocalGmailIncrementalCursorIgnoresMessageAge(t *testing.T) {
+	since := time.Now().UTC().Add(-24 * time.Hour)
+	require.True(t, localGmailSearchSince(7, since).IsZero())
+	require.Equal(t, since.Add(-2*time.Minute), localGmailSearchSince(0, since))
 }
 
 func TestLocalGmailCandidateFoldersPreferSpecialUseSpam(t *testing.T) {
@@ -350,10 +204,10 @@ func TestLocalGmailFetchLimitsBodyAndBatchMemory(t *testing.T) {
 	require.Nil(t, historyBodySection.Partial)
 }
 
-func TestFetchLocalPurchaseMailUsesTypedAllocationAndStableUIDs(t *testing.T) {
+func TestFetchLocalOrderMailUsesSharedResourceCursorForPurchases(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:gmail-local-purchase-mail?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &allocationModel{}, &sessionModel{}))
+	require.NoError(t, db.AutoMigrate(&resourceRootModel{}, &localResourceModel{}, &allocationModel{}))
 	root := resourceRootModel{Type: "gmail", OwnerUserID: 1}
 	require.NoError(t, db.Create(&root).Error)
 	require.NoError(t, db.Create(&localResourceModel{
@@ -372,6 +226,8 @@ func TestFetchLocalPurchaseMailUsesTypedAllocationAndStableUIDs(t *testing.T) {
 	require.NoError(t, db.Create(&allocation).Error)
 
 	service := NewService(db, nil)
+	now := allocatedAt.Add(time.Hour)
+	service.now = func() time.Time { return now }
 	mail := &localMailIngestSpy{}
 	service.SetMailIngest(mail)
 	const uidValidity = 91
@@ -393,65 +249,179 @@ func TestFetchLocalPurchaseMailUsesTypedAllocationAndStableUIDs(t *testing.T) {
 		}, localGmailFolderCursors{Inbox: providerCursor}, nil
 	}
 
-	require.NoError(t, service.FetchLocalPurchaseMail(context.Background(), allocation.OrderNo))
-	require.NoError(t, service.FetchLocalPurchaseMail(context.Background(), allocation.OrderNo))
+	require.NoError(t, service.FetchLocalOrderMail(context.Background(), allocation.OrderNo))
+	require.NoError(t, service.FetchLocalOrderMail(context.Background(), allocation.OrderNo))
 	require.Equal(t, []localGmailFolderCursors{{}, {Inbox: providerCursor}}, cursors)
 	require.Len(t, sinceValues, 2)
-	require.True(t, sinceValues[0].Equal(allocatedAt))
-	require.True(t, sinceValues[1].Equal(allocatedAt))
+	require.True(t, sinceValues[0].Equal(now.Add(-90*24*time.Hour)))
+	require.True(t, sinceValues[1].Equal(now.Add(-90*24*time.Hour)))
 	require.Equal(t, []string{"inbox:91:101", "inbox:91:102"}, mail.messageIDs)
 	require.Equal(t, []string{"purchase.mail+order@gmail.com", "purchase.mail+order@gmail.com"}, mail.recipients)
 
-	var sessionCount int64
-	require.NoError(t, db.Model(&sessionModel{}).Count(&sessionCount).Error)
-	require.Zero(t, sessionCount)
 	require.NoError(t, db.First(&allocation, allocation.ID).Error)
 	require.Equal(t, AllocationStatusAllocated, allocation.Status)
-	require.Equal(t, providerCursor, allocation.ProviderCursor)
+	var resource localResourceModel
+	require.NoError(t, db.First(&resource, resourceID).Error)
+	require.Equal(t, providerCursor, resource.ProviderCursor)
 
 	service.fetch = func(context.Context, string, string, localGmailFolderCursors, time.Time, bool) ([]localGmailFetchedMessage, localGmailFolderCursors, error) {
 		return nil, localGmailFolderCursors{}, errLocalGmailAuthentication
 	}
-	require.Error(t, service.FetchLocalPurchaseMail(context.Background(), allocation.OrderNo))
+	require.Error(t, service.FetchLocalOrderMail(context.Background(), allocation.OrderNo))
 	require.NoError(t, db.First(&allocation, allocation.ID).Error)
 	require.Equal(t, AllocationStatusAllocated, allocation.Status, "purchase mail errors must not release or refund the purchase")
 }
 
-func TestLocalGmailAuthenticationFailureDisablesSupplyAndRefunds(t *testing.T) {
-	clock := time.Date(2026, 8, 3, 5, 0, 0, 0, time.UTC)
-	db, service, session, resourceID := newLocalCodeSession(t, "gmail-local-auth-failure", &clock)
-	trade := newLocalGmailTradeSpy(db)
+func TestFetchLocalResourceMailResumesLatestAllocationCursor(t *testing.T) {
+	clock := time.Date(2026, 9, 4, 2, 0, 0, 0, time.UTC)
+	db, service, _, resourceID := newLocalMailResource(t, "gmail-admin-resource-fetch", &clock)
+	require.NoError(t, db.Model(&localResourceModel{}).Where("id = ?", resourceID).Update("credential_revision", 3).Error)
+	require.NoError(t, db.Model(&localResourceModel{}).Where("id = ?", resourceID).Updates(map[string]any{
+		"provider_cursor": joinLocalGmailCursor(11, 20), "provider_spam_cursor": joinLocalGmailCursor(12, 7),
+	}).Error)
+	newOrder := allocationModel{
+		OrderNo: "GMAIL-NEW-CODE", GuardType: "gmail", ProjectID: 7, ProductID: 71,
+		Source: SourceLocal, ServiceMode: string(tradedomain.ServiceModeCode), ResourceID: &resourceID,
+		SupplyScope: AllocationSupplyPublic, Mailbox: GmailMailboxPlus,
+		Email: "local+new@gmail.com", Status: AllocationStatusAllocated, CostPointsSnapshot: "1",
+	}
+	require.NoError(t, db.Create(&newOrder).Error)
+	mail := &localMailIngestSpy{}
+	service.SetMailIngest(mail)
+	var seenCursors []localGmailFolderCursors
+	service.fetch = func(_ context.Context, email, appPassword string, cursor localGmailFolderCursors, since time.Time, fullHistory bool) ([]localGmailFetchedMessage, localGmailFolderCursors, error) {
+		require.Equal(t, "local@gmail.com", email)
+		require.Equal(t, "app-password", appPassword)
+		require.Equal(t, clock.Add(-90*24*time.Hour), since)
+		require.False(t, fullHistory)
+		seenCursors = append(seenCursors, cursor)
+		if len(seenCursors) > 1 {
+			return nil, cursor, nil
+		}
+		return []localGmailFetchedMessage{{
+			UID: 21, Folder: localGmailInboxFolder, Recipient: "local+manual@gmail.com",
+			ProviderMessageID: "inbox:11:21", Raw: []byte("message"), ReceivedAt: clock,
+		}}, localGmailFolderCursors{Inbox: joinLocalGmailCursor(11, 21), Spam: joinLocalGmailCursor(12, 7)}, nil
+	}
+
+	fetched, stored, matched, err := service.FetchLocalResourceMail(context.Background(), resourceID, 3)
+	require.NoError(t, err)
+	require.Equal(t, 1, fetched)
+	require.Equal(t, 1, stored)
+	require.Zero(t, matched)
+	require.NoError(t, service.FetchLocalOrderMail(context.Background(), newOrder.OrderNo))
+	require.Equal(t, []localGmailFolderCursors{
+		{Inbox: joinLocalGmailCursor(11, 20), Spam: joinLocalGmailCursor(12, 7)},
+		{Inbox: joinLocalGmailCursor(11, 21), Spam: joinLocalGmailCursor(12, 7)},
+	}, seenCursors)
+	require.Equal(t, []string{"local+manual@gmail.com"}, mail.recipients)
+	var resource localResourceModel
+	require.NoError(t, db.First(&resource, resourceID).Error)
+	require.EqualValues(t, joinLocalGmailCursor(11, 21), resource.ProviderCursor)
+	require.EqualValues(t, joinLocalGmailCursor(12, 7), resource.ProviderSpamCursor)
+
+	_, _, _, err = service.FetchLocalResourceMail(context.Background(), resourceID, 4)
+	require.ErrorIs(t, err, ErrLocalValidationConflict)
+}
+
+func TestFetchLocalResourceMailUsesSharedLookbackBeforeFirstCursor(t *testing.T) {
+	clock := time.Date(2026, 9, 4, 2, 0, 0, 0, time.UTC)
+	db, service, _, resourceID := newLocalMailResource(t, "gmail-resource-lookback", &clock)
+	require.NoError(t, db.Model(&localResourceModel{}).Where("id = ?", resourceID).Update("credential_revision", 1).Error)
+	service.SetMailIngest(&localMailIngestSpy{})
+	service.fetch = func(_ context.Context, _, _ string, cursor localGmailFolderCursors, since time.Time, _ bool) ([]localGmailFetchedMessage, localGmailFolderCursors, error) {
+		require.Equal(t, localGmailFolderCursors{}, cursor)
+		require.Equal(t, clock.Add(-90*24*time.Hour), since)
+		return nil, cursor, nil
+	}
+
+	_, _, _, err := service.FetchLocalResourceMail(context.Background(), resourceID, 1)
+	require.NoError(t, err)
+}
+
+func TestFetchLocalResourceMailDoesNotOverwriteConcurrentCursor(t *testing.T) {
+	clock := time.Date(2026, 9, 4, 2, 0, 0, 0, time.UTC)
+	db, service, _, resourceID := newLocalMailResource(t, "gmail-resource-cursor-cas", &clock)
+	require.NoError(t, db.Model(&localResourceModel{}).Where("id = ?", resourceID).Update("credential_revision", 1).Error)
+	service.SetMailIngest(&localMailIngestSpy{})
+	newer := localGmailFolderCursors{Inbox: joinLocalGmailCursor(11, 30), Spam: joinLocalGmailCursor(12, 9)}
+	service.fetch = func(context.Context, string, string, localGmailFolderCursors, time.Time, bool) ([]localGmailFetchedMessage, localGmailFolderCursors, error) {
+		require.NoError(t, db.Model(&localResourceModel{}).Where("id = ?", resourceID).Updates(map[string]any{
+			"provider_cursor": newer.Inbox, "provider_spam_cursor": newer.Spam,
+		}).Error)
+		return nil, localGmailFolderCursors{Inbox: joinLocalGmailCursor(11, 21), Spam: joinLocalGmailCursor(12, 8)}, nil
+	}
+
+	_, _, _, err := service.FetchLocalResourceMail(context.Background(), resourceID, 1)
+	require.NoError(t, err)
+	var resource localResourceModel
+	require.NoError(t, db.First(&resource, resourceID).Error)
+	require.Equal(t, newer.Inbox, resource.ProviderCursor)
+	require.Equal(t, newer.Spam, resource.ProviderSpamCursor)
+}
+
+func TestFetchLocalResourceMailFenceStopsIngestAndCursor(t *testing.T) {
+	clock := time.Date(2026, 9, 4, 2, 0, 0, 0, time.UTC)
+	db, service, _, resourceID := newLocalMailResource(t, "gmail-resource-fetch-fence", &clock)
+	require.NoError(t, db.Model(&localResourceModel{}).Where("id = ?", resourceID).Update("credential_revision", 1).Error)
+	mail := &localMailIngestSpy{}
+	service.SetMailIngest(mail)
+	service.fetch = func(context.Context, string, string, localGmailFolderCursors, time.Time, bool) ([]localGmailFetchedMessage, localGmailFolderCursors, error) {
+		return []localGmailFetchedMessage{{
+			UID: 1, Folder: localGmailInboxFolder, Recipient: "local+fenced@gmail.com",
+			ProviderMessageID: "inbox:11:1", Raw: []byte("message"), ReceivedAt: clock,
+		}}, localGmailFolderCursors{Inbox: joinLocalGmailCursor(11, 1)}, nil
+	}
+	wantErr := errors.New("fetch claim replaced")
+	calls := 0
+	fence := func(context.Context) error {
+		calls++
+		if calls > 1 {
+			return wantErr
+		}
+		return nil
+	}
+
+	_, _, _, err := service.FetchLocalResourceMailWithFence(context.Background(), resourceID, 1, fence)
+	require.ErrorIs(t, err, wantErr)
+	require.Empty(t, mail.messageIDs)
+	var resource localResourceModel
+	require.NoError(t, db.First(&resource, resourceID).Error)
+	require.Zero(t, resource.ProviderCursor)
+}
+
+func TestFetchLocalOrderMailAuthenticationFailureMarksResourceAbnormal(t *testing.T) {
+	clock := time.Date(2026, 9, 4, 2, 0, 0, 0, time.UTC)
+	db, service, orderNo, resourceID := newLocalMailResource(t, "gmail-order-auth-failure", &clock)
+	service.SetMailIngest(&localMailIngestSpy{})
+	trade := &gmailTradeSpy{}
 	service.SetTrade(trade)
+	service.fetch = func(context.Context, string, string, localGmailFolderCursors, time.Time, bool) ([]localGmailFetchedMessage, localGmailFolderCursors, error) {
+		return nil, localGmailFolderCursors{}, errLocalGmailAuthentication
+	}
+
+	err := service.FetchLocalOrderMail(context.Background(), orderNo)
+	require.ErrorIs(t, err, errLocalGmailAuthentication)
+	var resource localResourceModel
+	require.NoError(t, db.First(&resource, resourceID).Error)
+	require.Equal(t, LocalResourceAbnormal, resource.Status)
+	require.Equal(t, []uint{resourceID}, trade.refundedResourceIDs)
+}
+
+func TestDisabledGmailAuthenticationFailureKeepsAdministratorState(t *testing.T) {
+	clock := time.Date(2026, 9, 4, 2, 0, 0, 0, time.UTC)
+	db, service, _, resourceID := newLocalMailResource(t, "gmail-disabled-auth-failure", &clock)
+	require.NoError(t, db.Model(&localResourceModel{}).Where("id = ?", resourceID).Updates(map[string]any{
+		"status": LocalResourceDisabled, "credential_revision": 1,
+	}).Error)
 	service.SetMailIngest(&localMailIngestSpy{})
 	service.fetch = func(context.Context, string, string, localGmailFolderCursors, time.Time, bool) ([]localGmailFetchedMessage, localGmailFolderCursors, error) {
 		return nil, localGmailFolderCursors{}, errLocalGmailAuthentication
 	}
 
-	require.NoError(t, service.Poll(context.Background(), session.ID))
-	session = loadGmailSession(t, db, session.ID)
-	require.Equal(t, SessionFailed, session.Status)
-	require.Nil(t, session.NextPollAt)
-	require.Equal(t, []string{session.OrderNo}, trade.failed)
+	_, _, _, err := service.FetchLocalResourceMail(context.Background(), resourceID, 1)
+	require.ErrorIs(t, err, errLocalGmailAuthentication)
 	var resource localResourceModel
 	require.NoError(t, db.First(&resource, resourceID).Error)
-	require.Equal(t, LocalResourceAbnormal, resource.Status)
-	var allocation allocationModel
-	require.NoError(t, db.Where("order_no = ?", session.OrderNo).Take(&allocation).Error)
-	require.Equal(t, AllocationStatusReleased, allocation.Status)
-}
-
-func TestCancelLocalGmailReleasesWithoutRemoteAction(t *testing.T) {
-	clock := time.Date(2026, 8, 3, 6, 0, 0, 0, time.UTC)
-	db, service, session, _ := newLocalCodeSession(t, "gmail-local-cancel", &clock)
-	trade := newLocalGmailTradeSpy(db)
-	service.SetTrade(trade)
-
-	require.NoError(t, service.CancelGmailOrder(context.Background(), session.OrderNo))
-	session = loadGmailSession(t, db, session.ID)
-	require.Equal(t, SessionCancelled, session.Status)
-	require.Nil(t, session.NextPollAt)
-	require.Equal(t, []string{session.OrderNo}, trade.failed)
-	var allocation allocationModel
-	require.NoError(t, db.Where("order_no = ?", session.OrderNo).Take(&allocation).Error)
-	require.Equal(t, AllocationStatusReleased, allocation.Status)
+	require.Equal(t, LocalResourceDisabled, resource.Status)
 }

@@ -7,37 +7,67 @@ import (
 
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
+	tradeapp "github.com/donnel666/remail/internal/trade/app"
+	tradedomain "github.com/donnel666/remail/internal/trade/domain"
 	"github.com/stretchr/testify/require"
 )
 
-type gmailMatchStub struct {
-	orderNo    string
-	code       string
-	receivedAt time.Time
-	calls      int
+type purchaseMatchRepoStub struct {
+	tradeapp.Repository
+	order     tradedomain.Order
+	activated int
+	completed int
 }
 
-func (s *gmailMatchStub) RecordMatchedCode(_ context.Context, orderNo, code string, receivedAt time.Time) error {
-	s.calls++
-	s.orderNo = orderNo
-	s.code = code
-	s.receivedAt = receivedAt
+func (s *purchaseMatchRepoStub) FindOrder(context.Context, string) (*tradedomain.Order, error) {
+	order := s.order
+	return &order, nil
+}
+
+func (*purchaseMatchRepoStub) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+func (s *purchaseMatchRepoStub) ActivatePurchaseOrder(_ context.Context, _ string, matchedAt, afterSaleUntil time.Time) (*tradedomain.Order, bool, error) {
+	s.activated++
+	s.order.ActivatedAt = &matchedAt
+	s.order.AfterSaleUntil = &afterSaleUntil
+	return &s.order, true, nil
+}
+
+func (s *purchaseMatchRepoStub) CompleteCodeOrder(_ context.Context, _ string, _ time.Time, readUntil time.Time) (*tradedomain.Order, bool, error) {
+	s.completed++
+	s.order.Status = tradedomain.OrderStatusCompleted
+	s.order.ReceiveUntil = &readUntil
+	return &s.order, true, nil
+}
+
+type purchaseMatchTokenStub struct {
+	tradeapp.OrderTokenPort
+	extended int
+}
+
+func (s *purchaseMatchTokenStub) ExtendOrderToken(context.Context, string, time.Time) error {
+	s.extended++
 	return nil
 }
 
-func TestMatchResultAdapterRoutesGmailCode(t *testing.T) {
+func TestMatchResultAdapterRoutesGmailCodeToSharedTradeLifecycle(t *testing.T) {
 	matchedAt := time.Date(2026, 8, 3, 10, 0, 0, 0, time.UTC)
-	adapter := &matchResultAdapter{}
-	port := &gmailMatchStub{}
-	module := &Module{matchResults: adapter}
-	module.SetGmailMatchPort(port)
+	repo := &purchaseMatchRepoStub{order: tradedomain.Order{
+		OrderNo: "OR_GMAIL_MATCH", ServiceMode: tradedomain.ServiceModeCode,
+		Status: tradedomain.OrderStatusActive,
+	}}
+	tokens := &purchaseMatchTokenStub{}
+	trade := tradeapp.NewUseCase(repo, nil, nil, nil, tokens)
+	adapter := &matchResultAdapter{trade: trade}
 
 	err := adapter.NotifyMatchedCode(context.Background(), mailmatchapp.MatchResult{
 		OrderNo: "OR_GMAIL_EMPTY", ResourceType: domain.ResourceTypeGmail,
 		ServiceMode: "code", VerificationCode: "  ", MatchedAt: matchedAt,
 	})
 	require.NoError(t, err)
-	require.Zero(t, port.calls, "mail without an extracted code must not block the Gmail polling cursor")
+	require.Zero(t, repo.completed)
 
 	err = adapter.NotifyMatchedCode(context.Background(), mailmatchapp.MatchResult{
 		OrderNo:          "OR_GMAIL_MATCH",
@@ -48,15 +78,27 @@ func TestMatchResultAdapterRoutesGmailCode(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, 1, port.calls)
-	require.Equal(t, "OR_GMAIL_MATCH", port.orderNo)
-	require.Equal(t, "123456", port.code)
-	require.Equal(t, matchedAt, port.receivedAt)
+	require.Equal(t, 1, repo.completed)
+	require.Equal(t, 1, tokens.extended)
+}
 
-	err = adapter.NotifyMatchedCode(context.Background(), mailmatchapp.MatchResult{
+func TestMatchResultAdapterRoutesGmailPurchaseToSharedTradeLifecycle(t *testing.T) {
+	matchedAt := time.Date(2026, 9, 4, 10, 0, 0, 0, time.UTC)
+	receiveUntil := matchedAt.Add(time.Hour)
+	repo := &purchaseMatchRepoStub{order: tradedomain.Order{
+		OrderNo: "OR_GMAIL_PURCHASE", ProjectID: 1, ProjectProductID: 2, ProductType: tradedomain.ProductTypeGmail,
+		ServiceMode: tradedomain.ServiceModePurchase, Status: tradedomain.OrderStatusActive,
+		ReceiveUntil: &receiveUntil, ActivationWindowMinutes: 60, WarrantyMinutes: 60,
+	}}
+	trade := tradeapp.NewUseCase(repo, nil, nil, nil, &purchaseMatchTokenStub{})
+	adapter := &matchResultAdapter{trade: trade}
+
+	err := adapter.NotifyMatchedCode(context.Background(), mailmatchapp.MatchResult{
 		OrderNo: "OR_GMAIL_PURCHASE", ResourceType: domain.ResourceTypeGmail,
-		ServiceMode: "purchase", VerificationCode: "654321", MatchedAt: matchedAt,
+		ServiceMode: "purchase", MatchedAt: matchedAt,
 	})
+
 	require.NoError(t, err)
-	require.Equal(t, 1, port.calls, "purchase mail must not call the code-session callback")
+	require.Equal(t, 1, repo.activated)
+	require.NotNil(t, repo.order.ActivatedAt)
 }

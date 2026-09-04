@@ -36,27 +36,6 @@ func (h *Handler) GetPickupMessages(c *gin.Context) {
 	serviceStarted := time.Now()
 	serviceResult := "succeeded"
 	defer func() { platform.ObserveServiceDuration("pickup_single", "single", serviceResult, serviceStarted) }()
-	if h.mod.UpstreamPickup != nil {
-		items, matched, err := h.mod.UpstreamPickup.ReadUpstreamPickup(ctx, email, tokenPlain)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				serviceResult = "canceled"
-				writePickupUnavailable(c)
-				return
-			}
-			if isPickupBusinessError(err) {
-				serviceResult = "business_failed"
-			} else {
-				serviceResult = "system_failed"
-			}
-			writeMailmatchError(c, err)
-			return
-		}
-		if matched {
-			c.JSON(http.StatusOK, orderMailResponse(items, nil))
-			return
-		}
-	}
 	items, state, err := h.mod.UseCase.ListPickupMail(ctx, tokenPlain, email)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -102,30 +81,6 @@ func (h *Handler) PostPickupMessagesBatch(c *gin.Context) {
 			failed = true
 			businessFailedItems++
 			continue
-		}
-		if h.mod.UpstreamPickup != nil {
-			items, matched, err := h.mod.UpstreamPickup.ReadUpstreamPickup(c.Request.Context(), credential.Email, credential.Token)
-			if err != nil {
-				resp[i].Status = "failed"
-				resp[i].Error = pickupBatchItemError(err)
-				if resp[i].Error.Code == "service_unavailable" {
-					c.Header("Retry-After", "1")
-				}
-				failed = true
-				if isPickupBusinessError(err) {
-					businessFailedItems++
-				} else {
-					systemFailedItems++
-				}
-				continue
-			}
-			if matched {
-				data := orderMailResponse(items, nil)
-				resp[i].Status = "succeeded"
-				resp[i].Data = &data
-				succeededItems++
-				continue
-			}
 		}
 		credentials = append(credentials, credential)
 		credentialIndexes = append(credentialIndexes, i)

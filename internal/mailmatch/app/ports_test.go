@@ -643,7 +643,7 @@ func TestICloudFencedIngressAppendsInsideGenerationFenceTransaction(t *testing.T
 	require.Equal(t, 1, repo.appended)
 }
 
-func TestGmailAppendOnlyReplaysAllMatchesForTheSessionInvariant(t *testing.T) {
+func TestGmailAppendOnlyKeepsOneDeliveryPerOrder(t *testing.T) {
 	base := time.Date(2026, 8, 3, 10, 0, 0, 0, time.UTC)
 	repo := &appendFenceRepoStub{matchingRepoStub: &matchingRepoStub{
 		scopes: []OrderScope{{
@@ -679,28 +679,16 @@ func TestGmailAppendOnlyReplaysAllMatchesForTheSessionInvariant(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 4, stored)
 	require.Equal(t, 4, matched)
-	require.Len(t, matches.results, 4)
-	require.Equal(t, []string{"000001", "000002", "000003", "000004"}, []string{
-		matches.results[0].VerificationCode,
-		matches.results[1].VerificationCode,
-		matches.results[2].VerificationCode,
-		matches.results[3].VerificationCode,
-	})
-	for _, result := range matches.results {
-		require.Equal(t, domain.ResourceTypeGmail, result.ResourceType)
-	}
+	require.Len(t, matches.results, 1)
+	require.Equal(t, "000001", matches.results[0].VerificationCode)
+	require.Equal(t, domain.ResourceTypeGmail, matches.results[0].ResourceType)
 
 	stored, matched, _, err = uc.ingestFetchedMessages(context.Background(), fetched)
 	require.NoError(t, err)
 	require.Zero(t, stored)
 	require.Zero(t, matched)
-	require.Len(t, matches.results, 8, "Gmail callbacks are replayed so a post-projection failure cannot lose a code")
-	require.Equal(t, []string{"000001", "000002", "000003", "000004"}, []string{
-		matches.results[4].VerificationCode,
-		matches.results[5].VerificationCode,
-		matches.results[6].VerificationCode,
-		matches.results[7].VerificationCode,
-	})
+	require.Len(t, matches.results, 2, "the immutable first delivery is safe to notify again")
+	require.Equal(t, "000001", matches.results[1].VerificationCode)
 }
 
 func TestGmailCodeSkipsOrdinaryMailAndContinuesToLaterCode(t *testing.T) {
@@ -1305,7 +1293,7 @@ func TestSchedulePickupRequestKeepsAllOrdersForSharedResource(t *testing.T) {
 	require.Equal(t, []string{"ORDER-B", "ORDER-A"}, requests[0].Scopes[0].OrderNos)
 }
 
-func TestSchedulePickupRequestUsesGmailPurchaseButNotCode(t *testing.T) {
+func TestSchedulePickupRequestUsesGmailPurchaseAndCode(t *testing.T) {
 	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
 	queue := &pickupBatchQueueStub{}
 	uc := NewUseCase(nil, queue, nil, nil)
@@ -1325,9 +1313,10 @@ func TestSchedulePickupRequestUsesGmailPurchaseButNotCode(t *testing.T) {
 
 	requests := queue.snapshot()
 	require.Len(t, requests, 1)
-	require.Equal(t, []PickupRequestFetchScope{{
-		OrderNo: "GMAIL-PURCHASE", OrderNos: []string{"GMAIL-PURCHASE"}, EmailResourceID: 31,
-	}}, requests[0].Scopes)
+	require.Equal(t, []PickupRequestFetchScope{
+		{OrderNo: "GMAIL-PURCHASE", OrderNos: []string{"GMAIL-PURCHASE"}, EmailResourceID: 31},
+		{OrderNo: "GMAIL-CODE", OrderNos: []string{"GMAIL-CODE"}, EmailResourceID: 32},
+	}, requests[0].Scopes)
 }
 
 func TestListPickupMailBatchKeepsValidFallbackOrderForSharedResource(t *testing.T) {

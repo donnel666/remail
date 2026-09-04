@@ -38,7 +38,8 @@ func TestAdminGmailManagementCoversBatchEditDeleteRecoverAndMaintenance(t *testi
 			ID: id, ResourceType: "gmail", OwnerUserID: 7, Email: email, Identity: email,
 			Password: "old-password", TwoFactorSecret: "JBSWY3DPEHPK3PXP",
 			AppPassword: "abcdefghijklmnop", CredentialRevision: 1,
-			CredentialUpdatedAt: now, ValidationGeneration: 1, Status: status,
+			CredentialUpdatedAt: now, ProviderCursor: 101, ProviderSpamCursor: 202,
+			ValidationGeneration: 1, Status: status,
 			CreatedAt: now, UpdatedAt: now,
 		}).Error)
 	}
@@ -115,6 +116,8 @@ func TestAdminGmailManagementCoversBatchEditDeleteRecoverAndMaintenance(t *testi
 	require.Equal(t, "recovery@example.com", resource.BindingEmail)
 	require.EqualValues(t, 2, resource.CredentialRevision)
 	require.EqualValues(t, 2, resource.ValidationGeneration)
+	require.Zero(t, resource.ProviderCursor)
+	require.Zero(t, resource.ProviderSpamCursor)
 
 	credentials, err := service.UpdateAdminLocalResource(ctx, AdminLocalResourceEditCommand{
 		ResourceID: 5, Version: 1, OperatorID: 99, OwnerUserID: 7,

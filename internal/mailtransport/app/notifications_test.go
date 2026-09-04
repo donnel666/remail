@@ -66,11 +66,6 @@ func TestSystemMessagesReuseVerificationFrameAndEscapeContent(t *testing.T) {
 	require.NotContains(t, verification.HTMLBody, `<table aria-label="通知详情"`)
 	require.Contains(t, verification.HTMLBody, "123456")
 
-	upstream := SMSBowerAlertMessage("admin@example.com", "price-1", "上游价格变动", "gm: 1.0 → 1.2\n<script>alert(1)</script>")
-	require.NotContains(t, upstream.HTMLBody, "<script>")
-	require.Contains(t, upstream.HTMLBody, "&lt;script&gt;alert(1)&lt;/script&gt;")
-	require.Equal(t, upstream.IdempotencyKey, SMSBowerAlertMessage("admin@example.com", "price-1", "different", "different").IdempotencyKey)
-	require.NotEqual(t, upstream.IdempotencyKey, SMSBowerAlertMessage("admin@example.com", "price-2", "different", "different").IdempotencyKey)
 }
 
 func TestBrandedHTMLReturnsRenderErrors(t *testing.T) {

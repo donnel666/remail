@@ -92,7 +92,7 @@ func TestUnifiedGmailAllocationReusesResourceWithUnusedProjectAlias(t *testing.T
 	require.NotEqual(t, historyEmail, allocation.Email)
 }
 
-func TestLocalGmailSupplyIgnoresUpstreamHistoryButKeepsLocalHistory(t *testing.T) {
+func TestLocalGmailSupplyIgnoresLegacyRemoteHistoryButKeepsLocalHistory(t *testing.T) {
 	db := newLocalGmailAllocationTestDB(t, "gmail-local-supply-history")
 	root := resourceRootModel{Type: "gmail", OwnerUserID: 1}
 	require.NoError(t, db.Create(&root).Error)
@@ -103,7 +103,7 @@ func TestLocalGmailSupplyIgnoresUpstreamHistoryButKeepsLocalHistory(t *testing.T
 	}).Error)
 	resourceID := root.ID
 	require.NoError(t, db.Create(&allocationModel{
-		OrderNo: "UPSTREAM-HISTORY", GuardType: "gmail", ProjectID: 11, ProductID: 12,
+		OrderNo: "REMOTE-HISTORY", GuardType: "gmail", ProjectID: 11, ProductID: 12,
 		Source: "smsbower", ServiceMode: string(allocdomain.GmailServiceModeCode), ResourceID: &resourceID,
 		SupplyScope: AllocationSupplyPublic, Mailbox: GmailMailboxMain, Email: "supply@gmail.com",
 		Status: AllocationStatusAllocated,
@@ -119,7 +119,7 @@ func TestLocalGmailSupplyIgnoresUpstreamHistoryButKeepsLocalHistory(t *testing.T
 
 	// An active main allocation in another project must not consume this
 	// project's dot-alias supply.
-	require.NoError(t, db.Model(&allocationModel{}).Where("order_no = ?", "UPSTREAM-HISTORY").Updates(map[string]any{
+	require.NoError(t, db.Model(&allocationModel{}).Where("order_no = ?", "REMOTE-HISTORY").Updates(map[string]any{
 		"source": SourceLocal, "project_id": 12, "status": AllocationStatusAllocated,
 	}).Error)
 	quote, err = service.CheckSupply(
@@ -129,7 +129,7 @@ func TestLocalGmailSupplyIgnoresUpstreamHistoryButKeepsLocalHistory(t *testing.T
 	require.NoError(t, err)
 	require.EqualValues(t, 1, quote.Available)
 
-	require.NoError(t, db.Model(&allocationModel{}).Where("order_no = ?", "UPSTREAM-HISTORY").Updates(map[string]any{
+	require.NoError(t, db.Model(&allocationModel{}).Where("order_no = ?", "REMOTE-HISTORY").Updates(map[string]any{
 		"project_id": 11, "status": AllocationStatusReleased,
 	}).Error)
 	quote, err = service.CheckSupply(
@@ -161,7 +161,7 @@ func TestLocalGmailSupplyExcludesDotExhaustedResources(t *testing.T) {
 		context.Background(), 11, 12, 2,
 		tradedomain.ServiceModeCode, tradedomain.SupplyPolicyPublicOnly, "1.00",
 	)
-	require.ErrorIs(t, err, tradedomain.ErrUpstreamUnavailable)
+	require.ErrorIs(t, err, tradedomain.ErrInsufficientInventory)
 }
 
 func TestUnifiedGmailAllocationHonorsPrivateFirstAndPublicOnly(t *testing.T) {

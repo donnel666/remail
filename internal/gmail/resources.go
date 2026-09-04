@@ -405,10 +405,6 @@ func removeWhitespace(value string) string {
 	}, value)
 }
 
-func isGmailMailbox(mailbox string) bool {
-	return mailbox == GmailMailboxMain || mailbox == GmailMailboxDot || mailbox == GmailMailboxPlus
-}
-
 func (s *Service) FindLocalPurchase(ctx context.Context, orderNo string) (*tradeapp.GmailPurchaseDelivery, error) {
 	orderNo = strings.TrimSpace(orderNo)
 	if orderNo == "" {

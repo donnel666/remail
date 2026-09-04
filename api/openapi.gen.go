@@ -2466,45 +2466,6 @@ func (e GitHubPendingResponseProvider) Valid() bool {
 	}
 }
 
-// Defines values for GmailUpstreamActivationItemStatus.
-const (
-	GmailUpstreamActivationItemStatusActive       GmailUpstreamActivationItemStatus = "active"
-	GmailUpstreamActivationItemStatusCancelled    GmailUpstreamActivationItemStatus = "cancelled"
-	GmailUpstreamActivationItemStatusCancelling   GmailUpstreamActivationItemStatus = "cancelling"
-	GmailUpstreamActivationItemStatusCompleted    GmailUpstreamActivationItemStatus = "completed"
-	GmailUpstreamActivationItemStatusCompleting   GmailUpstreamActivationItemStatus = "completing"
-	GmailUpstreamActivationItemStatusFailed       GmailUpstreamActivationItemStatus = "failed"
-	GmailUpstreamActivationItemStatusPending      GmailUpstreamActivationItemStatus = "pending"
-	GmailUpstreamActivationItemStatusProvisioning GmailUpstreamActivationItemStatus = "provisioning"
-	GmailUpstreamActivationItemStatusUnknown      GmailUpstreamActivationItemStatus = "unknown"
-)
-
-// Valid indicates whether the value is a known member of the GmailUpstreamActivationItemStatus enum.
-func (e GmailUpstreamActivationItemStatus) Valid() bool {
-	switch e {
-	case GmailUpstreamActivationItemStatusActive:
-		return true
-	case GmailUpstreamActivationItemStatusCancelled:
-		return true
-	case GmailUpstreamActivationItemStatusCancelling:
-		return true
-	case GmailUpstreamActivationItemStatusCompleted:
-		return true
-	case GmailUpstreamActivationItemStatusCompleting:
-		return true
-	case GmailUpstreamActivationItemStatusFailed:
-		return true
-	case GmailUpstreamActivationItemStatusPending:
-		return true
-	case GmailUpstreamActivationItemStatusProvisioning:
-		return true
-	case GmailUpstreamActivationItemStatusUnknown:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for ICloudForwardingEmailStatus.
 const (
 	ICloudForwardingEmailStatusCodeReceived ICloudForwardingEmailStatus = "code_received"
@@ -2813,19 +2774,19 @@ func (e MonitoringMetricSeriesType) Valid() bool {
 
 // Defines values for MonitoringStatus.
 const (
-	MonitoringStatusDegraded    MonitoringStatus = "degraded"
-	MonitoringStatusHealthy     MonitoringStatus = "healthy"
-	MonitoringStatusUnavailable MonitoringStatus = "unavailable"
+	Degraded    MonitoringStatus = "degraded"
+	Healthy     MonitoringStatus = "healthy"
+	Unavailable MonitoringStatus = "unavailable"
 )
 
 // Valid indicates whether the value is a known member of the MonitoringStatus enum.
 func (e MonitoringStatus) Valid() bool {
 	switch e {
-	case MonitoringStatusDegraded:
+	case Degraded:
 		return true
-	case MonitoringStatusHealthy:
+	case Healthy:
 		return true
-	case MonitoringStatusUnavailable:
+	case Unavailable:
 		return true
 	default:
 		return false
@@ -3876,48 +3837,6 @@ func (e ResourceItemPurpose) Valid() bool {
 	}
 }
 
-// Defines values for SMSBowerAccountStatusHealthStatus.
-const (
-	SMSBowerAccountStatusHealthStatusDegraded    SMSBowerAccountStatusHealthStatus = "degraded"
-	SMSBowerAccountStatusHealthStatusDisabled    SMSBowerAccountStatusHealthStatus = "disabled"
-	SMSBowerAccountStatusHealthStatusHealthy     SMSBowerAccountStatusHealthStatus = "healthy"
-	SMSBowerAccountStatusHealthStatusUnavailable SMSBowerAccountStatusHealthStatus = "unavailable"
-)
-
-// Valid indicates whether the value is a known member of the SMSBowerAccountStatusHealthStatus enum.
-func (e SMSBowerAccountStatusHealthStatus) Valid() bool {
-	switch e {
-	case SMSBowerAccountStatusHealthStatusDegraded:
-		return true
-	case SMSBowerAccountStatusHealthStatusDisabled:
-		return true
-	case SMSBowerAccountStatusHealthStatusHealthy:
-		return true
-	case SMSBowerAccountStatusHealthStatusUnavailable:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for SMSBowerStrategy.
-const (
-	LocalFirst    SMSBowerStrategy = "local_first"
-	UpstreamFirst SMSBowerStrategy = "upstream_first"
-)
-
-// Valid indicates whether the value is a known member of the SMSBowerStrategy enum.
-func (e SMSBowerStrategy) Valid() bool {
-	switch e {
-	case LocalFirst:
-		return true
-	case UpstreamFirst:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for SystemAnnouncementType.
 const (
 	SystemAnnouncementTypeDefault SystemAnnouncementType = "default"
@@ -4880,6 +4799,7 @@ func (e GetAdminMicrosoftResourceAliasesParamsKind) Valid() bool {
 
 // Defines values for PostAdminMicrosoftResourceMessagesFetchParamsType.
 const (
+	PostAdminMicrosoftResourceMessagesFetchParamsTypeGmail     PostAdminMicrosoftResourceMessagesFetchParamsType = "gmail"
 	PostAdminMicrosoftResourceMessagesFetchParamsTypeIcloud    PostAdminMicrosoftResourceMessagesFetchParamsType = "icloud"
 	PostAdminMicrosoftResourceMessagesFetchParamsTypeMicrosoft PostAdminMicrosoftResourceMessagesFetchParamsType = "microsoft"
 )
@@ -4887,6 +4807,8 @@ const (
 // Valid indicates whether the value is a known member of the PostAdminMicrosoftResourceMessagesFetchParamsType enum.
 func (e PostAdminMicrosoftResourceMessagesFetchParamsType) Valid() bool {
 	switch e {
+	case PostAdminMicrosoftResourceMessagesFetchParamsTypeGmail:
+		return true
 	case PostAdminMicrosoftResourceMessagesFetchParamsTypeIcloud:
 		return true
 	case PostAdminMicrosoftResourceMessagesFetchParamsTypeMicrosoft:
@@ -5993,19 +5915,19 @@ func (e GetTicketsParamsTicketType) Valid() bool {
 
 // Defines values for GetTicketsParamsStatus.
 const (
-	Closed     GetTicketsParamsStatus = "closed"
-	Open       GetTicketsParamsStatus = "open"
-	Processing GetTicketsParamsStatus = "processing"
+	GetTicketsParamsStatusClosed     GetTicketsParamsStatus = "closed"
+	GetTicketsParamsStatusOpen       GetTicketsParamsStatus = "open"
+	GetTicketsParamsStatusProcessing GetTicketsParamsStatus = "processing"
 )
 
 // Valid indicates whether the value is a known member of the GetTicketsParamsStatus enum.
 func (e GetTicketsParamsStatus) Valid() bool {
 	switch e {
-	case Closed:
+	case GetTicketsParamsStatusClosed:
 		return true
-	case Open:
+	case GetTicketsParamsStatusOpen:
 		return true
-	case Processing:
+	case GetTicketsParamsStatusProcessing:
 		return true
 	default:
 		return false
@@ -9420,132 +9342,6 @@ type GmailInventory struct {
 	TotalAvailable          int  `json:"totalAvailable"`
 }
 
-// GmailUpstreamActivationItem defines model for GmailUpstreamActivationItem.
-type GmailUpstreamActivationItem struct {
-	CompletedAt *time.Time `json:"completedAt,omitempty"`
-
-	// CostPoints Non-negative point amount with up to 6 decimal places.
-	CostPoints          NonNegativeLedgerAmountResponse   `json:"costPoints"`
-	CreatedAt           time.Time                         `json:"createdAt"`
-	Email               *openapi_types.Email              `json:"email,omitempty"`
-	ExpiresAt           *time.Time                        `json:"expiresAt,omitempty"`
-	Id                  int                               `json:"id"`
-	LastSafeError       *string                           `json:"lastSafeError,omitempty"`
-	OrderNo             string                            `json:"orderNo"`
-	ProjectId           int                               `json:"projectId"`
-	ProjectName         string                            `json:"projectName"`
-	ProviderServiceCode string                            `json:"providerServiceCode"`
-	ReceivedCount       int                               `json:"receivedCount"`
-	Source              string                            `json:"source"`
-	StartedAt           *time.Time                        `json:"startedAt,omitempty"`
-	Status              GmailUpstreamActivationItemStatus `json:"status"`
-}
-
-// GmailUpstreamActivationItemStatus defines model for GmailUpstreamActivationItem.Status.
-type GmailUpstreamActivationItemStatus string
-
-// GmailUpstreamActivationList defines model for GmailUpstreamActivationList.
-type GmailUpstreamActivationList struct {
-	Items  []GmailUpstreamActivationItem `json:"items"`
-	Limit  int                           `json:"limit"`
-	Offset int                           `json:"offset"`
-	Total  int64                         `json:"total"`
-}
-
-// GmailUpstreamFinanceBreakdown defines model for GmailUpstreamFinanceBreakdown.
-type GmailUpstreamFinanceBreakdown struct {
-	// Cost Non-negative point amount with up to 6 decimal places.
-	Cost NonNegativeLedgerAmountResponse `json:"cost"`
-	Key  string                          `json:"key"`
-	Name string                          `json:"name"`
-
-	// NetRevenue Non-negative point amount with up to 6 decimal places.
-	NetRevenue NonNegativeLedgerAmountResponse `json:"netRevenue"`
-	OrderCount int64                           `json:"orderCount"`
-
-	// Profit Signed point amount with up to 6 decimal places.
-	Profit LedgerAmountResponse `json:"profit"`
-}
-
-// GmailUpstreamFinanceOverview defines model for GmailUpstreamFinanceOverview.
-type GmailUpstreamFinanceOverview struct {
-	ActivationCount int64 `json:"activationCount"`
-
-	// ConservativeCost Non-negative point amount with up to 6 decimal places.
-	ConservativeCost NonNegativeLedgerAmountResponse `json:"conservativeCost"`
-
-	// ConservativeMarginRate Signed point amount with up to 6 decimal places.
-	ConservativeMarginRate LedgerAmountResponse `json:"conservativeMarginRate"`
-
-	// ConservativeProfit Signed point amount with up to 6 decimal places.
-	ConservativeProfit LedgerAmountResponse `json:"conservativeProfit"`
-
-	// NetRevenue Non-negative point amount with up to 6 decimal places.
-	NetRevenue   NonNegativeLedgerAmountResponse `json:"netRevenue"`
-	OneCodeCount int64                           `json:"oneCodeCount"`
-	OrderCount   int64                           `json:"orderCount"`
-
-	// Refunds Non-negative point amount with up to 6 decimal places.
-	Refunds NonNegativeLedgerAmountResponse `json:"refunds"`
-
-	// ReservedCost Non-negative point amount with up to 6 decimal places.
-	ReservedCost NonNegativeLedgerAmountResponse `json:"reservedCost"`
-
-	// Sales Non-negative point amount with up to 6 decimal places.
-	Sales NonNegativeLedgerAmountResponse `json:"sales"`
-
-	// SettledCost Non-negative point amount with up to 6 decimal places.
-	SettledCost    NonNegativeLedgerAmountResponse `json:"settledCost"`
-	ThreeCodeCount int64                           `json:"threeCodeCount"`
-	TwoCodeCount   int64                           `json:"twoCodeCount"`
-
-	// UnknownCost Non-negative point amount with up to 6 decimal places.
-	UnknownCost   NonNegativeLedgerAmountResponse `json:"unknownCost"`
-	ZeroCodeCount int64                           `json:"zeroCodeCount"`
-}
-
-// GmailUpstreamFinanceReport defines model for GmailUpstreamFinanceReport.
-type GmailUpstreamFinanceReport struct {
-	ByProject []GmailUpstreamFinanceBreakdown `json:"byProject"`
-	ByService []GmailUpstreamFinanceBreakdown `json:"byService"`
-	BySource  []GmailUpstreamFinanceBreakdown `json:"bySource"`
-	Overview  GmailUpstreamFinanceOverview    `json:"overview"`
-}
-
-// GmailUpstreamMappingItem defines model for GmailUpstreamMappingItem.
-type GmailUpstreamMappingItem struct {
-	// CodePrice Non-negative point amount with up to 6 decimal places.
-	CodePrice NonNegativeLedgerAmountResponse `json:"codePrice"`
-
-	// CostPoints Non-negative point amount with up to 6 decimal places.
-	CostPoints          NonNegativeLedgerAmountResponse `json:"costPoints"`
-	Enabled             bool                            `json:"enabled"`
-	ProjectId           int                             `json:"projectId"`
-	ProjectName         string                          `json:"projectName"`
-	ProviderServiceCode string                          `json:"providerServiceCode"`
-	ProviderServiceName *string                         `json:"providerServiceName,omitempty"`
-
-	// PurchasePrice Non-negative point amount with up to 6 decimal places.
-	PurchasePrice NonNegativeLedgerAmountResponse `json:"purchasePrice"`
-
-	// UpstreamPrice Non-negative point amount with up to 6 decimal places.
-	UpstreamPrice NonNegativeLedgerAmountResponse `json:"upstreamPrice"`
-}
-
-// GmailUpstreamMappingList defines model for GmailUpstreamMappingList.
-type GmailUpstreamMappingList struct {
-	Items []GmailUpstreamMappingItem `json:"items"`
-}
-
-// GmailUpstreamMappingRequest defines model for GmailUpstreamMappingRequest.
-type GmailUpstreamMappingRequest struct {
-	// Enabled Whether the saved mapping participates in Gmail inventory and fulfillment. Omitted values default to true.
-	Enabled *bool `json:"enabled,omitempty"`
-
-	// ProviderServiceCode SMSBower service code synchronized from the upstream catalog.
-	ProviderServiceCode string `json:"providerServiceCode"`
-}
-
 // GrantProjectAccessRequest defines model for GrantProjectAccessRequest.
 type GrantProjectAccessRequest struct {
 	UserId int `json:"userId"`
@@ -11293,88 +11089,6 @@ type ResourceValidationsResponse struct {
 	// Requested Number of explicit IDs accepted into Redis. Filter submissions return zero because matching is intentionally deferred.
 	Requested int `json:"requested"`
 }
-
-// SMSBowerAccountStatus defines model for SMSBowerAccountStatus.
-type SMSBowerAccountStatus struct {
-	// Balance Non-negative point amount with up to 6 decimal places.
-	Balance NonNegativeLedgerAmountResponse `json:"balance"`
-
-	// Configured Whether an API Key is stored. The key itself is never returned.
-	Configured          bool                              `json:"configured"`
-	ConsecutiveFailures int                               `json:"consecutiveFailures"`
-	Enabled             bool                              `json:"enabled"`
-	HealthStatus        SMSBowerAccountStatusHealthStatus `json:"healthStatus"`
-	LastSafeError       *string                           `json:"lastSafeError,omitempty"`
-	LastSuccessAt       *time.Time                        `json:"lastSuccessAt,omitempty"`
-	LastSyncedAt        *time.Time                        `json:"lastSyncedAt,omitempty"`
-}
-
-// SMSBowerAccountStatusHealthStatus defines model for SMSBowerAccountStatus.HealthStatus.
-type SMSBowerAccountStatusHealthStatus string
-
-// SMSBowerConfig defines model for SMSBowerConfig.
-type SMSBowerConfig struct {
-	// BalanceWarningThreshold Non-negative point amount with up to 6 decimal places.
-	BalanceWarningThreshold NonNegativeLedgerAmountResponse `json:"balanceWarningThreshold"`
-
-	// Configured Whether an API Key is stored. The key itself is never returned.
-	Configured bool `json:"configured"`
-	Enabled    bool `json:"enabled"`
-
-	// MinMarginRate Non-negative point amount with up to 6 decimal places.
-	MinMarginRate NonNegativeLedgerAmountResponse `json:"minMarginRate"`
-
-	// NoCodeRefundTimeoutMinutes Automatically cancel the upstream activation when no first verification code arrives within this many minutes.
-	NoCodeRefundTimeoutMinutes int `json:"noCodeRefundTimeoutMinutes"`
-
-	// PointsPerUnit Non-negative point amount with up to 6 decimal places.
-	PointsPerUnit       NonNegativeLedgerAmountResponse `json:"pointsPerUnit"`
-	Strategy            SMSBowerStrategy                `json:"strategy"`
-	SyncIntervalMinutes int                             `json:"syncIntervalMinutes"`
-}
-
-// SMSBowerConfigUpdate defines model for SMSBowerConfigUpdate.
-type SMSBowerConfigUpdate struct {
-	// ApiKey Leave empty to keep the stored API Key unchanged.
-	ApiKey *string `json:"apiKey,omitempty"`
-
-	// BalanceWarningThreshold Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	BalanceWarningThreshold NonNegativeLedgerAmount `json:"balanceWarningThreshold"`
-	Enabled                 bool                    `json:"enabled"`
-
-	// MinMarginRate Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	MinMarginRate NonNegativeLedgerAmount `json:"minMarginRate"`
-
-	// NoCodeRefundTimeoutMinutes Automatically cancel the upstream activation when no first verification code arrives within this many minutes.
-	NoCodeRefundTimeoutMinutes *int `json:"noCodeRefundTimeoutMinutes,omitempty"`
-
-	// PointsPerUnit Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
-	PointsPerUnit       NonNegativeLedgerAmount `json:"pointsPerUnit"`
-	Strategy            SMSBowerStrategy        `json:"strategy"`
-	SyncIntervalMinutes int                     `json:"syncIntervalMinutes"`
-}
-
-// SMSBowerServiceItem defines model for SMSBowerServiceItem.
-type SMSBowerServiceItem struct {
-	Active bool   `json:"active"`
-	Code   string `json:"code"`
-
-	// GmailPrice Non-negative point amount with up to 6 decimal places.
-	GmailPrice     NonNegativeLedgerAmountResponse  `json:"gmailPrice"`
-	GmailStock     int                              `json:"gmailStock"`
-	LastSeenAt     time.Time                        `json:"lastSeenAt"`
-	Name           string                           `json:"name"`
-	PreviousPrice  *NonNegativeLedgerAmountResponse `json:"previousPrice,omitempty"`
-	PriceChangedAt *time.Time                       `json:"priceChangedAt,omitempty"`
-}
-
-// SMSBowerServiceList defines model for SMSBowerServiceList.
-type SMSBowerServiceList struct {
-	Items []SMSBowerServiceItem `json:"items"`
-}
-
-// SMSBowerStrategy defines model for SMSBowerStrategy.
-type SMSBowerStrategy string
 
 // ServerCreateResponse defines model for ServerCreateResponse.
 type ServerCreateResponse struct {
@@ -13579,37 +13293,6 @@ type PostAdminTransactionReverseParams struct {
 	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
 }
 
-// GetAdminSMSBowerActivationsParams defines parameters for GetAdminSMSBowerActivations.
-type GetAdminSMSBowerActivationsParams struct {
-	// Offset Row offset used when afterId is absent.
-	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
-	Limit  *int         `form:"limit,omitempty" json:"limit,omitempty"`
-}
-
-// PutAdminSMSBowerConfigParams defines parameters for PutAdminSMSBowerConfig.
-type PutAdminSMSBowerConfigParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
-	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
-}
-
-// DeleteAdminSMSBowerMappingParams defines parameters for DeleteAdminSMSBowerMapping.
-type DeleteAdminSMSBowerMappingParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
-	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
-}
-
-// PutAdminSMSBowerMappingParams defines parameters for PutAdminSMSBowerMapping.
-type PutAdminSMSBowerMappingParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
-	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
-}
-
-// PostAdminSMSBowerSyncParams defines parameters for PostAdminSMSBowerSync.
-type PostAdminSMSBowerSyncParams struct {
-	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
-	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
-}
-
 // GetAdminUsersParams defines parameters for GetAdminUsers.
 type GetAdminUsersParams struct {
 	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
@@ -14844,12 +14527,6 @@ type PostAdminSystemKeyJSONRequestBody = AdminSystemKeyCreateRequest
 
 // PostAdminTicketMessageJSONRequestBody defines body for PostAdminTicketMessage for application/json ContentType.
 type PostAdminTicketMessageJSONRequestBody = ReplyTicketRequest
-
-// PutAdminSMSBowerConfigJSONRequestBody defines body for PutAdminSMSBowerConfig for application/json ContentType.
-type PutAdminSMSBowerConfigJSONRequestBody = SMSBowerConfigUpdate
-
-// PutAdminSMSBowerMappingJSONRequestBody defines body for PutAdminSMSBowerMapping for application/json ContentType.
-type PutAdminSMSBowerMappingJSONRequestBody = GmailUpstreamMappingRequest
 
 // PostAdminUserJSONRequestBody defines body for PostAdminUser for application/json ContentType.
 type PostAdminUserJSONRequestBody = AdminCreateUserRequest
@@ -16680,36 +16357,6 @@ type ServerInterface interface {
 	// Reverse a transaction
 	// (POST /v1/admin/transactions/{id}/reverse)
 	PostAdminTransactionReverse(c *gin.Context, id int, params PostAdminTransactionReverseParams)
-	// List Gmail code sessions
-	// (GET /v1/admin/upstreams/smsbower/activations)
-	GetAdminSMSBowerActivations(c *gin.Context, params GetAdminSMSBowerActivationsParams)
-	// Get SMSBower provider configuration without exposing the API Key
-	// (GET /v1/admin/upstreams/smsbower/config)
-	GetAdminSMSBowerConfig(c *gin.Context)
-	// Update SMSBower provider configuration and routing strategy
-	// (PUT /v1/admin/upstreams/smsbower/config)
-	PutAdminSMSBowerConfig(c *gin.Context, params PutAdminSMSBowerConfigParams)
-	// Get Gmail revenue, cost and conservative profit
-	// (GET /v1/admin/upstreams/smsbower/finance)
-	GetAdminSMSBowerFinance(c *gin.Context)
-	// List saved system project to SMSBower service mappings
-	// (GET /v1/admin/upstreams/smsbower/mappings)
-	GetAdminSMSBowerMappings(c *gin.Context)
-	// Delete one system project to SMSBower service mapping
-	// (DELETE /v1/admin/upstreams/smsbower/mappings/{projectId})
-	DeleteAdminSMSBowerMapping(c *gin.Context, projectId int, params DeleteAdminSMSBowerMappingParams)
-	// Create or update one system project to SMSBower service mapping
-	// (PUT /v1/admin/upstreams/smsbower/mappings/{projectId})
-	PutAdminSMSBowerMapping(c *gin.Context, projectId int, params PutAdminSMSBowerMappingParams)
-	// List the synchronized SMSBower mail service catalog
-	// (GET /v1/admin/upstreams/smsbower/services)
-	GetAdminSMSBowerServices(c *gin.Context)
-	// Get SMSBower account balance and health
-	// (GET /v1/admin/upstreams/smsbower/status)
-	GetAdminSMSBowerStatus(c *gin.Context)
-	// Queue an immediate SMSBower balance, service and price sync
-	// (POST /v1/admin/upstreams/smsbower/sync)
-	PostAdminSMSBowerSync(c *gin.Context, params PostAdminSMSBowerSyncParams)
 	// List all users (admin only)
 	// (GET /v1/admin/users)
 	GetAdminUsers(c *gin.Context, params GetAdminUsersParams)
@@ -29461,316 +29108,6 @@ func (siw *ServerInterfaceWrapper) PostAdminTransactionReverse(c *gin.Context) {
 	siw.Handler.PostAdminTransactionReverse(c, id, params)
 }
 
-// GetAdminSMSBowerActivations operation middleware
-func (siw *ServerInterfaceWrapper) GetAdminSMSBowerActivations(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params GetAdminSMSBowerActivationsParams
-
-	// ------------- Optional query parameter "offset" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetAdminSMSBowerActivations(c, params)
-}
-
-// GetAdminSMSBowerConfig operation middleware
-func (siw *ServerInterfaceWrapper) GetAdminSMSBowerConfig(c *gin.Context) {
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetAdminSMSBowerConfig(c)
-}
-
-// PutAdminSMSBowerConfig operation middleware
-func (siw *ServerInterfaceWrapper) PutAdminSMSBowerConfig(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params PutAdminSMSBowerConfigParams
-
-	headers := c.Request.Header
-
-	// ------------- Required header parameter "X-CSRF-Token" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
-		var XCSRFToken CsrfToken
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
-			return
-		}
-
-		params.XCSRFToken = XCSRFToken
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.PutAdminSMSBowerConfig(c, params)
-}
-
-// GetAdminSMSBowerFinance operation middleware
-func (siw *ServerInterfaceWrapper) GetAdminSMSBowerFinance(c *gin.Context) {
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetAdminSMSBowerFinance(c)
-}
-
-// GetAdminSMSBowerMappings operation middleware
-func (siw *ServerInterfaceWrapper) GetAdminSMSBowerMappings(c *gin.Context) {
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetAdminSMSBowerMappings(c)
-}
-
-// DeleteAdminSMSBowerMapping operation middleware
-func (siw *ServerInterfaceWrapper) DeleteAdminSMSBowerMapping(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "projectId" -------------
-	var projectId int
-
-	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params DeleteAdminSMSBowerMappingParams
-
-	headers := c.Request.Header
-
-	// ------------- Required header parameter "X-CSRF-Token" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
-		var XCSRFToken CsrfToken
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
-			return
-		}
-
-		params.XCSRFToken = XCSRFToken
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.DeleteAdminSMSBowerMapping(c, projectId, params)
-}
-
-// PutAdminSMSBowerMapping operation middleware
-func (siw *ServerInterfaceWrapper) PutAdminSMSBowerMapping(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "projectId" -------------
-	var projectId int
-
-	err = runtime.BindStyledParameterWithOptions("simple", "projectId", c.Param("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectId: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params PutAdminSMSBowerMappingParams
-
-	headers := c.Request.Header
-
-	// ------------- Required header parameter "X-CSRF-Token" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
-		var XCSRFToken CsrfToken
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
-			return
-		}
-
-		params.XCSRFToken = XCSRFToken
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.PutAdminSMSBowerMapping(c, projectId, params)
-}
-
-// GetAdminSMSBowerServices operation middleware
-func (siw *ServerInterfaceWrapper) GetAdminSMSBowerServices(c *gin.Context) {
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetAdminSMSBowerServices(c)
-}
-
-// GetAdminSMSBowerStatus operation middleware
-func (siw *ServerInterfaceWrapper) GetAdminSMSBowerStatus(c *gin.Context) {
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetAdminSMSBowerStatus(c)
-}
-
-// PostAdminSMSBowerSync operation middleware
-func (siw *ServerInterfaceWrapper) PostAdminSMSBowerSync(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	c.Set(string(CookieAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params PostAdminSMSBowerSyncParams
-
-	headers := c.Request.Header
-
-	// ------------- Required header parameter "X-CSRF-Token" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
-		var XCSRFToken CsrfToken
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
-			return
-		}
-
-		params.XCSRFToken = XCSRFToken
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.PostAdminSMSBowerSync(c, params)
-}
-
 // GetAdminUsers operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminUsers(c *gin.Context) {
 
@@ -36536,16 +35873,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/tickets/:ticketNo/refund", wrapper.PostAdminTicketRefund)
 	router.GET(options.BaseURL+"/v1/admin/transactions", wrapper.GetAdminTransactions)
 	router.POST(options.BaseURL+"/v1/admin/transactions/:id/reverse", wrapper.PostAdminTransactionReverse)
-	router.GET(options.BaseURL+"/v1/admin/upstreams/smsbower/activations", wrapper.GetAdminSMSBowerActivations)
-	router.GET(options.BaseURL+"/v1/admin/upstreams/smsbower/config", wrapper.GetAdminSMSBowerConfig)
-	router.PUT(options.BaseURL+"/v1/admin/upstreams/smsbower/config", wrapper.PutAdminSMSBowerConfig)
-	router.GET(options.BaseURL+"/v1/admin/upstreams/smsbower/finance", wrapper.GetAdminSMSBowerFinance)
-	router.GET(options.BaseURL+"/v1/admin/upstreams/smsbower/mappings", wrapper.GetAdminSMSBowerMappings)
-	router.DELETE(options.BaseURL+"/v1/admin/upstreams/smsbower/mappings/:projectId", wrapper.DeleteAdminSMSBowerMapping)
-	router.PUT(options.BaseURL+"/v1/admin/upstreams/smsbower/mappings/:projectId", wrapper.PutAdminSMSBowerMapping)
-	router.GET(options.BaseURL+"/v1/admin/upstreams/smsbower/services", wrapper.GetAdminSMSBowerServices)
-	router.GET(options.BaseURL+"/v1/admin/upstreams/smsbower/status", wrapper.GetAdminSMSBowerStatus)
-	router.POST(options.BaseURL+"/v1/admin/upstreams/smsbower/sync", wrapper.PostAdminSMSBowerSync)
 	router.GET(options.BaseURL+"/v1/admin/users", wrapper.GetAdminUsers)
 	router.POST(options.BaseURL+"/v1/admin/users", wrapper.PostAdminUser)
 	router.POST(options.BaseURL+"/v1/admin/users/delete", wrapper.PostAdminUsersDelete)

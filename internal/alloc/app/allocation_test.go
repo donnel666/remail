@@ -20,40 +20,6 @@ func (*missingProductInventoryRepoStub) GetProductInventoryTotals(context.Contex
 	return nil, domain.ErrProjectNotAllocatable
 }
 
-type productInventoryRepoStub struct{ Repository }
-
-func (*productInventoryRepoStub) GetProductInventoryTotals(_ context.Context, projectID uint) (*ProjectProductInventoryTotals, error) {
-	return &ProjectProductInventoryTotals{
-		ProjectID: projectID,
-		Items:     []ProductInventoryTotal{{ProductID: 71}},
-	}, nil
-}
-
-type productInventoryOverlayStub struct{ calls int }
-
-func (o *productInventoryOverlayStub) OverlayProductInventory(_ context.Context, _ []uint, snapshots map[uint]*ProjectProductInventoryTotals) error {
-	o.calls++
-	available := int64(3)
-	snapshots[10].TotalAvailable = available
-	snapshots[10].Items[0].TotalAvailable = available
-	snapshots[10].Items[0].PurchaseAvailable = &available
-	return nil
-}
-
-func TestProductInventorySnapshotAppliesSharedOverlay(t *testing.T) {
-	overlay := &productInventoryOverlayStub{}
-	useCase := NewUseCase(&productInventoryRepoStub{})
-	useCase.SetProductInventoryOverlay(overlay)
-
-	totals, err := useCase.GetProductInventorySnapshot(context.Background(), 10)
-	if err != nil {
-		t.Fatalf("GetProductInventorySnapshot() error = %v", err)
-	}
-	if overlay.calls != 1 || totals.TotalAvailable != 3 || totals.Items[0].PurchaseAvailable == nil || *totals.Items[0].PurchaseAvailable != 3 {
-		t.Fatalf("GetProductInventorySnapshot() = %#v, overlay calls = %d", totals, overlay.calls)
-	}
-}
-
 func TestProductInventorySnapshotPreservesMissingProjectErrorWithoutCache(t *testing.T) {
 	_, err := NewUseCase(&missingProductInventoryRepoStub{}).GetProductInventorySnapshot(context.Background(), 10)
 	if !errors.Is(err, domain.ErrProjectNotAllocatable) {

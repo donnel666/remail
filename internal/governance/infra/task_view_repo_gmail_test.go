@@ -43,6 +43,21 @@ CREATE TABLE gmail_maintenance_runs (
     last_safe_error TEXT NOT NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
+);
+CREATE TABLE mailmatch_admin_resource_fetch_states (
+    email_resource_id INTEGER PRIMARY KEY,
+    status TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    failures INTEGER NOT NULL,
+    operation_kind TEXT NOT NULL,
+    expected_credential_revision INTEGER NOT NULL,
+    requested_at DATETIME NULL,
+    started_at DATETIME NULL,
+    finished_at DATETIME NULL,
+    updated_at DATETIME NOT NULL,
+    fetched_count INTEGER NOT NULL,
+    stored_count INTEGER NOT NULL,
+    matched_count INTEGER NOT NULL
 )`).Error)
 
 	now := time.Date(2026, 8, 8, 8, 0, 0, 0, time.UTC)
@@ -74,6 +89,13 @@ INSERT INTO gmail_maintenance_runs(
     created_at, updated_at
 ) VALUES (9102, 7001, 2, 'history', 'canceled', 1, 3, 2, ?, ?, ?, 'Disabled by administrator.', ?, ?)`,
 		now, now, now, now, now).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_admin_resource_fetch_states(
+    email_resource_id, status, generation, failures, operation_kind,
+    expected_credential_revision, requested_at, started_at, finished_at,
+    updated_at, fetched_count, stored_count, matched_count
+) VALUES (7001, 'normal', 1, 0, 'gmail_resource_fetch', 2, ?, ?, ?, ?, 1, 1, 1)`,
+		now, now, now, now).Error)
 
 	repo := NewAdminTaskViewRepo(db)
 	exists, err := repo.GmailResourceExists(context.Background(), 7001)
@@ -86,9 +108,9 @@ INSERT INTO gmail_maintenance_runs(
 		Limit:   20,
 	})
 	require.NoError(t, err)
-	require.Equal(t, int64(3), total)
-	require.Equal(t, int64(1), succeeded)
-	require.Len(t, items, 3)
+	require.Equal(t, int64(4), total)
+	require.Equal(t, int64(2), succeeded)
+	require.Len(t, items, 4)
 	byID := make(map[string]governanceapp.AdminTaskView, len(items))
 	for _, item := range items {
 		byID[item.TaskID()] = item
@@ -96,4 +118,5 @@ INSERT INTO gmail_maintenance_runs(
 	require.Equal(t, governanceapp.AdminTaskStatusSucceeded, byID["gmail_validation:9100"].Status)
 	require.Equal(t, governanceapp.AdminTaskStatusQueued, byID["gmail_validation:9101"].Status)
 	require.Equal(t, governanceapp.AdminTaskStatusCanceled, byID["gmail_history:9102"].Status)
+	require.Equal(t, governanceapp.AdminTaskStatusSucceeded, byID["fetch:7001"].Status)
 }

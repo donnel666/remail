@@ -1,7 +1,6 @@
 package gmail
 
 import (
-	"encoding/json"
 	"errors"
 	"time"
 )
@@ -29,27 +28,10 @@ const (
 	GmailMailboxMain          = "main"
 	GmailMailboxDot           = "dot"
 	GmailMailboxPlus          = "plus"
-
-	SessionPending      = "pending"
-	SessionProvisioning = "provisioning"
-	SessionActive       = "active"
-	SessionCompleting   = "completing"
-	SessionCompleted    = "completed"
-	SessionCancelling   = "cancelling"
-	SessionCancelled    = "cancelled"
-	SessionFailed       = "failed"
-	SessionUnknown      = "unknown"
-
-	ActionWaitNext = "wait_next"
-	ActionComplete = "complete"
-	ActionCancel   = "cancel"
-
-	MaxCodes = 3
 )
 
 var (
 	ErrInvalidRoute              = errors.New("gmail: invalid supply route")
-	ErrSessionMissing            = errors.New("gmail: code session not found")
 	ErrInvalidLocalResource      = errors.New("gmail: invalid local resource")
 	ErrLocalResourceMissing      = errors.New("gmail: local resource not found")
 	ErrLocalResourceBusy         = errors.New("gmail: local resource is leased or sold")
@@ -70,6 +52,8 @@ type localResourceModel struct {
 	AppPassword           string     `gorm:"column:app_password"`
 	CredentialRevision    uint64     `gorm:"column:credential_revision"`
 	CredentialUpdatedAt   time.Time  `gorm:"column:credential_updated_at"`
+	ProviderCursor        uint64     `gorm:"column:provider_cursor"`
+	ProviderSpamCursor    uint64     `gorm:"column:provider_spam_cursor"`
 	ForSale               bool       `gorm:"column:for_sale"`
 	Status                string     `gorm:"column:status"`
 	ValidationGeneration  uint64     `gorm:"column:validation_generation"`
@@ -194,46 +178,4 @@ type LocalResourceList struct {
 	Offset int                 `json:"offset"`
 	Limit  int                 `json:"limit"`
 	Facets LocalResourceFacets `json:"facets"`
-}
-
-type sessionModel struct {
-	ID                 uint       `gorm:"column:id;primaryKey"`
-	OrderNo            string     `gorm:"column:order_no"`
-	Source             string     `gorm:"column:source"`
-	SourceRef          string     `gorm:"column:source_ref"`
-	ServiceMode        string     `gorm:"column:service_mode"`
-	Email              string     `gorm:"column:email"`
-	Status             string     `gorm:"column:status"`
-	ReceivedCount      uint8      `gorm:"column:received_count"`
-	CodesJSON          string     `gorm:"column:codes_json"`
-	CostPointsSnapshot string     `gorm:"column:cost_points_snapshot"`
-	ProviderCursor     uint64     `gorm:"column:provider_cursor"`
-	ProviderSpamCursor uint64     `gorm:"column:provider_spam_cursor"`
-	NextPollAt         *time.Time `gorm:"column:next_poll_at"`
-	LastSafeError      string     `gorm:"column:last_safe_error"`
-	Version            uint       `gorm:"column:version"`
-	StartedAt          *time.Time `gorm:"column:started_at"`
-	ExpiresAt          *time.Time `gorm:"column:expires_at"`
-	CompletedAt        *time.Time `gorm:"column:completed_at"`
-	CreatedAt          time.Time  `gorm:"column:created_at"`
-	UpdatedAt          time.Time  `gorm:"column:updated_at"`
-}
-
-func (sessionModel) TableName() string { return "gmail_code_sessions" }
-
-type Code struct {
-	Seq        int       `json:"seq"`
-	Code       string    `json:"code"`
-	ReceivedAt time.Time `json:"receivedAt"`
-}
-
-func decodeCodes(raw string) ([]Code, error) {
-	if len(raw) == 0 {
-		return []Code{}, nil
-	}
-	var codes []Code
-	if err := json.Unmarshal([]byte(raw), &codes); err != nil || len(codes) > MaxCodes {
-		return nil, errors.New("gmail: invalid stored codes")
-	}
-	return codes, nil
 }

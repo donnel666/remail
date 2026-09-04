@@ -163,10 +163,6 @@ func batchOrderItemError(err error) *OrderBatchItemErrorResponse {
 		return &OrderBatchItemErrorResponse{Code: "insufficient_balance", Message: "Insufficient balance."}
 	case errors.Is(err, domain.ErrInsufficientInventory):
 		return &OrderBatchItemErrorResponse{Code: "insufficient_inventory", Message: "Insufficient inventory."}
-	case errors.Is(err, domain.ErrUpstreamPriceProtected):
-		return &OrderBatchItemErrorResponse{Code: "temporarily_unavailable", Message: "Order cannot be completed at the current price."}
-	case errors.Is(err, domain.ErrUpstreamUnavailable):
-		return &OrderBatchItemErrorResponse{Code: "temporarily_unavailable", Message: "Order service is temporarily unavailable."}
 	case errors.Is(err, domain.ErrIdempotencyConflict):
 		return &OrderBatchItemErrorResponse{Code: "idempotency_conflict", Message: "Idempotency-Key conflicts with a different request."}
 	default:
@@ -216,10 +212,6 @@ func checkoutMetricResult(err error) string {
 		return "insufficient_balance"
 	case errors.Is(err, domain.ErrInsufficientInventory):
 		return "insufficient_inventory"
-	case errors.Is(err, domain.ErrUpstreamPriceProtected):
-		return "upstream_price_protected"
-	case errors.Is(err, domain.ErrUpstreamUnavailable):
-		return "upstream_unavailable"
 	case errors.Is(err, domain.ErrIdempotencyConflict):
 		return "idempotency_conflict"
 	default:
@@ -790,10 +782,6 @@ func writeTradeError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Insufficient balance.", "requestId": requestID})
 	case errors.Is(err, domain.ErrInsufficientInventory):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Insufficient inventory.", "requestId": requestID})
-	case errors.Is(err, domain.ErrUpstreamPriceProtected):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Order cannot be completed at the current price.", "requestId": requestID})
-	case errors.Is(err, domain.ErrUpstreamUnavailable):
-		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Order service is temporarily unavailable.", "requestId": requestID})
 	case errors.Is(err, domain.ErrProjectUnavailable):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Project is not available for ordering.", "requestId": requestID})
 	case errors.Is(err, domain.ErrCheckoutBusy):

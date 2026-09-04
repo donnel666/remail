@@ -6,7 +6,6 @@ import { hasPermission, useAuth } from "@/context/auth-provider";
 import { BalancesPanel } from "./admin-finance/balances-panel";
 import { CardKeysPanel } from "./admin-finance/card-keys-panel";
 import { InvitesPanel } from "./admin-finance/invites-panel";
-import { GmailUpstreamPanel } from "./admin-finance/gmail-upstream-panel";
 import { OverviewPanel } from "./admin-finance/overview-panel";
 import { TransactionsPanel } from "./admin-finance/transactions-panel";
 
@@ -15,8 +14,7 @@ type FinanceTab =
   | "invites"
   | "cards"
   | "transactions"
-  | "balances"
-  | "gmail";
+  | "balances";
 
 export default function AdminFinance() {
   const { t } = useTranslation();
@@ -47,7 +45,6 @@ export default function AdminFinance() {
       ) : null}
       <Tabs.TabPane itemKey="transactions" tab={t("Transactions")} />
       <Tabs.TabPane itemKey="balances" tab={t("User balances")} />
-      <Tabs.TabPane itemKey="gmail" tab="Gmail 经营" />
     </Tabs>
   );
 
@@ -60,8 +57,6 @@ export default function AdminFinance() {
     panel = <CardKeysPanel tabsArea={tabsArea} />;
   } else if (effectiveTab === "transactions") {
     panel = <TransactionsPanel tabsArea={tabsArea} />;
-  } else if (effectiveTab === "gmail") {
-    panel = <GmailUpstreamPanel tabsArea={tabsArea} />;
   } else {
     panel = <BalancesPanel tabsArea={tabsArea} />;
   }

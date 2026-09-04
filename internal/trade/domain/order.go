@@ -146,8 +146,6 @@ var (
 	ErrInsufficientInventory        = errors.New("trade: insufficient inventory")
 	ErrDefinitiveInventoryExhausted = fmt.Errorf("trade: definitive inventory exhausted: %w", ErrInsufficientInventory)
 	ErrInsufficientBalance          = errors.New("trade: insufficient balance")
-	ErrUpstreamUnavailable          = errors.New("trade: upstream unavailable")
-	ErrUpstreamPriceProtected       = errors.New("trade: upstream price protection blocked checkout")
 	ErrProjectUnavailable           = errors.New("trade: project is not available")
 	ErrOrderCompensationError       = errors.New("trade: order compensation failed")
 	ErrCheckoutBusy                 = errors.New("trade: checkout already queued for user")

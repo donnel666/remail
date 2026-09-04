@@ -379,6 +379,10 @@ func (s *Service) UpdateAdminLocalResource(ctx context.Context, command AdminLoc
 			"validation_failures": 0, "validation_request_id": strings.TrimSpace(command.RequestID),
 			"validation_command_hash": "", "last_safe_error": "", "last_checked_at": nil, "updated_at": now,
 		}
+		if identityChanged {
+			updates["provider_cursor"] = 0
+			updates["provider_spam_cursor"] = 0
+		}
 		credentialChanged := identityChanged || bindingChanged || command.Credentials != nil
 		if command.Credentials != nil {
 			if strings.TrimSpace(command.Credentials.Password) != "" {

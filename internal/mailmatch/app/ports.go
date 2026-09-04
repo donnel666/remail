@@ -193,12 +193,8 @@ type MailTransportFetchPort interface {
 	FetchMicrosoftMessages(ctx context.Context, req FetchMessagesRequest) (*FetchMessagesResult, error)
 }
 
-type GmailPurchaseFetchPort interface {
-	FetchLocalPurchaseMail(ctx context.Context, orderNo string) error
-}
-
-type GmailCodeDiagnosisFetchPort interface {
-	FetchLocalCodeMail(ctx context.Context, orderNo string) error
+type GmailMailFetchPort interface {
+	FetchLocalOrderMailWithFence(ctx context.Context, orderNo string, fence func(context.Context) error) error
 }
 
 type ICloudMailFetchPort interface {
@@ -346,7 +342,7 @@ type UseCase struct {
 	transport      MailTransportFetchPort
 	matches        MatchResultPort
 	credentials    coreapp.MicrosoftCredentialPort
-	gmailPurchase  GmailPurchaseFetchPort
+	gmailFetch     GmailMailFetchPort
 	iCloudFetch    ICloudMailFetchPort
 	pickupFetch    PickupFetchStatePort
 	pickupMessages PickupMessageCachePort
@@ -381,9 +377,9 @@ func (uc *UseCase) SetMicrosoftCredentialPort(credentials coreapp.MicrosoftCrede
 	}
 }
 
-func (uc *UseCase) SetGmailPurchaseFetchPort(fetch GmailPurchaseFetchPort) {
+func (uc *UseCase) SetGmailMailFetchPort(fetch GmailMailFetchPort) {
 	if uc != nil {
-		uc.gmailPurchase = fetch
+		uc.gmailFetch = fetch
 	}
 }
 
@@ -700,17 +696,10 @@ func (uc *UseCase) RefreshCodeDiagnosis(ctx context.Context, orderNo, _ string, 
 		return CodeDiagnosisRefreshResult{}, err
 	}
 	if scope.AllocationType == domain.ResourceTypeGmail {
-		if scope.ServiceMode == "purchase" {
-			if uc.gmailPurchase == nil {
-				return CodeDiagnosisRefreshResult{}, nil
-			}
-			return CodeDiagnosisRefreshResult{}, uc.gmailPurchase.FetchLocalPurchaseMail(ctx, scope.OrderNo)
-		}
-		fetch, ok := uc.gmailPurchase.(GmailCodeDiagnosisFetchPort)
-		if !ok {
+		if uc.gmailFetch == nil {
 			return CodeDiagnosisRefreshResult{}, nil
 		}
-		return CodeDiagnosisRefreshResult{}, fetch.FetchLocalCodeMail(ctx, scope.OrderNo)
+		return CodeDiagnosisRefreshResult{}, uc.gmailFetch.FetchLocalOrderMailWithFence(ctx, scope.OrderNo, nil)
 	}
 	if !scopeFetchable(*scope, uc.now) {
 		return CodeDiagnosisRefreshResult{}, nil
@@ -1134,10 +1123,20 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 		return nil
 	}
 	if scope.AllocationType == domain.ResourceTypeGmail {
-		if uc.gmailPurchase == nil {
+		if uc.gmailFetch == nil {
 			return domain.ErrMailServiceUnavailable
 		}
-		return uc.gmailPurchase.FetchLocalPurchaseMail(ctx, scope.OrderNo)
+		fetchFence := func(txCtx context.Context) error {
+			current, err := uc.pickupFetch.Owns(txCtx, task.EmailResourceID, task.LeaseToken)
+			if err != nil {
+				return err
+			}
+			if !current {
+				return domain.ErrFetchJobConflict
+			}
+			return nil
+		}
+		return uc.gmailFetch.FetchLocalOrderMailWithFence(ctx, scope.OrderNo, fetchFence)
 	}
 	var cachedMessages []FetchedMessage
 	if uc.pickupMessages != nil {
@@ -1478,8 +1477,8 @@ func (uc *UseCase) ingestFetchedMessagesWithScopeAndFence(
 			return nil
 		}
 		var appendErr error
-		if replayResourceType == domain.ResourceTypeICloud && fence != nil && len(messages) == 1 {
-			// iCloud administrator fetches ingest one message at a time. Keep the
+		if (replayResourceType == domain.ResourceTypeGmail || replayResourceType == domain.ResourceTypeICloud) && fence != nil && len(messages) == 1 {
+			// IMAP administrator fetches ingest one message at a time. Keep the
 			// generation lock held through the append so a replacement job cannot
 			// become current between the fence check and durable fact insertion.
 			appendErr = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
@@ -1598,18 +1597,14 @@ func (uc *UseCase) ingestFetchedMessagesWithScopeAndFence(
 		}
 	}
 	for _, delivery := range storedDeliveries {
-		// Microsoft/domain orders have a single immutable delivery head. Gmail
-		// code sessions intentionally accept up to three distinct messages.
-		if delivery.scope.AllocationType != domain.ResourceTypeGmail {
-			canonical, findErr := uc.repo.FindOrderDelivery(ctx, delivery.scope.OrderID)
-			if findErr != nil {
-				return stored, matched, lastReceivedAt, &mailIngestError{safe: "Mail delivery lookup failed.", err: findErr}
-			}
-			if canonical != nil {
-				delivery.message = domain.Message{ReceivedAt: canonical.ReceivedAt}
-				if canonical.Message != nil {
-					delivery.message = *canonical.Message
-				}
+		canonical, findErr := uc.repo.FindOrderDelivery(ctx, delivery.scope.OrderID)
+		if findErr != nil {
+			return stored, matched, lastReceivedAt, &mailIngestError{safe: "Mail delivery lookup failed.", err: findErr}
+		}
+		if canonical != nil {
+			delivery.message = domain.Message{ReceivedAt: canonical.ReceivedAt}
+			if canonical.Message != nil {
+				delivery.message = *canonical.Message
 			}
 		}
 		result := MatchResult{
@@ -1717,33 +1712,18 @@ func earliestOrderDeliveries(deliveries []matchedDelivery) []matchedDelivery {
 		return deliveries
 	}
 	earliestByOrder := make(map[uint]matchedDelivery, len(deliveries))
-	gmailDeliveries := make([]matchedDelivery, 0, len(deliveries))
 	for _, delivery := range deliveries {
-		if delivery.scope.AllocationType == domain.ResourceTypeGmail {
-			gmailDeliveries = append(gmailDeliveries, delivery)
-			continue
-		}
 		current, exists := earliestByOrder[delivery.scope.OrderID]
 		if !exists || deliveryPrecedes(delivery, current) {
 			earliestByOrder[delivery.scope.OrderID] = delivery
 		}
 	}
-	result := make([]matchedDelivery, 0, len(earliestByOrder)+len(gmailDeliveries))
+	result := make([]matchedDelivery, 0, len(earliestByOrder))
 	for _, delivery := range earliestByOrder {
 		result = append(result, delivery)
 	}
-	result = append(result, gmailDeliveries...)
 	sort.Slice(result, func(i, j int) bool {
-		if result[i].scope.OrderID != result[j].scope.OrderID {
-			return result[i].scope.OrderID < result[j].scope.OrderID
-		}
-		if result[i].scope.AllocationType == domain.ResourceTypeGmail && result[j].scope.AllocationType == domain.ResourceTypeGmail {
-			if !result[i].message.ReceivedAt.Equal(result[j].message.ReceivedAt) {
-				return result[i].message.ReceivedAt.Before(result[j].message.ReceivedAt)
-			}
-			return result[i].message.DedupeKey < result[j].message.DedupeKey
-		}
-		return deliveryPrecedes(result[i], result[j])
+		return result[i].scope.OrderID < result[j].scope.OrderID
 	})
 	return result
 }
@@ -1821,7 +1801,7 @@ func scopeFetchable(scope OrderScope, now func() time.Time) bool {
 
 func pickupFetchSupported(scope OrderScope) bool {
 	return scope.AllocationType == domain.ResourceTypeMicrosoft ||
-		scope.AllocationType == domain.ResourceTypeGmail && scope.ServiceMode == "purchase" ||
+		scope.AllocationType == domain.ResourceTypeGmail ||
 		scope.AllocationType == domain.ResourceTypeICloud
 }
 

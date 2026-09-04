@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestUpstreamPickupUsesNormalMailResponseShape(t *testing.T) {
+func TestPickupUsesNormalMailResponseShape(t *testing.T) {
 	receivedAt := time.Date(2026, 8, 31, 8, 0, 0, 0, time.UTC)
 	body, err := json.Marshal(orderMailResponse([]mailmatchdomain.MailContent{{
 		Recipient: "buyer@gmail.com", ReceivedAt: receivedAt, VerificationCode: "654321",

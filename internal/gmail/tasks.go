@@ -16,8 +16,6 @@ import (
 
 const (
 	typeGmailDispatch             = "gmail:dispatch"
-	typeGmailProvision            = "gmail:provision"
-	typeGmailPoll                 = "gmail:poll"
 	typeGmailResourceImport       = "gmail:resource_import"
 	gmailDispatchPeriod           = 5 * time.Second
 	gmailValidationDispatchPeriod = 30 * time.Second
@@ -48,9 +46,7 @@ func (s *Service) scheduleDispatcher(ctx context.Context) error {
 
 func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Context) {
 	mux.HandleFunc(typeGmailDispatch, func(ctx context.Context, _ *asynq.Task) error {
-		_, sessionErr := service.DispatchDueSessions(ctx, 200)
-		importErr := service.DispatchGmailResourceImports(ctx, 100)
-		return errors.Join(sessionErr, importErr)
+		return service.DispatchGmailResourceImports(ctx, 100)
 	})
 	mux.HandleFunc(typeGmailValidationDispatcher, func(ctx context.Context, _ *asynq.Task) error {
 		if err := service.DispatchLocalResourceValidations(ctx, localGmailValidationBatchMax); err != nil {
@@ -69,20 +65,6 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		}
 		defer release()
 		return service.ProcessLocalResourceValidationBatch(ctx, payload)
-	})
-	mux.HandleFunc(typeGmailProvision, func(ctx context.Context, task *asynq.Task) error {
-		payload, err := decodeSessionTask(task)
-		if err != nil {
-			return err
-		}
-		return service.Provision(ctx, payload.SessionID)
-	})
-	mux.HandleFunc(typeGmailPoll, func(ctx context.Context, task *asynq.Task) error {
-		payload, err := decodeSessionTask(task)
-		if err != nil {
-			return err
-		}
-		return service.Poll(ctx, payload.SessionID)
 	})
 	mux.HandleFunc(typeGmailValidateLocal, func(ctx context.Context, task *asynq.Task) error {
 		payload, err := decodeLocalResourceValidationTask(task)
@@ -312,14 +294,6 @@ func acquireLocalGmailHistoryCapacity(ctx context.Context, service *Service) (fu
 			}, true
 		}
 	}
-}
-
-func decodeSessionTask(task *asynq.Task) (*sessionTaskPayload, error) {
-	var payload sessionTaskPayload
-	if err := json.Unmarshal(task.Payload(), &payload); err != nil || payload.SessionID == 0 {
-		return nil, fmt.Errorf("decode Gmail session task: %w", asynq.SkipRetry)
-	}
-	return &payload, nil
 }
 
 func decodeGmailResourceImportTask(task *asynq.Task) (gmailResourceImportTask, error) {

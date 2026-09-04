@@ -668,6 +668,21 @@ describe("admin Microsoft detail sheet runtime", () => {
     await waitFor(() => expect(mocks.fetchMail).toHaveBeenCalledWith(77, "icloud"));
   });
 
+  it("passes the Gmail resource type to the shared mailbox fetch", async () => {
+    render(
+      <ResourceMailsPanel
+        resourceId={88}
+        resourceType="gmail"
+        t={((key: string) => key) as TFunction}
+      />
+    );
+    await waitFor(() => expect(mocks.messages).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Fetch mail" }));
+
+    await waitFor(() => expect(mocks.fetchMail).toHaveBeenCalledWith(88, "gmail"));
+  });
+
   it("polls active tasks and stops after the task reaches a terminal state", async () => {
     vi.useFakeTimers();
     try {

@@ -244,7 +244,11 @@ SELECT
     'fetch' AS source,
     state.email_resource_id AS source_id,
     state.email_resource_id AS resource_scope_id,
-    CASE WHEN state.operation_kind = 'icloud_resource_fetch' THEN 'icloud_resource' ELSE 'microsoft_resource' END AS biz_type,
+    CASE state.operation_kind
+        WHEN 'gmail_resource_fetch' THEN 'gmail_resource'
+        WHEN 'icloud_resource_fetch' THEN 'icloud_resource'
+        ELSE 'microsoft_resource'
+    END AS biz_type,
     state.email_resource_id AS biz_id,
     'fetch' AS kind,
     CASE state.status
@@ -263,11 +267,12 @@ SELECT
     state.fetched_count AS progress_total,
     state.fetched_count AS progress_processed,
     state.stored_count AS progress_succeeded,
-    GREATEST(state.fetched_count - state.stored_count, 0) AS progress_skipped,
+    CASE WHEN state.fetched_count > state.stored_count
+         THEN state.fetched_count - state.stored_count ELSE 0 END AS progress_skipped,
     0 AS progress_failed,
     NULL AS reason_buckets
 FROM mailmatch_admin_resource_fetch_states AS state
-WHERE state.operation_kind IN ('resource_fetch', 'icloud_resource_fetch')`
+WHERE state.operation_kind IN ('resource_fetch', 'gmail_resource_fetch', 'icloud_resource_fetch')`
 
 const resourceHistoryTaskSelect = `
 SELECT
@@ -461,7 +466,9 @@ const domainResourceTaskUnion = emptyTaskSelect
 
 const gmailResourceTaskUnion = gmailValidationTaskSelect + `
 UNION ALL
-` + gmailHistoryTaskSelect
+` + gmailHistoryTaskSelect + `
+UNION ALL
+` + fetchTaskSelect
 
 const iCloudResourceTaskUnion = iCloudImportResourceTaskSelect + `
 UNION ALL

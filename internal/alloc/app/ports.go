@@ -232,12 +232,6 @@ type ProjectProductInventoryTotals struct {
 	Cold bool
 }
 
-// ProductInventoryOverlay merges inventory owned outside Allocation into the
-// shared product snapshot used by every inventory endpoint.
-type ProductInventoryOverlay interface {
-	OverlayProductInventory(ctx context.Context, projectIDs []uint, snapshots map[uint]*ProjectProductInventoryTotals) error
-}
-
 type ProductInventoryAvailabilityRequest struct {
 	ProjectID   uint
 	ProductID   uint

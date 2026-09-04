@@ -15,9 +15,7 @@ import (
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	moneyfmt "github.com/donnel666/remail/internal/money"
 	"github.com/donnel666/remail/internal/platform"
-	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/donnel666/remail/internal/trade/domain"
-	"github.com/donnel666/remail/internal/upstream"
 )
 
 type OrderingQuote struct {
@@ -198,39 +196,8 @@ type GmailSupplyQuote struct {
 	Available  uint64
 }
 
-type GmailSessionCommand struct {
-	OrderNo           string
-	ProjectID         uint
-	ProductID         uint
-	CodeWindowMinutes int
-}
-
 type GmailSupplyPort interface {
 	CheckSupply(ctx context.Context, projectID, productID, buyerUserID uint, mode domain.ServiceMode, policy domain.SupplyPolicy, payAmount string) (*GmailSupplyQuote, error)
-	FindSessionID(ctx context.Context, orderNo string) (uint, error)
-	CreateSession(ctx context.Context, cmd GmailSessionCommand) (uint, error)
-	ScheduleProvision(ctx context.Context, sessionID uint) error
-	CancelGmailOrder(ctx context.Context, orderNo string) error
-}
-
-type GmailCode struct {
-	Seq        int
-	Code       string
-	ReceivedAt time.Time
-}
-
-type GmailDeliverySummary struct {
-	AllocationID uint
-	Codes        []GmailCode
-}
-
-type GmailDeliveryOrder struct {
-	OrderNo     string
-	ProductType domain.ProductType
-}
-
-type GmailDeliveryPort interface {
-	ListGmailDeliveries(ctx context.Context, orders []GmailDeliveryOrder) (map[string]GmailDeliverySummary, error)
 }
 
 type GmailPurchaseDelivery struct {
@@ -308,6 +275,7 @@ type Repository interface {
 	ListExpiredPurchaseWarrantyOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error)
 	ListCheckoutAllocationRecoveries(ctx context.Context, staleBefore time.Time, limit int) ([]CheckoutAllocationRecovery, error)
 	ListUnavailableMicrosoftOrderNos(ctx context.Context, resourceID uint, limit int) ([]string, error)
+	ListUnavailableGmailOrderNos(ctx context.Context, resourceID uint, limit int) ([]string, error)
 	ListCodeOrderNosReadyForCleanup(ctx context.Context, now time.Time, limit int) ([]string, error)
 	ListPartialCleanupOrderNos(ctx context.Context, limit int) ([]string, error)
 }
@@ -560,15 +528,6 @@ type MatchCodeResultRequest struct {
 	MatchedAt time.Time
 }
 
-type ActivateGmailOrderRequest struct {
-	OrderNo      string
-	AllocationID uint
-	SessionID    uint
-	Email        string
-	StartedAt    time.Time
-	ExpiresAt    time.Time
-}
-
 type AdminOrderCommandRequest struct {
 	OrderNo        string
 	Reason         string
@@ -597,8 +556,6 @@ type UseCase struct {
 	tokens                     OrderTokenPort
 	deliveries                 OrderDeliveryPort
 	gmailSupply                GmailSupplyPort
-	gmailDeliveries            GmailDeliveryPort
-	upstreams                  *upstream.Router
 	systemLogs                 SystemLogPort
 	projectDisplays            ProjectDisplayPort
 	owners                     OwnerLookupPort
@@ -632,13 +589,8 @@ func (uc *UseCase) SetOrderDeliveryPort(deliveries OrderDeliveryPort) {
 	uc.deliveries = deliveries
 }
 
-func (uc *UseCase) SetGmailPorts(supply GmailSupplyPort, deliveries GmailDeliveryPort) {
+func (uc *UseCase) SetGmailSupplyPort(supply GmailSupplyPort) {
 	uc.gmailSupply = supply
-	uc.gmailDeliveries = deliveries
-}
-
-func (uc *UseCase) SetUpstreams(router *upstream.Router) {
-	uc.upstreams = router
 }
 
 func (uc *UseCase) SetProjectDisplayPort(projectDisplays ProjectDisplayPort) {
@@ -948,10 +900,6 @@ type checkoutPreparation struct {
 	requestID            string
 	existing             *domain.Order
 	quote                *OrderingQuote
-	gmailQuote           *GmailSupplyQuote
-	upstreamOffer        *upstream.Offer
-	upstreamOwned        bool
-	fallbackAttempted    bool
 	inventoryUnavailable bool
 	prepareErr           error
 }
@@ -1173,119 +1121,8 @@ func (uc *UseCase) prepareCheckoutQuote(ctx context.Context, prepared *checkoutP
 	if err := finalizeCheckoutProduct(prepared, quote.ProductType); err != nil {
 		return err
 	}
-	if domain.IsGmailProductType(quote.ProductType) {
-		if uc.gmailSupply == nil {
-			return domain.ErrUpstreamUnavailable
-		}
-		gmailQuote, localErr := uc.gmailSupply.CheckSupply(
-			ctx, quote.ProjectID, quote.ProductID, prepared.request.UserID, prepared.mode, prepared.policy, quote.PayAmount,
-		)
-		localErr = checkoutGmailSupplyError(quote.ProductType, localErr)
-		if quote.ProductType == domain.ProductTypeGmailVariant {
-			if localErr != nil {
-				return localErr
-			}
-			if gmailQuote == nil || gmailQuote.Source != "local" {
-				return checkoutGmailSupplyError(quote.ProductType, domain.ErrUpstreamUnavailable)
-			}
-			prepared.gmailQuote = gmailQuote
-		} else {
-			if localErr != nil && !errors.Is(localErr, domain.ErrUpstreamUnavailable) {
-				return localErr
-			}
-			demand, err := gmailUpstreamDemand(
-				quote.ProjectID, quote.ProductID, prepared.request.UserID, prepared.mode, quote.PayAmount,
-			)
-			if err != nil {
-				return err
-			}
-			offer, useLocal, err := uc.upstreams.Choose(ctx, demand, gmailQuote != nil)
-			if err != nil {
-				return tradeUpstreamError(err)
-			}
-			if useLocal {
-				prepared.gmailQuote = gmailQuote
-			} else {
-				prepared.upstreamOffer = offer
-			}
-		}
-	}
 	prepared.quote = quote
 	return nil
-}
-
-func gmailUpstreamDemand(projectID, productID, buyerID uint, mode domain.ServiceMode, payAmount string) (upstream.Demand, error) {
-	orderType := upstream.OrderTypeCode
-	if mode == domain.ServiceModePurchase {
-		orderType = upstream.OrderTypePurchase
-	} else if mode != domain.ServiceModeCode {
-		return upstream.Demand{}, domain.ErrInvalidOrderRequest
-	}
-	return upstream.Demand{
-		ProjectID: projectID, ProductID: productID, BuyerID: buyerID,
-		EmailType: upstream.EmailTypeGmail, OrderType: orderType, PayAmount: payAmount,
-	}, nil
-}
-
-func tradeUpstreamError(err error) error {
-	switch {
-	case errors.Is(err, upstream.ErrUnavailable):
-		return domain.ErrUpstreamUnavailable
-	case errors.Is(err, upstream.ErrPriceProtected):
-		return domain.ErrUpstreamPriceProtected
-	default:
-		return err
-	}
-}
-
-func checkoutGmailSupplyError(productType domain.ProductType, err error) error {
-	if productType == domain.ProductTypeGmailVariant && errors.Is(err, domain.ErrUpstreamUnavailable) {
-		return domain.ErrInsufficientInventory
-	}
-	return err
-}
-
-func (uc *UseCase) checkoutUpstreamAfterLocalInventoryMiss(
-	ctx context.Context,
-	prepared checkoutPreparation,
-	order *domain.Order,
-	created bool,
-) (*CheckoutResult, bool, error) {
-	if prepared.fallbackAttempted || prepared.upstreamOwned || prepared.mode != domain.ServiceModeCode || prepared.quote == nil || order == nil {
-		return nil, false, nil
-	}
-	if order.ProductType != domain.ProductTypeGmail {
-		return nil, false, nil
-	}
-	if err := uc.allocation.ReleaseByOrder(ctx, order.OrderNo); err != nil {
-		return nil, true, err
-	}
-	demand, err := gmailUpstreamDemand(order.ProjectID, order.ProjectProductID, order.UserID, order.ServiceMode, order.PayAmount)
-	if err != nil {
-		return nil, true, err
-	}
-	offer, useLocal, err := uc.upstreams.Choose(ctx, demand, false)
-	if err != nil {
-		if errors.Is(err, upstream.ErrUnavailable) || errors.Is(err, upstream.ErrPriceProtected) {
-			return nil, false, nil
-		}
-		return nil, true, tradeUpstreamError(err)
-	}
-	if useLocal || offer == nil {
-		return nil, false, nil
-	}
-	prepared.existing = order
-	prepared.gmailQuote = nil
-	prepared.upstreamOffer = offer
-	prepared.fallbackAttempted = true
-	result, err := uc.checkoutUpstreamGmailPrepared(ctx, prepared)
-	if errors.Is(err, domain.ErrUpstreamUnavailable) {
-		return nil, false, nil
-	}
-	if result != nil && created {
-		result.Created = true
-	}
-	return result, true, err
 }
 
 func (uc *UseCase) checkoutPrepared(ctx context.Context, prepared checkoutPreparation) (*CheckoutResult, error) {
@@ -1293,21 +1130,19 @@ func (uc *UseCase) checkoutPrepared(ctx context.Context, prepared checkoutPrepar
 		return nil, prepared.prepareErr
 	}
 	if prepared.existing != nil {
-		if domain.IsGmailProductType(prepared.existing.ProductType) {
-			return uc.checkoutGmailPrepared(ctx, prepared)
-		}
-		return uc.resumeExistingCheckout(
+		result, err := uc.resumeExistingCheckout(
 			ctx,
 			prepared.existing.OrderNo,
 			prepared.emailSuffix,
 			prepared.requestID,
 		)
+		if err == nil {
+			err = uc.attachGmailPurchase(ctx, result)
+		}
+		return result, err
 	}
 	if prepared.quote == nil {
 		return nil, errors.New("checkout quote was not prepared")
-	}
-	if domain.IsGmailProductType(prepared.quote.ProductType) {
-		return uc.checkoutGmailPrepared(ctx, prepared)
 	}
 	order, created, err := uc.repo.LoadOrCreatePendingOrder(ctx, CreatePendingOrderCommand{
 		OrderNo:                 nextOrderNo(),
@@ -1359,640 +1194,10 @@ func (uc *UseCase) checkoutPrepared(ctx context.Context, prepared checkoutPrepar
 	if result != nil {
 		result.Created = created
 	}
+	if err == nil {
+		err = uc.attachGmailPurchase(ctx, result)
+	}
 	return result, err
-}
-
-func (uc *UseCase) checkoutGmailPrepared(ctx context.Context, prepared checkoutPreparation) (*CheckoutResult, error) {
-	if uc.gmailSupply == nil {
-		return nil, domain.ErrUpstreamUnavailable
-	}
-	if prepared.existing != nil {
-		switch prepared.existing.Status {
-		case domain.OrderStatusActive, domain.OrderStatusCompleted:
-			return uc.gmailCheckoutResult(ctx, *prepared.existing, false)
-		case domain.OrderStatusFailed:
-			if err := uc.allocation.ReleaseByOrder(ctx, prepared.existing.OrderNo); err != nil {
-				return nil, err
-			}
-			return &CheckoutResult{Order: *prepared.existing}, checkoutErrorForFailedOrder(*prepared.existing)
-		case domain.OrderStatusRefunded, domain.OrderStatusClosed:
-			if err := uc.allocation.ReleaseByOrder(ctx, prepared.existing.OrderNo); err != nil {
-				return nil, err
-			}
-			return &CheckoutResult{Order: *prepared.existing}, nil
-		}
-		storedQuote, err := orderingQuoteFromOrder(*prepared.existing)
-		if err != nil {
-			return nil, err
-		}
-		prepared.quote = storedQuote
-		prepared.mode = prepared.existing.ServiceMode
-		prepared.policy = prepared.existing.SupplyPolicy
-
-		if prepared.existing.ProductType == domain.ProductTypeGmail {
-			offer, owned, err := uc.upstreams.Owner(ctx, prepared.existing.OrderNo)
-			if err != nil {
-				return nil, err
-			}
-			if owned {
-				prepared.upstreamOffer = offer
-				prepared.upstreamOwned = true
-				return uc.checkoutUpstreamGmailPrepared(ctx, prepared)
-			}
-		}
-		if prepared.existing.Status == domain.OrderStatusPaid {
-			sessionID, err := uc.gmailSupply.FindSessionID(ctx, prepared.existing.OrderNo)
-			if err != nil {
-				return nil, err
-			}
-			if sessionID > 0 {
-				if err := uc.gmailSupply.ScheduleProvision(context.WithoutCancel(ctx), sessionID); err != nil {
-					slog.Warn("schedule existing Gmail provision failed", "order_no", prepared.existing.OrderNo, "session_id", sessionID, "error", err)
-				}
-				return uc.gmailCheckoutResult(ctx, *prepared.existing, false)
-			}
-		}
-		if prepared.gmailQuote == nil && prepared.upstreamOffer == nil {
-			gmailQuote, localErr := uc.gmailSupply.CheckSupply(
-				ctx, prepared.existing.ProjectID, prepared.existing.ProjectProductID, prepared.existing.UserID,
-				prepared.existing.ServiceMode, prepared.existing.SupplyPolicy, prepared.existing.PayAmount,
-			)
-			localErr = checkoutGmailSupplyError(prepared.existing.ProductType, localErr)
-			if prepared.existing.ProductType == domain.ProductTypeGmailVariant {
-				if localErr != nil {
-					return nil, localErr
-				}
-				if gmailQuote == nil || gmailQuote.Source != "local" {
-					return nil, checkoutGmailSupplyError(prepared.existing.ProductType, domain.ErrUpstreamUnavailable)
-				}
-				prepared.gmailQuote = gmailQuote
-			} else {
-				if localErr != nil && !errors.Is(localErr, domain.ErrUpstreamUnavailable) {
-					return nil, localErr
-				}
-				demand, err := gmailUpstreamDemand(
-					prepared.existing.ProjectID, prepared.existing.ProjectProductID, prepared.existing.UserID,
-					prepared.existing.ServiceMode, prepared.existing.PayAmount,
-				)
-				if err != nil {
-					return nil, err
-				}
-				offer, useLocal, err := uc.upstreams.Choose(ctx, demand, gmailQuote != nil)
-				if err != nil {
-					return nil, tradeUpstreamError(err)
-				}
-				if useLocal {
-					prepared.gmailQuote = gmailQuote
-				} else {
-					prepared.upstreamOffer = offer
-				}
-			}
-		}
-	}
-	if prepared.quote == nil || !domain.IsGmailProductType(prepared.quote.ProductType) {
-		return nil, domain.ErrInvalidOrderRequest
-	}
-	if prepared.upstreamOffer != nil {
-		return uc.checkoutUpstreamGmailPrepared(ctx, prepared)
-	}
-	if prepared.mode == domain.ServiceModePurchase {
-		return uc.checkoutGmailPurchasePrepared(ctx, prepared)
-	}
-	if prepared.mode != domain.ServiceModeCode || prepared.gmailQuote == nil || prepared.gmailQuote.Source != "local" {
-		return nil, domain.ErrInvalidOrderRequest
-	}
-	return uc.checkoutLocalGmailCodePrepared(ctx, prepared)
-}
-
-func (uc *UseCase) checkoutUpstreamGmailPrepared(ctx context.Context, prepared checkoutPreparation) (*CheckoutResult, error) {
-	if prepared.quote == nil || prepared.quote.ProductType != domain.ProductTypeGmail || prepared.mode != domain.ServiceModeCode || prepared.upstreamOffer == nil {
-		return nil, domain.ErrInvalidOrderRequest
-	}
-	var result *CheckoutResult
-	var checkoutErr error
-	created := false
-	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
-		userID := prepared.request.UserID
-		if prepared.existing != nil {
-			userID = prepared.existing.UserID
-		}
-		if err := uc.wallet.LockConsumer(txCtx, userID); err != nil {
-			return err
-		}
-		var order *domain.Order
-		var err error
-		if prepared.existing != nil {
-			order, err = uc.repo.LockOrderForUpdate(txCtx, prepared.existing.OrderNo)
-		} else {
-			order, created, err = uc.repo.LoadOrCreatePendingOrder(txCtx, CreatePendingOrderCommand{
-				OrderNo:            nextOrderNo(),
-				UserID:             prepared.request.UserID,
-				ProjectID:          prepared.quote.ProjectID,
-				ProjectProductID:   prepared.quote.ProductID,
-				ProductType:        prepared.quote.ProductType,
-				ServiceMode:        prepared.mode,
-				SupplyPolicy:       prepared.policy,
-				PayAmount:          prepared.quote.PayAmount,
-				CodeWindowMinutes:  prepared.quote.CodeWindowMinutes,
-				ClientChannel:      prepared.request.ClientChannel,
-				APIKeyID:           prepared.request.APIKeyID,
-				IdempotencyKey:     prepared.idempotencyKey,
-				RequestFingerprint: prepared.fingerprint,
-				Now:                uc.now(),
-			})
-		}
-		if err != nil {
-			return err
-		}
-		if order.ProductType != domain.ProductTypeGmail || order.ServiceMode != domain.ServiceModeCode {
-			return domain.ErrInvalidOrderRequest
-		}
-		if order.Status == domain.OrderStatusPendingPayment {
-			debit, err := uc.wallet.DebitConsumer(txCtx, WalletCommand{
-				UserID: order.UserID, Amount: order.PayAmount, Reason: "order:" + order.OrderNo,
-				IdempotencyKey: "order:" + order.OrderNo + ":debit", RequestID: prepared.requestID,
-			})
-			if err != nil {
-				if !errors.Is(err, domain.ErrInsufficientBalance) {
-					return err
-				}
-				failed, markErr := uc.repo.MarkFailed(txCtx, MarkFailedCommand{
-					OrderNo: order.OrderNo, FailureCode: domain.OrderFailureInsufficientBalance,
-					Reason: "Payment failed.", Now: uc.now(),
-				})
-				if markErr != nil {
-					return markErr
-				}
-				result = &CheckoutResult{Order: *failed, Created: created}
-				checkoutErr = err
-				return nil
-			}
-			order, err = uc.repo.MarkPaid(txCtx, MarkPaidCommand{OrderNo: order.OrderNo, DebitTxID: debit.ID, PayAmount: order.PayAmount})
-			if err != nil {
-				return err
-			}
-		}
-		if order.Status != domain.OrderStatusPaid {
-			result = &CheckoutResult{Order: *order, Created: created}
-			return nil
-		}
-		paidOrder := upstream.PaidOrder{
-			OrderNo: order.OrderNo, ProjectID: order.ProjectID, ProductID: order.ProjectProductID,
-			BuyerID: order.UserID, EmailType: upstream.EmailTypeGmail,
-			OrderType: upstream.OrderTypeCode, PayAmount: order.PayAmount,
-		}
-		if prepared.upstreamOwned {
-			err = uc.upstreams.ResumePaidOrder(txCtx, prepared.upstreamOffer, paidOrder)
-		} else {
-			err = uc.upstreams.AcceptPaidOrder(txCtx, prepared.upstreamOffer, paidOrder)
-		}
-		if err != nil {
-			return tradeUpstreamError(err)
-		}
-		order, err = uc.repo.FindOrder(txCtx, order.OrderNo)
-		if err != nil {
-			return err
-		}
-		if order.Status != domain.OrderStatusActive && order.Status != domain.OrderStatusCompleted {
-			return errors.New("upstream provider returned without activating order")
-		}
-		result = &CheckoutResult{Order: *order, Created: created}
-		return nil
-	})
-	if err != nil {
-		if errors.Is(err, domain.ErrUpstreamUnavailable) && !prepared.fallbackAttempted && !prepared.upstreamOwned {
-			projectID, productID, userID, payAmount := prepared.quote.ProjectID, prepared.quote.ProductID, prepared.request.UserID, prepared.quote.PayAmount
-			if prepared.existing != nil {
-				projectID, productID, userID, payAmount = prepared.existing.ProjectID, prepared.existing.ProjectProductID, prepared.existing.UserID, prepared.existing.PayAmount
-			}
-			gmailQuote, localErr := uc.gmailSupply.CheckSupply(ctx, projectID, productID, userID, prepared.mode, prepared.policy, payAmount)
-			if localErr != nil && !errors.Is(localErr, domain.ErrUpstreamUnavailable) {
-				return nil, localErr
-			}
-			if gmailQuote != nil && gmailQuote.Source == "local" {
-				prepared.gmailQuote = gmailQuote
-				prepared.upstreamOffer = nil
-				prepared.fallbackAttempted = true
-				return uc.checkoutLocalGmailCodePrepared(ctx, prepared)
-			}
-		}
-		return nil, err
-	}
-	if checkoutErr != nil {
-		return result, checkoutErr
-	}
-	if result == nil {
-		return nil, errors.New("upstream Gmail checkout returned no order")
-	}
-	return uc.gmailCheckoutResult(ctx, result.Order, result.Created)
-}
-
-func (uc *UseCase) checkoutLocalGmailCodePrepared(ctx context.Context, prepared checkoutPreparation) (*CheckoutResult, error) {
-	var order *domain.Order
-	created := false
-	var err error
-	if prepared.existing != nil {
-		order = prepared.existing
-	} else {
-		order, created, err = uc.repo.LoadOrCreatePendingOrder(ctx, CreatePendingOrderCommand{
-			OrderNo:            nextOrderNo(),
-			UserID:             prepared.request.UserID,
-			ProjectID:          prepared.quote.ProjectID,
-			ProjectProductID:   prepared.quote.ProductID,
-			ProductType:        prepared.quote.ProductType,
-			ServiceMode:        prepared.mode,
-			SupplyPolicy:       prepared.policy,
-			PayAmount:          prepared.quote.PayAmount,
-			CodeWindowMinutes:  prepared.quote.CodeWindowMinutes,
-			ClientChannel:      prepared.request.ClientChannel,
-			APIKeyID:           prepared.request.APIKeyID,
-			IdempotencyKey:     prepared.idempotencyKey,
-			RequestFingerprint: prepared.fingerprint,
-			Now:                uc.now(),
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
-	if order == nil || !domain.IsGmailProductType(order.ProductType) || order.ServiceMode != domain.ServiceModeCode {
-		return nil, domain.ErrInvalidOrderRequest
-	}
-
-	var allocation *AllocationResult
-	for {
-		switch order.Status {
-		case domain.OrderStatusPendingPayment:
-			allocation, err = uc.allocate(ctx, *order, "")
-			if err != nil {
-				if !errors.Is(err, domain.ErrInsufficientInventory) {
-					return nil, err
-				}
-				if result, handled, fallbackErr := uc.checkoutUpstreamAfterLocalInventoryMiss(ctx, prepared, order, created); handled {
-					return result, fallbackErr
-				}
-				failed, failErr := uc.failPendingCheckout(ctx, MarkFailedCommand{
-					OrderNo: order.OrderNo, FailureCode: domain.OrderFailureInsufficientInventory,
-					Reason: "Allocation failed.", Now: uc.now(),
-				})
-				if failErr != nil {
-					return nil, failErr
-				}
-				if failed == nil {
-					return nil, errors.New("mark failed returned no order")
-				}
-				if failed.Status != domain.OrderStatusFailed {
-					order = failed
-					continue
-				}
-				return &CheckoutResult{Order: *failed, Created: created}, checkoutErrorForFailedOrder(*failed)
-			}
-			if allocation == nil {
-				return nil, errors.New("allocation returned no result")
-			}
-			payAmount := checkoutPayAmount(order.PayAmount, allocation.SupplyScope)
-			paid, err := uc.payPendingCheckout(ctx, order.OrderNo, order.UserID, payAmount, prepared.requestID)
-			if err != nil {
-				if !errors.Is(err, domain.ErrInsufficientBalance) {
-					return nil, err
-				}
-				failed, failErr := uc.failPendingCheckout(ctx, MarkFailedCommand{
-					OrderNo: order.OrderNo, FailureCode: domain.OrderFailureInsufficientBalance,
-					Reason: "Payment failed.", Now: uc.now(),
-				})
-				if failErr != nil {
-					return nil, failErr
-				}
-				if failed == nil {
-					return nil, errors.New("mark failed returned no order")
-				}
-				if failed.Status != domain.OrderStatusFailed {
-					order = failed
-					continue
-				}
-				return &CheckoutResult{Order: *failed, Created: created}, checkoutErrorForFailedOrder(*failed)
-			}
-			order = paid
-
-		case domain.OrderStatusPaid:
-			if allocation == nil {
-				allocation, err = uc.allocate(ctx, *order, "")
-				if err != nil {
-					if !errors.Is(err, domain.ErrInsufficientInventory) {
-						return nil, err
-					}
-					if result, handled, fallbackErr := uc.checkoutUpstreamAfterLocalInventoryMiss(ctx, prepared, order, created); handled {
-						return result, fallbackErr
-					}
-					failed, refundErr := uc.compensatePaidCheckout(ctx, *order, domain.OrderFailureInsufficientInventory, "Allocation failed.")
-					if refundErr != nil {
-						return nil, fmt.Errorf("%w: %v", domain.ErrOrderCompensationError, refundErr)
-					}
-					if failed == nil {
-						return nil, errors.New("refund failed order returned no order")
-					}
-					if failed.Status != domain.OrderStatusFailed {
-						order = failed
-						continue
-					}
-					return &CheckoutResult{Order: *failed, Created: created}, checkoutErrorForFailedOrder(*failed)
-				}
-				if allocation == nil {
-					return nil, errors.New("allocation returned no result")
-				}
-			}
-			sessionID, err := uc.gmailSupply.FindSessionID(ctx, order.OrderNo)
-			if err != nil {
-				return nil, err
-			}
-			if sessionID == 0 {
-				sessionID, err = uc.gmailSupply.CreateSession(ctx, GmailSessionCommand{
-					OrderNo: order.OrderNo, ProjectID: order.ProjectID, ProductID: order.ProjectProductID,
-					CodeWindowMinutes: order.CodeWindowMinutes,
-				})
-				if err != nil {
-					return nil, err
-				}
-			}
-			if err := uc.gmailSupply.ScheduleProvision(context.WithoutCancel(ctx), sessionID); err != nil {
-				slog.Warn("schedule local Gmail provision failed", "order_no", order.OrderNo, "session_id", sessionID, "error", err)
-			}
-			return uc.gmailCheckoutResult(ctx, *order, created)
-
-		case domain.OrderStatusActive, domain.OrderStatusCompleted:
-			return uc.gmailCheckoutResult(ctx, *order, created)
-		case domain.OrderStatusFailed:
-			if err := uc.allocation.ReleaseByOrder(ctx, order.OrderNo); err != nil {
-				return nil, err
-			}
-			return &CheckoutResult{Order: *order, Created: created}, checkoutErrorForFailedOrder(*order)
-		case domain.OrderStatusRefunded, domain.OrderStatusClosed:
-			if err := uc.allocation.ReleaseByOrder(ctx, order.OrderNo); err != nil {
-				return nil, err
-			}
-			return &CheckoutResult{Order: *order, Created: created}, nil
-		default:
-			return &CheckoutResult{Order: *order, Created: created}, nil
-		}
-	}
-}
-
-func (uc *UseCase) checkoutGmailPurchasePrepared(ctx context.Context, prepared checkoutPreparation) (*CheckoutResult, error) {
-	purchases, ok := uc.gmailSupply.(GmailPurchaseSupplyPort)
-	if !ok || purchases == nil {
-		return nil, domain.ErrUpstreamUnavailable
-	}
-	if prepared.existing != nil {
-		switch prepared.existing.Status {
-		case domain.OrderStatusActive, domain.OrderStatusCompleted:
-			return uc.gmailCheckoutResult(ctx, *prepared.existing, false)
-		case domain.OrderStatusFailed:
-			return &CheckoutResult{Order: *prepared.existing}, checkoutErrorForFailedOrder(*prepared.existing)
-		case domain.OrderStatusRefunded, domain.OrderStatusClosed:
-			return &CheckoutResult{Order: *prepared.existing}, nil
-		}
-		storedQuote, err := orderingQuoteFromOrder(*prepared.existing)
-		if err != nil {
-			return nil, err
-		}
-		prepared.quote = storedQuote
-		if prepared.gmailQuote == nil {
-			gmailQuote, err := uc.gmailSupply.CheckSupply(
-				ctx, prepared.existing.ProjectID, prepared.existing.ProjectProductID, prepared.existing.UserID,
-				prepared.existing.ServiceMode, prepared.existing.SupplyPolicy, prepared.existing.PayAmount,
-			)
-			if err != nil {
-				return nil, err
-			}
-			prepared.gmailQuote = gmailQuote
-		}
-	}
-	if prepared.quote == nil || !domain.IsGmailProductType(prepared.quote.ProductType) || prepared.mode != domain.ServiceModePurchase ||
-		prepared.gmailQuote == nil || prepared.gmailQuote.Source != "local" {
-		return nil, domain.ErrInvalidOrderRequest
-	}
-
-	var order *domain.Order
-	created := false
-	var err error
-	if prepared.existing != nil {
-		order = prepared.existing
-	} else {
-		order, created, err = uc.repo.LoadOrCreatePendingOrder(ctx, CreatePendingOrderCommand{
-			OrderNo:                 nextOrderNo(),
-			UserID:                  prepared.request.UserID,
-			ProjectID:               prepared.quote.ProjectID,
-			ProjectProductID:        prepared.quote.ProductID,
-			ProductType:             prepared.quote.ProductType,
-			ServiceMode:             prepared.mode,
-			SupplyPolicy:            prepared.policy,
-			PayAmount:               prepared.quote.PayAmount,
-			ActivationWindowMinutes: prepared.quote.ActivationWindowMinutes,
-			WarrantyMinutes:         prepared.quote.WarrantyMinutes,
-			ClientChannel:           prepared.request.ClientChannel,
-			APIKeyID:                prepared.request.APIKeyID,
-			IdempotencyKey:          prepared.idempotencyKey,
-			RequestFingerprint:      prepared.fingerprint,
-			Now:                     uc.now(),
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
-	if order == nil || !domain.IsGmailProductType(order.ProductType) || order.ServiceMode != domain.ServiceModePurchase {
-		return nil, domain.ErrInvalidOrderRequest
-	}
-
-	var allocation *AllocationResult
-	var delivery *GmailPurchaseDelivery
-	for {
-		switch order.Status {
-		case domain.OrderStatusPendingPayment:
-			allocation, err = uc.allocate(ctx, *order, "")
-			if err != nil {
-				if !errors.Is(err, domain.ErrInsufficientInventory) {
-					return nil, err
-				}
-				failed, failErr := uc.failPendingCheckout(ctx, MarkFailedCommand{
-					OrderNo: order.OrderNo, FailureCode: domain.OrderFailureInsufficientInventory,
-					Reason: "Allocation failed.", Now: uc.now(),
-				})
-				if failErr != nil {
-					return nil, failErr
-				}
-				if failed == nil {
-					return nil, errors.New("mark failed returned no order")
-				}
-				if failed.Status != domain.OrderStatusFailed {
-					order = failed
-					continue
-				}
-				return &CheckoutResult{Order: *failed, Created: created}, checkoutErrorForFailedOrder(*failed)
-			}
-			if allocation == nil {
-				return nil, errors.New("allocation returned no result")
-			}
-			payAmount := checkoutPayAmount(order.PayAmount, allocation.SupplyScope)
-			paid, err := uc.payPendingCheckout(ctx, order.OrderNo, order.UserID, payAmount, prepared.requestID)
-			if err != nil {
-				if !errors.Is(err, domain.ErrInsufficientBalance) {
-					return nil, err
-				}
-				failed, failErr := uc.failPendingCheckout(ctx, MarkFailedCommand{
-					OrderNo: order.OrderNo, FailureCode: domain.OrderFailureInsufficientBalance,
-					Reason: "Payment failed.", Now: uc.now(),
-				})
-				if failErr != nil {
-					return nil, failErr
-				}
-				if failed == nil {
-					return nil, errors.New("mark failed returned no order")
-				}
-				if failed.Status != domain.OrderStatusFailed {
-					order = failed
-					continue
-				}
-				return &CheckoutResult{Order: *failed, Created: created}, checkoutErrorForFailedOrder(*failed)
-			}
-			order = paid
-
-		case domain.OrderStatusPaid:
-			if allocation == nil {
-				allocation, err = uc.allocate(ctx, *order, "")
-				if err != nil {
-					if !errors.Is(err, domain.ErrInsufficientInventory) {
-						return nil, err
-					}
-					failed, refundErr := uc.compensatePaidCheckout(ctx, *order, domain.OrderFailureInsufficientInventory, "Allocation failed.")
-					if refundErr != nil {
-						return nil, fmt.Errorf("%w: %v", domain.ErrOrderCompensationError, refundErr)
-					}
-					if failed == nil {
-						return nil, errors.New("refund failed order returned no order")
-					}
-					if failed.Status != domain.OrderStatusFailed {
-						order = failed
-						continue
-					}
-					return &CheckoutResult{Order: *failed, Created: created}, checkoutErrorForFailedOrder(*failed)
-				}
-				if allocation == nil {
-					return nil, errors.New("allocation returned no result")
-				}
-			}
-			if delivery == nil {
-				delivery, err = purchases.FindLocalPurchase(ctx, order.OrderNo)
-				if err != nil {
-					return nil, err
-				}
-				if delivery == nil || delivery.AllocationID != allocation.ID || !strings.EqualFold(delivery.Email, allocation.Email) {
-					return nil, errors.New("gmail purchase allocation returned no result")
-				}
-			}
-			now := uc.now()
-			receiveUntil := serviceReceiveUntil(now, *prepared.quote, domain.ServiceModePurchase)
-			afterSaleUntil := now.Add(time.Duration(prepared.quote.WarrantyMinutes) * time.Minute)
-			token, err := uc.tokens.IssueOrderToken(ctx, order.OrderNo, nil)
-			if err == nil && token == nil {
-				err = errors.New("issue order token returned no token")
-			}
-			if err != nil {
-				failed, refundErr := uc.compensatePaidCheckout(ctx, *order, domain.OrderFailureServiceToken, "Service token failed.")
-				if refundErr != nil {
-					return nil, fmt.Errorf("%w: %v", domain.ErrOrderCompensationError, refundErr)
-				}
-				if failed == nil {
-					return nil, errors.New("refund failed order returned no order")
-				}
-				if failed.Status != domain.OrderStatusFailed {
-					order = failed
-					continue
-				}
-				return nil, err
-			}
-			activated, err := uc.repo.MarkActive(ctx, MarkActiveCommand{
-				OrderNo: order.OrderNo, AllocationType: domain.AllocationTypeGmail,
-				AllocationID: delivery.AllocationID, DeliveryEmail: delivery.Email,
-				ReceiveStartedAt: now, ReceiveUntil: receiveUntil, ActivatedAt: &now, AfterSaleUntil: &afterSaleUntil,
-			})
-			if err != nil {
-				if errors.Is(err, domain.ErrOrderStateConflict) {
-					reloaded, reloadErr := uc.repo.FindOrder(ctx, order.OrderNo)
-					if reloadErr != nil {
-						return nil, reloadErr
-					}
-					if reloaded == nil {
-						return nil, errors.New("reload Gmail order returned no order")
-					}
-					order = reloaded
-					continue
-				}
-				failed, refundErr := uc.compensatePaidCheckout(ctx, *order, domain.OrderFailureActivation, "Order activation failed.")
-				if refundErr != nil {
-					return nil, fmt.Errorf("%w: %v", domain.ErrOrderCompensationError, refundErr)
-				}
-				if failed == nil {
-					return nil, errors.New("refund failed order returned no order")
-				}
-				if failed.Status != domain.OrderStatusFailed {
-					order = failed
-					continue
-				}
-				return nil, err
-			}
-			if activated == nil {
-				return nil, errors.New("mark active returned no order")
-			}
-			return uc.gmailCheckoutResult(ctx, *activated, created)
-
-		case domain.OrderStatusActive, domain.OrderStatusCompleted:
-			return uc.gmailCheckoutResult(ctx, *order, created)
-		case domain.OrderStatusFailed:
-			if err := uc.allocation.ReleaseByOrder(ctx, order.OrderNo); err != nil {
-				return nil, err
-			}
-			return &CheckoutResult{Order: *order, Created: created}, checkoutErrorForFailedOrder(*order)
-		case domain.OrderStatusRefunded, domain.OrderStatusClosed:
-			if err := uc.allocation.ReleaseByOrder(ctx, order.OrderNo); err != nil {
-				return nil, err
-			}
-			return &CheckoutResult{Order: *order, Created: created}, nil
-		default:
-			return &CheckoutResult{Order: *order, Created: created}, nil
-		}
-	}
-}
-
-func (uc *UseCase) gmailCheckoutResult(ctx context.Context, order domain.Order, created bool) (*CheckoutResult, error) {
-	result := &CheckoutResult{Order: order, Created: created}
-	if order.Status != domain.OrderStatusActive && order.Status != domain.OrderStatusCompleted {
-		return result, nil
-	}
-	if order.ServiceMode == domain.ServiceModePurchase {
-		if err := uc.attachGmailPurchase(ctx, result); err != nil {
-			return nil, err
-		}
-	} else {
-		items := []CheckoutResult{*result}
-		if err := uc.attachGmailDeliveries(ctx, items); err != nil {
-			return nil, err
-		}
-		*result = items[0]
-	}
-	token, err := uc.tokens.FindOrderTokenByOrder(ctx, order.OrderNo)
-	if err != nil {
-		return nil, err
-	}
-	if token == nil {
-		token, err = uc.tokens.IssueOrderToken(ctx, order.OrderNo, tokenExpireAtFromOrder(order))
-		if err != nil {
-			return nil, err
-		}
-	}
-	if token == nil {
-		return nil, errors.New("issue order token returned no token")
-	}
-	result.ServiceToken = token.TokenPlain
-	return result, nil
 }
 
 func (uc *UseCase) attachGmailPurchase(ctx context.Context, result *CheckoutResult) error {
@@ -2002,7 +1207,7 @@ func (uc *UseCase) attachGmailPurchase(ctx context.Context, result *CheckoutResu
 	}
 	purchases, ok := uc.gmailSupply.(GmailPurchaseSupplyPort)
 	if !ok || purchases == nil {
-		return domain.ErrUpstreamUnavailable
+		return errors.New("gmail purchase service is unavailable")
 	}
 	delivery, err := purchases.FindLocalPurchase(ctx, result.Order.OrderNo)
 	if err != nil {
@@ -2158,9 +1363,6 @@ func (uc *UseCase) precheckCheckoutInventory(ctx context.Context, prepared []che
 	for index := range prepared {
 		item := &prepared[index]
 		if item.prepareErr != nil || item.existing != nil || item.quote == nil {
-			continue
-		}
-		if domain.IsGmailProductType(item.quote.ProductType) {
 			continue
 		}
 		key := inventoryKey{
@@ -2511,22 +1713,6 @@ func (uc *UseCase) resumeExistingCheckout(ctx context.Context, orderNo, emailSuf
 	return result, err
 }
 
-func (uc *UseCase) resumeExistingGmailCheckout(ctx context.Context, orderNo, requestID string) (*CheckoutResult, error) {
-	order, err := uc.repo.FindOrder(ctx, orderNo)
-	if err != nil {
-		return nil, err
-	}
-	quote, err := orderingQuoteFromOrder(*order)
-	if err != nil {
-		return nil, err
-	}
-	return uc.checkoutGmailPrepared(ctx, checkoutPreparation{
-		existing: order, quote: quote, mode: order.ServiceMode, policy: order.SupplyPolicy,
-		requestID:  strings.TrimSpace(requestID),
-		gmailQuote: &GmailSupplyQuote{Source: "local", CostPoints: "0"},
-	})
-}
-
 func (uc *UseCase) GetOrder(ctx context.Context, orderNo string, userID uint, isAdmin bool) (*CheckoutResult, error) {
 	order, err := uc.repo.FindOrder(ctx, strings.TrimSpace(orderNo))
 	if err != nil {
@@ -2558,11 +1744,6 @@ func (uc *UseCase) GetOrder(ctx context.Context, orderNo string, userID uint, is
 		return nil, err
 	}
 	if domain.IsGmailProductType(result.Order.ProductType) {
-		gmailResults := []CheckoutResult{*result}
-		if err := uc.attachGmailDeliveries(ctx, gmailResults); err != nil {
-			return nil, err
-		}
-		*result = gmailResults[0]
 		if err := uc.attachGmailPurchase(ctx, result); err != nil {
 			return nil, err
 		}
@@ -2652,9 +1833,6 @@ func (uc *UseCase) ListOrders(ctx context.Context, filter OrderListFilter, offse
 		for i := range results {
 			attachOrderDeliverySummary(&results[i], deliveries[results[i].Order.ID])
 		}
-	}
-	if err := uc.attachGmailDeliveries(ctx, results); err != nil {
-		return nil, err
 	}
 	allocationResults := make([]*CheckoutResult, len(results))
 	for i := range results {
@@ -2810,57 +1988,17 @@ func (uc *UseCase) attachAllocationIDs(ctx context.Context, results ...*Checkout
 		orderNo := strings.TrimSpace(result.Order.OrderNo)
 		allocation, exists := allocations[orderNo]
 		if !exists {
-			if *result.Order.AllocationType != domain.AllocationTypeGmail {
-				return fmt.Errorf("%w: allocation missing for order %s", domain.ErrOrderStateConflict, orderNo)
+			if *result.Order.AllocationType == domain.AllocationTypeGmail &&
+				(result.Order.Status == domain.OrderStatusCompleted || result.Order.Status == domain.OrderStatusFailed ||
+					result.Order.Status == domain.OrderStatusRefunded || result.Order.Status == domain.OrderStatusClosed) {
+				continue
 			}
-			continue
+			return fmt.Errorf("%w: allocation missing for order %s", domain.ErrOrderStateConflict, orderNo)
 		}
 		if allocation.ID == 0 || allocation.Type != *result.Order.AllocationType {
 			return fmt.Errorf("%w: allocation mismatch for order %s", domain.ErrOrderStateConflict, orderNo)
 		}
 		result.AllocationID = allocation.ID
-	}
-	return nil
-}
-
-func (uc *UseCase) attachGmailDeliveries(ctx context.Context, results []CheckoutResult) error {
-	if uc.gmailDeliveries == nil || len(results) == 0 {
-		return nil
-	}
-	orders := make([]GmailDeliveryOrder, 0, len(results))
-	for i := range results {
-		if domain.IsGmailProductType(results[i].Order.ProductType) {
-			orders = append(orders, GmailDeliveryOrder{
-				OrderNo: results[i].Order.OrderNo, ProductType: results[i].Order.ProductType,
-			})
-		}
-	}
-	if len(orders) == 0 {
-		return nil
-	}
-	deliveries, err := uc.gmailDeliveries.ListGmailDeliveries(ctx, orders)
-	if err != nil {
-		return err
-	}
-	for i := range results {
-		if !domain.IsGmailProductType(results[i].Order.ProductType) {
-			continue
-		}
-		delivery, ok := deliveries[results[i].Order.OrderNo]
-		if !ok {
-			continue
-		}
-		results[i].AllocationID = delivery.AllocationID
-		if results[i].Order.ServiceMode != domain.ServiceModeCode {
-			continue
-		}
-		if len(delivery.Codes) > 0 {
-			latest := delivery.Codes[len(delivery.Codes)-1]
-			receivedAt := latest.ReceivedAt.UTC()
-			results[i].HasDelivery = true
-			results[i].VerificationCode = latest.Code
-			results[i].LastMailReceivedAt = &receivedAt
-		}
 	}
 	return nil
 }
@@ -3023,29 +2161,6 @@ func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrder
 			return nil, err
 		}
 		for _, recovery := range recoveries {
-			if domain.IsGmailProductType(recovery.ProductType) {
-				if uc.gmailSupply == nil {
-					result.Failed++
-					continue
-				}
-				if recovery.Status == domain.OrderStatusPaid {
-					if _, err := uc.resumeExistingGmailCheckout(ctx, recovery.OrderNo, ""); err != nil {
-						result.Failed++
-						continue
-					}
-					result.CheckoutRecovered++
-					continue
-				}
-				if _, err := uc.failPendingCheckout(ctx, MarkFailedCommand{
-					OrderNo: recovery.OrderNo, FailureCode: domain.OrderFailureAllocation,
-					Reason: "Checkout payment recovery timed out.", Now: uc.now(),
-				}); err != nil {
-					result.Failed++
-					continue
-				}
-				result.CheckoutRecovered++
-				continue
-			}
 			if uc.allocation == nil {
 				result.Failed++
 				continue
@@ -3091,6 +2206,20 @@ func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrder
 	}
 	for _, orderNo := range unavailable {
 		refunded, err := uc.refundUnavailableMicrosoftOrder(ctx, orderNo, "")
+		if err != nil {
+			result.Failed++
+			continue
+		}
+		if refunded {
+			result.ResourceUnavailableRefunded++
+		}
+	}
+	unavailableGmail, err := uc.repo.ListUnavailableGmailOrderNos(ctx, 0, limit)
+	if err != nil {
+		return nil, err
+	}
+	for _, orderNo := range unavailableGmail {
+		refunded, err := uc.refundUnavailableGmailOrder(ctx, orderNo, "")
 		if err != nil {
 			result.Failed++
 			continue
@@ -3182,6 +2311,45 @@ func (uc *UseCase) RefundUnavailableMicrosoftOrders(ctx context.Context, resourc
 	return refunded, resultErr
 }
 
+func (uc *UseCase) RefundUnavailableGmailOrders(ctx context.Context, resourceID uint, requestID string) (int, error) {
+	if uc == nil || uc.repo == nil || uc.wallet == nil || resourceID == 0 {
+		return 0, domain.ErrInvalidOrderRequest
+	}
+	orderNos, err := uc.repo.ListUnavailableGmailOrderNos(ctx, resourceID, 200)
+	if err != nil {
+		return 0, err
+	}
+	refunded := 0
+	var resultErr error
+	for _, orderNo := range orderNos {
+		changed, refundErr := uc.refundUnavailableGmailOrder(ctx, orderNo, requestID)
+		if changed {
+			refunded++
+		}
+		resultErr = errors.Join(resultErr, refundErr)
+	}
+	return refunded, resultErr
+}
+
+func (uc *UseCase) refundUnavailableGmailOrder(ctx context.Context, orderNo, requestID string) (bool, error) {
+	order, changed, err := uc.refundOrder(ctx, refundOrderRequest{
+		OrderNo:           orderNo,
+		Reason:            "Gmail resource is permanently unavailable.",
+		IdempotencyKey:    "order:" + strings.TrimSpace(orderNo) + ":refund",
+		RequestID:         strings.TrimSpace(requestID),
+		Operator:          domain.OperatorTypeSystem,
+		AllowedStatuses:   []domain.OrderStatus{domain.OrderStatusActive},
+		ReconcileDelivery: true,
+	})
+	if errors.Is(err, domain.ErrOrderStateConflict) {
+		return false, nil
+	}
+	if err != nil || order == nil || !changed {
+		return false, err
+	}
+	return true, uc.cleanupOrderService(ctx, *order, true, "Order refunded because its Gmail resource is permanently unavailable.", requestID)
+}
+
 func (uc *UseCase) NotifyMatchedCode(ctx context.Context, req MatchCodeResultRequest) error {
 	orderNo := strings.TrimSpace(req.OrderNo)
 	if orderNo == "" {
@@ -3223,198 +2391,6 @@ func (uc *UseCase) NotifyMatchedCode(ctx context.Context, req MatchCodeResultReq
 		}
 		return uc.tokens.ExtendOrderToken(txCtx, orderNo, readUntil)
 	})
-}
-
-func (uc *UseCase) ActivateGmailOrder(ctx context.Context, req ActivateGmailOrderRequest) error {
-	req.OrderNo = strings.TrimSpace(req.OrderNo)
-	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
-	if req.OrderNo == "" || req.Email == "" || req.AllocationID == 0 || req.SessionID == 0 || req.StartedAt.IsZero() || !req.ExpiresAt.After(req.StartedAt) {
-		return domain.ErrInvalidOrderRequest
-	}
-	if uc.gmailSupply == nil {
-		return domain.ErrUpstreamUnavailable
-	}
-	order, err := uc.repo.FindOrder(ctx, req.OrderNo)
-	if err != nil {
-		return err
-	}
-	if !domain.IsGmailProductType(order.ProductType) {
-		return domain.ErrInvalidOrderRequest
-	}
-	if order.Status == domain.OrderStatusActive || order.Status == domain.OrderStatusCompleted {
-		sessionID, findErr := uc.gmailSupply.FindSessionID(ctx, req.OrderNo)
-		if findErr != nil {
-			return findErr
-		}
-		if sessionID == req.SessionID {
-			return nil
-		}
-		return domain.ErrOrderStateConflict
-	}
-	if order.Status != domain.OrderStatusPaid {
-		return domain.ErrOrderStateConflict
-	}
-	token, err := uc.tokens.FindOrderTokenByOrder(ctx, req.OrderNo)
-	if err != nil {
-		return err
-	}
-	if token == nil {
-		token, err = uc.tokens.IssueOrderToken(ctx, req.OrderNo, &req.ExpiresAt)
-		if err != nil {
-			return err
-		}
-		if token == nil {
-			return errors.New("issue order token returned no token")
-		}
-	}
-	afterSaleUntil := req.ExpiresAt.UTC()
-	_, err = uc.repo.MarkActive(ctx, MarkActiveCommand{
-		OrderNo: req.OrderNo, AllocationType: domain.AllocationTypeGmail, AllocationID: req.AllocationID,
-		DeliveryEmail: req.Email, ReceiveStartedAt: req.StartedAt.UTC(), ReceiveUntil: req.ExpiresAt.UTC(), AfterSaleUntil: &afterSaleUntil,
-	})
-	if errors.Is(err, domain.ErrOrderStateConflict) {
-		reloaded, reloadErr := uc.repo.FindOrder(ctx, req.OrderNo)
-		if reloadErr == nil && (reloaded.Status == domain.OrderStatusActive || reloaded.Status == domain.OrderStatusCompleted) {
-			sessionID, findErr := uc.gmailSupply.FindSessionID(ctx, req.OrderNo)
-			if findErr == nil && sessionID == req.SessionID {
-				return nil
-			}
-		}
-	}
-	return err
-}
-
-func (uc *UseCase) ActivateUpstreamOrder(ctx context.Context, req upstream.Activation) error {
-	req.OrderNo = strings.TrimSpace(req.OrderNo)
-	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
-	if req.OrderNo == "" || req.Email == "" || req.StartedAt.IsZero() || !req.ExpiresAt.After(req.StartedAt) {
-		return domain.ErrInvalidOrderRequest
-	}
-	_, owned, err := uc.upstreams.Owner(ctx, req.OrderNo)
-	if err != nil {
-		return err
-	}
-	if !owned {
-		return domain.ErrInvalidOrderRequest
-	}
-	order, err := uc.repo.FindOrder(ctx, req.OrderNo)
-	if err != nil {
-		return err
-	}
-	if order.ProductType != domain.ProductTypeGmail || order.ServiceMode != domain.ServiceModeCode {
-		return domain.ErrInvalidOrderRequest
-	}
-	if order.Status == domain.OrderStatusActive || order.Status == domain.OrderStatusCompleted {
-		if strings.EqualFold(order.DeliveryEmail, req.Email) {
-			return nil
-		}
-		return domain.ErrOrderStateConflict
-	}
-	if order.Status != domain.OrderStatusPaid {
-		return domain.ErrOrderStateConflict
-	}
-	token, err := uc.tokens.FindOrderTokenByOrder(ctx, req.OrderNo)
-	if err != nil {
-		return err
-	}
-	if token == nil {
-		token, err = uc.tokens.IssueOrderToken(ctx, req.OrderNo, &req.ExpiresAt)
-		if err != nil {
-			return err
-		}
-		if token == nil {
-			return errors.New("issue order token returned no token")
-		}
-	}
-	afterSaleUntil := req.ExpiresAt.UTC()
-	receiveUntil := req.StartedAt.UTC().Add(runtimeconfig.Duration(
-		runtimeconfig.SMSBowerNoCodeRefundTimeoutMinutesKey, 10*time.Minute, time.Minute, 1,
-	))
-	_, err = uc.repo.MarkActive(ctx, MarkActiveCommand{
-		OrderNo: req.OrderNo, AllocationType: domain.AllocationTypeGmail,
-		DeliveryEmail: req.Email, ReceiveStartedAt: req.StartedAt.UTC(),
-		ReceiveUntil: receiveUntil, AfterSaleUntil: &afterSaleUntil,
-	})
-	if errors.Is(err, domain.ErrOrderStateConflict) {
-		reloaded, reloadErr := uc.repo.FindOrder(ctx, req.OrderNo)
-		if reloadErr == nil && (reloaded.Status == domain.OrderStatusActive || reloaded.Status == domain.OrderStatusCompleted) &&
-			strings.EqualFold(reloaded.DeliveryEmail, req.Email) {
-			return nil
-		}
-	}
-	return err
-}
-
-func (uc *UseCase) GmailOrderReceiveUntil(ctx context.Context, orderNo string) (time.Time, error) {
-	order, err := uc.repo.FindOrder(ctx, strings.TrimSpace(orderNo))
-	if err != nil {
-		return time.Time{}, err
-	}
-	if !domain.IsGmailProductType(order.ProductType) || order.ServiceMode != domain.ServiceModeCode || order.ReceiveUntil == nil || order.ReceiveUntil.IsZero() {
-		return time.Time{}, domain.ErrInvalidOrderRequest
-	}
-	return order.ReceiveUntil.UTC(), nil
-}
-
-func (uc *UseCase) CompleteGmailOrder(ctx context.Context, orderNo, reason string) error {
-	orderNo = strings.TrimSpace(orderNo)
-	if orderNo == "" {
-		return domain.ErrInvalidOrderRequest
-	}
-	return uc.repo.WithTx(ctx, func(txCtx context.Context) error {
-		order, err := uc.repo.FindOrder(txCtx, orderNo)
-		if err != nil {
-			return err
-		}
-		if !domain.IsGmailProductType(order.ProductType) || order.ServiceMode != domain.ServiceModeCode {
-			return domain.ErrInvalidOrderRequest
-		}
-		if _, _, err := uc.repo.CompleteExpiredOrder(txCtx, orderNo, strings.TrimSpace(reason)); err != nil {
-			return err
-		}
-		return uc.allocation.ReleaseByOrder(txCtx, orderNo)
-	})
-}
-
-func (uc *UseCase) FailGmailOrder(ctx context.Context, orderNo, reason string) error {
-	orderNo = strings.TrimSpace(orderNo)
-	reason = strings.TrimSpace(reason)
-	if orderNo == "" || reason == "" {
-		return domain.ErrInvalidOrderRequest
-	}
-	order, err := uc.repo.FindOrder(ctx, orderNo)
-	if err != nil {
-		return err
-	}
-	if !domain.IsGmailProductType(order.ProductType) {
-		return domain.ErrInvalidOrderRequest
-	}
-	switch order.Status {
-	case domain.OrderStatusPendingPayment:
-		_, err = uc.failPendingCheckout(ctx, MarkFailedCommand{
-			OrderNo: orderNo, FailureCode: domain.OrderFailureActivation, Reason: reason, Now: uc.now(),
-		})
-		return err
-	case domain.OrderStatusPaid:
-		if err := uc.confirmGmailUpstreamCancellation(ctx, *order); err != nil {
-			return err
-		}
-		_, err = uc.compensatePaidCheckout(ctx, *order, domain.OrderFailureActivation, reason)
-		return err
-	case domain.OrderStatusActive:
-		refunded, changed, err := uc.refundOrder(ctx, refundOrderRequest{
-			OrderNo: orderNo, Reason: reason, IdempotencyKey: "order:" + orderNo + ":refund",
-			Operator: domain.OperatorTypeSystem, AllowedStatuses: []domain.OrderStatus{domain.OrderStatusActive},
-		})
-		if err != nil || refunded == nil || !changed {
-			return err
-		}
-		return uc.cleanupOrderService(ctx, *refunded, true, reason, "")
-	case domain.OrderStatusFailed, domain.OrderStatusRefunded, domain.OrderStatusClosed:
-		return uc.allocation.ReleaseByOrder(ctx, orderNo)
-	default:
-		return nil
-	}
 }
 
 type refundOrderRequest struct {
@@ -3492,21 +2468,6 @@ func (uc *UseCase) refundOrder(ctx context.Context, req refundOrderRequest) (*do
 	if err != nil {
 		return nil, false, err
 	}
-	if owner.Status != domain.OrderStatusRefunded && statusAllowed(owner.Status, req.AllowedStatuses) {
-		delivered := false
-		if req.ReconcileDelivery && owner.ServiceMode == domain.ServiceModeCode && uc.deliveries != nil {
-			delivery, deliveryErr := uc.deliveries.FindOrderDelivery(ctx, owner.ID)
-			if deliveryErr != nil {
-				return nil, false, deliveryErr
-			}
-			delivered = delivery != nil
-		}
-		if !delivered {
-			if err := uc.confirmGmailUpstreamCancellation(ctx, *owner); err != nil {
-				return nil, false, err
-			}
-		}
-	}
 	err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
 		if err := uc.wallet.LockConsumer(txCtx, owner.UserID); err != nil {
 			return err
@@ -3565,33 +2526,8 @@ func (uc *UseCase) refundOrder(ctx context.Context, req refundOrderRequest) (*do
 	return refunded, changed, err
 }
 
-func (uc *UseCase) confirmGmailUpstreamCancellation(ctx context.Context, order domain.Order) error {
-	if order.ProductType != domain.ProductTypeGmail {
-		return nil
-	}
-	_, err := uc.upstreams.CancelOrder(ctx, order.OrderNo)
-	return err
-}
-
 func (uc *UseCase) cleanupOrderService(ctx context.Context, order domain.Order, releaseAllocation bool, reason string, requestID string) error {
 	failures := make([]string, 0, 3)
-	if domain.IsGmailProductType(order.ProductType) {
-		handled := false
-		if order.ProductType == domain.ProductTypeGmail {
-			var upstreamErr error
-			handled, upstreamErr = uc.upstreams.CancelOrder(ctx, order.OrderNo)
-			if upstreamErr != nil {
-				failures = append(failures, "cancel upstream order: "+upstreamErr.Error())
-			}
-		}
-		if !handled && len(failures) == 0 {
-			if uc.gmailSupply == nil {
-				failures = append(failures, "cancel Gmail session: service unavailable")
-			} else if err := uc.gmailSupply.CancelGmailOrder(ctx, order.OrderNo); err != nil {
-				failures = append(failures, "cancel Gmail session: "+err.Error())
-			}
-		}
-	}
 	if releaseAllocation && uc.allocation != nil {
 		if err := uc.allocation.ReleaseByOrder(ctx, order.OrderNo); err != nil {
 			failures = append(failures, "release allocation: "+err.Error())

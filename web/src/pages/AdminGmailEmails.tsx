@@ -1240,6 +1240,7 @@ function GmailTaskDiagnostics({
 
 function GmailDetailSheet({
   busyAction,
+  canFetchMessages,
   canOperate,
   canReadMessages,
   canReadOrders,
@@ -1257,6 +1258,7 @@ function GmailDetailSheet({
   onTogglePublish,
 }: {
   busyAction: RowAction | null;
+  canFetchMessages: boolean;
   canOperate: boolean;
   canReadMessages: boolean;
   canReadOrders: boolean;
@@ -1462,7 +1464,9 @@ function GmailDetailSheet({
 
               {activeTab === "mails" && canReadMessages ? (
                 <ResourceMailsPanel
-                  fetchEnabled={false}
+                  fetchDisabled={item.status === "deleted"}
+                  fetchEnabled={canFetchMessages}
+                  onRefresh={onRefresh}
                   resourceId={item.id}
                   resourceType="gmail"
                   t={t}
@@ -1612,6 +1616,10 @@ export default function AdminGmailEmails() {
   const canReadMessages = hasPermissionKey(
     currentUser,
     permissionKey("mailmatch:message", "read"),
+  );
+  const canFetchMessages = hasPermissionKey(
+    currentUser,
+    permissionKey("mailmatch:message", "operate"),
   );
 
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
@@ -2492,6 +2500,7 @@ export default function AdminGmailEmails() {
         busyAction={
           rowBusy && rowBusy.id === detail?.id ? rowBusy.action : null
         }
+        canFetchMessages={canFetchMessages}
         canOperate={canOperate}
         canReadMessages={canReadMessages}
         canReadOrders={canReadOrders}

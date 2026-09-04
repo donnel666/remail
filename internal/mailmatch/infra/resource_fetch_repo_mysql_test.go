@@ -131,6 +131,20 @@ INSERT INTO mailmatch_admin_resource_fetch_states(
 ) VALUES (101, 'pending', 1, 'icloud_resource_fetch')`).Error)
 }
 
+func TestResourceFetchStateAcceptsGmailOperationKindMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	require.NoError(t, db.Exec(`
+INSERT INTO users(id, email, password_hash, nickname, status, role)
+VALUES (1, 'gmail-owner@test.local', 'hash', 'owner', 'active', 'supplier')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO email_resources(id, type, owner_user_id)
+VALUES (102, 'gmail', 1)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_admin_resource_fetch_states(
+    email_resource_id, status, generation, operation_kind
+) VALUES (102, 'pending', 1, 'gmail_resource_fetch')`).Error)
+}
+
 func TestResourceFetchRepoBoundsInfrastructureFailuresMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	seedMailmatchFetchResource(t, db)

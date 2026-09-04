@@ -99,7 +99,7 @@ func (h *Handler) postAdminMicrosoftResourceFetch(c *gin.Context, kind domain.Re
 	if resourceType == "" {
 		resourceType = domain.ResourceTypeMicrosoft
 	}
-	if resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeICloud {
+	if resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeGmail && resourceType != domain.ResourceTypeICloud {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"message":   "Invalid request parameters.",
 			"requestId": middleware.GetRequestID(c),
@@ -199,6 +199,9 @@ func writeAdminResourceFetchError(c *gin.Context, err error) {
 }
 
 func resourceFetchBizType(resourceType domain.ResourceType) string {
+	if resourceType == domain.ResourceTypeGmail {
+		return "gmail_resource"
+	}
 	if resourceType == domain.ResourceTypeICloud {
 		return "icloud_resource"
 	}

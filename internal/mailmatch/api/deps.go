@@ -7,7 +7,6 @@ import (
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
-	mailmatchdomain "github.com/donnel666/remail/internal/mailmatch/domain"
 	mailmatchinfra "github.com/donnel666/remail/internal/mailmatch/infra"
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
@@ -31,17 +30,6 @@ type Module struct {
 	adminResourceFetchRepo *mailmatchinfra.AdminResourceFetchRepo
 	resourceHistoryRepo    *mailmatchinfra.ResourceHistoryRepo
 	matchResults           *matchResultAdapter
-	UpstreamPickup         UpstreamPickupPort
-}
-
-type UpstreamPickupPort interface {
-	ReadUpstreamPickup(ctx context.Context, email, token string) ([]mailmatchdomain.MailContent, bool, error)
-}
-
-func (m *Module) SetUpstreamPickup(port UpstreamPickupPort) {
-	if m != nil {
-		m.UpstreamPickup = port
-	}
 }
 
 func (m *Module) SetBotDiagnosisRefresh(port mailmatchapp.CodeDiagnosisRefreshPort) {
@@ -50,15 +38,15 @@ func (m *Module) SetBotDiagnosisRefresh(port mailmatchapp.CodeDiagnosisRefreshPo
 	}
 }
 
-func (m *Module) SetGmailMatchPort(port GmailMatchPort) {
-	if m != nil && m.matchResults != nil {
-		m.matchResults.gmail = port
+func (m *Module) SetGmailMailFetchPort(port mailmatchapp.GmailMailFetchPort) {
+	if m != nil && m.UseCase != nil {
+		m.UseCase.SetGmailMailFetchPort(port)
 	}
 }
 
-func (m *Module) SetGmailPurchaseFetchPort(port mailmatchapp.GmailPurchaseFetchPort) {
-	if m != nil && m.UseCase != nil {
-		m.UseCase.SetGmailPurchaseFetchPort(port)
+func (m *Module) SetGmailResourceFetchPort(port mailmatchapp.GmailResourceFetchPort) {
+	if m != nil && m.AdminResourceFetch != nil {
+		m.AdminResourceFetch.SetGmailResourceFetchPort(port)
 	}
 }
 

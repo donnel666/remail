@@ -81,18 +81,11 @@ type UseCase struct {
 	adminAllocationEnrichment  AdminAllocationEnrichmentPort
 	historicalMicrosoftAliases HistoricalMicrosoftAliasPort
 	inventoryCache             InventoryCache
-	productInventoryOverlay    ProductInventoryOverlay
 }
 
 func (uc *UseCase) SetInventoryCache(cache InventoryCache) {
 	if uc != nil {
 		uc.inventoryCache = cache
-	}
-}
-
-func (uc *UseCase) SetProductInventoryOverlay(overlay ProductInventoryOverlay) {
-	if uc != nil {
-		uc.productInventoryOverlay = overlay
 	}
 }
 
@@ -1129,7 +1122,7 @@ func (uc *UseCase) GetProductInventorySnapshots(ctx context.Context, projectIDs 
 			}
 			result[projectID] = totals
 		}
-		return result, uc.overlayProductInventory(ctx, projectIDs, result)
+		return result, nil
 	}
 	snapshots, err := uc.inventoryCache.GetProductInventorySnapshots(ctx, projectIDs)
 	if err != nil {
@@ -1142,7 +1135,7 @@ func (uc *UseCase) GetProductInventorySnapshots(ctx context.Context, projectIDs 
 		}
 	}
 	if len(missing) == 0 {
-		return snapshots, uc.overlayProductInventory(ctx, projectIDs, snapshots)
+		return snapshots, nil
 	}
 	if err := uc.inventoryCache.InitializeInventory(ctx, missing, inventoryCacheHardTTLValue()); err != nil {
 		return nil, fmt.Errorf("initialize inventory cache: %w", err)
@@ -1163,14 +1156,7 @@ func (uc *UseCase) GetProductInventorySnapshots(ctx context.Context, projectIDs 
 			snapshots[entry.ProjectID] = &ProjectProductInventoryTotals{ProjectID: entry.ProjectID, Cold: true}
 		}
 	}
-	return snapshots, uc.overlayProductInventory(ctx, projectIDs, snapshots)
-}
-
-func (uc *UseCase) overlayProductInventory(ctx context.Context, projectIDs []uint, snapshots map[uint]*ProjectProductInventoryTotals) error {
-	if uc.productInventoryOverlay == nil {
-		return nil
-	}
-	return uc.productInventoryOverlay.OverlayProductInventory(ctx, projectIDs, snapshots)
+	return snapshots, nil
 }
 
 func uniqueInventoryProjectIDs(projectIDs []uint) []uint {

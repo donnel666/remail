@@ -639,6 +639,7 @@ func (s *Service) createGmailResourcesForImport(
 					"validation_generation": gorm.Expr("CASE WHEN validation_generation < 1 THEN 1 ELSE validation_generation + 1 END"),
 					"validation_failures":   0, "validation_request_id": strings.TrimSpace(requestID), "validation_command_hash": "",
 					"alloc_bucket": uint16(item.ID % 2048), "last_allocated_at": nil,
+					"provider_cursor": 0, "provider_spam_cursor": 0,
 					"last_safe_error": "", "last_checked_at": nil,
 					"updated_at": now,
 				})

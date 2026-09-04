@@ -398,7 +398,7 @@ export async function createAdminMicrosoftExplicitAlias(
 
 export async function fetchAdminMicrosoftMail(
   resourceId: number,
-  resourceType: "microsoft" | "icloud" = "microsoft"
+  resourceType: "microsoft" | "gmail" | "icloud" = "microsoft"
 ): Promise<AdminMicrosoftTaskAcceptedResponse> {
   return unwrap(
     await client.POST("/v1/admin/resources/{resourceId}/messages/fetch", {

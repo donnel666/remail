@@ -26,6 +26,7 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 		"icloud_forwarding_mailboxes",
 		"smsbower_enabled", "smsbower_code_enabled", "smsbower_purchase_enabled", "smsbower_api_key",
 		"smsbower_sync_interval_minutes", "smsbower_balance_warning_threshold", "smsbower_points_per_unit", "smsbower_min_margin_rate",
+		"smsbower_no_code_refund_timeout_minutes",
 	} {
 		if _, exists := keys[key]; exists {
 			t.Fatalf("removed key %q is still seeded", key)
@@ -73,7 +74,6 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 	require.Equal(t, "1", keys[GmailPriceMultiplierKey])
 	require.Equal(t, "1", keys[ICloudPriceMultiplierKey])
 	require.Equal(t, "1", keys[DomainPriceMultiplierKey])
-	require.Equal(t, "10", keys[SMSBowerNoCodeRefundTimeoutMinutesKey])
 	require.Equal(t, "3", keys["gmail_code_retain_days"])
 	require.Equal(t, "300", keys["fetch_dispatcher_timeout_seconds"])
 	require.Equal(t, "10000", keys["resource_fetch_dispatch_limit"])

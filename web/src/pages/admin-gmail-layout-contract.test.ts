@@ -54,6 +54,7 @@ describe("admin Gmail page layout", () => {
       "<RelatedOrdersTable",
       "<GmailTaskDiagnostics",
       "<ResourceMailsPanel",
+      "fetchEnabled={canFetchMessages}",
       'tab={t("Validation")}',
       'tab={t("Other aliases")}',
       'tab={t("Orders")}',
