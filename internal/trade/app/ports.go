@@ -447,6 +447,7 @@ type OrderListFilter struct {
 	Scope       string
 	Status      domain.OrderStatus
 	ServiceMode domain.ServiceMode
+	ProductType domain.ProductType
 	Search      string
 	ProjectID   uint
 	// Domain filters by the delivery email domain without the "@" prefix.
@@ -472,6 +473,16 @@ type OrderServiceModeFacets struct {
 	Purchase int64
 }
 
+type OrderProductTypeFacets struct {
+	All          int64
+	Microsoft    int64
+	Domain       int64
+	Random       int64
+	Gmail        int64
+	GmailVariant int64
+	ICloud       int64
+}
+
 type OrderProjectFacet struct {
 	ProjectID uint
 	Name      string
@@ -489,6 +500,7 @@ type OrderKeyFacet struct {
 type OrderListFacets struct {
 	Status      OrderStatusFacets
 	ServiceMode OrderServiceModeFacets
+	ProductType OrderProductTypeFacets
 	Projects    []OrderProjectFacet
 	Domains     []OrderKeyFacet
 }

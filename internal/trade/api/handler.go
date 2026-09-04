@@ -264,6 +264,11 @@ func (h *Handler) GetOrders(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
 		return
 	}
+	productType, ok := parseOrderProductType(c.Query("productType"))
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
 	domainFilter, ok := parseOrderDomain(c.Query("domain"))
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
@@ -287,6 +292,7 @@ func (h *Handler) GetOrders(c *gin.Context) {
 		Scope:       strings.TrimSpace(c.DefaultQuery("scope", "mine")),
 		Status:      status,
 		ServiceMode: serviceMode,
+		ProductType: productType,
 		Search:      strings.TrimSpace(c.Query("search")),
 		ProjectID:   projectID,
 		Domain:      domainFilter,
@@ -609,6 +615,11 @@ func parseServiceMode(raw string) (domain.ServiceMode, bool) {
 	return domain.NormalizeServiceMode(raw)
 }
 
+func parseOrderProductType(raw string) (domain.ProductType, bool) {
+	productType := domain.ProductType(strings.TrimSpace(raw))
+	return productType, productType == "" || productType == domain.ProductTypeLegacyRandom || isCheckoutProductType(productType)
+}
+
 var orderDomainPattern = regexp.MustCompile(`^[A-Za-z0-9.-]{1,255}$`)
 
 func parseOrderDomain(raw string) (string, bool) {
@@ -670,6 +681,15 @@ func toOrderListFacetsResponse(facets *tradeapp.OrderListFacets) *OrderListFacet
 			All:      facets.ServiceMode.All,
 			Code:     facets.ServiceMode.Code,
 			Purchase: facets.ServiceMode.Purchase,
+		},
+		ProductType: OrderProductTypeFacetsResponse{
+			All:          facets.ProductType.All,
+			Microsoft:    facets.ProductType.Microsoft,
+			Domain:       facets.ProductType.Domain,
+			Random:       facets.ProductType.Random,
+			Gmail:        facets.ProductType.Gmail,
+			GmailVariant: facets.ProductType.GmailVariant,
+			ICloud:       facets.ProductType.ICloud,
 		},
 		Projects: projects,
 		Domains:  domains,

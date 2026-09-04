@@ -6164,6 +6164,22 @@ export interface components {
             /** Format: int64 */
             purchase: number;
         };
+        OrderProductTypeFacets: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            microsoft: number;
+            /** Format: int64 */
+            domain: number;
+            /** Format: int64 */
+            random: number;
+            /** Format: int64 */
+            gmail: number;
+            /** Format: int64 */
+            gmailVariant: number;
+            /** Format: int64 */
+            icloud: number;
+        };
         OrderProjectFacet: {
             projectId: number;
             name: string;
@@ -6180,6 +6196,7 @@ export interface components {
         OrderListFacets: {
             status: components["schemas"]["OrderStatusFacets"];
             serviceMode: components["schemas"]["OrderServiceModeFacets"];
+            productType: components["schemas"]["OrderProductTypeFacets"];
             projects: components["schemas"]["OrderProjectFacet"][];
             domains: components["schemas"]["OrderKeyFacet"][];
         };
@@ -17602,6 +17619,7 @@ export interface operations {
                 scope?: "mine" | "all";
                 status?: "pending_payment" | "paid" | "active" | "completed" | "refunded" | "failed" | "closed";
                 serviceMode?: "purchase" | "code";
+                productType?: "microsoft" | "domain" | "random" | "gmail" | "gmail_variant" | "icloud";
                 /** @description Prefix search by order number or delivery email; token-prefix search by user email/nickname or project name/platform; exact user/project ID search. */
                 search?: string;
                 /** @description Exact project filter used by the order project tabs. */

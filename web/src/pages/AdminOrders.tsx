@@ -49,6 +49,7 @@ import {
   listOrders,
   type OrderListFacets,
   type OrderListFilter,
+  type OrderProductType,
   type OrderResponse,
   type OrderServiceMode,
   type OrderStatus,
@@ -57,7 +58,11 @@ import { MailboxClientModal } from "@/pages/workbench/mailbox-client";
 import { orderReceiveUntil } from "@/pages/workbench/order-runtime";
 import { ProjectIcon } from "@/pages/workbench/project-icon";
 import type { FetchSource, WorkbenchMessage } from "@/pages/workbench/types";
-import { buildPickupUrl, pickupMessagesToWorkbench } from "@/pages/workbench/utils";
+import {
+  buildPickupUrl,
+  pickupMessagesToWorkbench,
+  productTypeLabel,
+} from "@/pages/workbench/utils";
 
 import {
   DATE_RANGE_DROPDOWN_CLASS,
@@ -82,6 +87,16 @@ import { OrderOwnerCell } from "./orders/order-requester-cell";
 
 type StatusFilter = "all" | OrderStatus;
 type ServiceModeFilter = "all" | OrderServiceMode;
+type ProductTypeFilter = "all" | OrderProductType;
+
+const PRODUCT_TYPE_VALUES: OrderProductType[] = [
+  "microsoft",
+  "domain",
+  "gmail",
+  "gmail_variant",
+  "icloud",
+  "random",
+];
 
 const DEFAULT_FETCH_COOLDOWN_SECONDS = 5;
 
@@ -136,6 +151,8 @@ export default function AdminOrders() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [serviceModeFilter, setServiceModeFilter] =
     useState<ServiceModeFilter>("all");
+  const [productTypeFilter, setProductTypeFilter] =
+    useState<ProductTypeFilter>("all");
   const [compactMode, setCompactMode] = useState(false);
   const [activePage, setActivePage] = useState(1);
   const [pageSize, setPageSize] = useSharedPageSize();
@@ -167,10 +184,17 @@ export default function AdminOrders() {
     if (search) filter.search = search;
     if (statusFilter !== "all") filter.status = statusFilter;
     if (serviceModeFilter !== "all") filter.serviceMode = serviceModeFilter;
+    if (productTypeFilter !== "all") filter.productType = productTypeFilter;
     if (createdFrom) filter.createdFrom = createdFrom;
     if (createdTo) filter.createdTo = createdTo;
     return filter;
-  }, [createdAtRange, debouncedSearchKeyword, serviceModeFilter, statusFilter]);
+  }, [
+    createdAtRange,
+    debouncedSearchKeyword,
+    productTypeFilter,
+    serviceModeFilter,
+    statusFilter,
+  ]);
 
   const orderListFilter = useMemo<OrderListFilter>(() => {
     if (activeProjectId === "all") return orderStatsFilter;
@@ -238,9 +262,22 @@ export default function AdminOrders() {
 
   const orderStats = useMemo(() => {
     if (orderFacets) {
-      return { serviceMode: orderFacets.serviceMode, status: orderFacets.status };
+      return {
+        productType: orderFacets.productType,
+        serviceMode: orderFacets.serviceMode,
+        status: orderFacets.status,
+      };
     }
     return {
+      productType: {
+        all: total,
+        domain: 0,
+        gmail: 0,
+        gmailVariant: 0,
+        icloud: 0,
+        microsoft: 0,
+        random: 0,
+      },
       serviceMode: { all: total, code: 0, purchase: 0 },
       status: {
         all: total,
@@ -256,7 +293,9 @@ export default function AdminOrders() {
   }, [orderFacets, total]);
 
   const activeStatisticFilterCount =
-    Number(statusFilter !== "all") + Number(serviceModeFilter !== "all");
+    Number(statusFilter !== "all") +
+    Number(serviceModeFilter !== "all") +
+    Number(productTypeFilter !== "all");
 
   useEffect(() => {
     if (
@@ -286,6 +325,7 @@ export default function AdminOrders() {
     setCreatedAtRange([]);
     setStatusFilter("all");
     setServiceModeFilter("all");
+    setProductTypeFilter("all");
     setActiveProjectId("all");
     setActivePage(1);
   };
@@ -297,6 +337,11 @@ export default function AdminOrders() {
 
   const applyServiceModeFilter = (value: ServiceModeFilter) => {
     setServiceModeFilter(value);
+    setActivePage(1);
+  };
+
+  const applyProductTypeFilter = (value: ProductTypeFilter) => {
+    setProductTypeFilter(value);
     setActivePage(1);
   };
 
@@ -733,7 +778,36 @@ export default function AdminOrders() {
           position="bottomRight"
           trigger="click"
           render={
-            <div className="w-[280px] p-2">
+            <div className="max-h-[70vh] w-[280px] overflow-y-auto p-2">
+              <div className="px-2 pb-1 text-xs font-medium text-[var(--semi-color-text-2)]">
+                {t("Product type")}
+              </div>
+              <div className="mb-2 space-y-1">
+                <StatisticFilterOption
+                  active={productTypeFilter === "all"}
+                  count={orderStats.productType.all}
+                  label={t("All product types")}
+                  onSelect={applyProductTypeFilter}
+                  value="all"
+                />
+                {PRODUCT_TYPE_VALUES.map((productType) => (
+                  <StatisticFilterOption
+                    active={productTypeFilter === productType}
+                    count={
+                      orderStats.productType[
+                        productType === "gmail_variant"
+                          ? "gmailVariant"
+                          : productType
+                      ]
+                    }
+                    key={productType}
+                    label={productTypeLabel(productType, t)}
+                    onSelect={applyProductTypeFilter}
+                    value={productType}
+                  />
+                ))}
+              </div>
+
               <div className="px-2 pb-1 text-xs font-medium text-[var(--semi-color-text-2)]">
                 {t("Service mode")}
               </div>

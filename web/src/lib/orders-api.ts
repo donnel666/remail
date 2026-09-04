@@ -13,6 +13,7 @@ export type OrderListResponse = components["schemas"]["OrderListResponse"];
 export type OrderListFacets = components["schemas"]["OrderListFacets"];
 export type OrderStatus = OrderResponse["status"];
 export type OrderServiceMode = OrderResponse["serviceMode"];
+export type OrderProductType = OrderResponse["productType"];
 
 export async function createOrder(
   payload: CreateOrderRequest,
@@ -77,6 +78,7 @@ export interface OrderListFilter {
   domain?: string;
   limit?: number;
   offset?: number;
+  productType?: OrderProductType;
   projectId?: number;
   scope?: "mine" | "all";
   search?: string;
@@ -96,6 +98,7 @@ export async function listOrders(filter: OrderListFilter) {
           search: filter.search,
           serviceMode: filter.serviceMode,
           status: filter.status,
+          productType: filter.productType,
           projectId: filter.projectId,
           domain: filter.domain,
           createdFrom: filter.createdFrom,

@@ -828,6 +828,46 @@ func (r *Repo) OrderFacets(ctx context.Context, filter tradeapp.OrderListFilter)
 		Purchase: modeRow.Purchase,
 	}
 
+	productTypeBase := filter
+	productTypeBase.ProductType = ""
+	var productTypeRow struct {
+		All          int64 `gorm:"column:all_count"`
+		Microsoft    int64 `gorm:"column:microsoft_count"`
+		Domain       int64 `gorm:"column:domain_count"`
+		Random       int64 `gorm:"column:random_count"`
+		Gmail        int64 `gorm:"column:gmail_count"`
+		GmailVariant int64 `gorm:"column:gmail_variant_count"`
+		ICloud       int64 `gorm:"column:icloud_count"`
+	}
+	if err := applyOrderFilter(r.dbFor(ctx).Model(&OrderModel{}), productTypeBase).
+		Select(
+			`COUNT(*) AS all_count,
+			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS microsoft_count,
+			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS domain_count,
+			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS random_count,
+			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS gmail_count,
+			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS gmail_variant_count,
+			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS icloud_count`,
+			string(domain.ProductTypeMicrosoft),
+			string(domain.ProductTypeDomain),
+			string(domain.ProductTypeLegacyRandom),
+			string(domain.ProductTypeGmail),
+			string(domain.ProductTypeGmailVariant),
+			string(domain.ProductTypeICloud),
+		).
+		Scan(&productTypeRow).Error; err != nil {
+		return nil, fmt.Errorf("order product type facets: %w", err)
+	}
+	facets.ProductType = tradeapp.OrderProductTypeFacets{
+		All:          productTypeRow.All,
+		Microsoft:    productTypeRow.Microsoft,
+		Domain:       productTypeRow.Domain,
+		Random:       productTypeRow.Random,
+		Gmail:        productTypeRow.Gmail,
+		GmailVariant: productTypeRow.GmailVariant,
+		ICloud:       productTypeRow.ICloud,
+	}
+
 	projectBase := filter
 	projectBase.ProjectID = 0
 	type projectRow struct {
@@ -1181,6 +1221,9 @@ func applyOrderFilter(query *gorm.DB, filter tradeapp.OrderListFilter) *gorm.DB 
 	}
 	if filter.ServiceMode != "" {
 		query = query.Where("service_mode = ?", string(filter.ServiceMode))
+	}
+	if filter.ProductType != "" {
+		query = query.Where("product_type = ?", string(filter.ProductType))
 	}
 	if filter.ProjectID > 0 {
 		query = query.Where("project_id = ?", filter.ProjectID)

@@ -5679,6 +5679,36 @@ func (e GetOrdersParamsServiceMode) Valid() bool {
 	}
 }
 
+// Defines values for GetOrdersParamsProductType.
+const (
+	GetOrdersParamsProductTypeDomain       GetOrdersParamsProductType = "domain"
+	GetOrdersParamsProductTypeGmail        GetOrdersParamsProductType = "gmail"
+	GetOrdersParamsProductTypeGmailVariant GetOrdersParamsProductType = "gmail_variant"
+	GetOrdersParamsProductTypeIcloud       GetOrdersParamsProductType = "icloud"
+	GetOrdersParamsProductTypeMicrosoft    GetOrdersParamsProductType = "microsoft"
+	GetOrdersParamsProductTypeRandom       GetOrdersParamsProductType = "random"
+)
+
+// Valid indicates whether the value is a known member of the GetOrdersParamsProductType enum.
+func (e GetOrdersParamsProductType) Valid() bool {
+	switch e {
+	case GetOrdersParamsProductTypeDomain:
+		return true
+	case GetOrdersParamsProductTypeGmail:
+		return true
+	case GetOrdersParamsProductTypeGmailVariant:
+		return true
+	case GetOrdersParamsProductTypeIcloud:
+		return true
+	case GetOrdersParamsProductTypeMicrosoft:
+		return true
+	case GetOrdersParamsProductTypeRandom:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PostOrderParamsServiceMode.
 const (
 	PostOrderParamsServiceModeCode     PostOrderParamsServiceMode = "code"
@@ -10090,6 +10120,7 @@ type OrderKeyFacet struct {
 // OrderListFacets List aggregates; each dimension is computed with the current filter minus that dimension itself.
 type OrderListFacets struct {
 	Domains     []OrderKeyFacet        `json:"domains"`
+	ProductType OrderProductTypeFacets `json:"productType"`
 	Projects    []OrderProjectFacet    `json:"projects"`
 	ServiceMode OrderServiceModeFacets `json:"serviceMode"`
 	Status      OrderStatusFacets      `json:"status"`
@@ -10139,6 +10170,17 @@ type OrderPickupCredentialsRequest struct {
 
 // OrderPickupCredentialsResponse defines model for OrderPickupCredentialsResponse.
 type OrderPickupCredentialsResponse = []OrderPickupCredentialResponse
+
+// OrderProductTypeFacets defines model for OrderProductTypeFacets.
+type OrderProductTypeFacets struct {
+	All          int64 `json:"all"`
+	Domain       int64 `json:"domain"`
+	Gmail        int64 `json:"gmail"`
+	GmailVariant int64 `json:"gmailVariant"`
+	Icloud       int64 `json:"icloud"`
+	Microsoft    int64 `json:"microsoft"`
+	Random       int64 `json:"random"`
+}
 
 // OrderProjectFacet defines model for OrderProjectFacet.
 type OrderProjectFacet struct {
@@ -14062,6 +14104,7 @@ type GetOrdersParams struct {
 	Scope       *GetOrdersParamsScope       `form:"scope,omitempty" json:"scope,omitempty"`
 	Status      *GetOrdersParamsStatus      `form:"status,omitempty" json:"status,omitempty"`
 	ServiceMode *GetOrdersParamsServiceMode `form:"serviceMode,omitempty" json:"serviceMode,omitempty"`
+	ProductType *GetOrdersParamsProductType `form:"productType,omitempty" json:"productType,omitempty"`
 
 	// Search Prefix search by order number or delivery email; token-prefix search by user email/nickname or project name/platform; exact user/project ID search.
 	Search *string `form:"search,omitempty" json:"search,omitempty"`
@@ -14088,6 +14131,9 @@ type GetOrdersParamsStatus string
 
 // GetOrdersParamsServiceMode defines parameters for GetOrders.
 type GetOrdersParamsServiceMode string
+
+// GetOrdersParamsProductType defines parameters for GetOrders.
+type GetOrdersParamsProductType string
 
 // PostOrderParams defines parameters for PostOrder.
 type PostOrderParams struct {
@@ -33523,6 +33569,14 @@ func (siw *ServerInterfaceWrapper) GetOrders(c *gin.Context) {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "serviceMode", c.Request.URL.Query(), &params.ServiceMode, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter serviceMode: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "productType" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "productType", c.Request.URL.Query(), &params.ProductType, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter productType: %w", err), http.StatusBadRequest)
 		return
 	}
 

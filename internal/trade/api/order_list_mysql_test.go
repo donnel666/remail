@@ -88,10 +88,17 @@ INSERT INTO project_mail_rules(project_id, rule_type, pattern, enabled) VALUES
 	second := checkoutListOrder(t, uc, 2, 10, 20, "code", "order-list-2")
 	seedTradeMicrosoftResource(t, db, 1, 1003, "b1@hotmail.test", "hotmail.test", 98, true)
 	third := checkoutListOrder(t, uc, 2, 11, 21, "purchase", "order-list-3")
+	require.NoError(t, db.Table("orders").Where("order_no = ?", third.Order.OrderNo).
+		Update("product_type", string(tradedomain.ProductTypeDomain)).Error)
 	seedTradeMicrosoftResource(t, db, 1, 1004, "b2@hotmail.test", "hotmail.test", 97, true)
 	fourth := checkoutListOrder(t, uc, 2, 11, 21, "purchase", "order-list-4")
 	seedTradeMicrosoftResource(t, db, 1, 1005, "c1@outlook.test", "outlook.test", 96, true)
 	other := checkoutListOrder(t, uc, 3, 10, 20, "code", "order-list-other")
+	require.NoError(t, db.Table("orders").Where("order_no = ?", other.Order.OrderNo).Updates(map[string]any{
+		"product_type":                string(tradedomain.ProductTypeLegacyRandom),
+		"random_microsoft_pay_amount": "1.00",
+		"random_domain_pay_amount":    "1.00",
+	}).Error)
 	seedTradeMicrosoftResource(t, db, 1, 1006, "history@history.test", "history.test", 95, true)
 	matchedAt := time.Now().UTC().Add(-time.Hour)
 	require.NoError(t, uc.ImportHistoricalMicrosoftUsage(ctx, []tradeapp.HistoricalMicrosoftUsage{{
@@ -160,6 +167,9 @@ INSERT INTO project_mail_rules(project_id, rule_type, pattern, enabled) VALUES
 	require.EqualValues(t, 4, all.Facets.ServiceMode.All)
 	require.EqualValues(t, 2, all.Facets.ServiceMode.Code)
 	require.EqualValues(t, 2, all.Facets.ServiceMode.Purchase)
+	require.EqualValues(t, 4, all.Facets.ProductType.All)
+	require.EqualValues(t, 3, all.Facets.ProductType.Microsoft)
+	require.EqualValues(t, 1, all.Facets.ProductType.Domain)
 	require.Len(t, all.Facets.Projects, 2)
 	require.Equal(t, uint(10), all.Facets.Projects[0].ProjectID)
 	require.Equal(t, "Trade Project", all.Facets.Projects[0].Name)
@@ -206,6 +216,28 @@ INSERT INTO project_mail_rules(project_id, rule_type, pattern, enabled) VALUES
 	require.Len(t, httpList.Facets.Projects, 2)
 	require.Equal(t, "/v1/projects/logos/second-project", httpList.Facets.Projects[1].LogoURL)
 	require.Equal(t, []OrderKeyFacetResponse{{Key: "hotmail.test", Count: 2}}, httpList.Facets.Domains)
+	require.EqualValues(t, 2, httpList.Facets.ProductType.All)
+	require.EqualValues(t, 1, httpList.Facets.ProductType.Microsoft)
+	require.EqualValues(t, 1, httpList.Facets.ProductType.Domain)
+
+	// Product type filtering uses the persisted order snapshot and keeps its
+	// own facet counts unfiltered so administrators can switch types directly.
+	byProductType, err := uc.ListOrders(ctx, tradeapp.OrderListFilter{
+		UserID: 2, ProductType: tradedomain.ProductTypeDomain,
+	}, 0, 0, 20)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, byProductType.Total)
+	require.Equal(t, third.Order.OrderNo, byProductType.Items[0].Order.OrderNo)
+	require.EqualValues(t, 4, byProductType.Facets.ProductType.All)
+	require.EqualValues(t, 3, byProductType.Facets.ProductType.Microsoft)
+	require.EqualValues(t, 1, byProductType.Facets.ProductType.Domain)
+
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/orders?productType=domain", nil))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &httpList))
+	require.EqualValues(t, 1, httpList.Total)
+	require.Equal(t, third.Order.OrderNo, httpList.Items[0].OrderNo)
 
 	// Domain filter, with and without the "@" prefix.
 	outlook, err := uc.ListOrders(ctx, tradeapp.OrderListFilter{UserID: 2, Domain: "outlook.test"}, 0, 0, 20)
@@ -316,6 +348,10 @@ INSERT INTO project_mail_rules(project_id, rule_type, pattern, enabled) VALUES
 	require.NotNil(t, adminList.Facets)
 	require.EqualValues(t, 5, adminList.Facets.Status.All)
 	require.EqualValues(t, 5, adminList.Facets.ServiceMode.All)
+	require.EqualValues(t, 5, adminList.Facets.ProductType.All)
+	require.EqualValues(t, 3, adminList.Facets.ProductType.Microsoft)
+	require.EqualValues(t, 1, adminList.Facets.ProductType.Domain)
+	require.EqualValues(t, 1, adminList.Facets.ProductType.Random)
 	require.Len(t, adminList.Facets.Projects, 2)
 	require.Equal(t, uint(10), adminList.Facets.Projects[0].ProjectID)
 	require.Equal(t, "Trade Project", adminList.Facets.Projects[0].Name)
@@ -325,7 +361,18 @@ INSERT INTO project_mail_rules(project_id, rule_type, pattern, enabled) VALUES
 	require.EqualValues(t, 2, adminList.Facets.Projects[1].Count)
 }
 
-func TestParseOrderDomainAndOptionalTime(t *testing.T) {
+func TestParseOrderFiltersAndOptionalTime(t *testing.T) {
+	for _, value := range []string{"microsoft", "domain", "gmail", "gmail_variant", "icloud"} {
+		productType, ok := parseOrderProductType(value)
+		require.True(t, ok)
+		require.Equal(t, value, string(productType))
+	}
+	productType, ok := parseOrderProductType("random")
+	require.True(t, ok)
+	require.Equal(t, tradedomain.ProductTypeLegacyRandom, productType)
+	_, ok = parseOrderProductType("unsupported")
+	require.False(t, ok)
+
 	domainCases := []struct {
 		raw      string
 		expected string

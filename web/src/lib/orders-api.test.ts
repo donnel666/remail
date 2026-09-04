@@ -19,10 +19,10 @@ describe("order API adapter", () => {
     vi.clearAllMocks();
   });
 
-  it("passes the selected project to the order list request", async () => {
+  it("passes the selected project and product type to the order list request", async () => {
     apiMocks.GET.mockResolvedValueOnce({ data: { items: [] } });
 
-    await listOrders({ projectId: 11 });
+    await listOrders({ productType: "gmail_variant", projectId: 11 });
 
     expect(apiMocks.GET).toHaveBeenCalledWith("/v1/orders", {
       params: {
@@ -34,6 +34,7 @@ describe("order API adapter", () => {
           search: undefined,
           serviceMode: undefined,
           status: undefined,
+          productType: "gmail_variant",
           projectId: 11,
           domain: undefined,
           createdFrom: undefined,

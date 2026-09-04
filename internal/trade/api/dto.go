@@ -118,6 +118,16 @@ type OrderServiceModeFacetsResponse struct {
 	Purchase int64 `json:"purchase"`
 }
 
+type OrderProductTypeFacetsResponse struct {
+	All          int64 `json:"all"`
+	Microsoft    int64 `json:"microsoft"`
+	Domain       int64 `json:"domain"`
+	Random       int64 `json:"random"`
+	Gmail        int64 `json:"gmail"`
+	GmailVariant int64 `json:"gmailVariant"`
+	ICloud       int64 `json:"icloud"`
+}
+
 type OrderProjectFacetResponse struct {
 	ProjectID uint   `json:"projectId"`
 	Name      string `json:"name"`
@@ -133,6 +143,7 @@ type OrderKeyFacetResponse struct {
 type OrderListFacetsResponse struct {
 	Status      OrderStatusFacetsResponse      `json:"status"`
 	ServiceMode OrderServiceModeFacetsResponse `json:"serviceMode"`
+	ProductType OrderProductTypeFacetsResponse `json:"productType"`
 	Projects    []OrderProjectFacetResponse    `json:"projects"`
 	Domains     []OrderKeyFacetResponse        `json:"domains"`
 }

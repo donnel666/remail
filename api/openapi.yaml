@@ -6167,6 +6167,11 @@ paths:
           schema:
             type: string
             enum: [purchase, code]
+        - name: productType
+          in: query
+          schema:
+            type: string
+            enum: [microsoft, domain, random, gmail, gmail_variant, icloud]
         - name: search
           in: query
           schema:
@@ -7270,6 +7275,9 @@ paths:
           schema:
             type: string
             enum: [mine, all]
+            x-enum-varnames:
+              - GetWalletTransactionsParamsScopeMine
+              - GetWalletTransactionsParamsScopeAll
             default: mine
         - name: search
           in: query
@@ -16201,6 +16209,33 @@ components:
           format: int64
       additionalProperties: false
 
+    OrderProductTypeFacets:
+      type: object
+      required: [all, microsoft, domain, random, gmail, gmailVariant, icloud]
+      properties:
+        all:
+          type: integer
+          format: int64
+        microsoft:
+          type: integer
+          format: int64
+        domain:
+          type: integer
+          format: int64
+        random:
+          type: integer
+          format: int64
+        gmail:
+          type: integer
+          format: int64
+        gmailVariant:
+          type: integer
+          format: int64
+        icloud:
+          type: integer
+          format: int64
+      additionalProperties: false
+
     OrderProjectFacet:
       type: object
       required:
@@ -16238,6 +16273,7 @@ components:
       required:
         - status
         - serviceMode
+        - productType
         - projects
         - domains
       properties:
@@ -16245,6 +16281,8 @@ components:
           $ref: "#/components/schemas/OrderStatusFacets"
         serviceMode:
           $ref: "#/components/schemas/OrderServiceModeFacets"
+        productType:
+          $ref: "#/components/schemas/OrderProductTypeFacets"
         projects:
           type: array
           items:
