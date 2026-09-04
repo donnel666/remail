@@ -89,6 +89,9 @@ func TestValidateAuthSecuritySettings(t *testing.T) {
 	require.NoError(t, Validate("default_project_microsoft_code_price", "0.000001"))
 	require.ErrorIs(t, Validate("default_project_microsoft_code_price", "-0.01"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("default_project_microsoft_code_price", "0.0000001"), domain.ErrInvalidValue)
+	require.NoError(t, Validate("default_project_gmail_variant_code_price", "8"))
+	require.NoError(t, Validate("default_project_gmail_variant_purchase_enabled", "true"))
+	require.ErrorIs(t, Validate("default_project_gmail_variant_purchase_enabled", "1"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("bcrypt_cost", "3"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("bcrypt_cost", "17"), domain.ErrInvalidValue)
 	require.ErrorIs(t, Validate("email_code_digit_len", "11"), domain.ErrInvalidValue)
@@ -140,6 +143,19 @@ func TestValidateAuthSecuritySettings(t *testing.T) {
 		{Key: "github_callback_url", Value: "https://mail.example.com/v1/oauth/github/callback"},
 	}))
 
+}
+
+func TestProjectProductDefaultsRequireAnEnabledService(t *testing.T) {
+	err := ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
+		{Key: "default_project_gmail_variant_code_enabled", Value: "false"},
+		{Key: "default_project_gmail_variant_purchase_enabled", Value: "false"},
+	})
+	require.ErrorIs(t, err, domain.ErrInvalidValue)
+
+	require.NoError(t, ValidatePersistedUpdates(DefaultSettings(), []domain.Setting{
+		{Key: "default_project_gmail_variant_code_enabled", Value: "false"},
+		{Key: "default_project_gmail_variant_purchase_enabled", Value: "true"},
+	}))
 }
 
 func TestValidateRechargeRebateSettings(t *testing.T) {

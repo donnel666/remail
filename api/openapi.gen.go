@@ -6403,7 +6403,43 @@ type AdminDashboardStats struct {
 	DomainCodeReceipts              int     `json:"domainCodeReceipts"`
 	DomainCodeSuccessRate           float32 `json:"domainCodeSuccessRate"`
 	DomainTotalMailboxes            int     `json:"domainTotalMailboxes"`
-	MicrosoftAvailableEmails        int     `json:"microsoftAvailableEmails"`
+
+	// GmailAvailableEmails Healthy public Gmail source accounts owned by active supplier or administrator accounts.
+	GmailAvailableEmails                  int     `json:"gmailAvailableEmails"`
+	GmailAverageCodeReceiptSeconds        int     `json:"gmailAverageCodeReceiptSeconds"`
+	GmailAveragePurchaseActivationSeconds int     `json:"gmailAveragePurchaseActivationSeconds"`
+	GmailCodeReceipts                     int     `json:"gmailCodeReceipts"`
+	GmailCodeSuccessRate                  float32 `json:"gmailCodeSuccessRate"`
+	GmailPurchaseActivationSuccessRate    float32 `json:"gmailPurchaseActivationSuccessRate"`
+	GmailPurchaseActivations              int     `json:"gmailPurchaseActivations"`
+
+	// GmailTotalEmails Non-deleted local Gmail source accounts.
+	GmailTotalEmails int `json:"gmailTotalEmails"`
+
+	// GmailVariantAvailableEmails Available Gmail source accounts that can generate plus-address variants.
+	GmailVariantAvailableEmails                  int     `json:"gmailVariantAvailableEmails"`
+	GmailVariantAverageCodeReceiptSeconds        int     `json:"gmailVariantAverageCodeReceiptSeconds"`
+	GmailVariantAveragePurchaseActivationSeconds int     `json:"gmailVariantAveragePurchaseActivationSeconds"`
+	GmailVariantCodeReceipts                     int     `json:"gmailVariantCodeReceipts"`
+	GmailVariantCodeSuccessRate                  float32 `json:"gmailVariantCodeSuccessRate"`
+	GmailVariantPurchaseActivationSuccessRate    float32 `json:"gmailVariantPurchaseActivationSuccessRate"`
+	GmailVariantPurchaseActivations              int     `json:"gmailVariantPurchaseActivations"`
+
+	// GmailVariantTotalEmails Gmail source accounts are shared by the Gmail and Gmail variant products.
+	GmailVariantTotalEmails int `json:"gmailVariantTotalEmails"`
+
+	// IcloudAvailableEmails Normal public iCloud source accounts with at least one currently unallocated usable alias.
+	IcloudAvailableEmails                  int     `json:"icloudAvailableEmails"`
+	IcloudAverageCodeReceiptSeconds        int     `json:"icloudAverageCodeReceiptSeconds"`
+	IcloudAveragePurchaseActivationSeconds int     `json:"icloudAveragePurchaseActivationSeconds"`
+	IcloudCodeReceipts                     int     `json:"icloudCodeReceipts"`
+	IcloudCodeSuccessRate                  float32 `json:"icloudCodeSuccessRate"`
+	IcloudPurchaseActivationSuccessRate    float32 `json:"icloudPurchaseActivationSuccessRate"`
+	IcloudPurchaseActivations              int     `json:"icloudPurchaseActivations"`
+
+	// IcloudTotalEmails Non-deleted iCloud source accounts.
+	IcloudTotalEmails        int `json:"icloudTotalEmails"`
+	MicrosoftAvailableEmails int `json:"microsoftAvailableEmails"`
 
 	// MicrosoftAverageCodeReceiptSeconds Global average seconds from receiveStartedAt to the first matched code message for successful Microsoft code orders created in the selected range.
 	MicrosoftAverageCodeReceiptSeconds int `json:"microsoftAverageCodeReceiptSeconds"`
@@ -6436,27 +6472,42 @@ type AdminDashboardStats struct {
 
 // AdminDashboardTrendPoint defines model for AdminDashboardTrendPoint.
 type AdminDashboardTrendPoint struct {
-	ActiveUsers                        int     `json:"activeUsers"`
-	DomainAvailableMailboxes           int     `json:"domainAvailableMailboxes"`
-	DomainAverageCodeReceiptSeconds    int     `json:"domainAverageCodeReceiptSeconds"`
-	DomainCodeSuccessRate              float32 `json:"domainCodeSuccessRate"`
-	DomainReceivedCodes                int     `json:"domainReceivedCodes"`
-	DomainTotalMailboxes               int     `json:"domainTotalMailboxes"`
-	Label                              string  `json:"label"`
-	MicrosoftAvailableEmails           int     `json:"microsoftAvailableEmails"`
-	MicrosoftAverageCodeReceiptSeconds int     `json:"microsoftAverageCodeReceiptSeconds"`
-	MicrosoftCodeSuccessRate           float32 `json:"microsoftCodeSuccessRate"`
-	MicrosoftReceivedCodes             int     `json:"microsoftReceivedCodes"`
-	MicrosoftTotalEmails               int     `json:"microsoftTotalEmails"`
-	NewUsers                           int     `json:"newUsers"`
-	Orders                             int     `json:"orders"`
-	PlatformRevenue                    float32 `json:"platformRevenue"`
-	RechargeAmount                     float32 `json:"rechargeAmount"`
-	RefundAmount                       float32 `json:"refundAmount"`
-	SpendAmount                        float32 `json:"spendAmount"`
-	SuccessfulCodeReceipts             int     `json:"successfulCodeReceipts"`
-	TotalUsers                         int     `json:"totalUsers"`
-	WithdrawAmount                     float32 `json:"withdrawAmount"`
+	ActiveUsers                           int     `json:"activeUsers"`
+	DomainAvailableMailboxes              int     `json:"domainAvailableMailboxes"`
+	DomainAverageCodeReceiptSeconds       int     `json:"domainAverageCodeReceiptSeconds"`
+	DomainCodeSuccessRate                 float32 `json:"domainCodeSuccessRate"`
+	DomainReceivedCodes                   int     `json:"domainReceivedCodes"`
+	DomainTotalMailboxes                  int     `json:"domainTotalMailboxes"`
+	GmailAvailableEmails                  int     `json:"gmailAvailableEmails"`
+	GmailAverageCodeReceiptSeconds        int     `json:"gmailAverageCodeReceiptSeconds"`
+	GmailCodeSuccessRate                  float32 `json:"gmailCodeSuccessRate"`
+	GmailReceivedCodes                    int     `json:"gmailReceivedCodes"`
+	GmailTotalEmails                      int     `json:"gmailTotalEmails"`
+	GmailVariantAvailableEmails           int     `json:"gmailVariantAvailableEmails"`
+	GmailVariantAverageCodeReceiptSeconds int     `json:"gmailVariantAverageCodeReceiptSeconds"`
+	GmailVariantCodeSuccessRate           float32 `json:"gmailVariantCodeSuccessRate"`
+	GmailVariantReceivedCodes             int     `json:"gmailVariantReceivedCodes"`
+	GmailVariantTotalEmails               int     `json:"gmailVariantTotalEmails"`
+	IcloudAvailableEmails                 int     `json:"icloudAvailableEmails"`
+	IcloudAverageCodeReceiptSeconds       int     `json:"icloudAverageCodeReceiptSeconds"`
+	IcloudCodeSuccessRate                 float32 `json:"icloudCodeSuccessRate"`
+	IcloudReceivedCodes                   int     `json:"icloudReceivedCodes"`
+	IcloudTotalEmails                     int     `json:"icloudTotalEmails"`
+	Label                                 string  `json:"label"`
+	MicrosoftAvailableEmails              int     `json:"microsoftAvailableEmails"`
+	MicrosoftAverageCodeReceiptSeconds    int     `json:"microsoftAverageCodeReceiptSeconds"`
+	MicrosoftCodeSuccessRate              float32 `json:"microsoftCodeSuccessRate"`
+	MicrosoftReceivedCodes                int     `json:"microsoftReceivedCodes"`
+	MicrosoftTotalEmails                  int     `json:"microsoftTotalEmails"`
+	NewUsers                              int     `json:"newUsers"`
+	Orders                                int     `json:"orders"`
+	PlatformRevenue                       float32 `json:"platformRevenue"`
+	RechargeAmount                        float32 `json:"rechargeAmount"`
+	RefundAmount                          float32 `json:"refundAmount"`
+	SpendAmount                           float32 `json:"spendAmount"`
+	SuccessfulCodeReceipts                int     `json:"successfulCodeReceipts"`
+	TotalUsers                            int     `json:"totalUsers"`
+	WithdrawAmount                        float32 `json:"withdrawAmount"`
 }
 
 // AdminDomainBulkCommandRequest defines model for AdminDomainBulkCommandRequest.
@@ -10604,6 +10655,7 @@ type ProjectMatchFacets struct {
 type ProjectPriceDefaultsResponse struct {
 	Defaults               map[string]NonNegativeLedgerAmount `json:"defaults"`
 	MicrosoftSuffixOptions []string                           `json:"microsoftSuffixOptions"`
+	ServiceDefaults        map[string]bool                    `json:"serviceDefaults"`
 }
 
 // ProjectProduct defines model for ProjectProduct.
@@ -16421,7 +16473,7 @@ type ServerInterface interface {
 	// Upload a project logo
 	// (POST /v1/admin/projects/logos)
 	PostAdminProjectLogo(c *gin.Context, params PostAdminProjectLogoParams)
-	// Get non-sensitive default project product prices
+	// Get non-sensitive default project product settings
 	// (GET /v1/admin/projects/product-defaults)
 	GetAdminProjectPriceDefaults(c *gin.Context)
 	// Create or replace product configurations for selected projects

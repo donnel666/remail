@@ -28,6 +28,7 @@ const defaultsSource = readFileSync(
   "utf8",
 );
 const emailResourcesSource = readFileSync(new URL("./email-resources.tsx", import.meta.url), "utf8");
+const projectPricingSource = readFileSync(new URL("./project-pricing.tsx", import.meta.url), "utf8");
 const backendKeys = [...defaultsSource.matchAll(/\{Key: "([^\"]+)"/g)].map((match) => match[1]);
 const nonUIRuntimeKeys = new Set([
   "admin_resource_list_default_limit",
@@ -86,5 +87,14 @@ describe("system setting keys", () => {
     expect(emailResourcesSource).toContain('update("icloud_forwarding_suffixes"');
     expect(emailResourcesSource).toContain('update("icloud_cookie_keepalive_minutes"');
     expect(emailResourcesSource).toContain('update("icloud_onboarding_max_attempts"');
+  });
+
+  it("exposes Gmail variant prices and per-product service defaults", () => {
+    expect(projectPricingSource).toContain("default_project_gmail_variant_code_price");
+    expect(projectPricingSource).toContain("default_project_gmail_variant_purchase_supplier_price");
+    expect(projectPricingSource).toContain("default_project_gmail_variant_code_enabled");
+    expect(projectPricingSource).toContain("default_project_icloud_purchase_enabled");
+    expect(projectPricingSource).toContain("每种商品至少默认启用接码或购买中的一项");
+    expect(projectPricingSource).toContain("ariaLabel={`${t(productLabel)} · ${t(label)}`}");
   });
 });

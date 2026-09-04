@@ -106,6 +106,11 @@ var removedKeys = map[string]struct{}{
 var booleanKeys = map[string]struct{}{
 	"register_enabled": {}, "captcha_enabled": {}, "announcement_enabled": {}, "faq_enabled": {}, "epay_enabled": {}, "epusdt_enabled": {},
 	"daily_checkin_enabled": {}, "leaderboard_reward_enabled": {}, "linuxdo_oauth_enabled": {}, "github_oauth_enabled": {}, "nodeloc_oauth_enabled": {},
+	"default_project_microsoft_code_enabled": {}, "default_project_microsoft_purchase_enabled": {},
+	"default_project_domain_code_enabled": {}, "default_project_domain_purchase_enabled": {},
+	"default_project_gmail_code_enabled": {}, "default_project_gmail_purchase_enabled": {},
+	"default_project_gmail_variant_code_enabled": {}, "default_project_gmail_variant_purchase_enabled": {},
+	"default_project_icloud_code_enabled": {}, "default_project_icloud_purchase_enabled": {},
 }
 
 func Validate(key, value string) error {
@@ -155,6 +160,8 @@ func Validate(key, value string) error {
 		"default_project_domain_purchase_price", "default_project_domain_purchase_supplier_price",
 		"default_project_gmail_code_price", "default_project_gmail_code_supplier_price",
 		"default_project_gmail_purchase_price", "default_project_gmail_purchase_supplier_price",
+		"default_project_gmail_variant_code_price", "default_project_gmail_variant_code_supplier_price",
+		"default_project_gmail_variant_purchase_price", "default_project_gmail_variant_purchase_supplier_price",
 		"default_project_icloud_code_price", "default_project_icloud_code_supplier_price",
 		"default_project_icloud_purchase_price", "default_project_icloud_purchase_supplier_price":
 		amount, err := money.Parse(value)
@@ -517,6 +524,12 @@ func validateRelationships(values map[string]string) error {
 	retries := value("smtp_task_retry_count", 3)
 	if value("outbound_mail_timeout_minutes", 3)*60 < smtpTaskBudgetSeconds(retries) {
 		return domain.ErrInvalidValue
+	}
+	for _, productType := range []string{"microsoft", "domain", "gmail", "gmail_variant", "icloud"} {
+		if strings.TrimSpace(values["default_project_"+productType+"_code_enabled"]) == "false" &&
+			strings.TrimSpace(values["default_project_"+productType+"_purchase_enabled"]) == "false" {
+			return domain.ErrInvalidValue
+		}
 	}
 	if strings.TrimSpace(values["epay_enabled"]) == "true" {
 		if fields := invalidEPayConfigFields(values); len(fields) > 0 {

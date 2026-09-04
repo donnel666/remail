@@ -121,9 +121,10 @@ type ProjectBulkUpdateProductsRequest struct {
 	Products   []ProjectProductRequest `json:"products" binding:"required,min=1,max=5"`
 }
 
-// ProjectPriceDefaultsResponse returns the non-sensitive project price defaults.
+// ProjectPriceDefaultsResponse returns non-sensitive project product defaults.
 type ProjectPriceDefaultsResponse struct {
 	Defaults               map[string]string `json:"defaults"`
+	ServiceDefaults        map[string]bool   `json:"serviceDefaults"`
 	MicrosoftSuffixOptions []string          `json:"microsoftSuffixOptions"`
 }
 

@@ -4016,7 +4016,7 @@ paths:
   /v1/admin/projects/product-defaults:
     get:
       operationId: getAdminProjectPriceDefaults
-      summary: Get non-sensitive default project product prices
+      summary: Get non-sensitive default project product settings
       tags:
         - Projects
       security:
@@ -17399,6 +17399,30 @@ components:
         - microsoftPurchaseActivations
         - microsoftPurchaseActivationSuccessRate
         - microsoftAveragePurchaseActivationSeconds
+        - gmailTotalEmails
+        - gmailAvailableEmails
+        - gmailCodeReceipts
+        - gmailCodeSuccessRate
+        - gmailAverageCodeReceiptSeconds
+        - gmailPurchaseActivations
+        - gmailPurchaseActivationSuccessRate
+        - gmailAveragePurchaseActivationSeconds
+        - gmailVariantTotalEmails
+        - gmailVariantAvailableEmails
+        - gmailVariantCodeReceipts
+        - gmailVariantCodeSuccessRate
+        - gmailVariantAverageCodeReceiptSeconds
+        - gmailVariantPurchaseActivations
+        - gmailVariantPurchaseActivationSuccessRate
+        - gmailVariantAveragePurchaseActivationSeconds
+        - icloudTotalEmails
+        - icloudAvailableEmails
+        - icloudCodeReceipts
+        - icloudCodeSuccessRate
+        - icloudAverageCodeReceiptSeconds
+        - icloudPurchaseActivations
+        - icloudPurchaseActivationSuccessRate
+        - icloudAveragePurchaseActivationSeconds
         - domainTotalMailboxes
         - domainAvailableMailboxes
         - domainCodeReceipts
@@ -17447,6 +17471,60 @@ components:
         microsoftAveragePurchaseActivationSeconds:
           type: integer
           description: Global average seconds from receiveStartedAt to activatedAt for activated Microsoft purchase orders created in the selected range.
+        gmailTotalEmails:
+          type: integer
+          description: Non-deleted local Gmail source accounts.
+        gmailAvailableEmails:
+          type: integer
+          description: Healthy public Gmail source accounts owned by active supplier or administrator accounts.
+        gmailCodeReceipts:
+          type: integer
+        gmailCodeSuccessRate:
+          type: number
+        gmailAverageCodeReceiptSeconds:
+          type: integer
+        gmailPurchaseActivations:
+          type: integer
+        gmailPurchaseActivationSuccessRate:
+          type: number
+        gmailAveragePurchaseActivationSeconds:
+          type: integer
+        gmailVariantTotalEmails:
+          type: integer
+          description: Gmail source accounts are shared by the Gmail and Gmail variant products.
+        gmailVariantAvailableEmails:
+          type: integer
+          description: Available Gmail source accounts that can generate plus-address variants.
+        gmailVariantCodeReceipts:
+          type: integer
+        gmailVariantCodeSuccessRate:
+          type: number
+        gmailVariantAverageCodeReceiptSeconds:
+          type: integer
+        gmailVariantPurchaseActivations:
+          type: integer
+        gmailVariantPurchaseActivationSuccessRate:
+          type: number
+        gmailVariantAveragePurchaseActivationSeconds:
+          type: integer
+        icloudTotalEmails:
+          type: integer
+          description: Non-deleted iCloud source accounts.
+        icloudAvailableEmails:
+          type: integer
+          description: Normal public iCloud source accounts with at least one currently unallocated usable alias.
+        icloudCodeReceipts:
+          type: integer
+        icloudCodeSuccessRate:
+          type: number
+        icloudAverageCodeReceiptSeconds:
+          type: integer
+        icloudPurchaseActivations:
+          type: integer
+        icloudPurchaseActivationSuccessRate:
+          type: number
+        icloudAveragePurchaseActivationSeconds:
+          type: integer
         domainTotalMailboxes:
           type: integer
         domainAvailableMailboxes:
@@ -17478,6 +17556,21 @@ components:
         - microsoftReceivedCodes
         - microsoftCodeSuccessRate
         - microsoftAverageCodeReceiptSeconds
+        - gmailTotalEmails
+        - gmailAvailableEmails
+        - gmailReceivedCodes
+        - gmailCodeSuccessRate
+        - gmailAverageCodeReceiptSeconds
+        - gmailVariantTotalEmails
+        - gmailVariantAvailableEmails
+        - gmailVariantReceivedCodes
+        - gmailVariantCodeSuccessRate
+        - gmailVariantAverageCodeReceiptSeconds
+        - icloudTotalEmails
+        - icloudAvailableEmails
+        - icloudReceivedCodes
+        - icloudCodeSuccessRate
+        - icloudAverageCodeReceiptSeconds
         - domainTotalMailboxes
         - domainAvailableMailboxes
         - domainReceivedCodes
@@ -17515,6 +17608,36 @@ components:
         microsoftCodeSuccessRate:
           type: number
         microsoftAverageCodeReceiptSeconds:
+          type: integer
+        gmailTotalEmails:
+          type: integer
+        gmailAvailableEmails:
+          type: integer
+        gmailReceivedCodes:
+          type: integer
+        gmailCodeSuccessRate:
+          type: number
+        gmailAverageCodeReceiptSeconds:
+          type: integer
+        gmailVariantTotalEmails:
+          type: integer
+        gmailVariantAvailableEmails:
+          type: integer
+        gmailVariantReceivedCodes:
+          type: integer
+        gmailVariantCodeSuccessRate:
+          type: number
+        gmailVariantAverageCodeReceiptSeconds:
+          type: integer
+        icloudTotalEmails:
+          type: integer
+        icloudAvailableEmails:
+          type: integer
+        icloudReceivedCodes:
+          type: integer
+        icloudCodeSuccessRate:
+          type: number
+        icloudAverageCodeReceiptSeconds:
           type: integer
         domainTotalMailboxes:
           type: integer
@@ -20388,12 +20511,17 @@ components:
       type: object
       required:
         - defaults
+        - serviceDefaults
         - microsoftSuffixOptions
       properties:
         defaults:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/NonNegativeLedgerAmount"
+        serviceDefaults:
+          type: object
+          additionalProperties:
+            type: boolean
         microsoftSuffixOptions:
           type: array
           items:

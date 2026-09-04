@@ -24,6 +24,8 @@ describe("Gmail variant product contract", () => {
     expect(adminSource).toMatch(
       /plusWeight:\s*product\.type === "gmail_variant"\s*\? 1/,
     );
+    expect(adminSource).toContain('gmail_variant: readProduct("gmail_variant")');
+    expect(adminSource).toContain("default_project_${type}");
     expect(applicationSource).toContain('<Select.Option value="gmail_variant">');
   });
 

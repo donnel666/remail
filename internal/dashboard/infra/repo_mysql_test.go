@@ -13,6 +13,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/donnel666/remail/internal/businessday"
 	"github.com/donnel666/remail/internal/platform/testmysql"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -260,7 +261,7 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 }
 
 // TestAdminViewRepoMySQL drives the platform-wide admin aggregates against real
-// MySQL: the microsoft/domain product-type split, user new/active counts, the
+// MySQL: the product-type split, user new/active counts, the
 // inventory snapshot WHERE clauses and the global project code ranking.
 func TestAdminViewRepoMySQL(t *testing.T) {
 	db := newDashboardMySQLTestDB(t)
@@ -273,7 +274,7 @@ func TestAdminViewRepoMySQL(t *testing.T) {
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, nickname, status, role, created_at, last_login_at) VALUES
 	    (1, 'base@test.local', 'h', 'Base', 'active', 'user', ?, NULL),
-	    (2, 'buyer@test.local', 'h', 'Buyer', 'active', 'user', ?, ?),
+	    (2, 'buyer@test.local', 'h', 'Buyer', 'active', 'supplier', ?, ?),
 	    (3, 'fresh@test.local', 'h', 'Fresh', 'active', 'user', ?, NULL),
 	    (4, 'deleted@test.local', 'h', 'Deleted', 'deleted', 'user', ?, ?)`,
 		beforeRange, ref, ref, ref, beforeRange, ref).Error)
@@ -304,14 +305,27 @@ INSERT INTO wallet_transactions(id, transaction_no, user_id, transaction_type, b
     amount, balance_before, balance_after, biz_type, biz_id)
 VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order', 'ORD')`).Error)
 
-	// Valid range cohort: 1 microsoft code, 2 domain code and 2 microsoft
-	// purchases (one activated), all charged.
+	// Valid range cohort starts with 1 Microsoft code, 2 domain code and 2
+	// Microsoft purchases (one activated), all charged.
 	seedTypedOrder(t, db, 1, 2, 10, 20, "microsoft", "code", "12.00", receiveStart, ref)
 	seedTypedOrder(t, db, 2, 2, 10, 20, "domain", "code", "5.00", receiveStart, ref)
 	seedTypedOrder(t, db, 3, 2, 10, 20, "microsoft", "purchase", "8.00", ref, ref)
 	seedTypedOrder(t, db, 4, 2, 10, 20, "domain", "code", "5.00", receiveStart, ref)
 	seedTypedOrder(t, db, 9, 2, 10, 20, "microsoft", "purchase", "8.00", ref.Add(-45*time.Second), ref)
 	require.NoError(t, db.Table("orders").Where("id = ?", 9).Update("activated_at", ref).Error)
+	// Gmail variants share allocation_type=gmail, so dashboard grouping must use
+	// the ordered SKU instead of collapsing them into the Gmail product.
+	seedTypedOrder(t, db, 12, 2, 10, 20, "gmail", "code", "1.00", receiveStart, ref)
+	seedTypedOrder(t, db, 13, 2, 10, 20, "gmail_variant", "code", "1.00", receiveStart, ref)
+	seedTypedOrder(t, db, 14, 2, 10, 20, "icloud", "code", "1.00", receiveStart, ref)
+	seedTypedOrder(t, db, 15, 2, 10, 20, "gmail", "purchase", "1.00", ref.Add(-35*time.Second), ref)
+	seedTypedOrder(t, db, 16, 2, 10, 20, "gmail_variant", "purchase", "1.00", ref.Add(-40*time.Second), ref)
+	seedTypedOrder(t, db, 17, 2, 10, 20, "icloud", "purchase", "1.00", ref, ref)
+	require.NoError(t, db.Exec(`UPDATE orders SET allocation_type = CASE
+WHEN product_type IN ('gmail', 'gmail_variant') THEN 'gmail'
+WHEN product_type = 'icloud' THEN 'icloud'
+END WHERE id BETWEEN 12 AND 17`).Error)
+	require.NoError(t, db.Table("orders").Where("id IN ?", []uint{15, 16}).Update("activated_at", ref).Error)
 	// Historical purchases are charged records but not platform orders.
 	seedTypedOrder(t, db, 6, 2, 10, 20, "microsoft", "purchase", "0.00", ref, ref)
 	require.NoError(t, db.Table("orders").Where("id = ?", 6).Update("order_no", "HIST-ADMIN-COUNT-TEST").Error)
@@ -324,6 +338,9 @@ VALUES (1, 'TX-1', 2, 'debit', 'consumer', 'out', -1.00, 100.00, 99.00, 'order',
 	seedDashboardReceipt(t, db, 4, 103, ref)
 	seedDashboardReceipt(t, db, 7, 105, ref)
 	seedDashboardReceipt(t, db, 8, 106, ref)
+	seedDashboardReceipt(t, db, 12, 112, ref)
+	seedDashboardReceipt(t, db, 13, 113, ref)
+	seedDashboardReceipt(t, db, 14, 114, ref)
 	// A valid paid/code fact outside the selected range must not affect any
 	// range-scoped order, receipt or ranking metric.
 	seedTypedOrder(t, db, 5, 2, 10, 20, "microsoft", "code", "9.00", beforeRange, beforeRange)
@@ -338,7 +355,43 @@ INSERT INTO microsoft_resources(id, email_address, password, status, for_sale, g
     (2, 'a@x.test', 'p', 'normal', TRUE, TRUE),
     (3, 'b@x.test', 'p', 'normal', FALSE, TRUE),
     (4, 'c@x.test', 'p', 'deleted', TRUE, TRUE)`).Error)
-
+	require.NoError(t, db.Exec(`
+INSERT INTO email_resources(id, type, owner_user_id) VALUES
+	    (20,'gmail',2),(21,'gmail',2),(22,'gmail',4),
+	    (30,'icloud',2),(31,'icloud',2),(32,'icloud',2),
+	    (40,'domain',2)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO gmail_resources(
+    id, resource_type, owner_user_id, email, identity, password,
+    two_factor_secret, app_password, for_sale, status, alloc_bucket
+) VALUES
+    (20, 'gmail', 2, 'available@gmail.com', 'available@gmail.com', 'p', 'secret', 'app', TRUE, 'normal', 20),
+    (21, 'gmail', 2, 'private@gmail.com', 'private@gmail.com', 'p', 'secret', 'app', FALSE, 'normal', 21),
+	    (22, 'gmail', 4, 'unavailable@gmail.com', 'unavailable@gmail.com', 'p', 'secret', 'app', TRUE, 'normal', 22)`).Error)
+	require.NoError(t, db.Table("users").Where("id = ?", 4).Update("role", "supplier").Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO mail_servers(id, owner_user_id, server_address, status)
+VALUES (40, 2, 'mail.relay.example', 'online')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO domain_resources(id, resource_type, owner_user_id, domain, mail_server_id, purpose, status)
+VALUES (40, 'domain', 2, 'relay.example', 40, 'binding', 'normal')`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO icloud_resources(id, primary_email, expire_at, for_sale, status, alias_count) VALUES
+	    (30, 'available@icloud.com', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'normal', 1),
+	    (31, 'private@icloud.com', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), FALSE, 'normal', 1),
+	    (32, 'deleted@icloud.com', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), TRUE, 'deleted', 1)`).Error)
+	require.NoError(t, db.Exec(`
+INSERT INTO icloud_aliases(resource_id, anonymous_id, email, forward_to_email, status)
+VALUES (30, 'available-alias', 'available-alias@icloud.com', 'inbox@relay.example', 'normal')`).Error)
+	previousForwardingSuffixes := runtimeconfig.String(runtimeconfig.ICloudForwardingSuffixesKey, "")
+	runtimeconfig.Set(runtimeconfig.ICloudForwardingSuffixesKey, "relay.example")
+	t.Cleanup(func() {
+		if previousForwardingSuffixes == "" {
+			runtimeconfig.Delete(runtimeconfig.ICloudForwardingSuffixesKey)
+		} else {
+			runtimeconfig.Set(runtimeconfig.ICloudForwardingSuffixesKey, previousForwardingSuffixes)
+		}
+	})
 	repo := NewAdminViewRepo(db)
 	from := ref.Add(-6 * time.Hour)
 	to := ref.Add(6 * time.Hour)
@@ -346,43 +399,37 @@ INSERT INTO microsoft_resources(id, email_address, password, status, for_sale, g
 
 	orderRows, err := repo.OrderTrend(ctx, dayFmt, from, to)
 	require.NoError(t, err)
-	require.Equal(t, 5, sumCountBuckets(orderRows))
+	require.Equal(t, 11, sumCountBuckets(orderRows))
 
 	codeOrders, err := repo.CodeOrderTrend(ctx, dayFmt, from, to)
 	require.NoError(t, err)
-	ms, domain := 0, 0
+	codeCounts := map[string]int{}
 	for _, r := range codeOrders {
-		if r.ProductType == "domain" {
-			domain += r.Count
-		} else {
-			ms += r.Count
-		}
+		codeCounts[r.ProductType] += r.Count
 	}
-	require.Equal(t, 1, ms)     // order 1
-	require.Equal(t, 2, domain) // orders 2 and 4 (purchase order 3 excluded)
+	require.Equal(t, map[string]int{"microsoft": 1, "domain": 2, "gmail": 1, "gmail_variant": 1, "icloud": 1}, codeCounts)
 
 	receipts, err := repo.CodeReceiptTrend(ctx, dayFmt, from, to)
 	require.NoError(t, err)
-	msR, domainR := 0, 0
+	receiptCounts := map[string]int{}
 	for _, r := range receipts {
 		require.Equal(t, 30, r.AvgSeconds)
 		require.EqualValues(t, 30*r.Received, r.TotalSeconds)
 		require.Equal(t, r.Received, r.Timed)
-		if r.ProductType == "domain" {
-			domainR += r.Received
-		} else {
-			msR += r.Received
-		}
+		receiptCounts[r.ProductType] += r.Received
 	}
-	require.Equal(t, 1, msR)
-	require.Equal(t, 2, domainR)
+	require.Equal(t, map[string]int{"microsoft": 1, "domain": 2, "gmail": 1, "gmail_variant": 1, "icloud": 1}, receiptCounts)
 
-	purchases, err := repo.MicrosoftPurchaseSummary(ctx, from, to)
+	purchases, err := repo.PurchaseSummaries(ctx, from, to)
 	require.NoError(t, err)
-	require.Equal(t, 2, purchases.Orders)
-	require.Equal(t, 1, purchases.Activated)
-	require.EqualValues(t, 45, purchases.TotalSeconds)
-	require.Equal(t, 1, purchases.Timed)
+	purchasesByType := map[string]dashboardapp.PurchaseSummary{}
+	for _, purchase := range purchases {
+		purchasesByType[purchase.ProductType] = purchase.PurchaseSummary
+	}
+	require.Equal(t, dashboardapp.PurchaseSummary{Orders: 2, Activated: 1, TotalSeconds: 45, Timed: 1}, purchasesByType["microsoft"])
+	require.Equal(t, dashboardapp.PurchaseSummary{Orders: 1, Activated: 1, TotalSeconds: 35, Timed: 1}, purchasesByType["gmail"])
+	require.Equal(t, dashboardapp.PurchaseSummary{Orders: 1, Activated: 1, TotalSeconds: 40, Timed: 1}, purchasesByType["gmail_variant"])
+	require.Equal(t, dashboardapp.PurchaseSummary{Orders: 1}, purchasesByType["icloud"])
 
 	newUsers, err := repo.NewUserTrend(ctx, dayFmt, from, to)
 	require.NoError(t, err)
@@ -404,12 +451,16 @@ INSERT INTO microsoft_resources(id, email_address, password, status, for_sale, g
 	require.Equal(t, 1, snap.MicrosoftAvailable) // res 2 only
 	require.Equal(t, 0, snap.DomainTotal)        // no generated mailboxes seeded
 	require.Equal(t, 0, snap.DomainAvailable)
+	require.Equal(t, 3, snap.GmailTotal)
+	require.Equal(t, 1, snap.GmailAvailable)
+	require.Equal(t, 2, snap.ICloudTotal)
+	require.Equal(t, 1, snap.ICloudAvailable)
 
 	ranking, err := repo.ProjectCodeRanking(ctx, from, to, 10)
 	require.NoError(t, err)
 	require.Len(t, ranking, 1)
 	require.Equal(t, "Microsoft", ranking[0].Name)
-	require.Equal(t, 3, ranking[0].Count) // 3 code receipts across the project
+	require.Equal(t, 6, ranking[0].Count) // 6 code receipts across the project
 
 	// 2025-12-31 16:30 UTC is 2026-01-01 00:30 in Shanghai. This covers the
 	// UTC/Shanghai day and year boundary without applying a second +08:00 shift
@@ -447,9 +498,9 @@ VALUES (10, 'boundary@test.local', 'h', 'Boundary', 'active', 'user', ?, ?)`, bo
 	require.NoError(t, err)
 	require.Equal(t, []dashboardapp.CountBucket{{Bucket: "2026-01-01 00:00:00", Count: 1}}, boundaryActiveUsers)
 
-	boundaryPurchases, err := repo.MicrosoftPurchaseSummary(ctx, boundaryFrom, boundaryTo)
+	boundaryPurchases, err := repo.PurchaseSummaries(ctx, boundaryFrom, boundaryTo)
 	require.NoError(t, err)
-	require.Equal(t, dashboardapp.PurchaseSummary{Orders: 1, Activated: 1, TotalSeconds: 45, Timed: 1}, boundaryPurchases)
+	require.Equal(t, []dashboardapp.TypePurchaseSummary{{ProductType: "microsoft", PurchaseSummary: dashboardapp.PurchaseSummary{Orders: 1, Activated: 1, TotalSeconds: 45, Timed: 1}}}, boundaryPurchases)
 
 	consoleRepo := NewViewRepo(db, nil)
 	consoleOrders, err := consoleRepo.OrderBuckets(ctx, 10, hourFmt, boundaryFrom, boundaryTo)

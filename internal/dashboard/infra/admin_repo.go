@@ -6,6 +6,7 @@ import (
 	"time"
 
 	dashboardapp "github.com/donnel666/remail/internal/dashboard/app"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"gorm.io/gorm"
 )
 
@@ -20,6 +21,11 @@ type AdminViewRepo struct {
 func NewAdminViewRepo(db *gorm.DB) *AdminViewRepo { return &AdminViewRepo{db: db} }
 
 var _ dashboardapp.AdminView = (*AdminViewRepo)(nil)
+
+const (
+	adminOrderProductType       = "COALESCE(NULLIF(product_type, 'random'), allocation_type)"
+	adminJoinedOrderProductType = "COALESCE(NULLIF(o.product_type, 'random'), o.allocation_type)"
+)
 
 func (r *AdminViewRepo) OrderTrend(ctx context.Context, sqlFormat string, from, to time.Time) ([]dashboardapp.CountBucket, error) {
 	// sqlFormat is a fixed internal constant (see app.sqlFormat), never user input.
@@ -39,14 +45,14 @@ func (r *AdminViewRepo) OrderTrend(ctx context.Context, sqlFormat string, from, 
 }
 
 func (r *AdminViewRepo) CodeOrderTrend(ctx context.Context, sqlFormat string, from, to time.Time) ([]dashboardapp.TypeCountBucket, error) {
-	sel := fmt.Sprintf("DATE_FORMAT(created_at, '%s') AS bucket, COALESCE(allocation_type, product_type) AS product_type, COUNT(*) AS count", sqlFormat)
+	sel := fmt.Sprintf("DATE_FORMAT(created_at, '%s') AS bucket, %s AS product_type, COUNT(*) AS count", sqlFormat, adminOrderProductType)
 	var rows []dashboardapp.TypeCountBucket
 	if err := r.db.WithContext(ctx).
 		Table("orders").
 		Select(sel).
 		Where("service_mode = 'code' AND debit_tx_id IS NOT NULL AND created_at >= ? AND created_at <= ?", from.UTC(), to.UTC()).
 		Where(historyOrderExclude).
-		Group("bucket, COALESCE(allocation_type, product_type)").
+		Group("bucket, " + adminOrderProductType).
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -57,8 +63,8 @@ func (r *AdminViewRepo) CodeReceiptTrend(ctx context.Context, sqlFormat string, 
 	// Anchored to the order's created_at (like the console) so receipts stay a
 	// subset of code orders in the same bucket; split by the delivered resource type.
 	sel := fmt.Sprintf(
-		"DATE_FORMAT(o.created_at, '%s') AS bucket, COALESCE(o.allocation_type, o.product_type) AS product_type, COUNT(*) AS received, COALESCE(ROUND(AVG(GREATEST(TIMESTAMPDIFF(SECOND, o.receive_started_at, h.message_received_at),0))),0) AS avg_seconds, COALESCE(SUM(CASE WHEN o.receive_started_at IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(SECOND, o.receive_started_at, h.message_received_at),0) ELSE 0 END),0) AS total_seconds, COUNT(o.receive_started_at) AS timed",
-		sqlFormat,
+		"DATE_FORMAT(o.created_at, '%s') AS bucket, %s AS product_type, COUNT(*) AS received, COALESCE(ROUND(AVG(GREATEST(TIMESTAMPDIFF(SECOND, o.receive_started_at, h.message_received_at),0))),0) AS avg_seconds, COALESCE(SUM(CASE WHEN o.receive_started_at IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(SECOND, o.receive_started_at, h.message_received_at),0) ELSE 0 END),0) AS total_seconds, COUNT(o.receive_started_at) AS timed",
+		sqlFormat, adminJoinedOrderProductType,
 	)
 	var rows []dashboardapp.TypeReceiptBucket
 	if err := r.db.WithContext(ctx).
@@ -67,22 +73,23 @@ func (r *AdminViewRepo) CodeReceiptTrend(ctx context.Context, sqlFormat string, 
 		Select(sel).
 		Where("o.service_mode = 'code' AND o.debit_tx_id IS NOT NULL AND o.created_at >= ? AND o.created_at <= ?", from.UTC(), to.UTC()).
 		Where("o." + historyOrderExclude).
-		Group("bucket, COALESCE(o.allocation_type, o.product_type)").
+		Group("bucket, " + adminJoinedOrderProductType).
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil
 }
 
-func (r *AdminViewRepo) MicrosoftPurchaseSummary(ctx context.Context, from, to time.Time) (dashboardapp.PurchaseSummary, error) {
-	var summary dashboardapp.PurchaseSummary
+func (r *AdminViewRepo) PurchaseSummaries(ctx context.Context, from, to time.Time) ([]dashboardapp.TypePurchaseSummary, error) {
+	var summaries []dashboardapp.TypePurchaseSummary
 	err := r.db.WithContext(ctx).
 		Table("orders").
-		Select("COUNT(*) AS orders, COUNT(activated_at) AS activated, COALESCE(SUM(CASE WHEN activated_at IS NOT NULL AND receive_started_at IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(SECOND, receive_started_at, activated_at),0) ELSE 0 END),0) AS total_seconds, COUNT(CASE WHEN activated_at IS NOT NULL AND receive_started_at IS NOT NULL THEN 1 END) AS timed").
-		Where("service_mode = 'purchase' AND debit_tx_id IS NOT NULL AND COALESCE(allocation_type, product_type) = 'microsoft' AND created_at >= ? AND created_at <= ?", from.UTC(), to.UTC()).
+		Select(adminOrderProductType+" AS product_type, COUNT(*) AS orders, COUNT(activated_at) AS activated, COALESCE(SUM(CASE WHEN activated_at IS NOT NULL AND receive_started_at IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(SECOND, receive_started_at, activated_at),0) ELSE 0 END),0) AS total_seconds, COUNT(CASE WHEN activated_at IS NOT NULL AND receive_started_at IS NOT NULL THEN 1 END) AS timed").
+		Where("service_mode = 'purchase' AND debit_tx_id IS NOT NULL AND created_at >= ? AND created_at <= ?", from.UTC(), to.UTC()).
 		Where(historyOrderExclude).
-		Scan(&summary).Error
-	return summary, err
+		Group(adminOrderProductType).
+		Scan(&summaries).Error
+	return summaries, err
 }
 
 func (r *AdminViewRepo) NewUserTrend(ctx context.Context, sqlFormat string, from, to time.Time) ([]dashboardapp.CountBucket, error) {
@@ -140,8 +147,7 @@ func (r *AdminViewRepo) TotalUsers(ctx context.Context) (int, error) {
 
 // InventorySnapshot is a point-in-time count (there is no historical snapshot
 // table, so the trend flat-lines these). "Available" mirrors what the platform
-// treats as sellable/usable: Microsoft = normal+for_sale+graph_available,
-// domain mailbox = normal.
+// treats as sellable/usable.
 func (r *AdminViewRepo) InventorySnapshot(ctx context.Context) (dashboardapp.InventorySnapshot, error) {
 	var snap dashboardapp.InventorySnapshot
 	counts := []struct {
@@ -153,6 +159,8 @@ func (r *AdminViewRepo) InventorySnapshot(ctx context.Context) (dashboardapp.Inv
 		{&snap.MicrosoftAvailable, "microsoft_resources", "status = 'normal' AND for_sale = TRUE AND graph_available = TRUE"},
 		{&snap.DomainTotal, "generated_mailboxes", "status <> 'retired'"},
 		{&snap.DomainAvailable, "generated_mailboxes", "status = 'normal'"},
+		{&snap.GmailTotal, "gmail_resources", "status <> 'deleted'"},
+		{&snap.ICloudTotal, "icloud_resources", "status <> 'deleted'"},
 	}
 	for _, c := range counts {
 		var n int64
@@ -161,6 +169,45 @@ func (r *AdminViewRepo) InventorySnapshot(ctx context.Context) (dashboardapp.Inv
 		}
 		*c.out = int(n)
 	}
+	var gmailAvailable int64
+	if err := r.db.WithContext(ctx).
+		Table("gmail_resources AS gr").
+		Joins("JOIN email_resources AS er ON er.id = gr.id AND er.type = 'gmail'").
+		Joins("JOIN users AS owner ON owner.id = er.owner_user_id").
+		Where("gr.status IN ('normal', 'available') AND gr.for_sale = TRUE").
+		Where("owner.status = 'active' AND owner.role IN ('supplier', 'admin', 'super_admin')").
+		Count(&gmailAvailable).Error; err != nil {
+		return dashboardapp.InventorySnapshot{}, err
+	}
+	snap.GmailAvailable = int(gmailAvailable)
+	domains := runtimeconfig.ICloudForwardingSuffixes(runtimeconfig.String(runtimeconfig.ICloudForwardingSuffixesKey, ""))
+	if len(domains) == 0 {
+		return snap, nil
+	}
+	var iCloudAvailable int64
+	if err := r.db.WithContext(ctx).
+		Table("icloud_resources AS ir").
+		Where("ir.status = 'normal' AND ir.for_sale = TRUE").
+		Where(`EXISTS (
+			SELECT 1 FROM icloud_aliases AS ia
+			WHERE ia.resource_id = ir.id
+			  AND ia.status = 'normal'
+			  AND LOWER(SUBSTR(ia.forward_to_email, INSTR(ia.forward_to_email, '@') + 1)) IN ?
+			  AND EXISTS (
+				  SELECT 1 FROM domain_resources AS forwarding_domain
+				  WHERE forwarding_domain.purpose = 'binding'
+				    AND forwarding_domain.status NOT IN ('disabled', 'deleted')
+				    AND LOWER(forwarding_domain.domain) = LOWER(SUBSTR(ia.forward_to_email, INSTR(ia.forward_to_email, '@') + 1))
+			  )
+			  AND NOT EXISTS (
+				  SELECT 1 FROM icloud_allocations AS active
+				  WHERE active.alias_id = ia.id AND active.status = 'allocated'
+			  )
+		)`, domains).
+		Count(&iCloudAvailable).Error; err != nil {
+		return dashboardapp.InventorySnapshot{}, err
+	}
+	snap.ICloudAvailable = int(iCloudAvailable)
 	return snap, nil
 }
 

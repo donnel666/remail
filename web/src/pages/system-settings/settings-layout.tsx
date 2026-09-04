@@ -96,8 +96,8 @@ export function FormLabel({ children }: { children: ReactNode }) {
 }
 
 // ---- SettingsSwitchField — full-width switch row with label + description ----
-export function SettingsSwitchField({ checked, onChange, label, description, disabled }: {
-  checked: boolean; onChange: (v: boolean) => void; label: string; description?: string; disabled?: boolean;
+export function SettingsSwitchField({ checked, onChange, label, description, disabled, ariaLabel }: {
+  checked: boolean; onChange: (v: boolean) => void; label: string; description?: string; disabled?: boolean; ariaLabel?: string;
 }) {
   return (
     <div data-slot="form-item" className="flex min-h-14 min-w-0 flex-row items-center justify-between gap-4 rounded-lg px-2 py-2 transition-colors hover:bg-surface-sunken/70">
@@ -105,7 +105,7 @@ export function SettingsSwitchField({ checked, onChange, label, description, dis
         <Label>{label}</Label>
         {description && <FormDescription>{description}</FormDescription>}
       </div>
-      <Sw checked={checked} onChange={onChange} disabled={disabled} ariaLabel={label} />
+      <Sw checked={checked} onChange={onChange} disabled={disabled} ariaLabel={ariaLabel ?? label} />
     </div>
   );
 }

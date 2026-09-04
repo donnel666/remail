@@ -50,7 +50,7 @@ func TestAdminDashboardCacheIgnoresPreviousSchemaVersion(t *testing.T) {
 		Data: &dashboardapp.AdminDashboard{Stats: dashboardapp.AdminStats{TotalUsers: 99}},
 	})
 	require.NoError(t, err)
-	oldKey := strings.Replace(adminDashboardCacheKey(nil, nil), adminDashboardCachePrefix, "dashboard:admin:v3:", 1)
+	oldKey := strings.Replace(adminDashboardCacheKey(nil, nil), adminDashboardCachePrefix, "dashboard:admin:v5:", 1)
 	require.NoError(t, client.Set(ctx, oldKey, payload, adminDashboardCacheTTL).Err())
 	require.NoError(t, client.ZAdd(ctx, adminDashboardActiveKey, redis.Z{
 		Score: float64(time.Now().UnixMilli()), Member: oldKey,

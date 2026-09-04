@@ -58,10 +58,27 @@ export const PROJECT_PRICE_KEYS = [
   "default_project_gmail_code_supplier_price",
   "default_project_gmail_purchase_price",
   "default_project_gmail_purchase_supplier_price",
+  "default_project_gmail_variant_code_price",
+  "default_project_gmail_variant_code_supplier_price",
+  "default_project_gmail_variant_purchase_price",
+  "default_project_gmail_variant_purchase_supplier_price",
   "default_project_icloud_code_price",
   "default_project_icloud_code_supplier_price",
   "default_project_icloud_purchase_price",
   "default_project_icloud_purchase_supplier_price",
+] as const;
+
+export const PROJECT_SERVICE_KEYS = [
+  "default_project_microsoft_code_enabled",
+  "default_project_microsoft_purchase_enabled",
+  "default_project_domain_code_enabled",
+  "default_project_domain_purchase_enabled",
+  "default_project_gmail_code_enabled",
+  "default_project_gmail_purchase_enabled",
+  "default_project_gmail_variant_code_enabled",
+  "default_project_gmail_variant_purchase_enabled",
+  "default_project_icloud_code_enabled",
+  "default_project_icloud_purchase_enabled",
 ] as const;
 
 export const PRODUCT_PRICE_MULTIPLIER_KEYS = [
@@ -77,6 +94,7 @@ export const PAYMENT_BILLING_KEYS = [
   ...TOPUP_KEYS,
   ...RECHARGE_CHECK_KEYS,
   ...PROJECT_PRICE_KEYS,
+  ...PROJECT_SERVICE_KEYS,
   ...PRODUCT_PRICE_MULTIPLIER_KEYS,
 ] as const;
 

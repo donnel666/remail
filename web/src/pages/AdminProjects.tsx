@@ -129,19 +129,31 @@ interface ProductDraft {
 
 type ProjectPriceDefaults = Record<
   ProjectProductType,
-  Pick<ProductDraft, "codePrice" | "codeSupplierPrice" | "purchasePrice" | "purchaseSupplierPrice">
+  Pick<
+    ProductDraft,
+    | "codeEnabled"
+    | "codePrice"
+    | "codeSupplierPrice"
+    | "purchaseEnabled"
+    | "purchasePrice"
+    | "purchaseSupplierPrice"
+  >
 >;
 
 const microsoftProjectPriceDefaults = {
+  codeEnabled: true,
   codePrice: "8",
   codeSupplierPrice: "5",
+  purchaseEnabled: true,
   purchasePrice: "10",
   purchaseSupplierPrice: "7",
 };
 
 const gmailProjectPriceDefaults = {
+  codeEnabled: true,
   codePrice: "8",
   codeSupplierPrice: "0",
+  purchaseEnabled: false,
   purchasePrice: "0",
   purchaseSupplierPrice: "0",
 };
@@ -150,8 +162,10 @@ const fallbackProjectPriceDefaults: ProjectPriceDefaults = {
   microsoft: microsoftProjectPriceDefaults,
   icloud: microsoftProjectPriceDefaults,
   domain: {
+    codeEnabled: true,
     codePrice: "80",
     codeSupplierPrice: "40",
+    purchaseEnabled: false,
     purchasePrice: "0",
     purchaseSupplierPrice: "0",
   },
@@ -159,41 +173,38 @@ const fallbackProjectPriceDefaults: ProjectPriceDefaults = {
   gmail_variant: gmailProjectPriceDefaults,
 };
 
-function projectPriceDefaultsFromValues(values: Record<string, string>): ProjectPriceDefaults {
-  const read = (key: string, fallback: string) => {
+function projectPriceDefaultsFromValues(
+  values: Record<string, string>,
+  serviceDefaults: Record<string, boolean>,
+): ProjectPriceDefaults {
+  const readPrice = (key: string, fallback: string) => {
     const value = values[key];
     return value !== undefined && Number.isFinite(Number(value)) && Number(value) >= 0
       ? value
       : fallback;
   };
-  const microsoft = {
-    codePrice: read("default_project_microsoft_code_price", fallbackProjectPriceDefaults.microsoft.codePrice),
-    codeSupplierPrice: read("default_project_microsoft_code_supplier_price", fallbackProjectPriceDefaults.microsoft.codeSupplierPrice),
-    purchasePrice: read("default_project_microsoft_purchase_price", fallbackProjectPriceDefaults.microsoft.purchasePrice),
-    purchaseSupplierPrice: read("default_project_microsoft_purchase_supplier_price", fallbackProjectPriceDefaults.microsoft.purchaseSupplierPrice),
-  };
-  const gmail = {
-    codePrice: read("default_project_gmail_code_price", fallbackProjectPriceDefaults.gmail.codePrice),
-    codeSupplierPrice: read("default_project_gmail_code_supplier_price", fallbackProjectPriceDefaults.gmail.codeSupplierPrice),
-    purchasePrice: read("default_project_gmail_purchase_price", fallbackProjectPriceDefaults.gmail.purchasePrice),
-    purchaseSupplierPrice: read("default_project_gmail_purchase_supplier_price", fallbackProjectPriceDefaults.gmail.purchaseSupplierPrice),
+  const readProduct = (type: ProjectProductType) => {
+    const fallback = fallbackProjectPriceDefaults[type];
+    const prefix = `default_project_${type}`;
+    return {
+      codeEnabled: serviceDefaults[`${prefix}_code_enabled`] ?? fallback.codeEnabled,
+      codePrice: readPrice(`${prefix}_code_price`, fallback.codePrice),
+      codeSupplierPrice: readPrice(`${prefix}_code_supplier_price`, fallback.codeSupplierPrice),
+      purchaseEnabled:
+        serviceDefaults[`${prefix}_purchase_enabled`] ?? fallback.purchaseEnabled,
+      purchasePrice: readPrice(`${prefix}_purchase_price`, fallback.purchasePrice),
+      purchaseSupplierPrice: readPrice(
+        `${prefix}_purchase_supplier_price`,
+        fallback.purchaseSupplierPrice,
+      ),
+    };
   };
   return {
-    microsoft,
-    icloud: {
-      codePrice: read("default_project_icloud_code_price", fallbackProjectPriceDefaults.icloud.codePrice),
-      codeSupplierPrice: read("default_project_icloud_code_supplier_price", fallbackProjectPriceDefaults.icloud.codeSupplierPrice),
-      purchasePrice: read("default_project_icloud_purchase_price", fallbackProjectPriceDefaults.icloud.purchasePrice),
-      purchaseSupplierPrice: read("default_project_icloud_purchase_supplier_price", fallbackProjectPriceDefaults.icloud.purchaseSupplierPrice),
-    },
-    domain: {
-      codePrice: read("default_project_domain_code_price", fallbackProjectPriceDefaults.domain.codePrice),
-      codeSupplierPrice: read("default_project_domain_code_supplier_price", fallbackProjectPriceDefaults.domain.codeSupplierPrice),
-      purchasePrice: read("default_project_domain_purchase_price", fallbackProjectPriceDefaults.domain.purchasePrice),
-      purchaseSupplierPrice: read("default_project_domain_purchase_supplier_price", fallbackProjectPriceDefaults.domain.purchaseSupplierPrice),
-    },
-    gmail,
-    gmail_variant: gmail,
+    microsoft: readProduct("microsoft"),
+    domain: readProduct("domain"),
+    gmail: readProduct("gmail"),
+    gmail_variant: readProduct("gmail_variant"),
+    icloud: readProduct("icloud"),
   };
 }
 
@@ -236,14 +247,14 @@ function createDefaultProduct(
   const hasMailboxWeights = usesMailboxWeights(type);
   return {
     activationWindowMinutes: "60",
-    codeEnabled: true,
+    codeEnabled: priceDefaults[type].codeEnabled,
     codePrice: priceDefaults[type].codePrice,
     codeSupplierPrice: priceDefaults[type].codeSupplierPrice,
     codeWindowMinutes: "10",
     dotWeight: "0",
     mainWeight: hasMailboxWeights || type === "gmail" ? "1" : "0",
     plusWeight: type === "gmail_variant" ? "1" : "0",
-    purchaseEnabled: type === "microsoft" || type === "icloud",
+    purchaseEnabled: priceDefaults[type].purchaseEnabled,
     purchasePrice: priceDefaults[type].purchasePrice,
     purchaseSupplierPrice: priceDefaults[type].purchaseSupplierPrice,
     status: "enabled",
@@ -1698,9 +1709,9 @@ export default function AdminProjects() {
   useEffect(() => {
     let active = true;
     void getAdminProjectPriceDefaults()
-      .then(({ defaults, microsoftSuffixOptions }) => {
+      .then(({ defaults, microsoftSuffixOptions, serviceDefaults }) => {
         if (!active) return;
-        setPriceDefaults(projectPriceDefaultsFromValues(defaults));
+        setPriceDefaults(projectPriceDefaultsFromValues(defaults, serviceDefaults ?? {}));
         setMicrosoftSuffixOptions(
           Array.isArray(microsoftSuffixOptions) ? microsoftSuffixOptions : []
         );

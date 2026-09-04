@@ -10,7 +10,7 @@ type fakeAdminView struct {
 	orders     []CountBucket
 	codeOrder  []TypeCountBucket
 	receipts   []TypeReceiptBucket
-	purchase   PurchaseSummary
+	purchases  []TypePurchaseSummary
 	newUsers   []CountBucket
 	active     []CountBucket
 	totalUsers int
@@ -27,8 +27,8 @@ func (f *fakeAdminView) CodeOrderTrend(context.Context, string, time.Time, time.
 func (f *fakeAdminView) CodeReceiptTrend(context.Context, string, time.Time, time.Time) ([]TypeReceiptBucket, error) {
 	return f.receipts, nil
 }
-func (f *fakeAdminView) MicrosoftPurchaseSummary(context.Context, time.Time, time.Time) (PurchaseSummary, error) {
-	return f.purchase, nil
+func (f *fakeAdminView) PurchaseSummaries(context.Context, time.Time, time.Time) ([]TypePurchaseSummary, error) {
+	return f.purchases, nil
 }
 func (f *fakeAdminView) NewUserTrend(context.Context, string, time.Time, time.Time) ([]CountBucket, error) {
 	return f.newUsers, nil
@@ -79,21 +79,35 @@ func TestAdminDashboardAssembly(t *testing.T) {
 	}
 
 	view := &fakeAdminView{
-		orders: []CountBucket{{Bucket: keys[0], Count: 10}, {Bucket: keys[2], Count: 4}},
+		orders: []CountBucket{{Bucket: keys[0], Count: 30}, {Bucket: keys[2], Count: 4}},
 		codeOrder: []TypeCountBucket{
 			{Bucket: keys[0], ProductType: "microsoft", Count: 6},
 			{Bucket: keys[0], ProductType: "domain", Count: 2},
+			{Bucket: keys[0], ProductType: "gmail", Count: 4},
+			{Bucket: keys[0], ProductType: "gmail_variant", Count: 5},
+			{Bucket: keys[0], ProductType: "icloud", Count: 3},
 		},
 		receipts: []TypeReceiptBucket{
 			{Bucket: keys[0], ProductType: "microsoft", Received: 5, AvgSeconds: 20, TotalSeconds: 100, Timed: 5},
 			{Bucket: keys[0], ProductType: "domain", Received: 2, AvgSeconds: 40, TotalSeconds: 80, Timed: 2},
+			{Bucket: keys[0], ProductType: "gmail", Received: 3, AvgSeconds: 30, TotalSeconds: 90, Timed: 3},
+			{Bucket: keys[0], ProductType: "gmail_variant", Received: 4, AvgSeconds: 50, TotalSeconds: 200, Timed: 4},
+			{Bucket: keys[0], ProductType: "icloud", Received: 2, AvgSeconds: 60, TotalSeconds: 120, Timed: 2},
 		},
-		purchase:   PurchaseSummary{Orders: 4, Activated: 3, TotalSeconds: 95, Timed: 3},
+		purchases: []TypePurchaseSummary{
+			{ProductType: "microsoft", PurchaseSummary: PurchaseSummary{Orders: 4, Activated: 3, TotalSeconds: 95, Timed: 3}},
+			{ProductType: "gmail", PurchaseSummary: PurchaseSummary{Orders: 5, Activated: 4, TotalSeconds: 120, Timed: 4}},
+			{ProductType: "gmail_variant", PurchaseSummary: PurchaseSummary{Orders: 4, Activated: 2, TotalSeconds: 50, Timed: 2}},
+			{ProductType: "icloud", PurchaseSummary: PurchaseSummary{Orders: 3, Activated: 1, TotalSeconds: 70, Timed: 1}},
+		},
 		newUsers:   []CountBucket{{Bucket: keys[0], Count: 3}, {Bucket: keys[1], Count: 2}},
 		active:     []CountBucket{{Bucket: keys[0], Count: 7}, {Bucket: keys[2], Count: 5}},
 		totalUsers: 105,
-		snapshot:   InventorySnapshot{MicrosoftTotal: 500, MicrosoftAvailable: 300, DomainTotal: 200, DomainAvailable: 120},
-		ranking:    []ProjectCountRow{{ProjectID: 1, Name: "Microsoft", Count: 5}, {ProjectID: 2, Name: "", Count: 2}},
+		snapshot: InventorySnapshot{
+			MicrosoftTotal: 500, MicrosoftAvailable: 300, DomainTotal: 200, DomainAvailable: 120,
+			GmailTotal: 80, GmailAvailable: 60, ICloudTotal: 40, ICloudAvailable: 30,
+		},
+		ranking: []ProjectCountRow{{ProjectID: 1, Name: "Microsoft", Count: 5}, {ProjectID: 2, Name: "", Count: 2}},
 	}
 	finance := fakeFinance{fin: AdminFinance{
 		RechargeAmount: 1000, SpendAmount: 800, RefundAmount: 20, WithdrawAmount: 60, PlatformRevenue: 120,
@@ -119,7 +133,7 @@ func TestAdminDashboardAssembly(t *testing.T) {
 	}
 	// inventory snapshot flat-lined across every bucket.
 	for i, p := range got.Trend {
-		if p.MicrosoftTotalEmails != 500 || p.DomainAvailableMailboxes != 120 {
+		if p.MicrosoftTotalEmails != 500 || p.DomainAvailableMailboxes != 120 || p.GmailAvailableEmails != 60 || p.ICloudTotalEmails != 40 {
 			t.Errorf("bucket %d inventory not flat-lined: %+v", i, p)
 		}
 	}
@@ -134,15 +148,18 @@ func TestAdminDashboardAssembly(t *testing.T) {
 	if got.Trend[0].MicrosoftCodeSuccessRate != 83.3 || got.Trend[0].DomainCodeSuccessRate != 100 {
 		t.Errorf("bucket0 success rates: %v / %v", got.Trend[0].MicrosoftCodeSuccessRate, got.Trend[0].DomainCodeSuccessRate)
 	}
-	if got.Trend[0].SuccessfulCodeReceipts != 7 {
-		t.Errorf("bucket0 successful receipts = %d, want 7", got.Trend[0].SuccessfulCodeReceipts)
+	if got.Trend[0].GmailCodeSuccessRate != 75 || got.Trend[0].GmailVariantCodeSuccessRate != 80 || got.Trend[0].ICloudCodeSuccessRate != 66.7 {
+		t.Errorf("new product success rates: %+v", got.Trend[0])
+	}
+	if got.Trend[0].SuccessfulCodeReceipts != 16 {
+		t.Errorf("bucket0 successful receipts = %d, want 16", got.Trend[0].SuccessfulCodeReceipts)
 	}
 
 	s := got.Stats
 	if s.RechargeAmount != 1000 || s.PlatformRevenue != 120 {
 		t.Errorf("finance stats: %+v", s)
 	}
-	if s.TotalOrders != 14 || s.SuccessfulCodeReceipts != 7 {
+	if s.TotalOrders != 34 || s.SuccessfulCodeReceipts != 16 {
 		t.Errorf("order/receipt totals: %d / %d", s.TotalOrders, s.SuccessfulCodeReceipts)
 	}
 	if s.TotalUsers != 105 || s.NewUsers != 5 || s.ActiveUsers != 12 {
@@ -157,7 +174,16 @@ func TestAdminDashboardAssembly(t *testing.T) {
 	if s.MicrosoftPurchaseActivations != 3 || s.MicrosoftPurchaseActivationSuccessRate != 75 || s.MicrosoftAveragePurchaseActivationSeconds != 32 {
 		t.Errorf("microsoft purchase fulfillment: %d / %v%% / %ds", s.MicrosoftPurchaseActivations, s.MicrosoftPurchaseActivationSuccessRate, s.MicrosoftAveragePurchaseActivationSeconds)
 	}
-	if s.MicrosoftTotalEmails != 500 || s.DomainAvailableMailboxes != 120 {
+	if s.GmailCodeReceipts != 3 || s.GmailCodeSuccessRate != 75 || s.GmailAverageCodeReceiptSeconds != 30 || s.GmailPurchaseActivations != 4 || s.GmailPurchaseActivationSuccessRate != 80 || s.GmailAveragePurchaseActivationSeconds != 30 {
+		t.Errorf("gmail fulfillment wrong: %+v", s)
+	}
+	if s.GmailVariantCodeReceipts != 4 || s.GmailVariantCodeSuccessRate != 80 || s.GmailVariantAverageCodeReceiptSeconds != 50 || s.GmailVariantPurchaseActivations != 2 || s.GmailVariantPurchaseActivationSuccessRate != 50 || s.GmailVariantAveragePurchaseActivationSeconds != 25 {
+		t.Errorf("gmail variant fulfillment wrong: %+v", s)
+	}
+	if s.ICloudCodeReceipts != 2 || s.ICloudCodeSuccessRate != 66.7 || s.ICloudAverageCodeReceiptSeconds != 60 || s.ICloudPurchaseActivations != 1 || s.ICloudPurchaseActivationSuccessRate != 33.3 || s.ICloudAveragePurchaseActivationSeconds != 70 {
+		t.Errorf("icloud fulfillment wrong: %+v", s)
+	}
+	if s.MicrosoftTotalEmails != 500 || s.DomainAvailableMailboxes != 120 || s.GmailTotalEmails != 80 || s.GmailVariantAvailableEmails != 60 || s.ICloudAvailableEmails != 30 {
 		t.Errorf("inventory stats wrong: %+v", s)
 	}
 

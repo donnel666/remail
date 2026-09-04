@@ -28,22 +28,39 @@ const (
 const ProjectBulkMaxExplicitIDs = 1000
 
 var projectPriceFallbacks = map[string]string{
-	"default_project_microsoft_code_price":              "8",
-	"default_project_microsoft_code_supplier_price":     "5",
-	"default_project_microsoft_purchase_price":          "10",
-	"default_project_microsoft_purchase_supplier_price": "7",
-	"default_project_domain_code_price":                 "80",
-	"default_project_domain_code_supplier_price":        "40",
-	"default_project_domain_purchase_price":             "0",
-	"default_project_domain_purchase_supplier_price":    "0",
-	"default_project_gmail_code_price":                  "8",
-	"default_project_gmail_code_supplier_price":         "0",
-	"default_project_gmail_purchase_price":              "0",
-	"default_project_gmail_purchase_supplier_price":     "0",
-	"default_project_icloud_code_price":                 "8",
-	"default_project_icloud_code_supplier_price":        "5",
-	"default_project_icloud_purchase_price":             "10",
-	"default_project_icloud_purchase_supplier_price":    "7",
+	"default_project_microsoft_code_price":                  "8",
+	"default_project_microsoft_code_supplier_price":         "5",
+	"default_project_microsoft_purchase_price":              "10",
+	"default_project_microsoft_purchase_supplier_price":     "7",
+	"default_project_domain_code_price":                     "80",
+	"default_project_domain_code_supplier_price":            "40",
+	"default_project_domain_purchase_price":                 "0",
+	"default_project_domain_purchase_supplier_price":        "0",
+	"default_project_gmail_code_price":                      "8",
+	"default_project_gmail_code_supplier_price":             "0",
+	"default_project_gmail_purchase_price":                  "0",
+	"default_project_gmail_purchase_supplier_price":         "0",
+	"default_project_gmail_variant_code_price":              "8",
+	"default_project_gmail_variant_code_supplier_price":     "0",
+	"default_project_gmail_variant_purchase_price":          "0",
+	"default_project_gmail_variant_purchase_supplier_price": "0",
+	"default_project_icloud_code_price":                     "8",
+	"default_project_icloud_code_supplier_price":            "5",
+	"default_project_icloud_purchase_price":                 "10",
+	"default_project_icloud_purchase_supplier_price":        "7",
+}
+
+var projectServiceFallbacks = map[string]bool{
+	"default_project_microsoft_code_enabled":         true,
+	"default_project_microsoft_purchase_enabled":     true,
+	"default_project_domain_code_enabled":            true,
+	"default_project_domain_purchase_enabled":        false,
+	"default_project_gmail_code_enabled":             true,
+	"default_project_gmail_purchase_enabled":         false,
+	"default_project_gmail_variant_code_enabled":     true,
+	"default_project_gmail_variant_purchase_enabled": false,
+	"default_project_icloud_code_enabled":            true,
+	"default_project_icloud_purchase_enabled":        true,
 }
 
 func projectNameMaxValue() int {
@@ -63,6 +80,14 @@ func ProjectPriceDefaults() map[string]string {
 	defaults := make(map[string]string, len(projectPriceFallbacks))
 	for key, fallback := range projectPriceFallbacks {
 		defaults[key] = runtimeconfig.String(key, fallback)
+	}
+	return defaults
+}
+
+func ProjectServiceDefaults() map[string]bool {
+	defaults := make(map[string]bool, len(projectServiceFallbacks))
+	for key, fallback := range projectServiceFallbacks {
+		defaults[key] = runtimeconfig.Bool(key, fallback)
 	}
 	return defaults
 }
@@ -994,9 +1019,6 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled, 
 func projectPriceOrDefault(value string, productType domain.ProductType, field string, applyDefault bool) string {
 	if !applyDefault || strings.TrimSpace(value) != "" {
 		return value
-	}
-	if productType == domain.ProductTypeGmailVariant {
-		productType = domain.ProductTypeGmail
 	}
 	key := "default_project_" + string(productType) + "_" + field
 	return runtimeconfig.String(key, projectPriceFallbacks[key])

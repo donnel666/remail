@@ -4345,12 +4345,20 @@ func TestCoreHandler_AdminProjectsProductsAcceptsAllActiveProductTypes(t *testin
 func TestCoreHandler_AdminProjectPriceDefaults(t *testing.T) {
 	key := "default_project_microsoft_code_price"
 	previous := runtimeconfig.String(key, "")
+	serviceKey := "default_project_gmail_variant_purchase_enabled"
+	previousService := runtimeconfig.String(serviceKey, "")
 	runtimeconfig.Set(key, "0.123456")
+	runtimeconfig.Set(serviceKey, "true")
 	t.Cleanup(func() {
 		if previous == "" {
 			runtimeconfig.Delete(key)
 		} else {
 			runtimeconfig.Set(key, previous)
+		}
+		if previousService == "" {
+			runtimeconfig.Delete(serviceKey)
+		} else {
+			runtimeconfig.Set(serviceKey, previousService)
 		}
 	})
 
@@ -4367,11 +4375,17 @@ func TestCoreHandler_AdminProjectPriceDefaults(t *testing.T) {
 	require.Equal(t, "0.123456", response.Defaults[key])
 	require.Equal(t, "8", response.Defaults["default_project_gmail_code_price"])
 	require.Equal(t, "0", response.Defaults["default_project_gmail_purchase_price"])
+	require.Equal(t, "8", response.Defaults["default_project_gmail_variant_code_price"])
+	require.Equal(t, "0", response.Defaults["default_project_gmail_variant_purchase_price"])
 	require.Equal(t, "8", response.Defaults["default_project_icloud_code_price"])
 	require.Equal(t, "5", response.Defaults["default_project_icloud_code_supplier_price"])
 	require.Equal(t, "10", response.Defaults["default_project_icloud_purchase_price"])
 	require.Equal(t, "7", response.Defaults["default_project_icloud_purchase_supplier_price"])
-	require.Len(t, response.Defaults, 16)
+	require.Len(t, response.Defaults, 20)
+	require.True(t, response.ServiceDefaults[serviceKey])
+	require.True(t, response.ServiceDefaults["default_project_microsoft_code_enabled"])
+	require.False(t, response.ServiceDefaults["default_project_domain_purchase_enabled"])
+	require.Len(t, response.ServiceDefaults, 10)
 }
 
 func TestCoreHandler_AdminProjectsProductsLimitsRequestBody(t *testing.T) {

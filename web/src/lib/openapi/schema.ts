@@ -1533,7 +1533,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get non-sensitive default project product prices */
+        /** Get non-sensitive default project product settings */
         get: operations["getAdminProjectPriceDefaults"];
         put?: never;
         post?: never;
@@ -6621,6 +6621,36 @@ export interface components {
             microsoftPurchaseActivationSuccessRate: number;
             /** @description Global average seconds from receiveStartedAt to activatedAt for activated Microsoft purchase orders created in the selected range. */
             microsoftAveragePurchaseActivationSeconds: number;
+            /** @description Non-deleted local Gmail source accounts. */
+            gmailTotalEmails: number;
+            /** @description Healthy public Gmail source accounts owned by active supplier or administrator accounts. */
+            gmailAvailableEmails: number;
+            gmailCodeReceipts: number;
+            gmailCodeSuccessRate: number;
+            gmailAverageCodeReceiptSeconds: number;
+            gmailPurchaseActivations: number;
+            gmailPurchaseActivationSuccessRate: number;
+            gmailAveragePurchaseActivationSeconds: number;
+            /** @description Gmail source accounts are shared by the Gmail and Gmail variant products. */
+            gmailVariantTotalEmails: number;
+            /** @description Available Gmail source accounts that can generate plus-address variants. */
+            gmailVariantAvailableEmails: number;
+            gmailVariantCodeReceipts: number;
+            gmailVariantCodeSuccessRate: number;
+            gmailVariantAverageCodeReceiptSeconds: number;
+            gmailVariantPurchaseActivations: number;
+            gmailVariantPurchaseActivationSuccessRate: number;
+            gmailVariantAveragePurchaseActivationSeconds: number;
+            /** @description Non-deleted iCloud source accounts. */
+            icloudTotalEmails: number;
+            /** @description Normal public iCloud source accounts with at least one currently unallocated usable alias. */
+            icloudAvailableEmails: number;
+            icloudCodeReceipts: number;
+            icloudCodeSuccessRate: number;
+            icloudAverageCodeReceiptSeconds: number;
+            icloudPurchaseActivations: number;
+            icloudPurchaseActivationSuccessRate: number;
+            icloudAveragePurchaseActivationSeconds: number;
             domainTotalMailboxes: number;
             domainAvailableMailboxes: number;
             domainCodeReceipts: number;
@@ -6644,6 +6674,21 @@ export interface components {
             microsoftReceivedCodes: number;
             microsoftCodeSuccessRate: number;
             microsoftAverageCodeReceiptSeconds: number;
+            gmailTotalEmails: number;
+            gmailAvailableEmails: number;
+            gmailReceivedCodes: number;
+            gmailCodeSuccessRate: number;
+            gmailAverageCodeReceiptSeconds: number;
+            gmailVariantTotalEmails: number;
+            gmailVariantAvailableEmails: number;
+            gmailVariantReceivedCodes: number;
+            gmailVariantCodeSuccessRate: number;
+            gmailVariantAverageCodeReceiptSeconds: number;
+            icloudTotalEmails: number;
+            icloudAvailableEmails: number;
+            icloudReceivedCodes: number;
+            icloudCodeSuccessRate: number;
+            icloudAverageCodeReceiptSeconds: number;
             domainTotalMailboxes: number;
             domainAvailableMailboxes: number;
             domainReceivedCodes: number;
@@ -7798,6 +7843,9 @@ export interface components {
         ProjectPriceDefaultsResponse: {
             defaults: {
                 [key: string]: components["schemas"]["NonNegativeLedgerAmount"];
+            };
+            serviceDefaults: {
+                [key: string]: boolean;
             };
             microsoftSuffixOptions: string[];
         };

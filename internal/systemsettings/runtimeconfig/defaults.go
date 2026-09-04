@@ -3,7 +3,7 @@ package runtimeconfig
 import "github.com/donnel666/remail/internal/systemsettings/domain"
 
 const (
-	DefaultSettingsCount                         = 268
+	DefaultSettingsCount                         = 282
 	NodeLocCallbackURL                           = "https://remail.aishop6.com/oauth/nodeloc"
 	RechargeTimeoutMinutesKey                    = "recharge_timeout_minutes"
 	SMSBowerNoCodeRefundTimeoutMinutesKey        = "smsbower_no_code_refund_timeout_minutes"
@@ -128,18 +128,32 @@ var defaultSettings = []domain.Setting{
 	{Key: "default_project_microsoft_code_supplier_price", Value: "5"},
 	{Key: "default_project_microsoft_purchase_price", Value: "10"},
 	{Key: "default_project_microsoft_purchase_supplier_price", Value: "7"},
+	{Key: "default_project_microsoft_code_enabled", Value: "true"},
+	{Key: "default_project_microsoft_purchase_enabled", Value: "true"},
 	{Key: "default_project_domain_code_price", Value: "80"},
 	{Key: "default_project_domain_code_supplier_price", Value: "40"},
 	{Key: "default_project_domain_purchase_price", Value: "0"},
 	{Key: "default_project_domain_purchase_supplier_price", Value: "0"},
+	{Key: "default_project_domain_code_enabled", Value: "true"},
+	{Key: "default_project_domain_purchase_enabled", Value: "false"},
 	{Key: "default_project_gmail_code_price", Value: "8"},
 	{Key: "default_project_gmail_code_supplier_price", Value: "0"},
 	{Key: "default_project_gmail_purchase_price", Value: "0"},
 	{Key: "default_project_gmail_purchase_supplier_price", Value: "0"},
+	{Key: "default_project_gmail_code_enabled", Value: "true"},
+	{Key: "default_project_gmail_purchase_enabled", Value: "false"},
+	{Key: "default_project_gmail_variant_code_price", Value: "8"},
+	{Key: "default_project_gmail_variant_code_supplier_price", Value: "0"},
+	{Key: "default_project_gmail_variant_purchase_price", Value: "0"},
+	{Key: "default_project_gmail_variant_purchase_supplier_price", Value: "0"},
+	{Key: "default_project_gmail_variant_code_enabled", Value: "true"},
+	{Key: "default_project_gmail_variant_purchase_enabled", Value: "false"},
 	{Key: "default_project_icloud_code_price", Value: "8"},
 	{Key: "default_project_icloud_code_supplier_price", Value: "5"},
 	{Key: "default_project_icloud_purchase_price", Value: "10"},
 	{Key: "default_project_icloud_purchase_supplier_price", Value: "7"},
+	{Key: "default_project_icloud_code_enabled", Value: "true"},
+	{Key: "default_project_icloud_purchase_enabled", Value: "true"},
 	{Key: "product_price_multiplier_microsoft", Value: "1"},
 	{Key: "product_price_multiplier_gmail", Value: "1"},
 	{Key: "product_price_multiplier_icloud", Value: "1"},

@@ -536,8 +536,8 @@ func TestProjectUseCaseAllowsPurchaseOnlyGmailProduct(t *testing.T) {
 	require.Equal(t, "99.000000", detail.Products[0].PurchasePrice)
 }
 
-func TestGmailVariantNormalizesToPlusAndUsesGmailDefaults(t *testing.T) {
-	key := "default_project_gmail_code_price"
+func TestGmailVariantNormalizesToPlusAndUsesOwnDefaults(t *testing.T) {
+	key := "default_project_gmail_variant_code_price"
 	previous := runtimeconfig.String(key, "")
 	runtimeconfig.Set(key, "12.345678")
 	t.Cleanup(func() {

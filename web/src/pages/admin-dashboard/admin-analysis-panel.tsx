@@ -159,14 +159,30 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
     if (view === "codes") {
       const microsoftLabel = t("Microsoft code receipts");
       const domainLabel = t("Domain code receipts");
+      const gmailLabel = t("Gmail code receipts");
+      const gmailVariantLabel = t("Gmail variant code receipts");
+      const iCloudLabel = t("iCloud code receipts");
       const values = (data?.trend ?? []).flatMap((point) => [
         { Count: point.microsoftReceivedCodes, Metric: microsoftLabel, Time: point.label },
         { Count: point.domainReceivedCodes, Metric: domainLabel, Time: point.label },
+        { Count: point.gmailReceivedCodes, Metric: gmailLabel, Time: point.label },
+        {
+          Count: point.gmailVariantReceivedCodes,
+          Metric: gmailVariantLabel,
+          Time: point.label,
+        },
+        { Count: point.icloudReceivedCodes, Metric: iCloudLabel, Time: point.label },
       ]);
 
       return asChartSpec({
         color: {
-          specified: { [domainLabel]: "#8b5cf6", [microsoftLabel]: "#3b82f6" },
+          specified: {
+            [domainLabel]: "#8b5cf6",
+            [gmailLabel]: "#ea4335",
+            [gmailVariantLabel]: "#f59e0b",
+            [iCloudLabel]: "#06b6d4",
+            [microsoftLabel]: "#3b82f6",
+          },
         },
         data: [{ id: "adminCodeTrendData", values }],
         legends: { selectMode: "single", visible: true },
@@ -184,9 +200,19 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
     if (view === "successRate") {
       const microsoftLabel = t("Microsoft code success rate");
       const domainLabel = t("Domain code success rate");
+      const gmailLabel = t("Gmail code success rate");
+      const gmailVariantLabel = t("Gmail variant code success rate");
+      const iCloudLabel = t("iCloud code success rate");
       const values = (data?.trend ?? []).flatMap((point) => [
         { Metric: microsoftLabel, Rate: point.microsoftCodeSuccessRate, Time: point.label },
         { Metric: domainLabel, Rate: point.domainCodeSuccessRate, Time: point.label },
+        { Metric: gmailLabel, Rate: point.gmailCodeSuccessRate, Time: point.label },
+        {
+          Metric: gmailVariantLabel,
+          Rate: point.gmailVariantCodeSuccessRate,
+          Time: point.label,
+        },
+        { Metric: iCloudLabel, Rate: point.icloudCodeSuccessRate, Time: point.label },
       ]);
 
       return asChartSpec({
@@ -197,7 +223,13 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
           },
         ],
         color: {
-          specified: { [domainLabel]: "#ec4899", [microsoftLabel]: "#22a06b" },
+          specified: {
+            [domainLabel]: "#ec4899",
+            [gmailLabel]: "#ea4335",
+            [gmailVariantLabel]: "#f59e0b",
+            [iCloudLabel]: "#06b6d4",
+            [microsoftLabel]: "#22a06b",
+          },
         },
         data: [{ id: "adminSuccessRateData", values }],
         legends: { selectMode: "single", visible: true },

@@ -558,6 +558,7 @@ func (h *CoreHandler) GetAdminProjectPriceDefaults(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, ProjectPriceDefaultsResponse{
 		Defaults:               coreapp.ProjectPriceDefaults(),
+		ServiceDefaults:        coreapp.ProjectServiceDefaults(),
 		MicrosoftSuffixOptions: coredomain.MicrosoftEmailDomains(),
 	})
 }
