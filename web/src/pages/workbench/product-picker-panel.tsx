@@ -159,6 +159,10 @@ export function ProductPickerPanel({
             const priceLabel = hasDiscount
               ? `${t("Original price")} ${formatMoneyExact(originalPrice)}, ${t("Discounted price")} ${formatMoneyExact(discountedPrice)}`
               : formatMoneyExact(originalPrice);
+            const suffix =
+              product.productType === "gmail_variant"
+                ? t(product.suffix)
+                : product.suffix;
             return (
               <Fragment key={product.id}>
                 {index === firstGmailIndex ? (
@@ -188,9 +192,9 @@ export function ProductPickerPanel({
                     </span>
                     <OverflowTooltip
                       className="workbench-product-suffix"
-                      content={product.suffix}
+                      content={suffix}
                     >
-                      {product.suffix}
+                      {suffix}
                     </OverflowTooltip>
                   </span>
                   <span className="workbench-product-side">

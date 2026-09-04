@@ -24,8 +24,12 @@ vi.mock("react-i18next", () => ({
       key === "Gmail email"
         ? "@gmail"
         : key === "Gmail variant"
-          ? "Gmail特种"
-          : key,
+          ? "谷歌变种"
+          : key === "Gmail variant suffix"
+            ? "变种@gmail"
+            : key === "@outlook.com"
+              ? "must not translate dynamic suffixes"
+              : key,
   }),
 }));
 
@@ -100,12 +104,18 @@ describe("ProductPickerPanel", () => {
       projectId: 1,
       totalAvailable: 15,
     };
+    const mergedProducts = mergeProjectInventory(project, inventory).products;
     const products = filterProducts(
-      mergeProjectInventory(project, inventory).products,
+      mergedProducts,
       "",
       "purchase",
       (key) => key,
     );
+    const translate = vi.fn((key: string) => key);
+    expect(
+      filterProducts(mergedProducts, "outlook.com", "purchase", translate),
+    ).toHaveLength(1);
+    expect(translate).not.toHaveBeenCalledWith("@outlook.com");
 
     expect(products[0]).toMatchObject({
       emailSuffix: "outlook",
@@ -129,7 +139,7 @@ describe("ProductPickerPanel", () => {
       emailSuffix: "gmail_variant",
       id: "gmail_variant",
       label: "Gmail variant",
-      suffix: ". / + @gmail.com",
+      suffix: "Gmail variant suffix",
     });
 
     const noop = vi.fn();
@@ -183,11 +193,19 @@ describe("ProductPickerPanel", () => {
       ...toWorkbenchProducts(1, { ...base, type: "icloud" }),
       ...toWorkbenchProducts(1, base),
     ];
-    expect(
-      filterProducts(products, "Gmail特种", "purchase", (key) =>
-        key === "Gmail variant" ? "Gmail特种" : key,
-      ).map((product) => product.id),
-    ).toEqual(["gmail_variant"]);
+    const translate = (key: string) =>
+      key === "Gmail variant"
+        ? "谷歌变种"
+        : key === "Gmail variant suffix"
+          ? "变种@gmail"
+          : key;
+    for (const search of ["谷歌变种", "变种@gmail"]) {
+      expect(
+        filterProducts(products, search, "purchase", translate).map(
+          (product) => product.id,
+        ),
+      ).toEqual(["gmail_variant"]);
+    }
     const noop = vi.fn();
     const { container } = render(
       <ProductPickerPanel
@@ -210,7 +228,8 @@ describe("ProductPickerPanel", () => {
     expect(rows[0]).toHaveClass("is-suffix");
     expect(rows[0]).toHaveTextContent("@gmail");
     expect(rows[1]).toHaveClass("is-suffix");
-    expect(rows[1]).toHaveTextContent("Gmail特种");
+    expect(rows[1]).toHaveTextContent("谷歌变种");
+    expect(rows[1]).toHaveTextContent("变种@gmail");
     expect(rows[2]).not.toHaveClass("is-suffix");
     expect(rows[2]).toHaveTextContent("iCloud");
   });

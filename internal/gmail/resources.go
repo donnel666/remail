@@ -222,8 +222,12 @@ func applyLocalResourceListFilter(db *gorm.DB, filter LocalResourceListFilter, i
 	if filter.Search != "" {
 		like := "%" + filter.Search + "%"
 		db = db.Where(`LOWER(gr.email) LIKE ? OR LOWER(gr.binding_email) LIKE ? OR LOWER(u.email) LIKE ? OR
-LOWER(u.nickname) LIKE ? OR CAST(gr.id AS CHAR) LIKE ? OR CAST(er.owner_user_id AS CHAR) LIKE ?`,
-			like, like, like, like, like, like)
+LOWER(u.nickname) LIKE ? OR CAST(gr.id AS CHAR) LIKE ? OR CAST(er.owner_user_id AS CHAR) LIKE ? OR EXISTS (
+    SELECT 1 FROM gmail_allocations search_alias
+    WHERE search_alias.resource_id = gr.id
+      AND search_alias.mailbox IN (?, ?)
+      AND LOWER(search_alias.email) LIKE ?
+)`, like, like, like, like, like, like, GmailMailboxDot, GmailMailboxPlus, like)
 	}
 	if !ignoreStatus {
 		switch filter.Status {

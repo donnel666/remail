@@ -98,6 +98,9 @@ export function filterProducts(
             product.label,
             translate(product.label),
             product.suffix,
+            product.productType === "gmail_variant"
+              ? translate(product.suffix)
+              : "",
             product.emailSuffix,
             product.productType,
           ]
@@ -236,7 +239,7 @@ export function toWorkbenchProducts(
     purchasePrice: moneyToNumber(product.purchasePrice),
     suffix:
       product.type === "gmail_variant"
-        ? ". / + @gmail.com"
+        ? "Gmail variant suffix"
         : product.type === "gmail" || product.type === "icloud"
           ? `@${emailSuffix}`
           : label,

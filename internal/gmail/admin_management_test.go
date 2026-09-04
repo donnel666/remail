@@ -62,12 +62,24 @@ func TestAdminGmailManagementCoversBatchEditDeleteRecoverAndMaintenance(t *testi
 	allocatedResourceID := uint(5)
 	require.NoError(t, db.Create(&allocationModel{
 		ID: 2, ResourceID: &allocatedResourceID, Status: AllocationStatusAllocated,
-		OrderNo: "order-credential-repair", Source: SourceLocal, CreatedAt: now,
+		OrderNo: "order-credential-repair", Source: SourceLocal, Mailbox: GmailMailboxPlus,
+		Email: "allocated+special@gmail.com", CreatedAt: now,
+	}).Error)
+	require.NoError(t, db.Create(&allocationModel{
+		ID: 3, ResourceID: &allocatedResourceID, Status: AllocationStatusReleased,
+		OrderNo: "order-dot-history", Source: SourceLocal, Mailbox: GmailMailboxDot,
+		Email: "allo.cated@gmail.com", CreatedAt: now,
 	}).Error)
 
 	service := NewService(db, nil)
 	service.now = func() time.Time { return now.Add(time.Hour) }
 	ctx := context.Background()
+	for _, alias := range []string{"allocated+special@gmail.com", "allo.cated@gmail.com"} {
+		result, err := service.ListLocalResources(ctx, LocalResourceListFilter{Search: alias})
+		require.NoError(t, err)
+		require.EqualValues(t, 1, result.Total, alias)
+		require.Equal(t, "allocated@gmail.com", result.Items[0].Email, alias)
+	}
 	_, err = service.UpdateAdminLocalResource(ctx, AdminLocalResourceEditCommand{
 		ResourceID: 4, Version: 1, OperatorID: 99, OwnerUserID: 7, Email: "edit@gmail.com",
 		Credentials:           &AdminLocalResourceCredentialsInput{TwoFactorSecret: strings.Repeat("A", 520)},

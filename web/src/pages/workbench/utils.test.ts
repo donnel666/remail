@@ -33,7 +33,7 @@ describe("domain suffix selections", () => {
   });
 });
 
-describe("Gmail special label", () => {
+describe("Gmail variant label", () => {
   it("keeps the dot-plus product distinct from primary Gmail", () => {
     expect(productTypeLabel("gmail_variant", (key) => key)).toBe("Gmail variant");
   });
