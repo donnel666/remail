@@ -243,7 +243,7 @@ func TestExpireDueOrdersResumesPaidGmailPurchaseWithoutSupplyPrecheck(t *testing
 	tokens := &issuedOrderTokenSpy{tokens: map[string]*OrderToken{}}
 	allocation := &unavailableRefundAllocationStub{}
 	uc := NewUseCase(repo, nil, nil, allocation, tokens)
-	uc.SetGmailSupplyPort(supply)
+	uc.SetGmailPurchaseSupplyPort(supply)
 	uc.now = func() time.Time { return now }
 
 	result, err := uc.ExpireDueOrders(context.Background(), 200)
@@ -251,7 +251,6 @@ func TestExpireDueOrdersResumesPaidGmailPurchaseWithoutSupplyPrecheck(t *testing
 	require.NoError(t, err)
 	require.Equal(t, 1, result.CheckoutRecovered)
 	require.Zero(t, result.Failed)
-	require.Zero(t, supply.checks)
 	require.Zero(t, supply.purchases)
 	require.Equal(t, domain.OrderStatusActive, repo.order.Status)
 	require.Equal(t, "buyer@gmail.com", repo.order.DeliveryEmail)

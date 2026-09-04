@@ -513,9 +513,9 @@ func TestProjectUseCasePreservesGmailCodeWindow(t *testing.T) {
 	require.Equal(t, 17, product.CodeWindowMinutes)
 	require.Equal(t, 60, product.ActivationWindowMinutes)
 	require.Equal(t, 30, product.WarrantyMinutes)
-	require.Equal(t, 2, product.MainWeight)
-	require.Equal(t, 3, product.DotWeight)
-	require.Equal(t, 4, product.PlusWeight)
+	require.Equal(t, 1, product.MainWeight)
+	require.Equal(t, 0, product.DotWeight)
+	require.Equal(t, 0, product.PlusWeight)
 }
 
 func TestProjectUseCaseAllowsPurchaseOnlyGmailProduct(t *testing.T) {
@@ -536,7 +536,7 @@ func TestProjectUseCaseAllowsPurchaseOnlyGmailProduct(t *testing.T) {
 	require.Equal(t, "99.000000", detail.Products[0].PurchasePrice)
 }
 
-func TestGmailVariantNormalizesToPlusAndUsesOwnDefaults(t *testing.T) {
+func TestGmailVariantUsesCompatibleWeightsAndOwnDefaults(t *testing.T) {
 	key := "default_project_gmail_variant_code_price"
 	previous := runtimeconfig.String(key, "")
 	runtimeconfig.Set(key, "12.345678")

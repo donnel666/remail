@@ -665,17 +665,25 @@ func TestGmailDotAliasCapacitySupportsMaximumLocalPart(t *testing.T) {
 }
 
 func TestGmailMailboxPreferencesAreFixedByProduct(t *testing.T) {
-	main := gmailMailboxPreferences(ProductAllocationConfig{
+	main := gmailMailboxPreferences("main-order", ProductAllocationConfig{
 		ProductType: coredomain.ProductTypeGmail, PlusWeight: 100,
 	})
-	if want := []domain.GmailMailbox{domain.GmailMailboxDot}; !slices.Equal(main, want) {
+	if want := []domain.GmailMailbox{domain.GmailMailboxMain}; !slices.Equal(main, want) {
 		t.Fatalf("gmail preferences = %v, want %v", main, want)
 	}
-	variant := gmailMailboxPreferences(ProductAllocationConfig{
-		ProductType: coredomain.ProductTypeGmailVariant, MainWeight: 100, DotWeight: 100,
-	})
-	if want := []domain.GmailMailbox{domain.GmailMailboxPlus}; !slices.Equal(variant, want) {
-		t.Fatalf("gmail variant preferences = %v, want %v", variant, want)
+	firstKinds := map[domain.GmailMailbox]bool{}
+	for i := 0; i < 100; i++ {
+		variant := gmailMailboxPreferences(fmt.Sprintf("special-order-%d", i), ProductAllocationConfig{
+			ProductType: coredomain.ProductTypeGmailVariant,
+		})
+		if len(variant) != 2 || variant[0] == variant[1] ||
+			!slices.Contains(variant, domain.GmailMailboxDot) || !slices.Contains(variant, domain.GmailMailboxPlus) {
+			t.Fatalf("gmail special preferences = %v, want dot and plus", variant)
+		}
+		firstKinds[variant[0]] = true
+	}
+	if !firstKinds[domain.GmailMailboxDot] || !firstKinds[domain.GmailMailboxPlus] {
+		t.Fatalf("gmail special first choices = %v, want balanced dot and plus choices", firstKinds)
 	}
 }
 
@@ -685,6 +693,7 @@ type gmailAllocationTestRepo struct {
 	busyRoots      map[uint]bool
 	historyCount   uint64
 	unavailable    map[string]struct{}
+	productType    coredomain.ProductType
 	tryLocks       []uint
 	waitLocks      int
 	historyBatches int
@@ -700,9 +709,13 @@ func (*gmailAllocationTestRepo) FindExistingAllocation(context.Context, string) 
 	return nil, nil
 }
 
-func (*gmailAllocationTestRepo) LoadProductConfig(context.Context, uint, uint, bool) (*ProductAllocationConfig, error) {
+func (r *gmailAllocationTestRepo) LoadProductConfig(context.Context, uint, uint, bool) (*ProductAllocationConfig, error) {
+	productType := r.productType
+	if productType == "" {
+		productType = coredomain.ProductTypeGmail
+	}
 	return &ProductAllocationConfig{
-		ProjectID: 10, ProductID: 20, ProductType: coredomain.ProductTypeGmail,
+		ProjectID: 10, ProductID: 20, ProductType: productType,
 		CodeEnabled: true, CodeSupplierPrice: "0",
 	}, nil
 }
@@ -752,6 +765,10 @@ func (r *gmailAllocationTestRepo) ListUnavailableGmailMailboxEmails(_ context.Co
 		}
 	}
 	return result, nil
+}
+
+func (*gmailAllocationTestRepo) IsGmailMailboxAvailable(context.Context, uint, uint, domain.GmailMailbox, string) (bool, error) {
+	return true, nil
 }
 
 func (*gmailAllocationTestRepo) CreateOrderGuard(context.Context, string, domain.AllocationType) error {
@@ -806,9 +823,21 @@ func TestGmailDotAllocationScansPastFragmentedHistoryWindow(t *testing.T) {
 		candidates:   []GmailCandidate{{ResourceID: 1, Email: email}},
 		historyCount: uint64(len(blocked)),
 		unavailable:  unavailable,
+		productType:  coredomain.ProductTypeGmailVariant,
+	}
+	orderNo := ""
+	for i := 0; i < 100; i++ {
+		candidate := fmt.Sprintf("gmail-fragmented-%d", i)
+		if gmailMailboxPreferences(candidate, ProductAllocationConfig{ProductType: coredomain.ProductTypeGmailVariant})[0] == domain.GmailMailboxDot {
+			orderNo = candidate
+			break
+		}
+	}
+	if orderNo == "" {
+		t.Fatal("no deterministic Gmail dot preference found")
 	}
 	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
-		OrderNo: "gmail-fragmented", BuyerUserID: 2, ProjectProductID: 20,
+		OrderNo: orderNo, BuyerUserID: 2, ProjectProductID: 20,
 		SupplyScope: domain.SupplyScopePublic, ServiceMode: domain.GmailServiceModeCode,
 	})
 	if err != nil || result == nil {
@@ -911,9 +940,9 @@ func TestHistoricalGmailAllocationReplayPreservesOriginalProduct(t *testing.T) {
 	repo.existing.OrderNo = historicalGmailAllocationOrderNo(cmd)
 	repo.existing.Mailbox = string(cmd.Mailbox)
 	repo.existing.Email = cmd.Email
-	_, err = NewUseCase(repo).ImportHistoricalGmailAllocation(context.Background(), cmd)
-	if !errors.Is(err, domain.ErrAllocationConflict) {
-		t.Fatalf("dot allocation replay error = %v, want allocation conflict", err)
+	result, err = NewUseCase(repo).ImportHistoricalGmailAllocation(context.Background(), cmd)
+	if err != nil || result == nil || result.ProductID != 20 {
+		t.Fatalf("dot allocation replay = %#v, %v; want preserved pre-special product", result, err)
 	}
 }
 

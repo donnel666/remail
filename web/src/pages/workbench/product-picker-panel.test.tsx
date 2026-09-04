@@ -19,7 +19,14 @@ import { ProductPickerPanel } from "./product-picker-panel";
 import type { WorkbenchProject } from "./types";
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string) =>
+      key === "Gmail email"
+        ? "@gmail"
+        : key === "Gmail variant"
+          ? "Gmail特种"
+          : key,
+  }),
 }));
 
 vi.mock("@/i18n/config", () => ({ default: { resolvedLanguage: "en" } }));
@@ -97,6 +104,7 @@ describe("ProductPickerPanel", () => {
       mergeProjectInventory(project, inventory).products,
       "",
       "purchase",
+      (key) => key,
     );
 
     expect(products[0]).toMatchObject({
@@ -121,7 +129,7 @@ describe("ProductPickerPanel", () => {
       emailSuffix: "gmail_variant",
       id: "gmail_variant",
       label: "Gmail variant",
-      suffix: "@gmail变种",
+      suffix: ". / + @gmail.com",
     });
 
     const noop = vi.fn();
@@ -148,5 +156,62 @@ describe("ProductPickerPanel", () => {
     expect(rows[1]).toHaveClass("is-suffix");
     expect(rows[1]).toHaveTextContent("@outlook.com");
     expect(rows[1]).toHaveTextContent("Stock 3");
+  });
+
+  it("groups the Gmail SKUs and filters their translated label", () => {
+    const base: ProjectProductSummary = {
+      activationWindowMinutes: 10,
+      codeAvailable: 3,
+      codeEnabled: true,
+      codePrice: "1",
+      codePublicAvailable: 3,
+      codeWindowMinutes: 10,
+      priceMultiplier: "1",
+      publicAvailable: 3,
+      purchaseAvailable: 3,
+      purchaseEnabled: true,
+      purchasePrice: "2",
+      purchasePublicAvailable: 3,
+      status: "enabled",
+      suffixes: [],
+      totalAvailable: 3,
+      type: "gmail",
+      warrantyMinutes: 60,
+    };
+    const products = [
+      ...toWorkbenchProducts(1, { ...base, type: "gmail_variant" }),
+      ...toWorkbenchProducts(1, { ...base, type: "icloud" }),
+      ...toWorkbenchProducts(1, base),
+    ];
+    expect(
+      filterProducts(products, "Gmail特种", "purchase", (key) =>
+        key === "Gmail variant" ? "Gmail特种" : key,
+      ).map((product) => product.id),
+    ).toEqual(["gmail_variant"]);
+    const noop = vi.fn();
+    const { container } = render(
+      <ProductPickerPanel
+        inventoryScope="private_first"
+        onInventoryScopeChange={noop}
+        onProductSearchChange={noop}
+        onSelectProduct={noop}
+        onServiceModeChange={noop}
+        priceMultiplier={1}
+        productSearch=""
+        products={products}
+        selectedProductId="gmail"
+        serviceMode="purchase"
+      />,
+    );
+
+    expect(container.querySelector(".workbench-product-group")).toHaveTextContent("@gmail");
+    const rows = container.querySelectorAll(".workbench-product-row");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toHaveClass("is-suffix");
+    expect(rows[0]).toHaveTextContent("@gmail");
+    expect(rows[1]).toHaveClass("is-suffix");
+    expect(rows[1]).toHaveTextContent("Gmail特种");
+    expect(rows[2]).not.toHaveClass("is-suffix");
+    expect(rows[2]).toHaveTextContent("iCloud");
   });
 });

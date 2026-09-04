@@ -216,7 +216,7 @@ VALUES (1003, 'running', UTC_TIMESTAMP(3))`).Error)
 
 func TestGmailUnifiedAllocationInventoryMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
-	seedAllocBase(t, db, "gmail", 1, 1, 1)
+	seedAllocBase(t, db, "gmail", 1, 0, 0)
 	require.NoError(t, db.Exec(`
 INSERT INTO project_products(
     id, project_id, type, status, code_enabled, purchase_enabled,
@@ -246,7 +246,7 @@ INSERT INTO project_products(
 		require.Equal(t, domain.AllocationStatusReleased, allocation.Status)
 	}
 
-	assertInventory := func(codeEnabled, purchaseEnabled bool) {
+	assertInventory := func(codeEnabled, purchaseEnabled bool, dotAvailable int64) {
 		t.Helper()
 		stats, err := repo.GetInventoryStats(context.Background(), 10)
 		require.NoError(t, err)
@@ -254,47 +254,43 @@ INSERT INTO project_products(
 		require.Equal(t, codeEnabled, stats.Gmail.CodeEnabled)
 		require.Equal(t, purchaseEnabled, stats.Gmail.PurchaseEnabled)
 		require.Equal(t, int64(2), stats.Gmail.EligibleResources)
-		require.False(t, stats.Gmail.MainEnabled)
-		require.Zero(t, stats.Gmail.MainAvailable)
-		require.Equal(t, int64(255), stats.Gmail.DotAvailable)
+		require.True(t, stats.Gmail.MainEnabled)
+		require.Equal(t, int64(1), stats.Gmail.MainAvailable)
+		require.Equal(t, dotAvailable, stats.Gmail.DotAvailable)
 		require.Equal(t, allocapp.GmailVariantInventory, stats.Gmail.PlusAvailable)
-		require.Equal(t, int64(1_000_000_255), stats.Gmail.TotalAvailable)
-		require.Equal(t, int64(1_000_000_255), stats.TotalAvailable)
+		require.Equal(t, allocapp.GmailVariantInventory+dotAvailable+1, stats.Gmail.TotalAvailable)
+		require.Equal(t, allocapp.GmailVariantInventory+dotAvailable+1, stats.TotalAvailable)
 
 		totals, err := repo.GetProductInventoryTotals(context.Background(), 10)
 		require.NoError(t, err)
 		require.Len(t, totals.Items, 2)
 		require.Equal(t, coredomain.ProductTypeGmail, totals.Items[0].ProductType)
-		require.Equal(t, int64(255), totals.Items[0].TotalAvailable)
+		require.Equal(t, int64(1), totals.Items[0].TotalAvailable)
 		require.Equal(t, coredomain.ProductTypeGmailVariant, totals.Items[1].ProductType)
-		require.Equal(t, allocapp.GmailVariantInventory, totals.Items[1].TotalAvailable)
+		require.Equal(t, allocapp.GmailVariantInventory+dotAvailable, totals.Items[1].TotalAvailable)
 	}
 
-	assertInventory(true, false)
+	assertInventory(true, false, 255)
 	privateInventory, err := repo.ListPrivateGmailInventoryTotals(context.Background(), 10, 2)
 	require.NoError(t, err)
 	require.Equal(t, []allocapp.PrivateSingletonInventoryTotal{
-		{ProductID: 20, ProductType: coredomain.ProductTypeGmail, Available: 16_383},
+		{ProductID: 20, ProductType: coredomain.ProductTypeGmail, Available: 1},
 		{ProductID: 21, ProductType: coredomain.ProductTypeGmailVariant, Available: allocapp.GmailVariantInventory},
 	}, privateInventory)
 	viewerTotals, err := uc.GetProductInventoryTotals(context.Background(), 10, 2)
 	require.NoError(t, err)
-	require.EqualValues(t, 1_000_016_638, viewerTotals.TotalAvailable)
-	require.EqualValues(t, 16_638, *viewerTotals.Items[0].CodeAvailable)
-	require.EqualValues(t, 16_638, *viewerTotals.Items[0].PurchaseAvailable)
-	require.EqualValues(t, 255, *viewerTotals.Items[0].CodePublicAvailable)
-	require.EqualValues(t, allocapp.GmailVariantInventory, *viewerTotals.Items[1].CodeAvailable)
-	require.EqualValues(t, allocapp.GmailVariantInventory, *viewerTotals.Items[1].CodePublicAvailable)
-	require.NoError(t, db.Table("project_products").Where("id = ?", 20).
-		Updates(map[string]any{"main_weight": 0, "dot_weight": 0, "plus_weight": 1}).Error)
+	require.EqualValues(t, 1_000_000_257, viewerTotals.TotalAvailable)
+	require.EqualValues(t, 2, *viewerTotals.Items[0].CodeAvailable)
+	require.EqualValues(t, 2, *viewerTotals.Items[0].PurchaseAvailable)
+	require.EqualValues(t, 1, *viewerTotals.Items[0].CodePublicAvailable)
+	require.EqualValues(t, 1_000_000_255, *viewerTotals.Items[1].CodeAvailable)
+	require.EqualValues(t, 1_000_000_255, *viewerTotals.Items[1].CodePublicAvailable)
 	active, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
 		OrderNo: "ord-gmail-active", BuyerUserID: 2, ProjectProductID: 21,
 		ServiceMode: domain.GmailServiceModeCode, SupplyScope: domain.SupplyScopePublic,
 	})
 	require.NoError(t, err)
-	require.Equal(t, "plus", active.Mailbox)
-	require.NoError(t, db.Table("project_products").Where("id = ?", 20).
-		Updates(map[string]any{"main_weight": 1, "dot_weight": 1, "plus_weight": 1}).Error)
+	require.Contains(t, []string{"dot", "plus"}, active.Mailbox)
 	stats, err := repo.GetInventoryStats(context.Background(), 10)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), stats.ActiveGmailAllocations)
@@ -306,12 +302,23 @@ INSERT INTO project_products(
 
 	require.NoError(t, db.Table("project_products").Where("id IN ?", []uint{20, 21}).
 		Updates(map[string]any{"code_enabled": false, "purchase_enabled": true}).Error)
-	assertInventory(false, true)
+	dotAvailable := int64(255)
+	if active.Mailbox == string(domain.GmailMailboxDot) {
+		dotAvailable--
+	}
+	assertInventory(false, true, dotAvailable)
+	primary, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+		OrderNo: "ord-gmail-primary", BuyerUserID: 2, ProjectProductID: 20,
+		ServiceMode: domain.GmailServiceModePurchase, SupplyScope: domain.SupplyScopePublic,
+	})
+	require.NoError(t, err)
+	require.Equal(t, string(domain.GmailMailboxMain), primary.Mailbox)
+	require.Equal(t, "ab@gmail.com", primary.Email)
 }
 
 func TestGmailDotAllocationIsProjectScopedMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
-	seedAllocBase(t, db, "gmail", 1, 0, 0)
+	seedAllocBase(t, db, "gmail_variant", 0, 0, 1)
 	seedGmailResources(t, db, []gmailResourceSeed{{ID: 1000, OwnerUserID: 1, Email: "shared@gmail.com", ForSale: true}})
 	require.NoError(t, db.Exec(`
 INSERT INTO projects(id, name, target_platform, status, access_type)
@@ -322,22 +329,28 @@ INSERT INTO project_products(
     code_price, purchase_price, code_supplier_price, purchase_supplier_price,
     code_window_minutes, activation_window_minutes, warranty_minutes,
     main_weight, dot_weight, plus_weight
-) VALUES (21, 11, 'gmail', 'enabled', TRUE, FALSE, 1, 0, 0.5, 0, 10, 60, 60, 1, 0, 0)`).Error)
+) VALUES (21, 11, 'gmail_variant', 'enabled', TRUE, FALSE, 1, 0, 0.5, 0, 10, 60, 60, 0, 0, 1)`).Error)
 
 	uc := allocapp.NewUseCase(NewRepo(db))
-	first, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-gmail-project-10", BuyerUserID: 2, ProjectProductID: 20,
-		ServiceMode: domain.GmailServiceModeCode, SupplyScope: domain.SupplyScopePublic,
-	})
-	require.NoError(t, err)
-	require.Equal(t, string(domain.GmailMailboxDot), first.Mailbox)
-
-	second, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-gmail-project-11", BuyerUserID: 2, ProjectProductID: 21,
-		ServiceMode: domain.GmailServiceModeCode, SupplyScope: domain.SupplyScopePublic,
-	})
-	require.NoError(t, err)
-	require.Equal(t, string(domain.GmailMailboxDot), second.Mailbox)
+	allocateDot := func(prefix string, productID uint) *domain.UnifiedAllocation {
+		for attempt := 0; attempt < 100; attempt++ {
+			orderNo := fmt.Sprintf("%s-%d", prefix, attempt)
+			allocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
+				OrderNo: orderNo, BuyerUserID: 2, ProjectProductID: productID,
+				ServiceMode: domain.GmailServiceModeCode, SupplyScope: domain.SupplyScopePublic,
+			})
+			require.NoError(t, err)
+			if allocation.Mailbox == string(domain.GmailMailboxDot) {
+				return allocation
+			}
+			_, err = uc.ReleaseByOrder(context.Background(), orderNo)
+			require.NoError(t, err)
+		}
+		t.Fatal("Gmail special allocation never selected a dot alias")
+		return nil
+	}
+	first := allocateDot("ord-gmail-project-10", 20)
+	second := allocateDot("ord-gmail-project-11", 21)
 	require.Equal(t, first.ResourceID, second.ResourceID)
 	require.Equal(t, first.Email, second.Email)
 

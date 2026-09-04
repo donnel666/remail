@@ -1,6 +1,7 @@
 import { Card, Empty, Input, Tag } from "@douyinfe/semi-ui";
 import { IconSearch } from "@douyinfe/semi-icons";
 import { ShoppingCart, Zap } from "lucide-react";
+import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
 
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
@@ -70,6 +71,23 @@ export function ProductPickerPanel({
   selectedProject?: WorkbenchProject;
 }) {
   const { t } = useTranslation();
+  const isGmailProduct = (product: WorkbenchProduct) =>
+    product.productType === "gmail" || product.productType === "gmail_variant";
+  const gmailProducts = products.filter(isGmailProduct).sort((left, right) => {
+    if (left.productType === right.productType) return 0;
+    return left.productType === "gmail" ? -1 : 1;
+  });
+  const firstGmailIndex = products.findIndex(isGmailProduct);
+  const displayedProducts =
+    firstGmailIndex < 0
+      ? products
+      : [
+          ...products.slice(0, firstGmailIndex),
+          ...gmailProducts,
+          ...products
+            .slice(firstGmailIndex)
+            .filter((product) => !isGmailProduct(product)),
+        ];
 
   return (
     <Card className="workbench-column workbench-product-panel" shadows="hover">
@@ -128,8 +146,9 @@ export function ProductPickerPanel({
         {products.length === 0 ? (
           <Empty description={t("No products")} />
         ) : (
-          products.map((product) => {
+          displayedProducts.map((product, index) => {
             const selected = selectedProductId === product.id;
+            const gmailChild = isGmailProduct(product);
             const inventory = getScopedInventory(product, serviceMode, inventoryScope);
             const originalPrice = getPrice(product, serviceMode);
             const discountedPrice = calculateDiscountedLedgerTotal(
@@ -141,51 +160,59 @@ export function ProductPickerPanel({
               ? `${t("Original price")} ${formatMoneyExact(originalPrice)}, ${t("Discounted price")} ${formatMoneyExact(discountedPrice)}`
               : formatMoneyExact(originalPrice);
             return (
-              <button
-                className={cn(
-                  "workbench-product-row",
-                  product.id !== product.productType && "is-suffix",
-                  selected && "is-selected"
-                )}
-                key={product.id}
-                onClick={() => onSelectProduct(product.id)}
-                type="button"
-              >
-                <span className="workbench-product-main">
-                  <span className="workbench-product-title">
-                    <OverflowTooltip content={product.label}>
-                      {product.label}
+              <Fragment key={product.id}>
+                {index === firstGmailIndex ? (
+                  <div aria-level={3} className="workbench-product-group" role="heading">
+                    @gmail
+                  </div>
+                ) : null}
+                <button
+                  className={cn(
+                    "workbench-product-row",
+                    (gmailChild || product.id !== product.productType) && "is-suffix",
+                    selected && "is-selected"
+                  )}
+                  onClick={() => onSelectProduct(product.id)}
+                  type="button"
+                >
+                  <span className="workbench-product-main">
+                    <span className="workbench-product-title">
+                      <OverflowTooltip content={t(product.label)}>
+                        {t(product.label)}
+                      </OverflowTooltip>
+                      {gmailChild ? null : (
+                        <Tag color="grey" shape="circle" size="small">
+                          {productTypeLabel(product.productType, t)}
+                        </Tag>
+                      )}
+                    </span>
+                    <OverflowTooltip
+                      className="workbench-product-suffix"
+                      content={product.suffix}
+                    >
+                      {product.suffix}
                     </OverflowTooltip>
-                    <Tag color="grey" shape="circle" size="small">
-                      {productTypeLabel(product.productType, t)}
-                    </Tag>
                   </span>
-                  <OverflowTooltip
-                    className="workbench-product-suffix"
-                    content={product.suffix}
-                  >
-                    {product.suffix}
-                  </OverflowTooltip>
-                </span>
-                <span className="workbench-product-side">
-                  <span
-                    aria-label={priceLabel}
-                    className="workbench-product-prices"
-                  >
-                    {hasDiscount ? (
-                      <span className="workbench-original-price">
-                        {formatMoney(originalPrice)}
+                  <span className="workbench-product-side">
+                    <span
+                      aria-label={priceLabel}
+                      className="workbench-product-prices"
+                    >
+                      {hasDiscount ? (
+                        <span className="workbench-original-price">
+                          {formatMoney(originalPrice)}
+                        </span>
+                      ) : null}
+                      <span className="workbench-product-price">
+                        {formatMoney(discountedPrice)}
                       </span>
-                    ) : null}
-                    <span className="workbench-product-price">
-                      {formatMoney(discountedPrice)}
+                    </span>
+                    <span className="workbench-product-stock">
+                      {t("Stock")} {formatCompactNumber(inventory)}
                     </span>
                   </span>
-                  <span className="workbench-product-stock">
-                    {t("Stock")} {formatCompactNumber(inventory)}
-                  </span>
-                </span>
-              </button>
+                </button>
+              </Fragment>
             );
           })
         )}

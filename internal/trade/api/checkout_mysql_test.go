@@ -363,7 +363,7 @@ INSERT INTO gmail_resources(
 	require.Zero(t, rollbackDebits)
 }
 
-func TestGmailVariantCodeUsesSharedTimeoutLifecycleMySQL(t *testing.T) {
+func TestGmailSpecialCodeUsesSharedTimeoutLifecycleMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	seedTradeBase(t, db, "gmail")
 	require.NoError(t, db.Table("project_products").Where("id = ?", 20).Updates(map[string]any{
@@ -380,7 +380,7 @@ func TestGmailVariantCodeUsesSharedTimeoutLifecycleMySQL(t *testing.T) {
 	creditBuyer(t, db, 2, "10.00")
 	module := newTradeModule(db)
 	gmail := gmailapp.NewService(db, nil)
-	module.UseCase.SetGmailSupplyPort(gmail)
+	module.UseCase.SetGmailPurchaseSupplyPort(gmail)
 
 	result, err := module.UseCase.Checkout(context.Background(), tradeapp.CheckoutRequest{
 		UserID: 2, ProjectID: 10, ProductID: 20, ServiceMode: "code",
@@ -388,7 +388,16 @@ func TestGmailVariantCodeUsesSharedTimeoutLifecycleMySQL(t *testing.T) {
 		IdempotencyKey: "gmail-variant-timeout", RequestID: "request-gmail-variant-timeout",
 	})
 	require.NoError(t, err)
-	require.Contains(t, result.Order.DeliveryEmail, "+")
+	var mailbox string
+	require.NoError(t, db.Table("gmail_allocations").Where("order_no = ?", result.Order.OrderNo).Pluck("mailbox", &mailbox).Error)
+	localPart, _, found := strings.Cut(result.Order.DeliveryEmail, "@")
+	require.True(t, found)
+	if mailbox == "dot" {
+		require.Contains(t, localPart, ".")
+	} else {
+		require.Equal(t, "plus", mailbox)
+		require.Contains(t, localPart, "+")
+	}
 	var sessionCount int64
 	require.NoError(t, db.Table("gmail_code_sessions").Where("order_no = ?", result.Order.OrderNo).Count(&sessionCount).Error)
 	require.Zero(t, sessionCount)

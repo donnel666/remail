@@ -107,10 +107,10 @@ func TestValidatedLocalGmailHistoryIdentifiesMainDotAndPlusUsage(t *testing.T) {
 	require.Equal(t, "first.name@gmail.com", byMailbox[GmailMailboxDot].Email)
 	require.Equal(t, "first.name+legacy@googlemail.com", byMailbox[GmailMailboxPlus].Email)
 	require.Equal(t, uint(12), byMailbox[GmailMailboxMain].ProductID)
-	require.Equal(t, uint(12), byMailbox[GmailMailboxDot].ProductID)
+	require.Equal(t, uint(13), byMailbox[GmailMailboxDot].ProductID)
 	require.Equal(t, uint(13), byMailbox[GmailMailboxPlus].ProductID)
 	for _, history := range trade.history {
-		if history.Mailbox == GmailMailboxPlus {
+		if history.Mailbox == GmailMailboxDot || history.Mailbox == GmailMailboxPlus {
 			require.Equal(t, tradedomain.ProductTypeGmailVariant, history.ProductType)
 		} else {
 			require.Equal(t, tradedomain.ProductTypeGmail, history.ProductType)
@@ -200,9 +200,10 @@ func TestLocalGmailHistoryRoutesMailboxByProductAndIgnoresRecipientRules(t *test
 	}
 	main := localGmailHistoryScope{ProductType: "gmail", Rules: rules}
 	require.True(t, localGmailHistoryMatchesScope(message, GmailMailboxMain, main))
-	require.True(t, localGmailHistoryMatchesScope(message, GmailMailboxDot, main))
+	require.False(t, localGmailHistoryMatchesScope(message, GmailMailboxDot, main))
 	require.False(t, localGmailHistoryMatchesScope(message, GmailMailboxPlus, main))
 	variant := localGmailHistoryScope{ProductType: "gmail_variant", Rules: rules}
+	require.True(t, localGmailHistoryMatchesScope(message, GmailMailboxDot, variant))
 	require.True(t, localGmailHistoryMatchesScope(message, GmailMailboxPlus, variant))
 	require.False(t, localGmailHistoryMatchesScope(message, GmailMailboxMain, variant))
 }

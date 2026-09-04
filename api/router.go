@@ -286,7 +286,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		cleanupFuncs = append(cleanupFuncs, kitesim.StartOperationDispatcher(kitesimService))
 		// Trade module (unified console/API Key checkout and order query).
 		tradeMod := tradeapi.NewModule(p.DB, coreMod.ProjectUseCase, billingMod.WalletUseCase, allocMod.UseCase, openapiMod.UseCase, p.Redis)
-		tradeMod.UseCase.SetGmailSupplyPort(gmailMod.Service)
+		tradeMod.UseCase.SetGmailPurchaseSupplyPort(gmailMod.Service)
 		gmailMod.Service.SetTrade(tradeMod.UseCase)
 		tradeMod.UseCase.SetOwnerLookupPort(orderOwnerDirectory{owners: iamMod.AdminResourceOwners})
 		tradeapi.RegisterRoutes(v1, tradeMod, iamSessionFetcher, iamMod.PermissionChecker)

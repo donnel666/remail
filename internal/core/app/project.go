@@ -988,7 +988,12 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled, 
 			DotWeight:               req.DotWeight,
 			PlusWeight:              req.PlusWeight,
 		}
-		if product.Type == domain.ProductTypeGmailVariant {
+		switch product.Type {
+		case domain.ProductTypeGmail:
+			product.MainWeight = 1
+			product.DotWeight = 0
+			product.PlusWeight = 0
+		case domain.ProductTypeGmailVariant:
 			product.MainWeight = 0
 			product.DotWeight = 0
 			product.PlusWeight = 1

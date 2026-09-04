@@ -15,7 +15,7 @@ const json = (schema) => ({
 const jsonBody = (schema) => ({ required: true, ...json(schema) });
 
 const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
-const emailSuffixDescription = "商品选择后缀。gmail.com 选择只分配点号别名的谷歌邮箱（原始主邮箱不会分配），gmail_variant 选择仅分配加号别名的 Gmail 变种商品（它不是实际域名），icloud.com 选择苹果邮箱；outlook.com 等具体后缀精确选择对应库存，特殊值 outlook 会在有货的微软白名单后缀中按库存量加权随机，特殊值 domain 会在有货的域名后缀中按库存量加权随机。private_first 随机时先在自有库存内按数量加权；只有自有后缀无货时才使用公共库存。private_first 下也可指定当前用户自有的完整域名，例如 mydomain.com。不接受完整邮箱地址。";
+const emailSuffixDescription = "商品选择后缀。gmail.com 选择本地 Gmail 原始主邮箱，gmail_variant 选择 Gmail 特种商品并分配点号别名或加号别名，icloud.com 选择苹果邮箱；outlook.com 等具体后缀精确选择对应库存，特殊值 outlook 会在有货的微软白名单后缀中按库存量加权随机，特殊值 domain 会在有货的域名后缀中按库存量加权随机。private_first 随机时先在自有库存内按数量加权；只有自有后缀无货时才使用公共库存。private_first 下也可指定当前用户自有的完整域名，例如 mydomain.com。不接受完整邮箱地址。";
 const batchEmailSuffixDescription = `${emailSuffixDescription} 批量下单只随机一次，所有子订单固定使用该后缀；该后缀库存耗尽后不再随机其他后缀。`;
 const listOf = (name) => ({ type: "array", items: ref(name) });
 const nullable = (type, schema = {}) => ({ type, nullable: true, ...schema });

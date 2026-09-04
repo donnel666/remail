@@ -199,6 +199,8 @@ function parseEmailTypes(value?: string) {
     }
     if (
       normalized.includes("gmail variant") ||
+      normalized.includes("gmail special") ||
+      normalized.includes("gmail特种") ||
       normalized.includes("gmail变种") ||
       normalized.includes("谷歌变种")
     ) {

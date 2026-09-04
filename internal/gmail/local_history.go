@@ -501,8 +501,8 @@ func localGmailHistoryMatchesScope(message localGmailHistoryMessage, mailbox str
 }
 
 func localGmailHistoryProductAcceptsMailbox(productType tradedomain.ProductType, mailbox string) bool {
-	return productType == tradedomain.ProductTypeGmail && (mailbox == GmailMailboxMain || mailbox == GmailMailboxDot) ||
-		productType == tradedomain.ProductTypeGmailVariant && mailbox == GmailMailboxPlus
+	return productType == tradedomain.ProductTypeGmail && mailbox == GmailMailboxMain ||
+		productType == tradedomain.ProductTypeGmailVariant && (mailbox == GmailMailboxDot || mailbox == GmailMailboxPlus)
 }
 
 type localGmailHistoryCachedRegex struct{ re *regexp.Regexp }

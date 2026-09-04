@@ -696,7 +696,7 @@ func historicalGmailAllocationOrderNo(cmd HistoricalGmailAllocationCommand) stri
 
 func sameHistoricalGmailAllocationIdentity(existing domain.UnifiedAllocation, orderNo string, cmd HistoricalGmailAllocationCommand) bool {
 	emailMatches := cmd.Mailbox == domain.GmailMailboxMain || strings.EqualFold(existing.Email, cmd.Email)
-	productMatches := existing.ProductID == cmd.ProductID || cmd.Mailbox == domain.GmailMailboxPlus
+	productMatches := existing.ProductID == cmd.ProductID || cmd.Mailbox == domain.GmailMailboxDot || cmd.Mailbox == domain.GmailMailboxPlus
 	return existing.Type == domain.AllocationTypeGmail && existing.OrderNo == orderNo &&
 		existing.ProjectID == cmd.ProjectID && productMatches && existing.ResourceID == cmd.ResourceID &&
 		existing.Mailbox == string(cmd.Mailbox) && emailMatches && existing.Status == domain.AllocationStatusReleased
@@ -1549,7 +1549,7 @@ func (uc *UseCase) allocateGmail(ctx context.Context, cmd AllocateCommand, confi
 	if err != nil {
 		return nil, err
 	}
-	preferences := gmailMailboxPreferences(config)
+	preferences := gmailMailboxPreferences(cmd.OrderNo, config)
 	if len(preferences) == 0 {
 		return nil, domain.ErrProjectNotAllocatable
 	}
@@ -2420,12 +2420,15 @@ func microsoftMailboxPreferences(orderNo string, config ProductAllocationConfig)
 	return result
 }
 
-func gmailMailboxPreferences(config ProductAllocationConfig) []domain.GmailMailbox {
+func gmailMailboxPreferences(orderNo string, config ProductAllocationConfig) []domain.GmailMailbox {
 	switch config.ProductType {
 	case coredomain.ProductTypeGmail:
-		return []domain.GmailMailbox{domain.GmailMailboxDot}
+		return []domain.GmailMailbox{domain.GmailMailboxMain}
 	case coredomain.ProductTypeGmailVariant:
-		return []domain.GmailMailbox{domain.GmailMailboxPlus}
+		if hash64(orderNo+"|gmail-special")%2 == 0 {
+			return []domain.GmailMailbox{domain.GmailMailboxDot, domain.GmailMailboxPlus}
+		}
+		return []domain.GmailMailbox{domain.GmailMailboxPlus, domain.GmailMailboxDot}
 	default:
 		return nil
 	}

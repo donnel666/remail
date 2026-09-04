@@ -2024,11 +2024,12 @@ JOIN project_products pp ON pp.project_id = p.id
 			stats.Gmail.Enabled = true
 			stats.Gmail.CodeEnabled = stats.Gmail.CodeEnabled || row.CodeEnabled
 			stats.Gmail.PurchaseEnabled = stats.Gmail.PurchaseEnabled || row.PurchaseEnabled
-			stats.Gmail.DotEnabled = true
+			stats.Gmail.MainEnabled = true
 		case coredomain.ProductTypeGmailVariant:
 			stats.Gmail.Enabled = true
 			stats.Gmail.CodeEnabled = stats.Gmail.CodeEnabled || row.CodeEnabled
 			stats.Gmail.PurchaseEnabled = stats.Gmail.PurchaseEnabled || row.PurchaseEnabled
+			stats.Gmail.DotEnabled = true
 			stats.Gmail.PlusEnabled = true
 		case coredomain.ProductTypeICloud:
 			stats.ICloud.Enabled = true
@@ -2237,6 +2238,25 @@ WHERE gr.status IN ('normal', 'available')
 			return nil, err
 		}
 		stats.Gmail.PublicEligibleResources = stats.Gmail.EligibleResources
+		if stats.Gmail.MainEnabled {
+			if err := scan(&stats.Gmail.MainAvailable, `
+SELECT COUNT(*)
+FROM gmail_resources gr
+JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
+JOIN users owner ON owner.id = er.owner_user_id
+WHERE gr.status IN ('normal', 'available')
+  AND `+gmailScope+`
+  AND NOT EXISTS (
+      SELECT 1 FROM gmail_allocations history
+      WHERE history.source = 'local'
+        AND history.resource_id = gr.id
+        AND history.project_id = ?
+        AND history.mailbox = 'main'
+  )`, projectID); err != nil {
+				return nil, err
+			}
+			stats.Gmail.MainPublicAvailable = stats.Gmail.MainAvailable
+		}
 		if stats.Gmail.DotEnabled {
 			var dot struct {
 				Capacity int64
@@ -2274,7 +2294,7 @@ WHERE gr.status IN ('normal', 'available')
 			}
 			stats.Gmail.PlusPublicAvailable = stats.Gmail.PlusAvailable
 		}
-		stats.Gmail.TotalAvailable = stats.Gmail.DotAvailable + stats.Gmail.PlusAvailable
+		stats.Gmail.TotalAvailable = stats.Gmail.MainAvailable + stats.Gmail.DotAvailable + stats.Gmail.PlusAvailable
 		stats.Gmail.PublicAvailable = stats.Gmail.TotalAvailable
 	}
 	if stats.ICloud.Enabled {
@@ -2467,9 +2487,9 @@ func productInventoryTotalFromStats(row productInventoryRow, stats *allocapp.Inv
 	case coredomain.ProductTypeDomain:
 		return stats.Domain.TotalAvailable
 	case coredomain.ProductTypeGmail:
-		return stats.Gmail.DotAvailable
+		return stats.Gmail.MainAvailable
 	case coredomain.ProductTypeGmailVariant:
-		return stats.Gmail.PlusAvailable
+		return stats.Gmail.DotAvailable + stats.Gmail.PlusAvailable
 	case coredomain.ProductTypeICloud:
 		return stats.ICloud.TotalAvailable
 	default:
@@ -2483,9 +2503,9 @@ func productInventoryPublicTotalFromStats(row productInventoryRow, stats *alloca
 	}
 	switch coredomain.ProductType(row.Type) {
 	case coredomain.ProductTypeGmail:
-		return stats.Gmail.DotPublicAvailable
+		return stats.Gmail.MainPublicAvailable
 	case coredomain.ProductTypeGmailVariant:
-		return stats.Gmail.PlusPublicAvailable
+		return stats.Gmail.DotPublicAvailable + stats.Gmail.PlusPublicAvailable
 	default:
 		return productInventoryTotalFromStats(row, stats)
 	}
@@ -2767,30 +2787,22 @@ ORDER BY pp.id ASC`, projectID).Scan(&rows).Error; err != nil {
 		available := int64(0)
 		switch coredomain.ProductType(row.Type) {
 		case coredomain.ProductTypeGmail:
-			var capacity, used int64
 			if err := r.dbFor(ctx).Raw(`
-SELECT COALESCE(SUM(`+gmailDotCapacityExpression("gr")+`), 0)
+SELECT COUNT(*)
 FROM gmail_resources gr
 JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
 WHERE gr.status IN ('normal', 'available')
   AND gr.for_sale = FALSE
-  AND er.owner_user_id = ?`, buyerUserID).Scan(&capacity).Error; err != nil {
-				return nil, fmt.Errorf("private Gmail dot capacity: %w", err)
+	  AND er.owner_user_id = ?
+  AND NOT EXISTS (
+      SELECT 1 FROM gmail_allocations history
+      WHERE history.source = 'local'
+        AND history.resource_id = gr.id
+        AND history.project_id = ?
+        AND history.mailbox = 'main'
+  )`, buyerUserID, projectID).Scan(&available).Error; err != nil {
+				return nil, fmt.Errorf("private Gmail main inventory: %w", err)
 			}
-			if err := r.dbFor(ctx).Raw(`
-SELECT COUNT(*)
-FROM gmail_allocations history
-JOIN gmail_resources gr ON gr.id = history.resource_id
-JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
-WHERE history.source = 'local'
-  AND history.project_id = ?
-  AND history.mailbox = 'dot'
-  AND gr.status IN ('normal', 'available')
-  AND gr.for_sale = FALSE
-  AND er.owner_user_id = ?`, projectID, buyerUserID).Scan(&used).Error; err != nil {
-				return nil, fmt.Errorf("private Gmail dot usage: %w", err)
-			}
-			available += nonNegative(capacity - used)
 		case coredomain.ProductTypeGmailVariant:
 			var plusResources int64
 			if err := r.dbFor(ctx).Raw(`

@@ -2089,6 +2089,13 @@ body[theme-mode="dark"] .semi-always-light,
   padding: 0 8px;
 }
 
+.workbench-product-group {
+  padding: 10px 8px 4px;
+  color: var(--semi-color-text-1);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .workbench-product-row {
   position: relative;
   display: flex;

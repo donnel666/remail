@@ -85,6 +85,7 @@ export function filterProducts(
   products: WorkbenchProduct[],
   search: string,
   serviceMode: ServiceMode,
+  translate: (key: string) => string,
 ) {
   const q = search.trim().toLowerCase();
   return products
@@ -95,6 +96,7 @@ export function filterProducts(
       q
         ? [
             product.label,
+            translate(product.label),
             product.suffix,
             product.emailSuffix,
             product.productType,
@@ -183,10 +185,10 @@ export function toWorkbenchProducts(
       : product.type === "domain"
         ? "Domain"
         : product.type === "gmail"
-          ? "Gmail"
+          ? "Gmail email"
           : product.type === "gmail_variant"
             ? "Gmail variant"
-          : "iCloud";
+            : "iCloud";
   const totalAvailable =
     inventory?.totalAvailable ?? product.totalAvailable ?? 0;
   const publicAvailable =
@@ -214,7 +216,7 @@ export function toWorkbenchProducts(
           ? "gmail.com"
           : product.type === "gmail_variant"
             ? "gmail_variant"
-          : "icloud.com";
+            : "icloud.com";
   const baseProduct: WorkbenchProduct = {
     activationWindowMinutes: product.activationWindowMinutes,
     codeEnabled: product.codeEnabled,
@@ -234,7 +236,7 @@ export function toWorkbenchProducts(
     purchasePrice: moneyToNumber(product.purchasePrice),
     suffix:
       product.type === "gmail_variant"
-        ? "@gmail变种"
+        ? ". / + @gmail.com"
         : product.type === "gmail" || product.type === "icloud"
           ? `@${emailSuffix}`
           : label,
@@ -447,8 +449,9 @@ export default function Dashboard() {
         selectedProject?.products ?? [],
         productSearch,
         serviceMode,
+        t,
       ),
-    [productSearch, selectedProject?.products, serviceMode],
+    [productSearch, selectedProject?.products, serviceMode, t],
   );
 
   useEffect(() => {
@@ -497,6 +500,7 @@ export default function Dashboard() {
         selectedProject.products,
         productSearch,
         serviceMode,
+        t,
       )[0]
         ?.id ?? "",
     );
@@ -505,6 +509,7 @@ export default function Dashboard() {
     selectedProject,
     selectedProductId,
     serviceMode,
+    t,
   ]);
 
   useEffect(() => {
@@ -680,7 +685,7 @@ export default function Dashboard() {
     setSelectedProjectId(projectId);
     setProductSearch("");
     setSelectedProductId(
-      filterProducts(project?.products ?? [], "", serviceMode)[0]
+      filterProducts(project?.products ?? [], "", serviceMode, t)[0]
         ?.id ?? "",
     );
   }

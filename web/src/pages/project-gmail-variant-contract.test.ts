@@ -17,10 +17,11 @@ const publicOpenApiSource = readFileSync(
   "utf8",
 );
 
-describe("Gmail variant product contract", () => {
-  it("keeps Gmail and its plus-only variant as separate configurable products", () => {
+describe("Gmail special product contract", () => {
+  it("keeps primary Gmail and its dot-plus special product separate", () => {
     expect(adminSource).toContain('"gmail", "gmail_variant"');
     expect(adminSource).toMatch(/mainWeight:\s*product\.type === "gmail"\s*\? 1/);
+    expect(adminSource).toContain('dotWeight: "0"');
     expect(adminSource).toMatch(
       /plusWeight:\s*product\.type === "gmail_variant"\s*\? 1/,
     );
@@ -29,9 +30,9 @@ describe("Gmail variant product contract", () => {
     expect(applicationSource).toContain('<Select.Option value="gmail_variant">');
   });
 
-  it("recognizes variant purchases and documents the checkout selector", () => {
+  it("recognizes special purchases and documents the checkout selector", () => {
     expect(orderDetailSource).toContain('order.productType === "gmail_variant"');
     expect(publicOpenApiSource).toContain("gmail_variant");
-    expect(publicOpenApiSource).toContain("它不是实际域名");
+    expect(publicOpenApiSource).toContain("点号别名或加号别名");
   });
 });

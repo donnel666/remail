@@ -190,16 +190,6 @@ type OrderDeliveryPort interface {
 	ListPendingNotifications(ctx context.Context, afterOrderID uint, limit int) ([]OrderDeliveryNotification, error)
 }
 
-type GmailSupplyQuote struct {
-	Source     string
-	CostPoints string
-	Available  uint64
-}
-
-type GmailSupplyPort interface {
-	CheckSupply(ctx context.Context, projectID, productID, buyerUserID uint, mode domain.ServiceMode, policy domain.SupplyPolicy, payAmount string) (*GmailSupplyQuote, error)
-}
-
 type GmailPurchaseDelivery struct {
 	AllocationID    uint
 	ResourceID      uint
@@ -555,7 +545,7 @@ type UseCase struct {
 	allocation                 AllocationPort
 	tokens                     OrderTokenPort
 	deliveries                 OrderDeliveryPort
-	gmailSupply                GmailSupplyPort
+	gmailPurchases             GmailPurchaseSupplyPort
 	systemLogs                 SystemLogPort
 	projectDisplays            ProjectDisplayPort
 	owners                     OwnerLookupPort
@@ -589,8 +579,8 @@ func (uc *UseCase) SetOrderDeliveryPort(deliveries OrderDeliveryPort) {
 	uc.deliveries = deliveries
 }
 
-func (uc *UseCase) SetGmailSupplyPort(supply GmailSupplyPort) {
-	uc.gmailSupply = supply
+func (uc *UseCase) SetGmailPurchaseSupplyPort(supply GmailPurchaseSupplyPort) {
+	uc.gmailPurchases = supply
 }
 
 func (uc *UseCase) SetProjectDisplayPort(projectDisplays ProjectDisplayPort) {
@@ -803,7 +793,7 @@ func sameHistoricalGmailOrder(
 	if allocation.ProductID == match.ProductID {
 		return order.ProductType == match.ProductType
 	}
-	return match.ProductType == domain.ProductTypeGmailVariant && match.Mailbox == "plus" &&
+	return match.ProductType == domain.ProductTypeGmailVariant && (match.Mailbox == "dot" || match.Mailbox == "plus") &&
 		order.ProductType == domain.ProductTypeGmail
 }
 
@@ -1205,11 +1195,10 @@ func (uc *UseCase) attachGmailPurchase(ctx context.Context, result *CheckoutResu
 		(result.Order.Status != domain.OrderStatusActive && result.Order.Status != domain.OrderStatusCompleted) {
 		return nil
 	}
-	purchases, ok := uc.gmailSupply.(GmailPurchaseSupplyPort)
-	if !ok || purchases == nil {
+	if uc.gmailPurchases == nil {
 		return errors.New("gmail purchase service is unavailable")
 	}
-	delivery, err := purchases.FindLocalPurchase(ctx, result.Order.OrderNo)
+	delivery, err := uc.gmailPurchases.FindLocalPurchase(ctx, result.Order.OrderNo)
 	if err != nil {
 		return err
 	}
