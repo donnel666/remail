@@ -126,7 +126,7 @@ jobs:
           cache-dependency-path: integrations/astrbot_plugin_remail/requirements.txt
 
       - name: Install dependencies
-        run: pip install -r integrations/astrbot_plugin_remail/requirements.txt pytest ruff
+        run: pip install -r integrations/astrbot_plugin_remail/requirements.txt pytest ruff==0.15.15
 
       - name: Check plugin
         run: |
