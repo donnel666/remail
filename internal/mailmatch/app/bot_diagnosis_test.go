@@ -82,6 +82,27 @@ func TestBotCodeDiagnosisReturnsProjectResolvedFromTheUsersOrder(t *testing.T) {
 	}
 }
 
+func TestBotCodeDiagnosisReportsOnlyTheOwnedProjectOnMismatch(t *testing.T) {
+	owned := CodeDiagnosisOrderFact{
+		OrderNo: "ORDER-OWNED", ProjectID: 2, ProjectName: "Purchased Project",
+		ServiceMode: "code", Status: "active", EmailResourceID: 8, ProjectMismatch: true,
+	}
+	service := NewBotDiagnosisService(&codeDiagnosisRepoStub{
+		lookups: []CodeDiagnosisLookup{{Orders: []CodeDiagnosisOrderFact{owned}}},
+	})
+
+	result, err := service.DiagnoseCode(context.Background(), 7, "private@example.com")
+
+	require.NoError(t, err)
+	require.Equal(t, "project_mismatch", result.Result)
+	require.True(t, result.MailReceived)
+	require.True(t, result.ProjectMismatch)
+	require.Equal(t, uint(2), result.ProjectID)
+	require.Equal(t, "Purchased Project", result.ProjectName)
+	require.Contains(t, result.Reason, "项目买错")
+	require.NotContains(t, result.Reason+result.Action, "Other Project")
+}
+
 func TestBotCodeDiagnosisUsesDeliveryFactsForBothServiceModes(t *testing.T) {
 	now := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)
 	oldMail := now.Add(-time.Minute)

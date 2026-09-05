@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/donnel666/remail/api/middleware"
 	allocapi "github.com/donnel666/remail/internal/alloc/api"
@@ -113,13 +114,12 @@ func (h *BotProjectHandler) GetProject(c *gin.Context) {
 	if !ok {
 		return
 	}
-	inventory, err := h.core.projectProductInventoryByID(c.Request.Context(), []coreapp.ProjectSummary{{
-		Project: detail.Project, Products: detail.Products,
-	}})
+	totals, err := h.projectInventory(c.Request.Context(), projectID, viewer.UserID)
 	if err != nil {
-		writeCoreError(c, err)
+		writeBotInventoryError(c, err)
 		return
 	}
+	inventory := productInventoryByID(totals)
 	response := toProjectDetailResponseWithInventory(detail, false, viewer.UserID, inventory)
 	if err := applyBotEffectiveProjectDetailPrices(&response, viewer.PriceDiscountRatio); err != nil {
 		writeCoreError(c, err)
@@ -168,21 +168,41 @@ type personalizedProjectInventory interface {
 
 func (h *BotProjectHandler) projectInventory(ctx context.Context, projectID, userID uint) (*allocapp.ProjectProductInventoryTotals, error) {
 	if h.core.module == nil || h.core.module.ProductInventory == nil {
-		return &allocapp.ProjectProductInventoryTotals{ProjectID: projectID}, nil
+		return nil, allocdomain.ErrInventoryRefreshInProgress
 	}
+	var totals *allocapp.ProjectProductInventoryTotals
+	var err error
 	if userID > 0 {
 		if inventory, ok := h.core.module.ProductInventory.(personalizedProjectInventory); ok {
-			return inventory.GetProductInventoryTotals(ctx, projectID, userID)
+			totals, err = inventory.GetProductInventoryTotals(ctx, projectID, userID)
+			if err != nil {
+				return nil, err
+			}
+			if !projectInventorySnapshotReady(totals, time.Now().UTC()) {
+				return nil, allocdomain.ErrInventoryRefreshInProgress
+			}
+			return totals, nil
 		}
 	}
 	snapshots, err := h.core.module.ProductInventory.GetProductInventorySnapshots(ctx, []uint{projectID})
 	if err != nil {
 		return nil, err
 	}
-	if totals := snapshots[projectID]; totals != nil {
-		return totals, nil
+	if totals = snapshots[projectID]; totals == nil {
+		return nil, allocdomain.ErrProjectNotAllocatable
 	}
-	return nil, allocdomain.ErrProjectNotAllocatable
+	if !projectInventorySnapshotReady(totals, time.Now().UTC()) {
+		return nil, allocdomain.ErrInventoryRefreshInProgress
+	}
+	return totals, nil
+}
+
+func productInventoryByID(totals *allocapp.ProjectProductInventoryTotals) map[uint]allocapp.ProductInventoryTotal {
+	items := make(map[uint]allocapp.ProductInventoryTotal, len(totals.Items))
+	for _, item := range totals.Items {
+		items[item.ProductID] = item
+	}
+	return items
 }
 
 func toProjectInventoryTotalResponse(totals *allocapp.ProjectProductInventoryTotals) allocapi.ProjectInventoryTotalResponse {
@@ -202,7 +222,7 @@ func toProjectInventoryTotalResponse(totals *allocapp.ProjectProductInventoryTot
 		}
 	}
 	return allocapi.ProjectInventoryTotalResponse{
-		ProjectID: totals.ProjectID, TotalAvailable: totals.TotalAvailable, Products: products,
+		ProjectID: totals.ProjectID, TotalAvailable: totals.TotalAvailable, Products: products, ObservedAt: totals.RefreshedAt,
 	}
 }
 

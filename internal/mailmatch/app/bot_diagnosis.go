@@ -18,6 +18,7 @@ type CodeDiagnosisOrderFact struct {
 	Status                   string
 	EmailResourceID          uint
 	DeliveryStoredAt         *time.Time
+	ProjectMismatch          bool
 	ResourceAbnormalRefunded bool
 }
 
@@ -39,11 +40,13 @@ type CodeDiagnosisRefreshResult struct {
 }
 
 type BotCodeDiagnosis struct {
-	Result      string
-	Reason      string
-	Action      string
-	ProjectID   uint
-	ProjectName string
+	Result          string
+	Reason          string
+	Action          string
+	ProjectID       uint
+	ProjectName     string
+	MailReceived    bool
+	ProjectMismatch bool
 }
 
 type BotDiagnosisService struct {
@@ -134,7 +137,17 @@ func classifyCodeDiagnosisOrder(order CodeDiagnosisOrderFact, now time.Time) str
 		}
 		return "pickup_grace_period"
 	}
+	if order.ProjectMismatch {
+		return "project_mismatch"
+	}
 	return ""
+}
+
+// CodeDiagnosisMessageMatchesProject applies the same rules as normal order
+// delivery without exposing any message fields through the diagnosis result.
+func CodeDiagnosisMessageMatchesProject(message domain.Message, scope OrderScope) bool {
+	matched, value, _ := matchAndExtractAnyRecipient(fetchedMessageFromDomain(message), scope)
+	return matched && (strings.TrimSpace(value) != "" || scope.ServiceMode == "purchase")
 }
 
 func botDiagnosis(result string, order CodeDiagnosisOrderFact) BotCodeDiagnosis {
@@ -143,6 +156,7 @@ func botDiagnosis(result string, order CodeDiagnosisOrderFact) BotCodeDiagnosis 
 		"pickup_not_requested":       {"验证码邮件已经到达，但尚未完成领取。", "请回到对应订单重新获取验证码。"},
 		"resource_abnormal_refunded": {"邮箱资源异常，系统已自动退款。", "请在工作台查看退款记录后重新下单。"},
 		"pickup_grace_period":        {"验证码正在处理中。", "请稍后重新获取。"},
+		"project_mismatch":           {"邮箱已收到邮件，但邮件不属于你购买的项目，说明项目买错了。", "请按实际需要重新购买正确项目。"},
 		"cause_not_confirmed":        {"暂未发现明确异常。", "请稍后重试；持续无结果时联系人工客服。"},
 	}
 	message, ok := messages[result]
@@ -153,5 +167,7 @@ func botDiagnosis(result string, order CodeDiagnosisOrderFact) BotCodeDiagnosis 
 	return BotCodeDiagnosis{
 		Result: result, Reason: message[0], Action: message[1],
 		ProjectID: order.ProjectID, ProjectName: order.ProjectName,
+		MailReceived:    result == "project_mismatch",
+		ProjectMismatch: result == "project_mismatch",
 	}
 }

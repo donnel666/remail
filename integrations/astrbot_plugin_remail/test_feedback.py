@@ -25,7 +25,12 @@ from .feedback import (
     sanitize_feedback_text,
     sanitize_report,
 )
-from .security import adapter_channel
+from .security import (
+    adapter_channel,
+    contains_credentials,
+    normalize_security_text,
+    redact_credentials,
+)
 
 
 PLUGIN_DIR = Path(__file__).parent
@@ -88,6 +93,7 @@ def _main_feedback_functions():
         "logger": SimpleNamespace(warning=lambda *_args: None),
         "re": re,
         "sanitize_feedback_text": sanitize_feedback_text,
+        "_safe_egress_text": lambda text, **_kwargs: text,
     }
     exec(
         compile(
@@ -139,7 +145,249 @@ def test_redaction_and_limits() -> None:
     assert len(sanitize_report("x" * (MAX_REPORT_CHARS + 10))) == MAX_REPORT_CHARS
 
     normal_problem = "验证码 没收到；账号 无法登录；密码 无法重置；API Key 无法使用；System Key 无法使用"
-    assert sanitize_feedback_text(normal_problem) == normal_problem
+    assert sanitize_feedback_text(normal_problem) == normalize_security_text(
+        normal_problem
+    )
+    zero_width = sanitize_feedback_text(
+        "密\u200b码：hunter2 邮箱：user@exa\u200bmple.com"
+    )
+    assert "hunter2" not in zero_width
+    assert "user@example.com" not in zero_width
+
+
+@pytest.mark.parametrize(
+    ("raw", "secrets"),
+    [
+        (
+            '{"password": "correct horse battery staple", "token": "abc def ghi"}',
+            ("correct horse battery staple", "abc def ghi"),
+        ),
+        (
+            "password: correct horse, battery staple",
+            ("correct horse", "battery staple"),
+        ),
+        (
+            "Cookie: session=FIRST_SECRET; refresh=SECOND_SECRET",
+            ("FIRST_SECRET", "SECOND_SECRET"),
+        ),
+        ("Token: opaque-token-value", ("opaque-token-value",)),
+        ('{"db_password":"hunter2"}', ("hunter2",)),
+        (
+            '{"new_password":"correct horse battery staple"}',
+            ("correct horse battery staple",),
+        ),
+        ('{"session_token":"opaque-secret-token"}', ("opaque-secret-token",)),
+        ('{"apiToken":"opaque-secret-token"}', ("opaque-secret-token",)),
+        ("api.key=opaque-secret-value", ("opaque-secret-value",)),
+        ("X-Auth-Token: opaque-secret-token", ("opaque-secret-token",)),
+        ('{"pwd":"hunter2"}', ("hunter2",)),
+        ('{"pass":"hunter2"}', ("hunter2",)),
+        ('{"passcode":"654321"}', ("654321",)),
+        ('{"credentials":"opaque-secret-value"}', ("opaque-secret-value",)),
+        ("PWD=correct horse battery staple", ("correct horse battery staple",)),
+        ("我的密码是 hunter2", ("hunter2",)),
+        ("密碼：hunter2", ("hunter2",)),
+        ("登录密码是 hunter2", ("hunter2",)),
+        ("新密码是 hunter2", ("hunter2",)),
+        ("账号密码是 hunter2", ("hunter2",)),
+        ("邮箱密码为 hunter2", ("hunter2",)),
+        ("数据库密码是 hunter2", ("hunter2",)),
+        ("临时口令设置为 hunter2", ("hunter2",)),
+        ("口令设为 hunter2", ("hunter2",)),
+        ("密码改成 hunter2", ("hunter2",)),
+        ("账号密码就是 hunter2", ("hunter2",)),
+        ("密码设成 hunter2", ("hunter2",)),
+        ("密码换成 hunter2", ("hunter2",)),
+        ("密码修改成 hunter2", ("hunter2",)),
+        ("口令定为 hunter2", ("hunter2",)),
+        ("短信验证码是 123456", ("123456",)),
+        ("邮件验证码为 ABCDEF", ("ABCDEF",)),
+        ("登录验证码就是 654321", ("654321",)),
+        ("一次性验证码 998877", ("998877",)),
+        ("邮箱验证码设为 112233", ("112233",)),
+        ("密码设置为 hunter2", ("hunter2",)),
+        ("Token 设置为 opaque-secret-token", ("opaque-secret-token",)),
+        ("password is hunter2?", ("hunter2",)),
+        ("密码是 hunter2 吗？", ("hunter2",)),
+        ("Token opaque-secret-token?", ("opaque-secret-token",)),
+        ("API Key abc12345 是否正确？", ("abc12345",)),
+        ("password hunter2 must change", ("hunter2",)),
+        ("token abcdefghijkl length 12", ("abcdefghijkl",)),
+        ("password is reset123", ("reset123",)),
+        ("password is encryptedSecret42", ("encryptedSecret42",)),
+        ("token 参数使用 Bearer 格式 abcsecret", ("abcsecret",)),
+        ("API Key 应放在 sk-secret 请求头", ("sk-secret",)),
+        ("密码是怎么123", ("怎么123",)),
+        (
+            "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqh\n-----END PRIVATE KEY-----",
+            ("MIIEvQIBADANBgkqh",),
+        ),
+        (
+            "-----BEGIN PGP PRIVATE KEY BLOCK-----\nPGP_SECRET\n-----END PGP PRIVATE KEY BLOCK-----",
+            ("PGP_SECRET",),
+        ),
+        ("恢复码：abcd-efgh-ijkl", ("abcd-efgh-ijkl",)),
+        (
+            "Recovery codes: alpha-bravo-charlie, delta-echo-foxtrot",
+            ("alpha-bravo-charlie", "delta-echo-foxtrot"),
+        ),
+        (
+            "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+            ("sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",),
+        ),
+        (
+            "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+            ("ghp_abcdefghijklmnopqrstuvwxyz0123456789",),
+        ),
+        (
+            "https://alice:SuperSecret@example.com/api",
+            ("alice", "SuperSecret"),
+        ),
+        (
+            "amqp://guest:RabbitSecret@rabbitmq.internal/vhost",
+            ("guest", "RabbitSecret"),
+        ),
+        (
+            "amqp://:RabbitSecret@rabbitmq.internal/vhost",
+            ("RabbitSecret",),
+        ),
+        (
+            "https://:ApiToken@example.com/path",
+            ("ApiToken",),
+        ),
+        (
+            "postgresql+asyncpg://root:DbSecret@db.internal/remail",
+            ("root", "DbSecret"),
+        ),
+        (
+            "smtp://mailer:MailSecret@smtp.example.com",
+            ("mailer", "MailSecret"),
+        ),
+        (
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature",
+            ("eyJhbGciOiJIUzI1NiJ9", "signature"),
+        ),
+        (
+            "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE",
+            ("AKIAIOSFODNN7EXAMPLE",),
+        ),
+        (
+            "AWS_ACCESS_KEY_ID=ASIAIOSFODNN7EXAMPLE",
+            ("ASIAIOSFODNN7EXAMPLE",),
+        ),
+        ("AKIAIOSFODNN7EXAMPLE", ("AKIAIOSFODNN7EXAMPLE",)),
+        ("ASIAIOSFODNN7EXAMPLE", ("ASIAIOSFODNN7EXAMPLE",)),
+        (
+            "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            ("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",),
+        ),
+        (
+            "AWS_SESSION_TOKEN=IQoJb3JpZ2luX2VjEExampleSessionToken",
+            ("IQoJb3JpZ2luX2VjEExampleSessionToken",),
+        ),
+    ],
+)
+def test_shared_credential_redaction_is_complete_and_idempotent(
+    raw: str, secrets: tuple[str, ...]
+) -> None:
+    clean = redact_credentials(raw)
+    assert clean != normalize_security_text(raw)
+    assert all(secret not in clean for secret in secrets)
+    assert not contains_credentials(clean)
+    assert redact_credentials(clean) == clean
+
+
+def test_shared_credential_redaction_preserves_descriptions_and_placeholders() -> None:
+    safe_values = (
+        "如何重置密码",
+        "密码 无法重置",
+        "密码是否为空",
+        "password is required",
+        "password is not required",
+        "token is expired",
+        "API Key 无法使用",
+        "System Key 如何保存",
+        "cookie is optional",
+        "API Key 应放在 Authorization 请求头",
+        "token 参数使用 Bearer 格式",
+        "调用公开 API 时，请在 Bearer 请求头提供 API Key。",
+        "API Key 应通过 Authorization 请求头传递吗？",
+        "token 参数应该采用 Bearer 方案吗？",
+        "Cookie 应设置 HttpOnly 属性吗？",
+        "password must contain 12 characters吗？",
+        "token budget is 1000",
+        "API Key 放在 Authorization 头部",
+        "Token 使用 Bearer 鉴权",
+        "Cookie 开启 HttpOnly",
+        "API Key 存放于环境变量",
+        "Token 采用 Bearer 鉴权",
+        "Cookie 启用 HttpOnly",
+        "password requirements include 12 characters",
+        "API Key rotation policy",
+        "Token authentication overview",
+        "验证码 收不到",
+        "验证码 一直没来",
+        "验证码 迟迟不来",
+        "登录密码 忘记了",
+        "API 密钥 无效",
+        "口令 不正确",
+        "Token 验证失败",
+        "Cookie 被禁用",
+        "重置密码 失败怎么办",
+        "修改密码 报错",
+        "API 密钥 管理指南",
+        "api.key 字段如何填写",
+        "AWS_ACCESS_KEY_ID 字段是什么",
+        "AWS_SECRET_ACCESS_KEY 应存放在环境变量吗？",
+        '{"password":"<PASSWORD>","token":"${TOKEN}",'
+        '"authorization":"Bearer <API_KEY>"}',
+        "AWS_ACCESS_KEY_ID=<AWS_ACCESS_KEY_ID>",
+        "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}",
+        "AWS_SESSION_TOKEN=<AWS_SESSION_TOKEN>",
+    )
+    for value in safe_values:
+        assert redact_credentials(value) == normalize_security_text(value)
+        assert not contains_credentials(value)
+
+
+def test_feedback_redacts_numeric_codes_without_hiding_http_status() -> None:
+    clean = sanitize_feedback_text("code 1234；OTP: 654321；status code 200")
+    assert "1234" not in clean
+    assert "654321" not in clean
+    assert "status code 200" in clean
+
+
+def test_feedback_report_uses_a_non_reversible_group_reference() -> None:
+    tree = ast.parse((PLUGIN_DIR / "main.py").read_text(encoding="utf-8"))
+    method = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_feedback_report"
+    )
+    source = ast.unparse(method)
+    assert "hashlib.sha256" in source
+    assert "来源群标识" in source
+    assert "来源群：{group_id}" not in source
+
+
+def test_feedback_uses_shared_credential_gate_without_secret_suffixes() -> None:
+    raw = (
+        "Cookie: session=FIRST_SECRET; refresh=SECOND_SECRET\n"
+        '{"password":"correct horse battery staple","token":"opaque token"}\n'
+        "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef\n"
+        "-----BEGIN PRIVATE KEY-----\nMIIE_PRIVATE_MATERIAL\n-----END PRIVATE KEY-----"
+    )
+    clean = sanitize_feedback_text(raw)
+    for secret in (
+        "FIRST_SECRET",
+        "SECOND_SECRET",
+        "correct horse battery staple",
+        "opaque token",
+        "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        "MIIE_PRIVATE_MATERIAL",
+    ):
+        assert secret not in clean
+    assert sanitize_feedback_text(clean) == clean
 
 
 def test_report_schedule_uses_configured_shanghai_time() -> None:
@@ -517,7 +765,12 @@ def test_empty_feedback_command_checks_group_authorization_before_format_help() 
         stop_event=lambda: stopped.append(True),
     )
     authorize = AsyncMock(return_value=(False, "当前群未获授权。"))
-    plugin = SimpleNamespace(_feedback_authorized=authorize)
+
+    async def reply(target_event, text):
+        await target_event.send([text])
+        target_event.stop_event()
+
+    plugin = SimpleNamespace(_feedback_authorized=authorize, _reply=reply)
 
     asyncio.run(submit(plugin, event, "feedback", "反馈"))
     authorize.assert_awaited_once_with(event)

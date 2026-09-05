@@ -245,6 +245,10 @@ func (h *BillingHandler) GetRecharges(c *gin.Context) {
 }
 
 func (h *BillingHandler) GetRechargeConfig(c *gin.Context) {
+	if h == nil || h.module == nil || h.module.RechargeUseCase == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Service is temporarily unavailable.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
 	result, err := h.module.RechargeUseCase.Config()
 	if err != nil {
 		writeBillingError(c, err)

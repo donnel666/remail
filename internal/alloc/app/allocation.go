@@ -1112,6 +1112,7 @@ func (uc *UseCase) GetProductInventorySnapshots(ctx context.Context, projectIDs 
 	}
 	if uc.inventoryCache == nil {
 		result := make(map[uint]*ProjectProductInventoryTotals, len(projectIDs))
+		observedAt := time.Now().UTC()
 		for _, projectID := range projectIDs {
 			totals, err := uc.repo.GetProductInventoryTotals(ctx, projectID)
 			if errors.Is(err, domain.ErrProjectNotAllocatable) {
@@ -1119,6 +1120,9 @@ func (uc *UseCase) GetProductInventorySnapshots(ctx context.Context, projectIDs 
 			}
 			if err != nil {
 				return nil, err
+			}
+			if totals.RefreshedAt == nil {
+				totals.RefreshedAt = &observedAt
 			}
 			result[projectID] = totals
 		}

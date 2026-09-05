@@ -68,6 +68,7 @@ type ProjectInventoryTotalResponse struct {
 	ProjectID      uint                                   `json:"projectId"`
 	TotalAvailable int64                                  `json:"totalAvailable"`
 	Products       []ProjectProductInventoryTotalResponse `json:"products"`
+	ObservedAt     *time.Time                             `json:"observedAt,omitempty"`
 }
 
 type ProjectProductInventoryTotalResponse struct {

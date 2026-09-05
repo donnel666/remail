@@ -3698,6 +3698,7 @@ func TestCoreHandler_DomainMailboxesHideBindingDomainFromNonAdmin(t *testing.T) 
 
 func TestCoreHandler_GetProjectDetailHidesInternalProductFieldsForNormalUser(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	observedAt := time.Now().UTC()
 
 	repo := newMockProjectRepo()
 	detail := projectDetailForAPITest()
@@ -3709,7 +3710,7 @@ func TestCoreHandler_GetProjectDetailHidesInternalProductFieldsForNormalUser(t *
 	mod := &CoreModule{
 		ProjectUseCase: coreapp.NewProjectUseCase(repo),
 		ProductInventory: projectInventoryProviderStub{totals: &allocapp.ProjectProductInventoryTotals{
-			ProjectID: 1,
+			ProjectID: 1, RefreshedAt: &observedAt,
 			Items: []allocapp.ProductInventoryTotal{{
 				ProductID: 11, TotalAvailable: 12, PublicAvailable: 12,
 				Suffixes: []allocapp.ProductInventorySuffixTotal{{Suffix: "hotmail.com", TotalAvailable: 7, PublicAvailable: 7}},
@@ -3805,6 +3806,7 @@ func TestCoreHandler_GetProjectsScopeAllRequiresProjectReadPermission(t *testing
 
 func TestCoreHandler_GetProjectsIncludesProductSummaries(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	observedAt := time.Now().UTC()
 	previous := runtimeconfig.Snapshot()
 	previousValue, existed := previous[runtimeconfig.MicrosoftPriceMultiplierKey]
 	runtimeconfig.Set(runtimeconfig.MicrosoftPriceMultiplierKey, "0.8")
@@ -3831,7 +3833,7 @@ func TestCoreHandler_GetProjectsIncludesProductSummaries(t *testing.T) {
 	mod := &CoreModule{
 		ProjectUseCase: coreapp.NewProjectUseCase(repo),
 		ProductInventory: projectInventoryProviderStub{totals: &allocapp.ProjectProductInventoryTotals{
-			ProjectID: 1,
+			ProjectID: 1, RefreshedAt: &observedAt,
 			Items: []allocapp.ProductInventoryTotal{{
 				ProductID: 11, TotalAvailable: 12, PublicAvailable: 12,
 				Suffixes: []allocapp.ProductInventorySuffixTotal{{Suffix: "hotmail.com", TotalAvailable: 7, PublicAvailable: 7}},
@@ -3879,7 +3881,7 @@ func TestCoreHandler_GetProjectsIncludesProductSummaries(t *testing.T) {
 	require.Equal(t, float64(1), productTypeFacets["microsoft"])
 }
 
-func TestCoreHandler_GetProjectsReturnsColdInventoryAsZero(t *testing.T) {
+func TestCoreHandler_GetProjectsReturnsColdInventoryAsUnknown(t *testing.T) {
 	detail := projectDetailForAPITest()
 	repo := newMockProjectRepo()
 	repo.summaries = []coreapp.ProjectSummary{{
@@ -3889,6 +3891,7 @@ func TestCoreHandler_GetProjectsReturnsColdInventoryAsZero(t *testing.T) {
 		ProjectUseCase: coreapp.NewProjectUseCase(repo),
 		ProductInventory: projectInventoryProviderStub{totals: &allocapp.ProjectProductInventoryTotals{
 			ProjectID: detail.Project.ID, Cold: true,
+			Items: []allocapp.ProductInventoryTotal{{ProductID: detail.Products[0].ID, TotalAvailable: 99, PublicAvailable: 99}},
 		}},
 	})
 
@@ -3901,9 +3904,11 @@ func TestCoreHandler_GetProjectsReturnsColdInventoryAsZero(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var body ProjectListResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	require.Zero(t, body.Items[0].Products[0].TotalAvailable)
-	require.Zero(t, body.Items[0].Products[0].PublicAvailable)
+	require.Nil(t, body.Items[0].Products[0].TotalAvailable)
+	require.Nil(t, body.Items[0].Products[0].PublicAvailable)
 	require.Empty(t, body.Items[0].Products[0].Suffixes)
+	require.Contains(t, w.Body.String(), `"totalAvailable":null`)
+	require.Contains(t, w.Body.String(), `"publicAvailable":null`)
 }
 
 func TestCoreHandler_GetProjectsDoesNotTurnInventoryDependencyFailuresIntoZero(t *testing.T) {

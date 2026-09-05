@@ -501,6 +501,7 @@ func allowedBotWebSocketRequest(method, path string) bool {
 		"GET /v1/bot/context",
 		"GET /v1/bot/profile",
 		"GET /v1/bot/projects",
+		"GET /v1/bot/recharges/config",
 		"GET /v1/bot/rankings/orders",
 		"GET /v1/bot/rankings/rewards/latest",
 		"POST /v1/bot/diagnoses/code":

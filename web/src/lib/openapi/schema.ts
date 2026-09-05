@@ -1084,6 +1084,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bot/recharges/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the current public recharge configuration
+         * @description Returns the same current structured configuration used by the recharge service, including enabled payment methods, fees, tiers, and the configured redemption-code purchase URL. Gateway credentials, merchant secrets, signing keys, and internal provider configuration are never returned.
+         */
+        get: operations["getBotRechargeConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/bot/rankings/orders": {
         parameters: {
             query?: never;
@@ -1132,7 +1152,7 @@ export interface paths {
         put?: never;
         /**
          * Safely diagnose why the current bound user has not received a code
-         * @description Uses the current bound identity and delivery email to locate only that user's recent order, derive the public project id/name, and return a safe order assessment. The email cannot widen the query to another user. The response never includes the email, order number, message content, credentials or verification codes; AstrBot may combine the safe result with the user's own problem description.
+         * @description Uses the current bound identity and delivery email to locate only that user's purchased order and return a safe assessment. A project mismatch is proven only from a completed ignored message that has no effective order owner and whose resource, recipient, and receive time do not overlap another order service window. Claimed, ambiguous, still-processing, overlapping, or scan-truncated messages fail closed and cannot confirm receipt. projectId/projectName, when present, always identify only the current bound user's purchased order. The response never includes the queried email, order number, other project ids/names, message metadata/content, credentials, or verification codes.
          */
         post: operations["postBotCodeDiagnosis"];
         delete?: never;
@@ -7294,9 +7314,29 @@ export interface components {
             bindingRequired?: boolean;
             /** @description True only when a binding exists but the bound ReMail account is unavailable. */
             accountUnavailable?: boolean;
-            /** @description Public project id resolved from the current user's matching order; omitted when no order was found. */
+            /**
+             * @description Safe machine-readable diagnosis code returned for every successful diagnosis of an available bound account. It contains no mail content or identity and is absent from binding, validation, authentication and service-error responses.
+             * @enum {string}
+             */
+            diagnosisCode?: "order_not_found" | "pickup_not_requested" | "resource_abnormal_refunded" | "pickup_grace_period" | "project_mismatch" | "cause_not_confirmed";
+            /**
+             * @description Present only when the backend has proven from an ignored, unclaimed, non-overlapping message that mail arrived for the queried address but does not match the current bound user's purchased project. Claimed, ambiguous, processing, overlapping, or scan-truncated messages cannot produce this result. No other internal diagnosis result is exposed.
+             * @enum {string}
+             */
+            result?: "project_mismatch";
+            /**
+             * @description Present and true only for a proven project_mismatch. It confirms receipt without exposing the other project's identity, mail metadata, message content, or verification code.
+             * @enum {boolean}
+             */
+            mailReceived?: true;
+            /**
+             * @description Present and true only when the backend has proven the user bought the wrong project. It never authorizes disclosure of the project that actually matched the mail.
+             * @enum {boolean}
+             */
+            projectMismatch?: true;
+            /** @description Public project id of only the current bound user's purchased order; omitted when no such order was found. It never identifies a different project whose rules matched received mail. */
             projectId?: number;
-            /** @description Public project name resolved from the current user's matching order; omitted when no order was found. */
+            /** @description Public project name of only the current bound user's purchased order; omitted when no such order was found. It never identifies a different project whose rules matched received mail. */
             projectName?: string;
         };
         AdminUpdateUserRequest: {
@@ -7834,14 +7874,14 @@ export interface components {
             warrantyMinutes: number;
             /**
              * Format: int64
-             * @description User-safe total currently available for this product summary. It is an allocation read model hint, not a reservation.
+             * @description User-safe total currently available for this product summary. Null means the snapshot is missing, preparing, stale, or otherwise unknown and must never be interpreted as zero. It is an allocation read model hint, not a reservation.
              */
-            totalAvailable: number;
+            totalAvailable: number | null;
             /**
              * Format: int64
-             * @description User-safe public inventory currently available for this product summary.
+             * @description User-safe public inventory currently available for this product summary. Null means the snapshot is missing, preparing, stale, or otherwise unknown and must never be interpreted as zero.
              */
-            publicAvailable: number;
+            publicAvailable: number | null;
             /** Format: int64 */
             codeAvailable?: number;
             /** Format: int64 */
@@ -8188,6 +8228,11 @@ export interface components {
             projectId: number;
             totalAvailable: number;
             products: components["schemas"]["ProjectProductInventoryTotal"][];
+            /**
+             * Format: date-time
+             * @description Time the ready inventory snapshot was observed by the system; omitted when the source does not provide an observation time.
+             */
+            observedAt?: string;
         };
         ProjectProductInventoryTotal: {
             /** @enum {string} */
@@ -13136,7 +13181,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Workbench-compatible project list */
+            /** @description Workbench-compatible project list. Inventory totals are null while the snapshot is missing, still preparing, or older than two configured refresh intervals; null never means zero inventory. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -13171,7 +13216,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Safe project detail with current price and inventory fields */
+            /** @description Safe project detail with current price and a fresh inventory snapshot */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -13184,7 +13229,16 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             429: components["responses"]["TooManyRequests"];
-            503: components["responses"]["ServiceUnavailable"];
+            /** @description The inventory snapshot is missing, still preparing, stale, or a required service is temporarily unavailable. Retry-After is returned when retrying the inventory read is appropriate. */
+            503: {
+                headers: {
+                    "Retry-After"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getBotProjectInventory: {
@@ -13207,7 +13261,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Current project product inventory totals */
+            /** @description Fresh project product inventory totals. Bot responses always include the source observation time; snapshots older than two configured refresh intervals are rejected. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -13220,6 +13274,47 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["UnprocessableEntity"];
+            429: components["responses"]["TooManyRequests"];
+            /** @description The inventory snapshot is missing, still preparing, stale, or a required service is temporarily unavailable. Retry-After is returned when retrying the inventory read is appropriate. */
+            503: {
+                headers: {
+                    "Retry-After"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getBotRechargeConfig: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument. */
+                "X-Bot-Channel": components["parameters"]["BotChannel"];
+                /** @description Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument. */
+                "X-Bot-Subject": components["parameters"]["BotSubject"];
+                /** @description Private scenes may use the current bound account and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group; binding remains private-only, while diagnosis is available for the current sender's own bound account. */
+                "X-Bot-Scene": components["parameters"]["BotScene"];
+                /** @description Trusted platform group id supplied by the bot adapter. QQ values are positive decimal group numbers and Telegram values are non-zero decimal Chat IDs (normally negative). Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+                "X-Bot-Group"?: components["parameters"]["BotGroup"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current public recharge configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RechargeConfigResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
             429: components["responses"]["TooManyRequests"];
             503: components["responses"]["ServiceUnavailable"];
         };

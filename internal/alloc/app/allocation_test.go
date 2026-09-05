@@ -20,6 +20,30 @@ func (*missingProductInventoryRepoStub) GetProductInventoryTotals(context.Contex
 	return nil, domain.ErrProjectNotAllocatable
 }
 
+type directProductInventoryRepoStub struct {
+	Repository
+	totals *ProjectProductInventoryTotals
+}
+
+func (r *directProductInventoryRepoStub) GetProductInventoryTotals(context.Context, uint) (*ProjectProductInventoryTotals, error) {
+	return r.totals, nil
+}
+
+func TestProductInventorySnapshotDatesAuthoritativeDBFallback(t *testing.T) {
+	useCase := NewUseCase(&directProductInventoryRepoStub{
+		totals: &ProjectProductInventoryTotals{ProjectID: 10, TotalAvailable: 7},
+	})
+	before := time.Now().UTC()
+
+	totals, err := useCase.GetProductInventorySnapshot(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("GetProductInventorySnapshot() error = %v", err)
+	}
+	if totals.RefreshedAt == nil || totals.RefreshedAt.Before(before) || totals.RefreshedAt.After(time.Now().UTC()) {
+		t.Fatalf("RefreshedAt = %v, want authoritative query time", totals.RefreshedAt)
+	}
+}
+
 func TestProductInventorySnapshotPreservesMissingProjectErrorWithoutCache(t *testing.T) {
 	_, err := NewUseCase(&missingProductInventoryRepoStub{}).GetProductInventorySnapshot(context.Background(), 10)
 	if !errors.Is(err, domain.ErrProjectNotAllocatable) {

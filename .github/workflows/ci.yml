@@ -5,12 +5,10 @@ on:
     branches: [main]
     tags: ["v*"]
     paths-ignore:
-      - "docs/**"
       - "**/*.md"
   pull_request:
     branches: [main]
     paths-ignore:
-      - "docs/**"
       - "**/*.md"
   workflow_dispatch:
 
@@ -114,6 +112,31 @@ jobs:
       - name: Verify all backend test shards
         run: test "${{ needs.backend-test-shard.result }}" = "success"
 
+  remail-plugin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: integrations/astrbot_plugin_remail/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r integrations/astrbot_plugin_remail/requirements.txt pytest ruff
+
+      - name: Check plugin
+        run: |
+          ruff check integrations/astrbot_plugin_remail
+          python -m py_compile \
+            integrations/astrbot_plugin_remail/main.py \
+            integrations/astrbot_plugin_remail/security.py \
+            integrations/astrbot_plugin_remail/feedback.py
+          pytest -q integrations/astrbot_plugin_remail
+
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -166,7 +189,7 @@ jobs:
 
   smoke:
     if: github.event_name != 'pull_request'
-    needs: [backend-static, backend-test, frontend]
+    needs: [backend-static, backend-test, remail-plugin, frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:

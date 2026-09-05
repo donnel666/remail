@@ -280,6 +280,9 @@ func TestAllowedBotWebSocketRequestRejectsArbitraryRoutes(t *testing.T) {
 	if !allowedBotWebSocketRequest(http.MethodGet, "/v1/bot/profile") {
 		t.Fatal("bot profile route was rejected")
 	}
+	if !allowedBotWebSocketRequest(http.MethodGet, "/v1/bot/recharges/config") {
+		t.Fatal("bot recharge config route was rejected")
+	}
 	recorder := newBotWebSocketResponseRecorder()
 	payload := make([]byte, botWebSocketMaxResponseBytes+1)
 	if written, err := recorder.Write(payload); err != nil || written != len(payload) || !recorder.tooLarge || recorder.body.Len() != botWebSocketMaxResponseBytes {

@@ -30,6 +30,7 @@ type BotLeaderboardRewardsResponse struct {
 // limiting are applied by the caller to rg.
 func RegisterBotRoutes(rg *gin.RouterGroup, mod *BillingModule) {
 	h := &BillingHandler{module: mod}
+	rg.GET("/recharges/config", h.GetRechargeConfig)
 	rg.GET("/rankings/rewards/latest", h.GetBotLatestLeaderboardRewards)
 }
 

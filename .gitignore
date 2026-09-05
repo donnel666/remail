@@ -23,6 +23,9 @@ strix_runs/
 # Env
 .env
 .local-secrets/
+deploy/napcat/config/
+deploy/napcat/qq/
+deploy/napcat/plugins/
 
 # IDE
 .idea/

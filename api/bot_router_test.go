@@ -27,6 +27,10 @@ func TestGeneratedOpenAPICompatibilityAliases(t *testing.T) {
 	if Qq != "qq" || Telegram != "telegram" || Private != "private" || Public != "public" {
 		t.Fatalf("unexpected compatibility aliases: %q %q %q %q", Qq, Telegram, Private, Public)
 	}
+	if ConnectBotWebSocketParamsXBotChannelQq != Qq || ConnectBotWebSocketParamsXBotChannelTelegram != Telegram ||
+		GetProjectsParamsAccessTypePrivate != Private || GetProjectsParamsAccessTypePublic != Public {
+		t.Fatal("long-form OpenAPI compatibility aliases changed")
+	}
 }
 
 func TestBotProjectOpenAPIModelsExcludeInternalFields(t *testing.T) {
@@ -47,6 +51,29 @@ func TestBotProjectOpenAPIModelsExcludeInternalFields(t *testing.T) {
 				t.Fatalf("%s exposes internal field %q", typeOf.Name(), name)
 			}
 		}
+	}
+}
+
+func TestGeneratedBotFactContractsFailClosed(t *testing.T) {
+	if !BotDiagnosisResultProjectMismatch.Valid() || BotDiagnosisResponseResult("cause_not_confirmed").Valid() {
+		t.Fatal("bot diagnosis result contract exposes an unproven internal result")
+	}
+	if !BotDiagnosisResponseMailReceived(true).Valid() || BotDiagnosisResponseMailReceived(false).Valid() ||
+		!BotDiagnosisResponseProjectMismatch(true).Valid() || BotDiagnosisResponseProjectMismatch(false).Valid() {
+		t.Fatal("bot diagnosis proof flags must only allow true when present")
+	}
+	for _, fieldName := range []string{"TotalAvailable", "PublicAvailable"} {
+		field, ok := reflect.TypeOf(ProjectProductSummary{}).FieldByName(fieldName)
+		if !ok || field.Type.Kind() != reflect.Pointer {
+			t.Fatalf("ProjectProductSummary.%s must be nullable for unknown inventory", fieldName)
+		}
+	}
+	observedAt, ok := reflect.TypeOf(ProjectInventoryTotalResponse{}).FieldByName("ObservedAt")
+	if !ok || observedAt.Type.Kind() != reflect.Pointer {
+		t.Fatal("ready project inventory must support an optional observation time")
+	}
+	if !GetBotRechargeConfigParamsXBotChannelQq.Valid() || !GetBotRechargeConfigParamsXBotScenePrivate.Valid() {
+		t.Fatal("bot recharge config path is missing trusted identity parameters")
 	}
 }
 
@@ -73,6 +100,7 @@ func TestBotRoutesRequireBotSystemKeyAndMatchContract(t *testing.T) {
 		"GET /v1/bot/projects",
 		"GET /v1/bot/projects/:projectId",
 		"GET /v1/bot/projects/:projectId/inventory",
+		"GET /v1/bot/recharges/config",
 		"GET /v1/bot/rankings/orders",
 		"GET /v1/bot/rankings/rewards/latest",
 		"GET /v1/bot/ws",
@@ -113,6 +141,7 @@ func TestEveryBotBusinessRouteRequiresSubjectAndGroupContext(t *testing.T) {
 		{http.MethodGet, "/v1/bot/projects"},
 		{http.MethodGet, "/v1/bot/projects/1"},
 		{http.MethodGet, "/v1/bot/projects/1/inventory"},
+		{http.MethodGet, "/v1/bot/recharges/config"},
 		{http.MethodGet, "/v1/bot/rankings/orders"},
 		{http.MethodGet, "/v1/bot/rankings/rewards/latest"},
 		{http.MethodPost, "/v1/bot/diagnoses/code"},

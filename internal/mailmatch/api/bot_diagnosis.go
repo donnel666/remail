@@ -28,6 +28,10 @@ type BotCodeDiagnosisResponse struct {
 	Message            string `json:"message"`
 	BindingRequired    bool   `json:"bindingRequired,omitempty"`
 	AccountUnavailable bool   `json:"accountUnavailable,omitempty"`
+	DiagnosisCode      string `json:"diagnosisCode,omitempty"`
+	Result             string `json:"result,omitempty"`
+	MailReceived       bool   `json:"mailReceived,omitempty"`
+	ProjectMismatch    bool   `json:"projectMismatch,omitempty"`
 	ProjectID          uint   `json:"projectId,omitempty"`
 	ProjectName        string `json:"projectName,omitempty"`
 }
@@ -79,7 +83,15 @@ func (h botDiagnosisHandler) PostCodeDiagnosis(c *gin.Context) {
 		return
 	}
 	message := strings.TrimSpace(result.Reason + " " + result.Action)
-	writeBotDiagnosis(c, http.StatusOK, message, result.ProjectID, result.ProjectName)
+	safeResult := ""
+	if result.ProjectMismatch {
+		safeResult = result.Result
+	}
+	c.JSON(http.StatusOK, BotCodeDiagnosisResponse{
+		Message: message, DiagnosisCode: result.Result, Result: safeResult,
+		MailReceived: result.MailReceived, ProjectMismatch: result.ProjectMismatch,
+		ProjectID: result.ProjectID, ProjectName: result.ProjectName,
+	})
 }
 
 func validBotCodeDiagnosisRequest(req BotCodeDiagnosisRequest, scene string) bool {

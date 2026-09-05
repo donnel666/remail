@@ -8,6 +8,8 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from .security import redact_credentials
+
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 REPORT_TIME = time(20)
@@ -27,36 +29,16 @@ _LABELS = {
     "unresolved": "未解决问题",
 }
 _EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+", re.IGNORECASE)
-_SYSTEM_KEY_VALUE = re.compile(
-    r"(?i)\b(?:x-system-key|system[ _-]?key)"
-    r"(?:\s*[:=：]\s*|\s*是\s*|\s+is\s+)\S+"
+_ACCOUNT_VALUE = re.compile(
+    r"(?ix)\b(?:account|username|账号|账户|用户名)(?:"
+    r"[ \t]*(?:[:=：]|\bis\b|是|为)[ \t]*[^\s,，;；}\]\r\n]+|"
+    r"[ \t]+[a-z0-9._~+/=-]{4,}(?=\s|$))"
 )
-_SYSTEM_KEY_SPACE_VALUE = re.compile(
-    r"(?i)\b(?:x-system-key|system[ _-]?key)\s+"
-    r"[a-z0-9._~+/=-]{4,}(?=\s|$)"
-)
-_SYSTEM_KEY = re.compile(r"(?i)\bsk_[a-z0-9_-]{4,}\b")
-_CREDENTIAL_VALUE = re.compile(
-    r"(?i)\b(?:password|passwd|secret|authorization|cookie|access[ _-]?token|"
-    r"refresh[ _-]?token|api[ _-]?key|account|username|密码|密钥|令牌|验证码|"
-    r"账号|账户|用户名)"
-    r"(?:\s*[:=：]\s*|\s*是\s*|\s+is\s+)\S+"
-)
-_CREDENTIAL_SPACE_VALUE = re.compile(
-    r"(?i)\b(?:password|passwd|secret|authorization|cookie|access[ _-]?token|"
-    r"refresh[ _-]?token|api[ _-]?key|account|username|密码|密钥|令牌|验证码|"
-    r"账号|账户|用户名)\s+[a-z0-9._~+/=-]{4,}(?=\s|$)"
-)
-_OTP_VALUE = re.compile(
-    r"(?i)\b(?:verification[ _-]?code|otp|code|验证码)"
-    r"(?:\s*[:=：]\s*|\s*是\s*|\s+)\d{4,8}\b"
+_CODE_VALUE = re.compile(
+    r"(?i)\b(?:code|otp)[ \t]*(?:(?:[:=：]|\bis\b)[ \t]*)?\d{4,8}\b"
 )
 _ORDER_VALUE = re.compile(
     r"(?i)\b(?:order[ _-]?(?:id|no|number)|订单号|订单编号)\s*[:=：#]?\s*[a-z0-9_-]{4,}"
-)
-_AUTHORIZATION = re.compile(r"(?i)\b(?:basic|bearer)\s+[a-z0-9._~+/=-]{8,}")
-_DATABASE_URL = re.compile(
-    r"(?i)\b(?:mysql|mariadb|postgres(?:ql)?|redis|mongodb(?:\+srv)?|sqlite)://\S+"
 )
 _SENSITIVE_COMMAND = re.compile(
     r"(?im)(?<!\S)(?P<command>[/!！]?(?:绑定|bind|诊断|接码排查|查码)(?:@[a-z0-9_]+)?)(?:[ \t]+[^\r\n]*)?"
@@ -65,7 +47,6 @@ _PLATFORM_ID = re.compile(
     r"(?i)\b(?:qq|tg|telegram)(?:\s*(?:user|group|chat))?[ _-]?(?:id|号)?\s*[:=：]\s*-?\d+\b"
 )
 _LONG_NUMBER = re.compile(r"-?\d{5,}")
-_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _CLOCK = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -103,16 +84,10 @@ def feedback_day(now: datetime | None = None, report_time: time = REPORT_TIME) -
 
 def _redact(value: str, *, limit: int, collapse: bool) -> str:
     text = value[: max(MAX_INPUT_CHARS, limit)]
-    text = _CONTROL.sub("", text)
+    text = redact_credentials(text)
     text = _SENSITIVE_COMMAND.sub(r"\g<command> [参数已隐藏]", text)
-    text = _DATABASE_URL.sub("[数据库地址已隐藏]", text)
-    text = _SYSTEM_KEY_VALUE.sub("System Key=[已隐藏]", text)
-    text = _SYSTEM_KEY_SPACE_VALUE.sub("System Key=[已隐藏]", text)
-    text = _SYSTEM_KEY.sub("[System Key已隐藏]", text)
-    text = _AUTHORIZATION.sub("[授权信息已隐藏]", text)
-    text = _OTP_VALUE.sub("[验证码已隐藏]", text)
-    text = _CREDENTIAL_VALUE.sub("[凭证已隐藏]", text)
-    text = _CREDENTIAL_SPACE_VALUE.sub("[凭证已隐藏]", text)
+    text = _ACCOUNT_VALUE.sub("[账号已隐藏]", text)
+    text = _CODE_VALUE.sub("[验证码已隐藏]", text)
     text = _ORDER_VALUE.sub("[订单号已隐藏]", text)
     text = _EMAIL.sub("[邮箱已隐藏]", text)
     text = _PLATFORM_ID.sub("[平台账号已隐藏]", text)

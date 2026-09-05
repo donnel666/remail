@@ -2016,6 +2016,81 @@ func (e BotContextResponseAuthorized) Valid() bool {
 	}
 }
 
+// Defines values for BotDiagnosisResponseDiagnosisCode.
+const (
+	BotDiagnosisCodeCauseNotConfirmed        BotDiagnosisResponseDiagnosisCode = "cause_not_confirmed"
+	BotDiagnosisCodeOrderNotFound            BotDiagnosisResponseDiagnosisCode = "order_not_found"
+	BotDiagnosisCodePickupGracePeriod        BotDiagnosisResponseDiagnosisCode = "pickup_grace_period"
+	BotDiagnosisCodePickupNotRequested       BotDiagnosisResponseDiagnosisCode = "pickup_not_requested"
+	BotDiagnosisCodeProjectMismatch          BotDiagnosisResponseDiagnosisCode = "project_mismatch"
+	BotDiagnosisCodeResourceAbnormalRefunded BotDiagnosisResponseDiagnosisCode = "resource_abnormal_refunded"
+)
+
+// Valid indicates whether the value is a known member of the BotDiagnosisResponseDiagnosisCode enum.
+func (e BotDiagnosisResponseDiagnosisCode) Valid() bool {
+	switch e {
+	case BotDiagnosisCodeCauseNotConfirmed:
+		return true
+	case BotDiagnosisCodeOrderNotFound:
+		return true
+	case BotDiagnosisCodePickupGracePeriod:
+		return true
+	case BotDiagnosisCodePickupNotRequested:
+		return true
+	case BotDiagnosisCodeProjectMismatch:
+		return true
+	case BotDiagnosisCodeResourceAbnormalRefunded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BotDiagnosisResponseMailReceived.
+const (
+	BotDiagnosisResponseMailReceivedTrue BotDiagnosisResponseMailReceived = true
+)
+
+// Valid indicates whether the value is a known member of the BotDiagnosisResponseMailReceived enum.
+func (e BotDiagnosisResponseMailReceived) Valid() bool {
+	switch e {
+	case BotDiagnosisResponseMailReceivedTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BotDiagnosisResponseProjectMismatch.
+const (
+	BotDiagnosisResponseProjectMismatchTrue BotDiagnosisResponseProjectMismatch = true
+)
+
+// Valid indicates whether the value is a known member of the BotDiagnosisResponseProjectMismatch enum.
+func (e BotDiagnosisResponseProjectMismatch) Valid() bool {
+	switch e {
+	case BotDiagnosisResponseProjectMismatchTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BotDiagnosisResponseResult.
+const (
+	BotDiagnosisResultProjectMismatch BotDiagnosisResponseResult = "project_mismatch"
+)
+
+// Valid indicates whether the value is a known member of the BotDiagnosisResponseResult enum.
+func (e BotDiagnosisResponseResult) Valid() bool {
+	switch e {
+	case BotDiagnosisResultProjectMismatch:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BotOrderRankingsResponseTimezone.
 const (
 	AsiaShanghai BotOrderRankingsResponseTimezone = "Asia/Shanghai"
@@ -5514,18 +5589,54 @@ func (e GetBotLatestLeaderboardRewardsParamsXBotScene) Valid() bool {
 	}
 }
 
+// Defines values for GetBotRechargeConfigParamsXBotChannel.
+const (
+	GetBotRechargeConfigParamsXBotChannelQq       GetBotRechargeConfigParamsXBotChannel = "qq"
+	GetBotRechargeConfigParamsXBotChannelTelegram GetBotRechargeConfigParamsXBotChannel = "telegram"
+)
+
+// Valid indicates whether the value is a known member of the GetBotRechargeConfigParamsXBotChannel enum.
+func (e GetBotRechargeConfigParamsXBotChannel) Valid() bool {
+	switch e {
+	case GetBotRechargeConfigParamsXBotChannelQq:
+		return true
+	case GetBotRechargeConfigParamsXBotChannelTelegram:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetBotRechargeConfigParamsXBotScene.
+const (
+	GetBotRechargeConfigParamsXBotSceneGroup   GetBotRechargeConfigParamsXBotScene = "group"
+	GetBotRechargeConfigParamsXBotScenePrivate GetBotRechargeConfigParamsXBotScene = "private"
+)
+
+// Valid indicates whether the value is a known member of the GetBotRechargeConfigParamsXBotScene enum.
+func (e GetBotRechargeConfigParamsXBotScene) Valid() bool {
+	switch e {
+	case GetBotRechargeConfigParamsXBotSceneGroup:
+		return true
+	case GetBotRechargeConfigParamsXBotScenePrivate:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ConnectBotWebSocketParamsXBotChannel.
 const (
-	ConnectBotWebSocketParamsXBotChannelQq       ConnectBotWebSocketParamsXBotChannel = "qq"
-	ConnectBotWebSocketParamsXBotChannelTelegram ConnectBotWebSocketParamsXBotChannel = "telegram"
+	Qq       ConnectBotWebSocketParamsXBotChannel = "qq"
+	Telegram ConnectBotWebSocketParamsXBotChannel = "telegram"
 )
 
 // Valid indicates whether the value is a known member of the ConnectBotWebSocketParamsXBotChannel enum.
 func (e ConnectBotWebSocketParamsXBotChannel) Valid() bool {
 	switch e {
-	case ConnectBotWebSocketParamsXBotChannelQq:
+	case Qq:
 		return true
-	case ConnectBotWebSocketParamsXBotChannelTelegram:
+	case Telegram:
 		return true
 	default:
 		return false
@@ -5747,16 +5858,16 @@ func (e GetProjectsParamsStatus) Valid() bool {
 
 // Defines values for GetProjectsParamsAccessType.
 const (
-	GetProjectsParamsAccessTypePrivate GetProjectsParamsAccessType = "private"
-	GetProjectsParamsAccessTypePublic  GetProjectsParamsAccessType = "public"
+	Private GetProjectsParamsAccessType = "private"
+	Public  GetProjectsParamsAccessType = "public"
 )
 
 // Valid indicates whether the value is a known member of the GetProjectsParamsAccessType enum.
 func (e GetProjectsParamsAccessType) Valid() bool {
 	switch e {
-	case GetProjectsParamsAccessTypePrivate:
+	case Private:
 		return true
-	case GetProjectsParamsAccessTypePublic:
+	case Public:
 		return true
 	default:
 		return false
@@ -8524,15 +8635,39 @@ type BotDiagnosisResponse struct {
 	// BindingRequired True only when the trusted platform sender must bind a ReMail account before diagnosis.
 	BindingRequired *bool `json:"bindingRequired,omitempty"`
 
+	// DiagnosisCode Safe machine-readable diagnosis code returned for every successful diagnosis of an available bound account. It contains no mail content or identity and is absent from binding, validation, authentication and service-error responses.
+	DiagnosisCode *BotDiagnosisResponseDiagnosisCode `json:"diagnosisCode,omitempty"`
+
+	// MailReceived Present and true only for a proven project_mismatch. It confirms receipt without exposing the other project's identity, mail metadata, message content, or verification code.
+	MailReceived *BotDiagnosisResponseMailReceived `json:"mailReceived,omitempty"`
+
 	// Message User-facing diagnosis only; never includes email, order number, message content, credentials, codes, internal status names or implementation steps.
 	Message string `json:"message"`
 
-	// ProjectId Public project id resolved from the current user's matching order; omitted when no order was found.
+	// ProjectId Public project id of only the current bound user's purchased order; omitted when no such order was found. It never identifies a different project whose rules matched received mail.
 	ProjectId *int `json:"projectId,omitempty"`
 
-	// ProjectName Public project name resolved from the current user's matching order; omitted when no order was found.
+	// ProjectMismatch Present and true only when the backend has proven the user bought the wrong project. It never authorizes disclosure of the project that actually matched the mail.
+	ProjectMismatch *BotDiagnosisResponseProjectMismatch `json:"projectMismatch,omitempty"`
+
+	// ProjectName Public project name of only the current bound user's purchased order; omitted when no such order was found. It never identifies a different project whose rules matched received mail.
 	ProjectName *string `json:"projectName,omitempty"`
+
+	// Result Present only when the backend has proven from an ignored, unclaimed, non-overlapping message that mail arrived for the queried address but does not match the current bound user's purchased project. Claimed, ambiguous, processing, overlapping, or scan-truncated messages cannot produce this result. No other internal diagnosis result is exposed.
+	Result *BotDiagnosisResponseResult `json:"result,omitempty"`
 }
+
+// BotDiagnosisResponseDiagnosisCode Safe machine-readable diagnosis code returned for every successful diagnosis of an available bound account. It contains no mail content or identity and is absent from binding, validation, authentication and service-error responses.
+type BotDiagnosisResponseDiagnosisCode string
+
+// BotDiagnosisResponseMailReceived Present and true only for a proven project_mismatch. It confirms receipt without exposing the other project's identity, mail metadata, message content, or verification code.
+type BotDiagnosisResponseMailReceived bool
+
+// BotDiagnosisResponseProjectMismatch Present and true only when the backend has proven the user bought the wrong project. It never authorizes disclosure of the project that actually matched the mail.
+type BotDiagnosisResponseProjectMismatch bool
+
+// BotDiagnosisResponseResult Present only when the backend has proven from an ignored, unclaimed, non-overlapping message that mail arrived for the queried address but does not match the current bound user's purchased project. Claimed, ambiguous, processing, overlapping, or scan-truncated messages cannot produce this result. No other internal diagnosis result is exposed.
+type BotDiagnosisResponseResult string
 
 // BotLeaderboardItem defines model for BotLeaderboardItem.
 type BotLeaderboardItem struct {
@@ -10353,6 +10488,8 @@ type ProjectInventoryResponse struct {
 
 // ProjectInventoryTotalResponse defines model for ProjectInventoryTotalResponse.
 type ProjectInventoryTotalResponse struct {
+	// ObservedAt Time the ready inventory snapshot was observed by the system; omitted when the source does not provide an observation time.
+	ObservedAt     *time.Time                     `json:"observedAt,omitempty"`
 	Products       []ProjectProductInventoryTotal `json:"products"`
 	ProjectId      int                            `json:"projectId"`
 	TotalAvailable int                            `json:"totalAvailable"`
@@ -10578,8 +10715,8 @@ type ProjectProductSummary struct {
 	// PriceMultiplier Exact decimal discount ratio from 0 through 1, with up to 6 decimal places.
 	PriceMultiplier UserGroupDiscountRatio `json:"priceMultiplier"`
 
-	// PublicAvailable User-safe public inventory currently available for this product summary.
-	PublicAvailable   int64  `json:"publicAvailable"`
+	// PublicAvailable User-safe public inventory currently available for this product summary. Null means the snapshot is missing, preparing, stale, or otherwise unknown and must never be interpreted as zero.
+	PublicAvailable   *int64 `json:"publicAvailable"`
 	PurchaseAvailable *int64 `json:"purchaseAvailable,omitempty"`
 	PurchaseEnabled   bool   `json:"purchaseEnabled"`
 
@@ -10589,8 +10726,8 @@ type ProjectProductSummary struct {
 	Status                  ProjectProductSummaryStatus `json:"status"`
 	Suffixes                *[]ProductSuffixInventory   `json:"suffixes,omitempty"`
 
-	// TotalAvailable User-safe total currently available for this product summary. It is an allocation read model hint, not a reservation.
-	TotalAvailable  int64                     `json:"totalAvailable"`
+	// TotalAvailable User-safe total currently available for this product summary. Null means the snapshot is missing, preparing, stale, or otherwise unknown and must never be interpreted as zero. It is an allocation read model hint, not a reservation.
+	TotalAvailable  *int64                    `json:"totalAvailable"`
 	Type            ProjectProductSummaryType `json:"type"`
 	WarrantyMinutes int                       `json:"warrantyMinutes"`
 }
@@ -13763,6 +13900,27 @@ type GetBotLatestLeaderboardRewardsParamsXBotChannel string
 // GetBotLatestLeaderboardRewardsParamsXBotScene defines parameters for GetBotLatestLeaderboardRewards.
 type GetBotLatestLeaderboardRewardsParamsXBotScene string
 
+// GetBotRechargeConfigParams defines parameters for GetBotRechargeConfig.
+type GetBotRechargeConfigParams struct {
+	// XBotChannel Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument.
+	XBotChannel GetBotRechargeConfigParamsXBotChannel `json:"X-Bot-Channel"`
+
+	// XBotSubject Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument.
+	XBotSubject BotSubject `json:"X-Bot-Subject"`
+
+	// XBotScene Private scenes may use the current bound account and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group; binding remains private-only, while diagnosis is available for the current sender's own bound account.
+	XBotScene GetBotRechargeConfigParamsXBotScene `json:"X-Bot-Scene"`
+
+	// XBotGroup Trusted platform group id supplied by the bot adapter. QQ values are positive decimal group numbers and Telegram values are non-zero decimal Chat IDs (normally negative). Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument.
+	XBotGroup *BotGroup `json:"X-Bot-Group,omitempty"`
+}
+
+// GetBotRechargeConfigParamsXBotChannel defines parameters for GetBotRechargeConfig.
+type GetBotRechargeConfigParamsXBotChannel string
+
+// GetBotRechargeConfigParamsXBotScene defines parameters for GetBotRechargeConfig.
+type GetBotRechargeConfigParamsXBotScene string
+
 // ConnectBotWebSocketParams defines parameters for ConnectBotWebSocket.
 type ConnectBotWebSocketParams struct {
 	// XBotChannel Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument.
@@ -16501,6 +16659,9 @@ type ServerInterface interface {
 	// Read the latest completed leaderboard reward list
 	// (GET /v1/bot/rankings/rewards/latest)
 	GetBotLatestLeaderboardRewards(c *gin.Context, params GetBotLatestLeaderboardRewardsParams)
+	// Read the current public recharge configuration
+	// (GET /v1/bot/recharges/config)
+	GetBotRechargeConfig(c *gin.Context, params GetBotRechargeConfigParams)
 	// Open the persistent Bot WebSocket transport
 	// (GET /v1/bot/ws)
 	ConnectBotWebSocket(c *gin.Context, params ConnectBotWebSocketParams)
@@ -32072,6 +32233,114 @@ func (siw *ServerInterfaceWrapper) GetBotLatestLeaderboardRewards(c *gin.Context
 	siw.Handler.GetBotLatestLeaderboardRewards(c, params)
 }
 
+// GetBotRechargeConfig operation middleware
+func (siw *ServerInterfaceWrapper) GetBotRechargeConfig(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(SystemKeyAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetBotRechargeConfigParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-Bot-Channel" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Channel")]; found {
+		var XBotChannel GetBotRechargeConfigParamsXBotChannel
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Channel, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Channel", valueList[0], &XBotChannel, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Channel: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotChannel = XBotChannel
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Channel is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Subject" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Subject")]; found {
+		var XBotSubject BotSubject
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Subject, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Subject", valueList[0], &XBotSubject, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Subject: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotSubject = XBotSubject
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Subject is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Scene" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Scene")]; found {
+		var XBotScene GetBotRechargeConfigParamsXBotScene
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Scene, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Scene", valueList[0], &XBotScene, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Scene: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotScene = XBotScene
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Scene is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional header parameter "X-Bot-Group" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Group")]; found {
+		var XBotGroup BotGroup
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Group, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Group", valueList[0], &XBotGroup, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Group: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotGroup = &XBotGroup
+
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetBotRechargeConfig(c, params)
+}
+
 // ConnectBotWebSocket operation middleware
 func (siw *ServerInterfaceWrapper) ConnectBotWebSocket(c *gin.Context) {
 
@@ -35921,6 +36190,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/bot/projects/:projectId/inventory", wrapper.GetBotProjectInventory)
 	router.GET(options.BaseURL+"/v1/bot/rankings/orders", wrapper.GetBotOrderRankings)
 	router.GET(options.BaseURL+"/v1/bot/rankings/rewards/latest", wrapper.GetBotLatestLeaderboardRewards)
+	router.GET(options.BaseURL+"/v1/bot/recharges/config", wrapper.GetBotRechargeConfig)
 	router.GET(options.BaseURL+"/v1/bot/ws", wrapper.ConnectBotWebSocket)
 	router.POST(options.BaseURL+"/v1/cards/redeem", wrapper.PostCardRedeem)
 	router.GET(options.BaseURL+"/v1/customer-service", wrapper.GetCustomerService)

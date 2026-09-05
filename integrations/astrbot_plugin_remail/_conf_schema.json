@@ -104,13 +104,13 @@
   "welcome_text": {
     "type": "text",
     "description": "欢迎文本",
-    "default": "欢迎加入 ReMail 交流群。\n\n官网：https://remail.aishop6.com\n兑换码购买：https://catfk.com/shop/aishop6\n\n目前已支持 Outlook、iCloud 和域名邮箱。\n新用户注册可领取积分，邀请好友也有积分奖励，具体活动规则以官网为准。\n\n接码、邮箱购买或 API 对接遇到问题，直接 @红夜；账号、订单等个人问题请私聊红夜。\n发送 /help 查看机器人支持的指令。"
+    "default": "欢迎加入 ReMail 交流群。\n\n官网：https://remail.aishop6.com\n\n接码、邮箱购买或 API 对接遇到问题，直接 @红夜；账号、订单等个人问题请私聊红夜。\n发送 /help 查看机器人支持的指令，当前项目、价格、库存和活动请以实时查询结果为准。"
   },
   "feedback_enabled": {
     "type": "bool",
     "description": "工作日报",
-    "hint": "收集 QQ 白名单群的反馈、建议和未解决问题，并在设定时间私聊发送给群主。",
-    "default": true
+    "hint": "启用后，只收集显式 /反馈、/建议 和 FAE 已确认的未解决问题，并在设定时间私聊发送给群主；不会收集普通群消息。",
+    "default": false
   },
   "feedback_report_time": {
     "type": "string",

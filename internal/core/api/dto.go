@@ -442,8 +442,8 @@ type ProjectProductSummaryResponse struct {
 	CodeWindowMinutes       int                                     `json:"codeWindowMinutes"`
 	ActivationWindowMinutes int                                     `json:"activationWindowMinutes"`
 	WarrantyMinutes         int                                     `json:"warrantyMinutes"`
-	TotalAvailable          int64                                   `json:"totalAvailable"`
-	PublicAvailable         int64                                   `json:"publicAvailable"`
+	TotalAvailable          *int64                                  `json:"totalAvailable"`
+	PublicAvailable         *int64                                  `json:"publicAvailable"`
 	CodeAvailable           *int64                                  `json:"codeAvailable,omitempty"`
 	CodePublicAvailable     *int64                                  `json:"codePublicAvailable,omitempty"`
 	PurchaseAvailable       *int64                                  `json:"purchaseAvailable,omitempty"`

@@ -715,11 +715,22 @@ func (h *CoreHandler) projectProductInventoryByID(ctx context.Context, summaries
 		if totals == nil {
 			return nil, fmt.Errorf("load project %d inventory: empty snapshot", projectID)
 		}
+		if !projectInventorySnapshotReady(totals, time.Now().UTC()) {
+			continue
+		}
 		for _, item := range totals.Items {
 			result[item.ProductID] = item
 		}
 	}
 	return result, nil
+}
+
+func projectInventorySnapshotReady(totals *allocapp.ProjectProductInventoryTotals, now time.Time) bool {
+	if totals == nil || totals.Cold || totals.RefreshedAt == nil {
+		return false
+	}
+	age := now.UTC().Sub(totals.RefreshedAt.UTC())
+	return age >= 0 && age <= 2*allocapp.InventoryRefreshIntervalValue()
 }
 
 func hasEnabledProjectProduct(products []coredomain.Product) bool {
@@ -1642,7 +1653,6 @@ func toProjectProductSummaryResponses(products []coredomain.Product, inventoryBy
 	items := make([]ProjectProductSummaryResponse, len(products))
 	for i := range products {
 		product := products[i]
-		inventory := inventoryByProductID[product.ID]
 		items[i] = ProjectProductSummaryResponse{
 			Type:                    string(product.Type),
 			Status:                  string(product.Status),
@@ -1654,13 +1664,15 @@ func toProjectProductSummaryResponses(products []coredomain.Product, inventoryBy
 			CodeWindowMinutes:       product.CodeWindowMinutes,
 			ActivationWindowMinutes: product.ActivationWindowMinutes,
 			WarrantyMinutes:         product.WarrantyMinutes,
-			TotalAvailable:          inventory.TotalAvailable,
-			PublicAvailable:         inventory.PublicAvailable,
-			CodeAvailable:           inventory.CodeAvailable,
-			CodePublicAvailable:     inventory.CodePublicAvailable,
-			PurchaseAvailable:       inventory.PurchaseAvailable,
-			PurchasePublicAvailable: inventory.PurchasePublicAvailable,
-			Suffixes:                toProjectProductSuffixInventoryResponses(inventory.Suffixes),
+		}
+		if inventory, ok := inventoryByProductID[product.ID]; ok {
+			items[i].TotalAvailable = int64Ptr(inventory.TotalAvailable)
+			items[i].PublicAvailable = int64Ptr(inventory.PublicAvailable)
+			items[i].CodeAvailable = inventory.CodeAvailable
+			items[i].CodePublicAvailable = inventory.CodePublicAvailable
+			items[i].PurchaseAvailable = inventory.PurchaseAvailable
+			items[i].PurchasePublicAvailable = inventory.PurchasePublicAvailable
+			items[i].Suffixes = toProjectProductSuffixInventoryResponses(inventory.Suffixes)
 		}
 	}
 	return items
@@ -1690,7 +1702,6 @@ func toProjectDetailResponseWithInventory(detail *coredomain.ProjectDetail, incl
 	products := make([]ProjectProductResponse, len(detail.Products))
 	for i := range detail.Products {
 		product := detail.Products[i]
-		inventory := inventoryByProductID[product.ID]
 		products[i] = ProjectProductResponse{
 			ProjectID:               product.ProjectID,
 			Type:                    string(product.Type),
@@ -1706,7 +1717,7 @@ func toProjectDetailResponseWithInventory(detail *coredomain.ProjectDetail, incl
 			CreatedAt:               product.CreatedAt,
 			UpdatedAt:               product.UpdatedAt,
 		}
-		if inventoryByProductID != nil {
+		if inventory, ok := inventoryByProductID[product.ID]; ok {
 			products[i].TotalAvailable = int64Ptr(inventory.TotalAvailable)
 			products[i].PublicAvailable = int64Ptr(inventory.PublicAvailable)
 			products[i].CodeAvailable = inventory.CodeAvailable

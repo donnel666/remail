@@ -17,16 +17,22 @@ import (
 )
 
 type botDiagnosisRepoStub struct {
-	userID uint
-	email  string
+	userID          uint
+	email           string
+	projectMismatch bool
 }
 
 func (r *botDiagnosisRepoStub) LookupCodeDiagnosis(_ context.Context, userID uint, email string) (mailmatchapp.CodeDiagnosisLookup, error) {
 	r.userID, r.email = userID, email
 	receivedAt := time.Now().UTC().Add(-2 * time.Minute)
+	var deliveryStoredAt *time.Time
+	if !r.projectMismatch {
+		deliveryStoredAt = &receivedAt
+	}
 	return mailmatchapp.CodeDiagnosisLookup{Orders: []mailmatchapp.CodeDiagnosisOrderFact{{
 		OrderNo: "SECRET-ORDER-NO", ProjectID: 10, ProjectName: "GitHub",
-		ServiceMode: "code", Status: "completed", DeliveryStoredAt: &receivedAt,
+		ServiceMode: "code", Status: "completed", DeliveryStoredAt: deliveryStoredAt,
+		ProjectMismatch: r.projectMismatch,
 	}}}, nil
 }
 
@@ -81,13 +87,43 @@ func TestBotCodeDiagnosisResponseCannotExposeRawFacts(t *testing.T) {
 	require.Contains(t, response.Body.String(), "验证码邮件已经到达")
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
-	require.ElementsMatch(t, []string{"message", "projectId", "projectName"}, mapKeys(body))
+	require.ElementsMatch(t, []string{"message", "diagnosisCode", "projectId", "projectName"}, mapKeys(body))
+	require.Equal(t, "pickup_not_requested", body["diagnosisCode"])
 	require.Equal(t, float64(10), body["projectId"])
 	require.Equal(t, "GitHub", body["projectName"])
 	require.Equal(t, uint(2), repo.userID)
 	require.Equal(t, "private@example.com", repo.email)
-	for _, secret := range []string{"private@example.com", "SECRET-ORDER-NO", "verificationCode", "token", "pickup", "cache", "requestId"} {
+	for _, secret := range []string{"private@example.com", "SECRET-ORDER-NO", "verificationCode", "token", "cache", "requestId"} {
 		require.NotContains(t, response.Body.String(), secret)
+	}
+}
+
+func TestBotCodeDiagnosisProjectMismatchExposesOnlyOwnedProjectAndSafeFacts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &botDiagnosisRepoStub{projectMismatch: true}
+	module := &Module{BotDiagnosis: mailmatchapp.NewBotDiagnosisService(repo)}
+	router := botDiagnosisRouter(module, func(*gin.Context) (BotUserResolution, bool) { return activeBotUser(2), true })
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, botDiagnosisRequest(middleware.BotScenePrivate, `{"email":"private@example.com"}`))
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.ElementsMatch(t, []string{
+		"message", "diagnosisCode", "result", "mailReceived", "projectMismatch", "projectId", "projectName",
+	}, mapKeys(body))
+	require.Equal(t, "project_mismatch", body["diagnosisCode"])
+	require.Equal(t, "project_mismatch", body["result"])
+	require.Equal(t, true, body["mailReceived"])
+	require.Equal(t, true, body["projectMismatch"])
+	require.Equal(t, float64(10), body["projectId"])
+	require.Equal(t, "GitHub", body["projectName"])
+	require.Contains(t, body["message"], "项目买错")
+	for _, forbidden := range []string{
+		"private@example.com", "SECRET-ORDER-NO", "Other Project", "subject", "sender", "body", "code",
+	} {
+		require.NotContains(t, response.Body.String(), forbidden)
 	}
 }
 

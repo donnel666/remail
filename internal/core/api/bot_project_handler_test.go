@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	allocapi "github.com/donnel666/remail/internal/alloc/api"
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
@@ -123,6 +124,7 @@ func TestBotProjectListCapsWebSocketSizedResponses(t *testing.T) {
 func TestBotProjectDetailNeverUsesAdminView(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	userID := uint(42)
+	observedAt := time.Now().UTC()
 	repo := &botProjectRepoStub{detail: &coredomain.ProjectDetail{
 		Project: coredomain.Project{
 			ID: 7, Name: "Safe", Status: coredomain.ProjectStatusListed, AccessType: coredomain.ProjectAccessPrivate,
@@ -139,7 +141,7 @@ func TestBotProjectDetailNeverUsesAdminView(t *testing.T) {
 	module := &CoreModule{
 		ProjectUseCase: coreapp.NewProjectUseCase(repo),
 		ProductInventory: projectInventoryProviderStub{totals: &allocapp.ProjectProductInventoryTotals{
-			ProjectID: 7, Items: []allocapp.ProductInventoryTotal{{ProductID: 70}},
+			ProjectID: 7, RefreshedAt: &observedAt, Items: []allocapp.ProductInventoryTotal{{ProductID: 70}},
 		}},
 	}
 	h := NewBotProjectHandler(module, func(*gin.Context) (BotProjectViewer, bool) {
@@ -170,9 +172,10 @@ func TestBotProjectInventoryUsesBoundWorkbenchInventory(t *testing.T) {
 	repo := &botProjectRepoStub{detail: &coredomain.ProjectDetail{Project: coredomain.Project{
 		ID: 7, Status: coredomain.ProjectStatusListed, AccessType: coredomain.ProjectAccessPublic,
 	}}}
+	observedAt := time.Now().UTC()
 	inventory := &botPersonalizedInventoryStub{projectInventoryProviderStub: projectInventoryProviderStub{
 		totals: &allocapp.ProjectProductInventoryTotals{
-			ProjectID: 7, TotalAvailable: 9,
+			ProjectID: 7, TotalAvailable: 9, RefreshedAt: &observedAt,
 			Items: []allocapp.ProductInventoryTotal{{ProductType: coredomain.ProductTypeMicrosoft, TotalAvailable: 9, PublicAvailable: 4}},
 		},
 	}}
@@ -191,6 +194,86 @@ func TestBotProjectInventoryUsesBoundWorkbenchInventory(t *testing.T) {
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 	require.Equal(t, int64(9), response.TotalAvailable)
 	require.Equal(t, int64(4), response.Products[0].PublicAvailable)
+	require.Equal(t, observedAt, *response.ObservedAt)
+}
+
+func TestBotProjectColdInventoryIsUnknownInListsAndRetryableInDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	product := coredomain.Product{ID: 70, ProjectID: 7, Type: coredomain.ProductTypeMicrosoft, Status: coredomain.ProductStatusEnabled}
+	repo := &botProjectRepoStub{
+		items: []coreapp.ProjectSummary{{
+			Project:  coredomain.Project{ID: 7, Status: coredomain.ProjectStatusListed, AccessType: coredomain.ProjectAccessPublic},
+			Products: []coredomain.Product{product}, ProductCount: 1,
+		}},
+		detail: &coredomain.ProjectDetail{
+			Project:  coredomain.Project{ID: 7, Status: coredomain.ProjectStatusListed, AccessType: coredomain.ProjectAccessPublic},
+			Products: []coredomain.Product{product},
+		},
+	}
+	h := NewBotProjectHandler(&CoreModule{
+		ProjectUseCase: coreapp.NewProjectUseCase(repo),
+		ProductInventory: projectInventoryProviderStub{totals: &allocapp.ProjectProductInventoryTotals{
+			ProjectID: 7, Cold: true,
+			Items: []allocapp.ProductInventoryTotal{{ProductID: 70, TotalAvailable: 99, PublicAvailable: 99}},
+		}},
+	}, nil)
+
+	listRecorder, listContext := botProjectContext(http.MethodGet, "/projects")
+	h.GetProjects(listContext)
+	require.Equal(t, http.StatusOK, listRecorder.Code, listRecorder.Body.String())
+	var list ProjectListResponse
+	require.NoError(t, json.Unmarshal(listRecorder.Body.Bytes(), &list))
+	require.Nil(t, list.Items[0].Products[0].TotalAvailable)
+	require.Nil(t, list.Items[0].Products[0].PublicAvailable)
+
+	for _, target := range []string{"/projects/7", "/projects/7/inventory"} {
+		recorder, c := botProjectContext(http.MethodGet, target)
+		c.Params = gin.Params{{Key: "projectId", Value: "7"}}
+		if target == "/projects/7" {
+			h.GetProject(c)
+		} else {
+			h.GetProjectInventory(c)
+		}
+		require.Equal(t, http.StatusServiceUnavailable, recorder.Code, target+": "+recorder.Body.String())
+		require.Equal(t, "1", recorder.Header().Get("Retry-After"))
+		require.NotContains(t, recorder.Body.String(), "cache")
+	}
+}
+
+func TestBotProjectStaleInventoryIsUnknownInListsAndRetryableInDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	product := coredomain.Product{ID: 70, ProjectID: 7, Type: coredomain.ProductTypeMicrosoft, Status: coredomain.ProductStatusEnabled}
+	stale := time.Now().UTC().Add(-2*allocapp.InventoryRefreshIntervalValue() - time.Second)
+	repo := &botProjectRepoStub{
+		items: []coreapp.ProjectSummary{{
+			Project:  coredomain.Project{ID: 7, Status: coredomain.ProjectStatusListed, AccessType: coredomain.ProjectAccessPublic},
+			Products: []coredomain.Product{product}, ProductCount: 1,
+		}},
+		detail: &coredomain.ProjectDetail{
+			Project:  coredomain.Project{ID: 7, Status: coredomain.ProjectStatusListed, AccessType: coredomain.ProjectAccessPublic},
+			Products: []coredomain.Product{product},
+		},
+	}
+	h := NewBotProjectHandler(&CoreModule{
+		ProjectUseCase: coreapp.NewProjectUseCase(repo),
+		ProductInventory: projectInventoryProviderStub{totals: &allocapp.ProjectProductInventoryTotals{
+			ProjectID: 7, RefreshedAt: &stale,
+			Items: []allocapp.ProductInventoryTotal{{ProductID: 70, TotalAvailable: 99, PublicAvailable: 99}},
+		}},
+	}, nil)
+
+	listRecorder, listContext := botProjectContext(http.MethodGet, "/projects")
+	h.GetProjects(listContext)
+	require.Equal(t, http.StatusOK, listRecorder.Code, listRecorder.Body.String())
+	var list ProjectListResponse
+	require.NoError(t, json.Unmarshal(listRecorder.Body.Bytes(), &list))
+	require.Nil(t, list.Items[0].Products[0].TotalAvailable)
+
+	recorder, c := botProjectContext(http.MethodGet, "/projects/7/inventory")
+	c.Params = gin.Params{{Key: "projectId", Value: "7"}}
+	h.GetProjectInventory(c)
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+	require.Equal(t, "1", recorder.Header().Get("Retry-After"))
 }
 
 func TestBotEffectivePricesUseLowerProductOrUserGroupMultiplier(t *testing.T) {

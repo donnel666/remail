@@ -197,6 +197,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		systemSettingsMod.SetRuntimeUpdateHook(func(ctx context.Context, settings []settingsdomain.Setting) error {
 			domainTLDChanged := false
 			iCloudForwardingChanged := false
+			inventoryTimingChanged := false
 			for _, setting := range settings {
 				key := strings.ToLower(strings.TrimSpace(setting.Key))
 				if key == "domain_custom_tlds" {
@@ -204,6 +205,9 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 				}
 				if key == "icloud_forwarding_suffixes" {
 					iCloudForwardingChanged = true
+				}
+				if key == "inventory_refresh_interval_minutes" || key == "inventory_cache_hard_ttl_hours" {
+					inventoryTimingChanged = true
 				}
 			}
 			if domainTLDChanged {
@@ -215,6 +219,10 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 				if err := applyICloudForwardingSuffixesUpdate(ctx, p.DB, settings); err != nil {
 					return err
 				}
+			}
+			if inventoryTimingChanged && p.Redis != nil {
+				_, err := allocMod.UseCase.TriggerInventoryRefresh(ctx, 0)
+				return err
 			}
 			if domainTLDChanged || iCloudForwardingChanged {
 				return allocMod.UseCase.ScheduleInventoryRefresh(ctx)
