@@ -1618,7 +1618,24 @@ func (uc *UseCase) tryGmailCandidates(
 		if err != nil {
 			return nil, false, err
 		}
+		cooling := make(map[uint]bool)
+		if mailbox != domain.GmailMailboxMain && uc.gmailVariantCooldown != nil && len(candidates) > 0 {
+			resourceIDs := make([]uint, len(candidates))
+			for i, candidate := range candidates {
+				resourceIDs[i] = candidate.ResourceID
+			}
+			coolingIDs, err := uc.gmailVariantCooldown.CoolingResourceIDs(ctx, config.ProjectID, resourceIDs)
+			if err != nil {
+				return nil, false, err
+			}
+			for _, resourceID := range coolingIDs {
+				cooling[resourceID] = true
+			}
+		}
 		for _, candidate := range candidates {
+			if cooling[candidate.ResourceID] {
+				continue
+			}
 			platform.AddAllocationCandidateAttempts(string(domain.AllocationTypeGmail), 1)
 			result, err := uc.tryGmailCandidate(ctx, cmd, config, mailbox, candidate, cost, now)
 			if err == nil && result != nil {
@@ -1633,6 +1650,7 @@ func (uc *UseCase) tryGmailCandidates(
 			}
 			return nil, false, err
 		}
+		// Keep the unfiltered page as the cursor: a cooling page is not exhaustion.
 		if len(candidates) < limit {
 			return nil, resourceBusy, nil
 		}
@@ -1754,6 +1772,15 @@ func (uc *UseCase) createGmailAllocation(
 	if allocation.Email == "" || !domain.IsValidGmailMailbox(allocation.Mailbox) {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
+	if mailbox != domain.GmailMailboxMain && uc.gmailVariantCooldown != nil {
+		started, err := uc.gmailVariantCooldown.StartVariantCooldown(ctx, resourceID, config.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		if !started {
+			return nil, errCandidateUnavailable
+		}
+	}
 	if err := cmd.ensureOrderGuard(ctx, domain.AllocationTypeGmail); err != nil {
 		return nil, err
 	}
@@ -1762,11 +1789,6 @@ func (uc *UseCase) createGmailAllocation(
 	}
 	if err := uc.repo.TouchGmailAllocated(ctx, resourceID, now); err != nil {
 		return nil, err
-	}
-	if mailbox != domain.GmailMailboxMain && uc.gmailVariantCooldown != nil {
-		if err := uc.gmailVariantCooldown.StartVariantCooldown(ctx, resourceID); err != nil {
-			return nil, err
-		}
 	}
 	return &domain.UnifiedAllocation{
 		Type: domain.AllocationTypeGmail, ID: allocation.ID, OrderNo: allocation.OrderNo,

@@ -71,7 +71,7 @@ export default function EmailResourceSection({ options, onBulkSave }: SectionPro
       </FormItem>
       <SettingsNumberField
         label={t("谷歌变种冷却时间（分钟）")}
-        description={t("主邮箱分配谷歌变种后暂停再次分配；0 表示关闭")}
+        description={t("同一主邮箱在同一项目内分配变种后冷却，其他项目不受影响；0 表示关闭")}
         value={number(form.gmail_variant_cooldown_minutes)}
         onChange={(value) => update("gmail_variant_cooldown_minutes", value)}
         min={0}

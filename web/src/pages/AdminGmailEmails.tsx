@@ -497,17 +497,23 @@ function ResourceStatusTag({ item }: { item: AdminGmailResourceItem }) {
       {t(meta.label)}
     </Tag>
   );
-  const remainingSeconds = item.cooldownUntil
-    ? Math.max(0, Math.ceil((Date.parse(item.cooldownUntil) - Date.now()) / 1000))
-    : 0;
-  const cooldownHint = item.status === "cooldown"
-    ? item.cooldownUntil
-      ? `${remainingSeconds < 60
-        ? t("Recovers in {{seconds}} seconds", { seconds: remainingSeconds })
-        : t("Recovers in {{minutes}} minutes", { minutes: Math.ceil(remainingSeconds / 60) })} (${formatTime(item.cooldownUntil)})`
-      : t("Cooldown recovery pending")
-    : "";
-  const tooltip = cooldownHint || item.lastSafeError;
+  const cooldownHint = (until?: string | null) => {
+    if (!until) return t("Cooldown recovery pending");
+    const remainingSeconds = Math.max(0, Math.ceil((Date.parse(until) - Date.now()) / 1000));
+    return `${remainingSeconds < 60
+      ? t("Recovers in {{seconds}} seconds", { seconds: remainingSeconds })
+      : t("Recovers in {{minutes}} minutes", { minutes: Math.ceil(remainingSeconds / 60) })} (${formatTime(until)})`;
+  };
+  const tooltip = item.status === "cooldown" ? (
+    <div>
+      <div>{t("Only the listed projects are cooling down; other projects remain available.")}</div>
+      {item.projectCooldowns?.length ? item.projectCooldowns.map((cooldown) => (
+        <div key={cooldown.projectId}>
+          #{cooldown.projectId} {cooldown.projectName}: {cooldownHint(cooldown.cooldownUntil)}
+        </div>
+      )) : cooldownHint(item.cooldownUntil)}
+    </div>
+  ) : item.lastSafeError;
   return tooltip ? (
     <Tooltip content={tooltip}>{tag}</Tooltip>
   ) : (

@@ -6717,11 +6717,13 @@ type AdminGmailBulkCommandRequest struct {
 
 // AdminGmailBulkFilter defines model for AdminGmailBulkFilter.
 type AdminGmailBulkFilter struct {
-	CreatedFrom *time.Time                `json:"createdFrom,omitempty"`
-	CreatedTo   *time.Time                `json:"createdTo,omitempty"`
-	ForSale     *bool                     `json:"forSale,omitempty"`
-	Search      *string                   `json:"search,omitempty"`
-	Status      *AdminGmailResourceStatus `json:"status,omitempty"`
+	CreatedFrom *time.Time `json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time `json:"createdTo,omitempty"`
+	ForSale     *bool      `json:"forSale,omitempty"`
+	Search      *string    `json:"search,omitempty"`
+
+	// Status Cooldown is a display state derived from active project-specific Redis keys, not global resource health.
+	Status *AdminGmailResourceStatus `json:"status,omitempty"`
 }
 
 // AdminGmailBulkResult defines model for AdminGmailBulkResult.
@@ -6790,10 +6792,12 @@ type AdminGmailImportResponseStatus string
 
 // AdminGmailMutationResponse defines model for AdminGmailMutationResponse.
 type AdminGmailMutationResponse struct {
-	ForSale    bool                     `json:"forSale"`
-	ResourceId int                      `json:"resourceId"`
-	Status     AdminGmailResourceStatus `json:"status"`
-	Version    int64                    `json:"version"`
+	ForSale    bool `json:"forSale"`
+	ResourceId int  `json:"resourceId"`
+
+	// Status Cooldown is a display state derived from active project-specific Redis keys, not global resource health.
+	Status  AdminGmailResourceStatus `json:"status"`
+	Version int64                    `json:"version"`
 }
 
 // AdminGmailOwnerSummary defines model for AdminGmailOwnerSummary.
@@ -6830,20 +6834,29 @@ type AdminGmailResourceItem struct {
 	// BindingEmail Optional imported binding email used for Google account challenges.
 	BindingEmail *openapi_types.Email `json:"bindingEmail,omitempty"`
 
-	// CooldownUntil Redis TTL-derived recovery time for a cooling Gmail resource.
-	CooldownUntil       *time.Time               `json:"cooldownUntil"`
-	CreatedAt           time.Time                `json:"createdAt"`
-	CredentialRevision  int64                    `json:"credentialRevision"`
-	CredentialUpdatedAt time.Time                `json:"credentialUpdatedAt"`
-	Email               openapi_types.Email      `json:"email"`
-	ForSale             bool                     `json:"forSale"`
-	Id                  int                      `json:"id"`
-	LastAllocatedAt     *time.Time               `json:"lastAllocatedAt,omitempty"`
-	LastCheckedAt       *time.Time               `json:"lastCheckedAt,omitempty"`
-	LastSafeError       *string                  `json:"lastSafeError,omitempty"`
-	Owner               AdminGmailOwnerSummary   `json:"owner"`
-	OwnerUserId         int                      `json:"ownerUserId"`
-	PasswordConfigured  bool                     `json:"passwordConfigured"`
+	// CooldownUntil Latest Redis TTL-derived recovery time across this resource's cooling projects.
+	CooldownUntil       *time.Time             `json:"cooldownUntil"`
+	CreatedAt           time.Time              `json:"createdAt"`
+	CredentialRevision  int64                  `json:"credentialRevision"`
+	CredentialUpdatedAt time.Time              `json:"credentialUpdatedAt"`
+	Email               openapi_types.Email    `json:"email"`
+	ForSale             bool                   `json:"forSale"`
+	Id                  int                    `json:"id"`
+	LastAllocatedAt     *time.Time             `json:"lastAllocatedAt,omitempty"`
+	LastCheckedAt       *time.Time             `json:"lastCheckedAt,omitempty"`
+	LastSafeError       *string                `json:"lastSafeError,omitempty"`
+	Owner               AdminGmailOwnerSummary `json:"owner"`
+	OwnerUserId         int                    `json:"ownerUserId"`
+	PasswordConfigured  bool                   `json:"passwordConfigured"`
+
+	// ProjectCooldowns Only these projects are temporarily blocked from allocating another variant of this resource.
+	ProjectCooldowns *[]struct {
+		CooldownUntil *time.Time `json:"cooldownUntil"`
+		ProjectId     int        `json:"projectId"`
+		ProjectName   string     `json:"projectName"`
+	} `json:"projectCooldowns,omitempty"`
+
+	// Status Cooldown is a display state derived from active project-specific Redis keys, not global resource health.
 	Status              AdminGmailResourceStatus `json:"status"`
 	TwoFactorConfigured bool                     `json:"twoFactorConfigured"`
 	UpdatedAt           time.Time                `json:"updatedAt"`
@@ -6860,7 +6873,7 @@ type AdminGmailResourceList struct {
 	Total  int64                    `json:"total"`
 }
 
-// AdminGmailResourceStatus defines model for AdminGmailResourceStatus.
+// AdminGmailResourceStatus Cooldown is a display state derived from active project-specific Redis keys, not global resource health.
 type AdminGmailResourceStatus string
 
 // AdminGmailResourceUpdateRequest defines model for AdminGmailResourceUpdateRequest.

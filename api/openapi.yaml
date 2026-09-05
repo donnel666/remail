@@ -25321,6 +25321,7 @@ components:
     AdminGmailResourceStatus:
       type: string
       enum: [pending, validating, identifying, normal, cooldown, abnormal, disabled, deleted]
+      description: Cooldown is a display state derived from active project-specific Redis keys, not global resource health.
 
     AdminGmailBooleanFacet:
       type: object
@@ -25472,7 +25473,24 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: Redis TTL-derived recovery time for a cooling Gmail resource.
+          description: Latest Redis TTL-derived recovery time across this resource's cooling projects.
+        projectCooldowns:
+          type: array
+          description: Only these projects are temporarily blocked from allocating another variant of this resource.
+          items:
+            type: object
+            required: [projectId, projectName, cooldownUntil]
+            properties:
+              projectId:
+                type: integer
+                minimum: 1
+              projectName:
+                type: string
+              cooldownUntil:
+                type: string
+                format: date-time
+                nullable: true
+            additionalProperties: false
         lastSafeError:
           type: string
         lastCheckedAt:

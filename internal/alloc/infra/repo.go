@@ -106,7 +106,23 @@ func microsoftCanonicalDomainExpression(domainColumn string) string {
 }
 
 type Repo struct {
-	db *gorm.DB
+	db                   *gorm.DB
+	gmailVariantCooldown allocapp.GmailVariantCooldownPort
+}
+
+func (r *Repo) SetGmailVariantCooldownPort(port allocapp.GmailVariantCooldownPort) {
+	r.gmailVariantCooldown = port
+}
+
+func (r *Repo) gmailCoolingResourceIDs(ctx context.Context, projectID uint, query *gorm.DB) ([]uint, error) {
+	if r.gmailVariantCooldown == nil {
+		return nil, nil
+	}
+	var resourceIDs []uint
+	if err := query.Session(&gorm.Session{}).Pluck("gr.id", &resourceIDs).Error; err != nil {
+		return nil, fmt.Errorf("list Gmail inventory cooldown candidates: %w", err)
+	}
+	return r.gmailVariantCooldown.CoolingResourceIDs(ctx, projectID, resourceIDs)
 }
 
 func NewRepo(db *gorm.DB) *Repo {
@@ -125,9 +141,15 @@ func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error
 		if r.db.Name() != "mysql" {
 			txOptions = nil
 		}
+		attemptCtx, rollback := platform.WithGormRollback(ctx)
 		err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			return fn(platform.WithGormTx(ctx, tx))
+			return fn(platform.WithGormTx(attemptCtx, tx))
 		}, txOptions)
+		if err != nil {
+			if rollbackErr := rollback(context.WithoutCancel(ctx)); rollbackErr != nil {
+				return errors.Join(err, rollbackErr)
+			}
+		}
 		if err == nil || !isDeadlockError(err) {
 			return err
 		}
@@ -2228,6 +2250,15 @@ WHERE adu.usage_date = ?
 	}
 	if stats.Gmail.Enabled {
 		gmailScope := "gr.for_sale = TRUE AND owner.status = 'active' AND owner.role IN ('supplier', 'admin', 'super_admin')"
+		var cooling []uint
+		if stats.Gmail.DotEnabled || stats.Gmail.PlusEnabled {
+			var err error
+			cooling, err = r.gmailCoolingResourceIDs(ctx, projectID,
+				gmailSourceCandidateQuery(r.dbFor(ctx), projectID, 0, domain.SupplyScopePublic, domain.GmailMailboxPlus))
+			if err != nil {
+				return nil, err
+			}
+		}
 		if err := scan(&stats.Gmail.EligibleResources, `
 SELECT COUNT(*)
 FROM gmail_resources gr
@@ -2262,6 +2293,13 @@ WHERE gr.status IN ('normal', 'available')
 				Capacity int64
 				Used     int64
 			}
+			historyCoolingFilter, resourceCoolingFilter := "", ""
+			dotArgs := []any{projectID}
+			if len(cooling) > 0 {
+				historyCoolingFilter = " AND history_gr.id NOT IN ?"
+				resourceCoolingFilter = " AND gr.id NOT IN ?"
+				dotArgs = append(dotArgs, cooling, cooling)
+			}
 			if err := scan(&dot, `
 SELECT COALESCE(SUM(`+gmailDotCapacityExpression("gr")+`), 0) AS capacity,
        COALESCE((
@@ -2277,19 +2315,32 @@ SELECT COALESCE(SUM(`+gmailDotCapacityExpression("gr")+`), 0) AS capacity,
              AND history_gr.for_sale = TRUE
              AND history_owner.status = 'active'
              AND history_owner.role IN ('supplier', 'admin', 'super_admin')
+			 `+historyCoolingFilter+`
        ), 0) AS used
 FROM gmail_resources gr
 JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
 JOIN users owner ON owner.id = er.owner_user_id
 WHERE gr.status IN ('normal', 'available')
-  AND `+gmailScope, projectID); err != nil {
+  AND `+gmailScope+resourceCoolingFilter, dotArgs...); err != nil {
 				return nil, err
 			}
 			stats.Gmail.DotAvailable = nonNegative(dot.Capacity - dot.Used)
 			stats.Gmail.DotPublicAvailable = stats.Gmail.DotAvailable
 		}
 		if stats.Gmail.PlusEnabled {
-			if stats.Gmail.EligibleResources > 0 {
+			availableResources := stats.Gmail.EligibleResources
+			if len(cooling) > 0 {
+				if err := scan(&availableResources, `
+SELECT COUNT(*)
+FROM gmail_resources gr
+JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
+JOIN users owner ON owner.id = er.owner_user_id
+WHERE gr.status IN ('normal', 'available')
+  AND `+gmailScope+` AND gr.id NOT IN ?`, cooling); err != nil {
+					return nil, err
+				}
+			}
+			if availableResources > 0 {
 				stats.Gmail.PlusAvailable = allocapp.GmailVariantInventory
 			}
 			stats.Gmail.PlusPublicAvailable = stats.Gmail.PlusAvailable
@@ -2805,13 +2856,17 @@ WHERE gr.status IN ('normal', 'available')
 			}
 		case coredomain.ProductTypeGmailVariant:
 			var plusResources int64
-			if err := r.dbFor(ctx).Raw(`
-SELECT COUNT(*)
-FROM gmail_resources gr
-JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'
-WHERE gr.status IN ('normal', 'available')
-  AND gr.for_sale = FALSE
-  AND er.owner_user_id = ?`, buyerUserID).Scan(&plusResources).Error; err != nil {
+			query := r.dbFor(ctx).Table("gmail_resources gr").
+				Joins("JOIN email_resources er ON er.id = gr.id AND er.type = 'gmail'").
+				Where("gr.status IN ('normal', 'available') AND gr.for_sale = FALSE AND er.owner_user_id = ?", buyerUserID)
+			cooling, err := r.gmailCoolingResourceIDs(ctx, projectID, query)
+			if err != nil {
+				return nil, err
+			}
+			if len(cooling) > 0 {
+				query = query.Where("gr.id NOT IN ?", cooling)
+			}
+			if err := query.Count(&plusResources).Error; err != nil {
 				return nil, fmt.Errorf("private Gmail plus inventory: %w", err)
 			}
 			if plusResources > 0 {

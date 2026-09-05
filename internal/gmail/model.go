@@ -126,26 +126,33 @@ type allocationModel struct {
 func (allocationModel) TableName() string { return "gmail_allocations" }
 
 type LocalResourceItem struct {
-	ID                    uint               `json:"id"`
-	Version               uint64             `json:"version"`
-	OwnerUserID           uint               `json:"ownerUserId"`
-	Owner                 LocalResourceOwner `json:"owner"`
-	Email                 string             `json:"email"`
-	BindingEmail          string             `json:"bindingEmail,omitempty"`
-	Status                string             `json:"status"`
-	ForSale               bool               `json:"forSale"`
-	PasswordConfigured    bool               `json:"passwordConfigured"`
-	TwoFactorConfigured   bool               `json:"twoFactorConfigured"`
-	AppPasswordConfigured bool               `json:"appPasswordConfigured"`
-	CredentialRevision    uint64             `json:"credentialRevision"`
-	CredentialUpdatedAt   time.Time          `json:"credentialUpdatedAt"`
-	ValidationFailures    int                `json:"validationFailures"`
-	LastAllocatedAt       *time.Time         `json:"lastAllocatedAt,omitempty"`
-	CooldownUntil         *time.Time         `json:"cooldownUntil"`
-	LastSafeError         string             `json:"lastSafeError,omitempty"`
-	LastCheckedAt         *time.Time         `json:"lastCheckedAt,omitempty"`
-	CreatedAt             time.Time          `json:"createdAt"`
-	UpdatedAt             time.Time          `json:"updatedAt"`
+	ID                    uint                   `json:"id"`
+	Version               uint64                 `json:"version"`
+	OwnerUserID           uint                   `json:"ownerUserId"`
+	Owner                 LocalResourceOwner     `json:"owner"`
+	Email                 string                 `json:"email"`
+	BindingEmail          string                 `json:"bindingEmail,omitempty"`
+	Status                string                 `json:"status"`
+	ForSale               bool                   `json:"forSale"`
+	PasswordConfigured    bool                   `json:"passwordConfigured"`
+	TwoFactorConfigured   bool                   `json:"twoFactorConfigured"`
+	AppPasswordConfigured bool                   `json:"appPasswordConfigured"`
+	CredentialRevision    uint64                 `json:"credentialRevision"`
+	CredentialUpdatedAt   time.Time              `json:"credentialUpdatedAt"`
+	ValidationFailures    int                    `json:"validationFailures"`
+	LastAllocatedAt       *time.Time             `json:"lastAllocatedAt,omitempty"`
+	CooldownUntil         *time.Time             `json:"cooldownUntil"`
+	ProjectCooldowns      []LocalProjectCooldown `json:"projectCooldowns,omitempty"`
+	LastSafeError         string                 `json:"lastSafeError,omitempty"`
+	LastCheckedAt         *time.Time             `json:"lastCheckedAt,omitempty"`
+	CreatedAt             time.Time              `json:"createdAt"`
+	UpdatedAt             time.Time              `json:"updatedAt"`
+}
+
+type LocalProjectCooldown struct {
+	ProjectID     uint       `json:"projectId"`
+	ProjectName   string     `json:"projectName"`
+	CooldownUntil *time.Time `json:"cooldownUntil"`
 }
 
 type LocalResourceOwner struct {

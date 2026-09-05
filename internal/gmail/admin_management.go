@@ -203,7 +203,7 @@ func (s *Service) ApplyAdminLocalResourceBatch(
 			replayed = wasReplayed
 			return err
 		}
-		resourceIDs, err := resolveAdminLocalResourceSelectionTx(ctx, tx, selection)
+		resourceIDs, err := s.resolveAdminLocalResourceSelectionTx(ctx, tx, selection)
 		if err != nil {
 			return err
 		}
@@ -488,7 +488,7 @@ func adminLocalResourceBatchLimit() int {
 	return min(runtimeconfig.Int("admin_resource_bulk_max_ids", adminLocalGmailBatchMax, 1), adminLocalGmailBatchMax)
 }
 
-func resolveAdminLocalResourceSelectionTx(ctx context.Context, tx *gorm.DB, selection AdminLocalResourceSelection) ([]uint, error) {
+func (s *Service) resolveAdminLocalResourceSelectionTx(ctx context.Context, tx *gorm.DB, selection AdminLocalResourceSelection) ([]uint, error) {
 	if selection.Mode == "ids" {
 		return selection.ResourceIDs, nil
 	}
@@ -501,7 +501,17 @@ func resolveAdminLocalResourceSelectionTx(ctx context.Context, tx *gorm.DB, sele
 	var rows []struct {
 		ID uint `gorm:"column:id"`
 	}
-	query := applyLocalResourceListFilter(localResourceAdminQuery(ctx, tx), *selection.Filter, false, false)
+	filter := *selection.Filter
+	if filter.Status == LocalResourceNormal || filter.Status == LocalResourceCooldown {
+		cooldowns, err := s.variantCooldowns(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for resourceID := range cooldowns {
+			filter.coolingResourceIDs = append(filter.coolingResourceIDs, resourceID)
+		}
+	}
+	query := applyLocalResourceListFilter(localResourceAdminQuery(ctx, tx), filter, false, false)
 	if err := query.Select("gr.id").Order("gr.id ASC").Limit(limit + 1).Scan(&rows).Error; err != nil {
 		return nil, err
 	}

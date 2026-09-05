@@ -150,7 +150,8 @@ type HistoricalMicrosoftAliasPort interface {
 }
 
 type GmailVariantCooldownPort interface {
-	StartVariantCooldown(ctx context.Context, resourceID uint) error
+	CoolingResourceIDs(ctx context.Context, projectID uint, resourceIDs []uint) ([]uint, error)
+	StartVariantCooldown(ctx context.Context, resourceID, projectID uint) (bool, error)
 }
 
 type InventoryStats struct {

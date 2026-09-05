@@ -21,13 +21,14 @@ import (
 const localGmailAllocationBucketCount = 2048
 
 type LocalResourceListFilter struct {
-	Search      string     `json:"search,omitempty"`
-	Status      string     `json:"status,omitempty"`
-	ForSale     *bool      `json:"forSale,omitempty"`
-	CreatedFrom *time.Time `json:"createdFrom,omitempty"`
-	CreatedTo   *time.Time `json:"createdTo,omitempty"`
-	Offset      int        `json:"-"`
-	Limit       int        `json:"-"`
+	Search             string     `json:"search,omitempty"`
+	Status             string     `json:"status,omitempty"`
+	ForSale            *bool      `json:"forSale,omitempty"`
+	CreatedFrom        *time.Time `json:"createdFrom,omitempty"`
+	CreatedTo          *time.Time `json:"createdTo,omitempty"`
+	Offset             int        `json:"-"`
+	Limit              int        `json:"-"`
+	coolingResourceIDs []uint
 }
 
 type localResourceAdminRow struct {
@@ -90,6 +91,13 @@ func (s *Service) ListLocalResources(ctx context.Context, filter LocalResourceLi
 	if err != nil {
 		return nil, err
 	}
+	cooldowns, err := s.variantCooldowns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for resourceID := range cooldowns {
+		filter.coolingResourceIDs = append(filter.coolingResourceIDs, resourceID)
+	}
 	db := applyLocalResourceListFilter(localResourceAdminQuery(ctx, s.dbFor(ctx)), filter, false, false)
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
@@ -111,7 +119,7 @@ gr.last_safe_error, gr.last_checked_at, gr.created_at, gr.updated_at`).
 	for i := range rows {
 		items[i] = localResourceItemFromRow(rows[i])
 	}
-	if err := s.enrichVariantCooldowns(ctx, items); err != nil {
+	if err := s.enrichVariantCooldowns(ctx, items, cooldowns); err != nil {
 		return nil, err
 	}
 	facets, err := s.localResourceFacets(ctx, filter)
@@ -142,7 +150,11 @@ gr.last_safe_error, gr.last_checked_at, gr.created_at, gr.updated_at`).
 	}
 	item := localResourceItemFromRow(row)
 	items := []LocalResourceItem{item}
-	if err := s.enrichVariantCooldowns(ctx, items); err != nil {
+	cooldowns, err := s.variantCooldowns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.enrichVariantCooldowns(ctx, items, cooldowns); err != nil {
 		return nil, err
 	}
 	return &items[0], nil
@@ -242,6 +254,12 @@ LOWER(u.nickname) LIKE ? OR CAST(gr.id AS CHAR) LIKE ? OR CAST(er.owner_user_id 
 			db = db.Where("gr.status <> ?", LocalResourceDeleted)
 		case LocalResourceNormal:
 			db = db.Where("gr.status IN (?, ?, ?, ?)", LocalResourceNormal, localResourceRollbackNormal, localResourceRollbackLeased, localResourceRollbackSold)
+			if len(filter.coolingResourceIDs) > 0 {
+				db = db.Where("gr.id NOT IN ?", filter.coolingResourceIDs)
+			}
+		case LocalResourceCooldown:
+			db = db.Where("gr.status IN (?, ?, ?, ?)", LocalResourceNormal, localResourceRollbackNormal, localResourceRollbackLeased, localResourceRollbackSold).
+				Where("gr.id IN ?", filter.coolingResourceIDs)
 		default:
 			db = db.Where("gr.status = ?", filter.Status)
 		}
@@ -309,6 +327,17 @@ func (s *Service) localResourceFacets(ctx context.Context, filter LocalResourceL
 		case LocalResourceDeleted:
 			facets.Deleted = item.Count
 		}
+	}
+	if len(filter.coolingResourceIDs) > 0 {
+		var cooling int64
+		query := applyLocalResourceListFilter(localResourceAdminQuery(ctx, s.dbFor(ctx)), filter, true, false).
+			Where("gr.status IN (?, ?, ?, ?)", LocalResourceNormal, localResourceRollbackNormal, localResourceRollbackLeased, localResourceRollbackSold).
+			Where("gr.id IN ?", filter.coolingResourceIDs)
+		if err := query.Count(&cooling).Error; err != nil {
+			return LocalResourceFacets{}, fmt.Errorf("count cooling Gmail resource facets: %w", err)
+		}
+		facets.Normal = max(0, facets.Normal-cooling)
+		facets.Cooldown += cooling
 	}
 	var saleRows []struct {
 		ForSale bool  `gorm:"column:for_sale"`

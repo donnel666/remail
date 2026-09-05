@@ -46,10 +46,7 @@ func (s *Service) scheduleDispatcher(ctx context.Context) error {
 
 func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Context) {
 	mux.HandleFunc(typeGmailDispatch, func(ctx context.Context, _ *asynq.Task) error {
-		return errors.Join(
-			service.DispatchGmailResourceImports(ctx, 100),
-			service.RestoreExpiredVariantCooldowns(ctx),
-		)
+		return service.DispatchGmailResourceImports(ctx, 100)
 	})
 	mux.HandleFunc(typeGmailValidationDispatcher, func(ctx context.Context, _ *asynq.Task) error {
 		if err := service.DispatchLocalResourceValidations(ctx, localGmailValidationBatchMax); err != nil {

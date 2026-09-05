@@ -270,6 +270,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		gmailMod = gmailapi.NewModule(p.DB, p.Redis, p.Asynq, fileStore)
 		allocMod.UseCase.SetGmailVariantCooldownPort(gmailMod.Service)
+		allocMod.Repo.SetGmailVariantCooldownPort(gmailMod.Service)
 		gmailMod.Service.SetBackgroundExecutionGate(p.BackgroundLoad)
 		gmailMod.Service.SetPickupProxyProvider(proxyMod.ProxyUseCase)
 		gmailMod.Service.SetImportOwnerValidator(func(ctx context.Context, ownerID uint) (bool, error) {

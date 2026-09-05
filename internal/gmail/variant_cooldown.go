@@ -3,149 +3,177 @@ package gmail
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 const localGmailVariantCooldownKeyPrefix = "gmail:variant_cooldown:"
 
-func localGmailVariantCooldownKey(resourceID uint) string {
-	return localGmailVariantCooldownKeyPrefix + strconv.FormatUint(uint64(resourceID), 10)
+func localGmailVariantCooldownKey(resourceID, projectID uint) string {
+	return localGmailVariantCooldownKeyPrefix + strconv.FormatUint(uint64(projectID), 10) + ":" + strconv.FormatUint(uint64(resourceID), 10)
 }
 
-func (s *Service) StartVariantCooldown(ctx context.Context, resourceID uint) error {
+// The caller holds the allocation resource lock and shares the order rollback scope.
+func (s *Service) StartVariantCooldown(ctx context.Context, resourceID, projectID uint) (bool, error) {
+	if resourceID == 0 || projectID == 0 {
+		return false, ErrInvalidLocalResource
+	}
 	duration := runtimeconfig.GmailVariantCooldown()
 	if duration <= 0 {
-		return nil
+		return true, nil
 	}
-	if s == nil || s.db == nil || s.redis == nil || resourceID == 0 {
-		return ErrLocalCooldownDependency
+	if s == nil || s.redis == nil || !platform.HasGormRollback(ctx) {
+		return false, ErrLocalCooldownDependency
 	}
-	if err := s.redis.Set(ctx, localGmailVariantCooldownKey(resourceID), "1", duration).Err(); err != nil {
-		return fmt.Errorf("set Gmail variant cooldown TTL: %w", err)
-	}
-	result := s.dbFor(ctx).Model(&localResourceModel{}).
-		Where("id = ? AND status IN ?", resourceID, []string{LocalResourceNormal, localResourceRollbackNormal}).
-		Updates(map[string]any{"status": LocalResourceCooldown, "updated_at": s.now().UTC()})
-	if result.Error != nil {
-		return fmt.Errorf("mark Gmail resource cooling down: %w", result.Error)
-	}
-	if result.RowsAffected != 1 {
-		return ErrInvalidLocalResource
-	}
-	return nil
-}
-
-func (s *Service) RestoreExpiredVariantCooldowns(ctx context.Context) error {
-	if s == nil || s.db == nil || s.redis == nil {
-		return nil
-	}
-	var resourceIDs []uint
-	if err := s.dbFor(ctx).Model(&localResourceModel{}).
-		Where("status = ?", LocalResourceCooldown).Order("id").Pluck("id", &resourceIDs).Error; err != nil {
-		return fmt.Errorf("list cooling Gmail resources: %w", err)
-	}
-	if len(resourceIDs) == 0 {
-		return nil
-	}
-	// ponytail: a pipelined scan is enough for the current Gmail pool; move due
-	// IDs to a Redis sorted set only if active cooldown cardinality becomes large.
-	ttls, err := s.variantCooldownTTLs(ctx, resourceIDs)
-	if err != nil {
-		return err
-	}
-	expired := make([]uint, 0, len(resourceIDs))
-	for _, resourceID := range resourceIDs {
-		if ttls[resourceID] <= 0 {
-			expired = append(expired, resourceID)
-		}
-	}
-	for _, resourceID := range expired {
-		if err := s.restoreExpiredVariantCooldown(ctx, resourceID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *Service) restoreExpiredVariantCooldown(ctx context.Context, resourceID uint) error {
-	return s.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
-		var resource localResourceModel
-		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").
-			Where("id = ? AND status = ?", resourceID, LocalResourceCooldown).Limit(1).Find(&resource)
-		if result.Error != nil {
-			return fmt.Errorf("lock cooling Gmail resource: %w", result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return nil
-		}
-		ttl, err := s.redis.PTTL(ctx, localGmailVariantCooldownKey(resourceID)).Result()
-		if err != nil {
-			return fmt.Errorf("recheck Gmail variant cooldown TTL: %w", err)
-		}
-		if ttl > 0 {
-			return nil
-		}
-		if err := s.redis.Del(ctx, localGmailVariantCooldownKey(resourceID)).Err(); err != nil {
-			return fmt.Errorf("clear expired Gmail variant cooldown: %w", err)
-		}
-		if err := tx.Model(&localResourceModel{}).Where("id = ? AND status = ?", resourceID, LocalResourceCooldown).
-			Updates(map[string]any{"status": localResourceRollbackNormal, "updated_at": s.now().UTC()}).Error; err != nil {
-			return fmt.Errorf("restore cooled Gmail resource: %w", err)
-		}
-		return nil
+	key := localGmailVariantCooldownKey(resourceID, projectID)
+	token := platform.NewUUIDV7String()
+	platform.RegisterGormRollback(ctx, func(rollbackCtx context.Context) error {
+		cleanupCtx, cancel := context.WithTimeout(rollbackCtx, 2*time.Second)
+		defer cancel()
+		return gmailVariantCooldownReleaseScript.Run(cleanupCtx, s.redis, []string{key}, token).Err()
 	})
+	started, err := s.redis.SetNX(ctx, key, token, duration).Result()
+	if err != nil {
+		return false, fmt.Errorf("set Gmail project variant cooldown TTL: %w", err)
+	}
+	return started, nil
 }
 
-func (s *Service) variantCooldownTTLs(ctx context.Context, resourceIDs []uint) (map[uint]time.Duration, error) {
+var gmailVariantCooldownReleaseScript = redis.NewScript(
+	"if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0",
+)
+
+// CoolingResourceIDs checks only the supplied candidates, never the Redis keyspace.
+func (s *Service) CoolingResourceIDs(ctx context.Context, projectID uint, resourceIDs []uint) ([]uint, error) {
+	if projectID == 0 {
+		return nil, ErrInvalidLocalResource
+	}
+	if runtimeconfig.GmailVariantCooldown() <= 0 || len(resourceIDs) == 0 {
+		return nil, nil
+	}
+	if s == nil || s.redis == nil {
+		return nil, ErrLocalCooldownDependency
+	}
 	commands := make(map[uint]*redis.DurationCmd, len(resourceIDs))
 	_, err := s.redis.Pipelined(ctx, func(pipe redis.Pipeliner) error {
 		for _, resourceID := range resourceIDs {
-			commands[resourceID] = pipe.PTTL(ctx, localGmailVariantCooldownKey(resourceID))
+			if resourceID == 0 {
+				return ErrInvalidLocalResource
+			}
+			if _, exists := commands[resourceID]; !exists {
+				commands[resourceID] = pipe.PTTL(ctx, localGmailVariantCooldownKey(resourceID, projectID))
+			}
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("read Gmail variant cooldown TTLs: %w", err)
+		return nil, fmt.Errorf("read Gmail candidate variant cooldown TTLs: %w", err)
 	}
-	ttls := make(map[uint]time.Duration, len(commands))
+	ids := make([]uint, 0, len(commands))
 	for resourceID, command := range commands {
-		ttl, err := command.Result()
-		if err != nil {
-			return nil, fmt.Errorf("read Gmail resource %d cooldown TTL: %w", resourceID, err)
+		if command.Val() > 0 {
+			ids = append(ids, resourceID)
 		}
-		ttls[resourceID] = ttl
 	}
-	return ttls, nil
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids, nil
 }
 
-func (s *Service) enrichVariantCooldowns(ctx context.Context, items []LocalResourceItem) error {
-	if s == nil || s.redis == nil {
-		return nil
+// variantCooldowns reads all projects only for administrator filtering and display.
+func (s *Service) variantCooldowns(ctx context.Context) (map[uint][]LocalProjectCooldown, error) {
+	result := make(map[uint][]LocalProjectCooldown)
+	if runtimeconfig.GmailVariantCooldown() <= 0 || s == nil || s.redis == nil {
+		return result, nil
 	}
-	resourceIDs := make([]uint, 0, len(items))
+	pattern := localGmailVariantCooldownKeyPrefix + "*"
+	// ponytail: admin-wide filtering still scans Redis; add a cooldown index if
+	// measured admin latency needs it. Allocation and inventory use exact keys.
+	seen := make(map[string]bool)
+	var cursor uint64
+	for {
+		keys, next, err := s.redis.Scan(ctx, cursor, pattern, 200).Result()
+		if err != nil {
+			return nil, fmt.Errorf("list Gmail project variant cooldowns: %w", err)
+		}
+		commands := make(map[string]*redis.DurationCmd, len(keys))
+		observedAt := s.now().UTC()
+		_, err = s.redis.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+			for _, key := range keys {
+				if !seen[key] {
+					seen[key] = true
+					commands[key] = pipe.PTTL(ctx, key)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("read Gmail project variant cooldown TTLs: %w", err)
+		}
+		for key, command := range commands {
+			project, resource, ok := strings.Cut(strings.TrimPrefix(key, localGmailVariantCooldownKeyPrefix), ":")
+			if !ok {
+				continue // The retired global key has no project component.
+			}
+			projectID, projectErr := strconv.ParseUint(project, 10, strconv.IntSize)
+			resourceID, resourceErr := strconv.ParseUint(resource, 10, strconv.IntSize)
+			if projectErr != nil || resourceErr != nil || projectID == 0 || resourceID == 0 {
+				continue
+			}
+			if ttl := command.Val(); ttl > 0 {
+				until := observedAt.Add(ttl)
+				result[uint(resourceID)] = append(result[uint(resourceID)], LocalProjectCooldown{
+					ProjectID: uint(projectID), CooldownUntil: &until,
+				})
+			}
+		}
+		if next == 0 {
+			return result, nil
+		}
+		cursor = next
+	}
+}
+
+func (s *Service) enrichVariantCooldowns(ctx context.Context, items []LocalResourceItem, cooldowns map[uint][]LocalProjectCooldown) error {
+	projectIDs := make([]uint, 0)
 	for i := range items {
-		if items[i].Status == LocalResourceCooldown {
-			resourceIDs = append(resourceIDs, items[i].ID)
+		if items[i].Status != LocalResourceNormal || len(cooldowns[items[i].ID]) == 0 {
+			continue
+		}
+		items[i].Status = LocalResourceCooldown
+		items[i].ProjectCooldowns = append([]LocalProjectCooldown(nil), cooldowns[items[i].ID]...)
+		sort.Slice(items[i].ProjectCooldowns, func(left, right int) bool {
+			return items[i].ProjectCooldowns[left].ProjectID < items[i].ProjectCooldowns[right].ProjectID
+		})
+		for _, cooldown := range items[i].ProjectCooldowns {
+			projectIDs = append(projectIDs, cooldown.ProjectID)
+			if items[i].CooldownUntil == nil || cooldown.CooldownUntil.After(*items[i].CooldownUntil) {
+				items[i].CooldownUntil = cooldown.CooldownUntil
+			}
 		}
 	}
-	if len(resourceIDs) == 0 {
+	if len(projectIDs) == 0 {
 		return nil
 	}
-	ttls, err := s.variantCooldownTTLs(ctx, resourceIDs)
-	if err != nil {
-		return err
+	var projects []struct {
+		ID   uint
+		Name string
 	}
-	now := s.now().UTC()
+	if err := s.dbFor(ctx).Table("projects").Select("id, name").Where("id IN ?", projectIDs).Scan(&projects).Error; err != nil {
+		return fmt.Errorf("load cooling Gmail project names: %w", err)
+	}
+	names := make(map[uint]string, len(projects))
+	for _, project := range projects {
+		names[project.ID] = project.Name
+	}
 	for i := range items {
-		if ttl := ttls[items[i].ID]; items[i].Status == LocalResourceCooldown && ttl > 0 {
-			until := now.Add(ttl)
-			items[i].CooldownUntil = &until
+		for j := range items[i].ProjectCooldowns {
+			items[i].ProjectCooldowns[j].ProjectName = names[items[i].ProjectCooldowns[j].ProjectID]
 		}
 	}
 	return nil
