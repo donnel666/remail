@@ -952,11 +952,13 @@ export interface paths {
         };
         /**
          * Verify the current trusted bot event context
-         * @description Returns only an authorization acknowledgement. In a private scene, send the trusted subject
+         * @description Returns an authorization acknowledgement and the trusted sender's bound/accountAvailable
+         *     flags for plugin access control only; never place these flags in group replies or LLM inputs.
+         *     In a private scene, send the trusted subject
          *     and `X-Bot-Scene: private` without a group header. In a group scene, `X-Bot-Group` is required
          *     and must match one of the authenticated Bot System Key's `allowedGroupIds`. Missing or invalid
          *     keys, subjects, scenes, group ids, and non-whitelisted groups all receive the same 401 response;
-         *     this endpoint never returns platform scope, namespace, binding, or account information.
+         *     This endpoint never returns platform scope, namespace, user ID, email, or account profile.
          */
         get: operations["getBotContext"];
         put?: never;
@@ -1084,6 +1086,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bot/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the current bound user's private order summaries
+         * @description Private conversations only. Identity is resolved from the trusted bot binding; user ID, scope overrides and email searches are not accepted. Returns recent orders without order numbers, emails, payment amounts, credentials or mail contents. Order status does not prove mail receipt or project mismatch.
+         */
+        get: operations["getBotOrders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/bot/recharges/config": {
         parameters: {
             query?: never;
@@ -1098,6 +1120,26 @@ export interface paths {
         get: operations["getBotRechargeConfig"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bot/recharges/quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Quote point credit and the selected method's payment amount
+         * @description Read-only calculation using the current recharge configuration. Accepts only points and an optional paymentMethod; no query parameters, user IDs, subjects or scope overrides are accepted. It never creates a recharge, contacts a payment gateway, deducts funds or credits a wallet. The point fields use system points; paymentAmount uses exactly paymentCurrency (CNY or USDT, never USD). A quote does not prove payment or credit; the eventual payment page supplies the final transfer amount, network and address.
+         */
+        post: operations["postBotRechargeQuote"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2612,8 +2654,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Quote a recharge entirely in points
-         * @description Returns the point principal, bonus, fee, and credited total.
+         * Quote point credit and a payment amount in the selected currency
+         * @description Returns the point principal, bonus, fee, and credited total separately from paymentAmount and its CNY or USDT paymentCurrency. This is a read-only calculation and does not create or pay a recharge.
          */
         post: operations["postRechargeQuote"];
         delete?: never;
@@ -6269,6 +6311,10 @@ export interface components {
             enabled: boolean;
             /** @description Enabled payment method identifiers. */
             paymentMethods: ("alipay" | "epusdt_usdt_tron")[];
+            /** @description Enabled payment method identifier to its quoted payment currency. System balances and product prices use points; CNY and USDT are payment currencies, and USDT is not USD. Omitted when no methods are enabled or by older servers. */
+            paymentCurrencies?: {
+                [key: string]: "CNY" | "USDT";
+            };
             minPoints: components["schemas"]["NonNegativeLedgerAmount"];
             feeRate: components["schemas"]["NonNegativeLedgerAmount"];
             feeCapPoints: components["schemas"]["NonNegativeLedgerAmount"];
@@ -7085,6 +7131,7 @@ export interface components {
         };
         SystemAnnouncementsResponse: {
             announcements: components["schemas"]["SystemAnnouncement"][];
+            truncated?: boolean;
         };
         SystemNoticeResponse: {
             /** @description Plain-text system notice, maximum 1 MiB when UTF-8 encoded. */
@@ -7101,6 +7148,7 @@ export interface components {
         SystemFAQsResponse: {
             enabled: boolean;
             items: components["schemas"]["SystemFAQ"][];
+            truncated?: boolean;
         };
         CustomerServiceResponse: {
             qqGroupNumber: string;
@@ -7170,6 +7218,10 @@ export interface components {
              * @enum {boolean}
              */
             authorized: true;
+            /** @description Trusted sender binding state, for plugin access control only; never expose it in group replies or LLM inputs. */
+            bound: boolean;
+            /** @description True only for an active bound account. No user ID, email or account profile is returned. */
+            accountAvailable: boolean;
         };
         BotProfileResponse: {
             /** @description Whether the trusted platform sender has a ReMail binding record. */
@@ -7236,6 +7288,33 @@ export interface components {
             /** Format: date-time */
             settledAt: string | null;
             items: components["schemas"]["BotLeaderboardRewardItem"][];
+        };
+        BotOrderSummary: {
+            projectId: number;
+            projectName: string;
+            productType: string;
+            /** @enum {string} */
+            serviceMode: "code" | "purchase";
+            /** @enum {string} */
+            status: "pending_payment" | "paid" | "active" | "completed" | "refunded" | "failed" | "closed";
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            activatedAt?: string;
+            /** Format: date-time */
+            receiveUntil?: string;
+            /** Format: date-time */
+            afterSaleUntil?: string;
+        };
+        BotOrderListResponse: {
+            available: boolean;
+            bindingRequired?: boolean;
+            accountUnavailable?: boolean;
+            items: components["schemas"]["BotOrderSummary"][];
+            total: number;
+            offset: number;
+            limit: number;
+            truncated: boolean;
         };
         BotProjectListResponse: {
             items: components["schemas"]["BotProjectItem"][];
@@ -10294,7 +10373,9 @@ export interface operations {
     };
     getSystemAnnouncements: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10310,6 +10391,7 @@ export interface operations {
                     "application/json": components["schemas"]["SystemAnnouncementsResponse"];
                 };
             };
+            400: components["responses"]["BadRequest"];
         };
     };
     getSystemNotice: {
@@ -10334,7 +10416,9 @@ export interface operations {
     };
     getSystemFAQs: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10350,6 +10434,7 @@ export interface operations {
                     "application/json": components["schemas"]["SystemFAQsResponse"];
                 };
             };
+            400: components["responses"]["BadRequest"];
         };
     };
     getCustomerService: {
@@ -13304,6 +13389,41 @@ export interface operations {
             };
         };
     };
+    getBotOrders: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header: {
+                /** @description Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument. */
+                "X-Bot-Channel": components["parameters"]["BotChannel"];
+                /** @description Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument. */
+                "X-Bot-Subject": components["parameters"]["BotSubject"];
+                /** @description Private scenes may use the current bound account and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group; binding remains private-only, while diagnosis is available for the current sender's own bound account. */
+                "X-Bot-Scene": components["parameters"]["BotScene"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Owner-scoped order summaries, or binding/account unavailability */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotOrderListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     getBotRechargeConfig: {
         parameters: {
             query?: never;
@@ -13332,6 +13452,53 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postBotRechargeQuote: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument. */
+                "X-Bot-Channel": components["parameters"]["BotChannel"];
+                /** @description Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument. */
+                "X-Bot-Subject": components["parameters"]["BotSubject"];
+                /** @description Private scenes may use the current bound account and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group; binding remains private-only, while diagnosis is available for the current sender's own bound account. */
+                "X-Bot-Scene": components["parameters"]["BotScene"];
+                /** @description Trusted platform group id supplied by the bot adapter. QQ values are positive decimal group numbers and Telegram values are non-zero decimal Chat IDs (normally negative). Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument. */
+                "X-Bot-Group"?: components["parameters"]["BotGroup"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description One JSON object, at most 4 KiB. */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RechargeQuoteRequest"];
+            };
+        };
+        responses: {
+            /** @description Point principal, bonus, fee and credit, with a separately denominated payment quote */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RechargeQuoteResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Invalid points or payment method, or payment below the configured minimum */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -19098,7 +19265,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Point quote */
+            /** @description Point credit and payment quote */
             200: {
                 headers: {
                     [name: string]: unknown;

@@ -11,6 +11,7 @@ import (
 	iamapi "github.com/donnel666/remail/internal/iam/api"
 	mailmatchapi "github.com/donnel666/remail/internal/mailmatch/api"
 	settingsapp "github.com/donnel666/remail/internal/systemsettings/app"
+	tradeapi "github.com/donnel666/remail/internal/trade/api"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 )
@@ -30,6 +31,7 @@ func registerBotRoutes(
 	mailmatchMod *mailmatchapi.Module,
 	dashboardMod *dashboardapi.Module,
 	billingMod *billingapi.BillingModule,
+	tradeMod *tradeapi.Module,
 	rdb redis.UniversalClient,
 	eventSources ...botWebSocketEventSource,
 ) {
@@ -45,8 +47,15 @@ func registerBotRoutes(
 	contextReads := bot.Group("")
 	contextReads.Use(middleware.BotIdentityRequired())
 	contextReads.Use(middleware.RateLimitPerBotSubject(rdb, "context_read", botSubjectReadsPerMinute, 60))
-	contextReads.GET("/context", getBotContext)
+	contextReads.GET("/context", func(c *gin.Context) { getBotContext(c, botDiagnosisUserResolver(iamMod)) })
 	contextReads.GET("/profile", func(c *gin.Context) { getBotProfile(c, iamMod, billingMod) })
+	var orderList botOrderList
+	if tradeMod != nil && tradeMod.UseCase != nil {
+		orderList = tradeMod.UseCase.ListOrders
+	}
+	contextReads.GET("/orders", middleware.BotPrivateRequired(), func(c *gin.Context) {
+		getBotOrders(c, botDiagnosisUserResolver(iamMod), orderList)
+	})
 
 	iamapi.RegisterBotBindingRoutes(bot, iamMod, rdb)
 	resolveUser := botUserResolver(iamMod)
@@ -95,8 +104,15 @@ func botDiagnosisUserResolver(iamMod *iamapi.IAMModule) mailmatchapi.BotUserIDRe
 	}
 }
 
-func getBotContext(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"authorized": true})
+func getBotContext(c *gin.Context, resolve mailmatchapi.BotUserIDResolver) {
+	user, ok := resolve(c)
+	if !ok || c.IsAborted() || c.Writer.Written() {
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"authorized": true, "bound": user.Bound,
+		"accountAvailable": user.Bound && user.Available && user.UserID > 0,
+	})
 }
 
 func botUserResolver(iamMod *iamapi.IAMModule) coreapi.BotProjectUserResolver {

@@ -166,7 +166,46 @@ func TestSystemAnnouncementsArePublic(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, response.Code)
 	require.Equal(t, "no-store", response.Header().Get("Cache-Control"))
-	require.JSONEq(t, `{"announcements":[{"id":1,"title":"Notice","content":"Hello","type":"default","startTime":"","endTime":"","enabled":true}]}`, response.Body.String())
+	require.JSONEq(t, `{"announcements":[{"id":1,"title":"Notice","content":"Hello","type":"default","startTime":"","endTime":"","enabled":true}],"truncated":false}`, response.Body.String())
+}
+
+func TestSystemAnnouncementsBoundedPublicPage(t *testing.T) {
+	items := make([]runtimeconfig.Announcement, 100)
+	for i := range items {
+		items[i] = runtimeconfig.Announcement{ID: int64(i + 1), Title: "Published", Content: "Public policy", Type: "default", Enabled: true}
+	}
+	items[97].Enabled = false
+	items[98].StartTime = "2999-01-01T00:00:00Z"
+	items[99].EndTime = "2000-01-01T00:00:00Z"
+	encoded, err := json.Marshal(items)
+	require.NoError(t, err)
+	runtimeconfig.Replace([]settingsdomain.Setting{{Key: "announcement_enabled", Value: "true"}, {Key: "announcements", Value: string(encoded)}})
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
+	r := testRouter(&fakeRepository{items: map[string]settingsdomain.Setting{}})
+	for _, tc := range []struct {
+		query     string
+		count     int
+		truncated bool
+	}{{"", 20, true}, {"?limit=1", 1, true}, {"?limit=100", 97, false}} {
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/announcements"+tc.query, nil))
+		require.Equal(t, http.StatusOK, response.Code)
+		var page struct {
+			Announcements []runtimeconfig.Announcement `json:"announcements"`
+			Truncated     bool                         `json:"truncated"`
+		}
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
+		require.Len(t, page.Announcements, tc.count)
+		require.Equal(t, tc.truncated, page.Truncated)
+		for _, item := range page.Announcements {
+			require.LessOrEqual(t, item.ID, int64(97), "unpublished, future and expired announcements must stay hidden")
+		}
+	}
+	for _, query := range []string{"limit=0", "limit=101", "limit=abc", "limit=1&limit=100"} {
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/announcements?"+query, nil))
+		require.Equal(t, http.StatusBadRequest, response.Code)
+	}
 }
 
 func TestSystemNoticeIsPublic(t *testing.T) {
@@ -195,7 +234,34 @@ func TestSystemFAQsArePublic(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, response.Code)
 	require.Equal(t, "no-store", response.Header().Get("Cache-Control"))
-	require.JSONEq(t, `{"enabled":true,"items":[{"id":1,"question":"Question","answer":"Answer","weight":2}]}`, response.Body.String())
+	require.JSONEq(t, `{"enabled":true,"items":[{"id":1,"question":"Question","answer":"Answer","weight":2}],"truncated":false}`, response.Body.String())
+}
+
+func TestSystemFAQsBoundedPage(t *testing.T) {
+	items := make([]runtimeconfig.FAQ, 101)
+	for i := range items {
+		items[i] = runtimeconfig.FAQ{ID: int64(i + 1), Question: "Question", Answer: "Answer"}
+	}
+	encoded, err := json.Marshal(items)
+	require.NoError(t, err)
+	runtimeconfig.Replace([]settingsdomain.Setting{{Key: "faq_enabled", Value: "true"}, {Key: "faq_list", Value: string(encoded)}})
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
+	r := testRouter(&fakeRepository{items: map[string]settingsdomain.Setting{}})
+	response := httptest.NewRecorder()
+	r.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/faqs?limit=100", nil))
+	require.Equal(t, http.StatusOK, response.Code)
+	var page struct {
+		Items     []runtimeconfig.FAQ `json:"items"`
+		Truncated bool                `json:"truncated"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
+	require.Len(t, page.Items, 100)
+	require.True(t, page.Truncated)
+	for _, query := range []string{"limit=0", "limit=101", "limit=abc", "limit=1&limit=100"} {
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/faqs?"+query, nil))
+		require.Equal(t, http.StatusBadRequest, response.Code)
+	}
 }
 
 func TestCustomerServiceSettingsArePublic(t *testing.T) {

@@ -366,6 +366,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 			mailmatchMod,
 			dashboardMod,
 			billingMod,
+			tradeMod,
 			p.Redis,
 			newBotWebSocketDBEventSource(p.DB),
 		)

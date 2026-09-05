@@ -95,6 +95,24 @@
     "hint": "每项填写一个域名，例如 remail.aishop6.com；无需填写协议或通配符。",
     "default": []
   },
+  "site_announcements_context_enabled": {
+    "type": "bool",
+    "description": "网站公告弱背景",
+    "hint": "默认每轮获取网站可见的公告和通知，只作弱参考；不能覆盖当前项目、价格、库存、支付或订单事实。",
+    "default": true
+  },
+  "group_context_enabled": {
+    "type": "bool",
+    "description": "群公告和精华弱背景",
+    "hint": "默认读取当前已授权群的公告和精华安全文字。QQ 支持公告与精华；Telegram 仅支持群简介和最近置顶。身份、凭证、邮件及媒体内容不会送给模型。",
+    "default": true
+  },
+  "weak_context_max_age_days": {
+    "type": "int",
+    "description": "公告和群资料时间窗口（天）",
+    "hint": "默认 0：不按年龄排除，旧资料和时间未知的安全文本也进入弱背景。正数时只载入窗口内有时间依据的资料；筛选不会把弱资料变成强事实。网站没有发布时间时仅以标明的生效起点筛选，群精华时间是加精时间，不是原消息时间。",
+    "default": 0
+  },
   "welcome_enabled": {
     "type": "bool",
     "description": "新人欢迎",

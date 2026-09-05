@@ -266,6 +266,8 @@ func TestAllowedBotWebSocketRequestRejectsArbitraryRoutes(t *testing.T) {
 		{http.MethodGet, "/v1/bot/ws"},
 		{http.MethodPost, "/v1/bot/projects/1"},
 		{http.MethodGet, "/v1/bot/projects/1/anything"},
+		{http.MethodPost, "/v1/bot/recharges"},
+		{http.MethodPost, "/v1/recharges"},
 	} {
 		if allowedBotWebSocketRequest(test.method, test.path) {
 			t.Fatalf("unexpectedly allowed %s %s", test.method, test.path)
@@ -282,6 +284,9 @@ func TestAllowedBotWebSocketRequestRejectsArbitraryRoutes(t *testing.T) {
 	}
 	if !allowedBotWebSocketRequest(http.MethodGet, "/v1/bot/recharges/config") {
 		t.Fatal("bot recharge config route was rejected")
+	}
+	if !allowedBotWebSocketRequest(http.MethodPost, "/v1/bot/recharges/quote") {
+		t.Fatal("bot recharge quote route was rejected")
 	}
 	recorder := newBotWebSocketResponseRecorder()
 	payload := make([]byte, botWebSocketMaxResponseBytes+1)
@@ -316,7 +321,7 @@ func TestBotWebSocketReusesRegisteredBotMiddleware(t *testing.T) {
 			Platform: "qq", SubjectNamespace: "qq:main", AllowedGroupIDs: []string{"10001"},
 		}, nil
 	})
-	registerBotRoutes(router.Group("/v1"), router, auth, nil, nil, nil, nil, nil, rdb)
+	registerBotRoutes(router.Group("/v1"), router, auth, nil, nil, nil, nil, nil, nil, rdb)
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 	conn := dialBotWebSocket(t, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/bot/ws")
@@ -330,11 +335,11 @@ func TestBotWebSocketReusesRegisteredBotMiddleware(t *testing.T) {
 		t.Fatalf("send request: %v", err)
 	}
 	response := receiveBotWebSocketFrame(t, conn)
-	if response["type"] != "response" || response["status"] != float64(http.StatusOK) {
+	if response["type"] != "response" || response["status"] != float64(http.StatusServiceUnavailable) {
 		t.Fatalf("unexpected middleware response: %v", response)
 	}
 	body, ok := response["body"].(map[string]any)
-	if !ok || body["authorized"] != true || len(body) != 1 {
+	if !ok || body["authorized"] != nil || body["message"] != "Service is temporarily unavailable." {
 		t.Fatalf("unsafe context response: %v", response)
 	}
 

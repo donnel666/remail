@@ -1,6 +1,10 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -31,7 +35,36 @@ type BotLeaderboardRewardsResponse struct {
 func RegisterBotRoutes(rg *gin.RouterGroup, mod *BillingModule) {
 	h := &BillingHandler{module: mod}
 	rg.GET("/recharges/config", h.GetRechargeConfig)
+	rg.POST("/recharges/quote", h.PostBotRechargeQuote)
 	rg.GET("/rankings/rewards/latest", h.GetBotLatestLeaderboardRewards)
+}
+
+// Only the two quote inputs are accepted; no user, scope or identity overrides.
+// The existing quote handler owns validation and all pricing calculations.
+func (h *BillingHandler) PostBotRechargeQuote(c *gin.Context) {
+	invalid := errors.New("only points and paymentMethod are accepted in one bounded JSON object")
+	if c.Request.URL.RawQuery != "" {
+		writeInvalidBody(c, invalid)
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxRechargeRequestBytes))
+	if err != nil {
+		writeInvalidBody(c, invalid)
+		return
+	}
+	var request RechargeQuoteRequest
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeInvalidBody(c, invalid)
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeInvalidBody(c, invalid)
+		return
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	h.PostRechargeQuote(c)
 }
 
 func (h *BillingHandler) GetBotLatestLeaderboardRewards(c *gin.Context) {

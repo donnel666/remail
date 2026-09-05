@@ -588,6 +588,18 @@ func availableRechargePaymentMethods(config RechargeConfig) []string {
 	return methods
 }
 
+// RechargePaymentCurrency is shared by quotes and public method metadata.
+func RechargePaymentCurrency(method string) string {
+	switch method {
+	case domain.RechargePaymentMethodAlipay:
+		return "CNY"
+	case domain.RechargePaymentMethodEpusdtUSDTTron:
+		return "USDT"
+	default:
+		return ""
+	}
+}
+
 func defaultRechargePaymentMethod(config RechargeConfig) string {
 	if method, ok := domain.NormalizeRechargePaymentMethod(config.PaymentMethod); ok && rechargePaymentMethodAvailable(config, method) {
 		return method
@@ -650,14 +662,13 @@ func rechargeAmounts(config RechargeConfig, rawPoints string) (*RechargeQuoteRes
 		}
 	}
 	fee := decimal.Zero
-	paymentCurrency := "CNY"
+	paymentCurrency := RechargePaymentCurrency(method)
 	var payment decimal.Decimal
 	if method == domain.RechargePaymentMethodEpusdtUSDTTron {
 		pointsPerUSDT, rateErr := domain.ParseMoney(config.EpusdtPointsPerUSDT)
 		if rateErr != nil || !pointsPerUSDT.IsPositive() {
 			return nil, "", domain.ErrRechargeConfigUnavailable
 		}
-		paymentCurrency = "USDT"
 		payment = points.Div(pointsPerUSDT).RoundCeil(2)
 	} else {
 		rate, rateErr := domain.ParseMoney(config.FeeRate)

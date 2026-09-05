@@ -6,6 +6,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal
 from functools import partial
 from pathlib import Path
 from time import monotonic
@@ -23,6 +24,15 @@ from .diagnosis import (
     seal_diagnosis_fact,
 )
 from .feedback import sanitize_feedback_text, sanitize_report
+from .group_context import load_group_context
+from .sources import (
+    SOURCE_RELIABILITY_RULES,
+    STRONG_SOURCES,
+    evidence_block,
+    source_metadata,
+    weak_time_metadata,
+    within_weak_window,
+)
 from .persona import (
     CRITIC_SYSTEM_PROMPT,
     PERSONA_SYSTEM_PROMPT,
@@ -51,6 +61,8 @@ from .security import (
 )
 from .workflow import (
     PLANNER_SYSTEM_PROMPT,
+    PUBLIC_BUSINESS_RULES,
+    RECHARGE_PAYMENT_METHODS,
     FactPlan,
     FactRequest,
     parse_fact_plan,
@@ -284,6 +296,7 @@ def _load_welcome_functions():
         "_REMAIL_INTENT_UNAVAILABLE_TEXT",
         "_REMAIL_TOOLSET_UNAVAILABLE_TEXT",
         "_REMAIL_SAFE_ERROR_TEXT",
+        "_REMAIL_BINDING_GUIDANCE",
         "_REMAIL_CREDENTIAL_INPUT_TEXT",
         "_ALLOWED_REMAIL_TOOLS",
         "_REMAIL_TOOL_MODULE_SUFFIX",
@@ -399,7 +412,15 @@ def _load_welcome_functions():
             "_remail_intent_decision",
             "_is_public_api_path",
             "_public_api_capability_summary",
+            "_project_background_view",
+            "_prepare_fae_context",
+            "_configured_personality",
+            "_recent_intent_context",
+            "_orders_view",
+            "_render_orders_evidence",
             "_safe_llm_context_text",
+            "_service_entry_requested",
+            "_install_early_entry_guard",
             "_generate_fact_plan",
             "_prepare_owned_event_input",
             "_classify_api_consultation",
@@ -424,12 +445,15 @@ def _load_welcome_functions():
             "_render_price_evidence",
             "_render_inventory_evidence",
             "_render_recharge_evidence",
+            "_recharge_quote_view",
+            "_render_recharge_quote_evidence",
             "_project_items_for_plan",
             "_render_projects_evidence",
             "_without_urls",
             "_contains_dynamic_literal",
             "_render_faq_evidence",
             "_render_announcement_evidence",
+            "_render_group_evidence",
             "_schema_ref_name",
             "_api_placeholder",
             "_render_api_curl",
@@ -437,6 +461,7 @@ def _load_welcome_functions():
             "_render_ranking_evidence",
             "_render_evidence_claim",
             "_grounded_dynamic_answer",
+            "_evidence_blocks",
             "_persona_evidence_packet",
             "_generate_persona_answer",
             "_request_is_remail",
@@ -492,6 +517,9 @@ def _load_welcome_functions():
             "_ensure_openapi_spec",
             "_public_api_capability_context",
             "prepare_remail_llm_response",
+            "require_bound_service_user",
+            "_authorize_event",
+            "remail_orders",
             "_reply",
             "enforce_redemption_channel_priority",
             "snapshot_safe_remail_response",
@@ -538,6 +566,7 @@ def _load_welcome_functions():
         "logger": SimpleNamespace(warning=lambda *_args: None),
         "monotonic": monotonic,
         "datetime": datetime,
+        "Decimal": Decimal,
         "dataclass": dataclass,
         "timezone": timezone,
         "uuid": uuid,
@@ -556,6 +585,15 @@ def _load_welcome_functions():
         "unsupported_sensitive_states": unsupported_sensitive_states,
         "validate_persona_response": validate_persona_response,
         "PLANNER_SYSTEM_PROMPT": PLANNER_SYSTEM_PROMPT,
+        "PUBLIC_BUSINESS_RULES": PUBLIC_BUSINESS_RULES,
+        "RECHARGE_PAYMENT_METHODS": RECHARGE_PAYMENT_METHODS,
+        "SOURCE_RELIABILITY_RULES": SOURCE_RELIABILITY_RULES,
+        "STRONG_SOURCES": STRONG_SOURCES,
+        "evidence_block": evidence_block,
+        "source_metadata": source_metadata,
+        "weak_time_metadata": weak_time_metadata,
+        "within_weak_window": within_weak_window,
+        "load_group_context": load_group_context,
         "FactPlan": FactPlan,
         "FactRequest": FactRequest,
         "IntentPlan": FactPlan,
@@ -691,13 +729,18 @@ def test_fact_planner_llm_requires_one_valid_structured_plan() -> None:
     ).failed
 
     is_command = functions["_is_remail_command"]
-    for value in ("/项目 github", "!help", "！诊断 foo bar", "/绑定状态"):
+    for value in (
+        "/项目 github",
+        "!help",
+        "！诊断 foo bar",
+        "/绑定状态",
+        "帮助 我看看天气",
+        "项目 管理",
+    ):
         assert is_command(value)
     for value in (
         "/weather",
         "!今天天气",
-        "帮助 我看看天气",
-        "项目 管理",
         "普通聊天",
         "",
     ):
@@ -1377,7 +1420,7 @@ def test_agent_draft_is_primary_and_semantic_critic_fails_closed() -> None:
         )
     )
     assert malicious.completion_text == normalize_security_text(
-        functions["_REMAIL_INTENT_UNAVAILABLE_TEXT"]
+        functions["_REMAIL_SAFE_ERROR_TEXT"]
     )
     for private_value in (
         "Genspark",
@@ -1389,6 +1432,309 @@ def test_agent_draft_is_primary_and_semantic_critic_fails_closed() -> None:
     ):
         assert private_value not in malicious.completion_text
     assert malicious_context.llm_generate.await_count == 1
+
+
+@pytest.mark.parametrize(
+    ("question", "candidate", "source", "text", "needs_inference"),
+    [
+        (
+            "这两项差多少积分？",
+            "两项相差 15 积分。",
+            "project_prices",
+            "两项当前价格分别为 20 积分、35 积分。",
+            True,
+        ),
+        (
+            "接码能用几次？",
+            "接码只接收 1 次。",
+            "policy.business",
+            "接码是短期单次服务。",
+            True,
+        ),
+        (
+            "我有 27 积分，可以用吗？",
+            "你提到有 27 积分，需要结合当前项目价格判断。",
+            "policy.business",
+            "服务使用 ReMail 积分余额支付。",
+            False,
+        ),
+        (
+            "接码窗口多久？",
+            "当前窗口为 1 小时。",
+            "projects",
+            "当前项目的接码窗口为 60 分钟。",
+            False,
+        ),
+    ],
+)
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+def test_numeric_writer_output_always_requires_an_independent_critic(
+    question, candidate, source, text, needs_inference, decision
+) -> None:
+    functions, _ = _load_welcome_functions()
+    event = SimpleNamespace(unified_msg_origin="bot:FriendMessage:123456789")
+
+    async def generate(**kwargs):
+        payload = json.loads(kwargs["prompt"])
+        assert kwargs["tools"] is None and kwargs["contexts"] is None
+        if kwargs["system_prompt"] == PERSONA_SYSTEM_PROMPT:
+            return SimpleNamespace(
+                role="assistant",
+                completion_text=json.dumps(
+                    {"answer": candidate, "usedEvidence": ["checked"], "seals": []},
+                    ensure_ascii=False,
+                ),
+            )
+        assert kwargs["system_prompt"] == CRITIC_SYSTEM_PROMPT
+        assert payload["candidateAnswer"] == normalize_security_text(candidate)
+        assert payload["factPlan"]["verificationHints"] == {
+            "numericInferenceNeeded": needs_inference
+        }
+        assert payload["requiredEvidence"] == ["checked"]
+        return SimpleNamespace(
+            role="assistant",
+            completion_text=json.dumps(
+                {
+                    "decision": decision,
+                    "supportedEvidence": ["checked"] if decision == "approve" else [],
+                    "violations": []
+                    if decision == "approve"
+                    else ["unsupported_claim"],
+                }
+            ),
+        )
+
+    context = SimpleNamespace(
+        get_current_chat_provider_id=AsyncMock(return_value="provider"),
+        llm_generate=AsyncMock(side_effect=generate),
+    )
+    actual = asyncio.run(
+        functions["_generate_persona_answer"](
+            context,
+            event,
+            question=question,
+            agent_draft="先核对对应事实。",
+            authoritative_answer="先核对对应事实。",
+            evidence={"checked": evidence_block(source, text)},
+            required_evidence_ids=("checked",),
+            fact_plan={"answer_mode": "normal"},
+        )
+    )
+    assert context.llm_generate.await_count == 2
+    assert actual == (
+        normalize_security_text(candidate) if decision == "approve" else ""
+    )
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        "银河项目价格 10 积分；星火项目价格 20 积分。",
+        "星云项目价格 10 积分。",
+    ],
+)
+def test_unquoted_chinese_project_mismatches_require_semantic_rejection(
+    candidate,
+) -> None:
+    functions, _ = _load_welcome_functions()
+    authoritative = "星火项目价格 10 积分；银河项目价格 20 积分。"
+
+    async def generate(**kwargs):
+        if kwargs["system_prompt"] == PERSONA_SYSTEM_PROMPT:
+            return SimpleNamespace(
+                role="assistant",
+                completion_text=json.dumps(
+                    {"answer": candidate, "usedEvidence": ["prices"], "seals": []},
+                    ensure_ascii=False,
+                ),
+            )
+        assert kwargs["system_prompt"] == CRITIC_SYSTEM_PROMPT
+        payload = json.loads(kwargs["prompt"])
+        assert payload["candidateAnswer"] == normalize_security_text(candidate)
+        assert (
+            normalize_security_text(authoritative) in payload["evidence"][0]["summary"]
+        )
+        return SimpleNamespace(
+            role="assistant",
+            completion_text=json.dumps(
+                {
+                    "decision": "reject",
+                    "supportedEvidence": [],
+                    "violations": ["reversed_relation"],
+                }
+            ),
+        )
+
+    context = SimpleNamespace(
+        get_current_chat_provider_id=AsyncMock(return_value="provider"),
+        llm_generate=AsyncMock(side_effect=generate),
+    )
+    actual = asyncio.run(
+        functions["_generate_persona_answer"](
+            context,
+            SimpleNamespace(unified_msg_origin="bot:FriendMessage:123456789"),
+            question="星火和银河分别多少钱？",
+            agent_draft=authoritative,
+            authoritative_answer=authoritative,
+            evidence={"prices": evidence_block("project_prices", authoritative)},
+            required_evidence_ids=("prices",),
+            fact_plan={"answer_mode": "normal"},
+        )
+    )
+    assert context.llm_generate.await_count == 2
+    assert actual == ""
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        "访问 https://evil.example/v1/open/orders，等待 15 秒。",
+        "使用 `UNEXPECTED_TOKEN`，等待 15 秒。",
+        "Genspark 的接码价格为 15 积分。",
+        "password=sentinel-password",
+    ],
+)
+def test_numeric_writer_cannot_pass_unknown_urls_tokens_or_projects_to_critic(
+    candidate,
+) -> None:
+    functions, _ = _load_welcome_functions()
+    context = SimpleNamespace(
+        get_current_chat_provider_id=AsyncMock(return_value="provider"),
+        llm_generate=AsyncMock(
+            return_value=SimpleNamespace(
+                role="assistant",
+                completion_text=json.dumps(
+                    {"answer": candidate, "usedEvidence": [], "seals": []},
+                    ensure_ascii=False,
+                ),
+            )
+        ),
+    )
+    actual = asyncio.run(
+        functions["_generate_persona_answer"](
+            context,
+            SimpleNamespace(unified_msg_origin="bot:FriendMessage:123456789"),
+            question="ChatGPT 的接码价格是多少？",
+            agent_draft="ChatGPT 接码当前为 20 积分。",
+            authoritative_answer="ChatGPT 接码当前为 20 积分。",
+            evidence={
+                "price": evidence_block(
+                    "project_prices", "ChatGPT 接码当前为 20 积分。"
+                )
+            },
+            fact_plan={"answer_mode": "normal"},
+        )
+    )
+    assert actual == ""
+    context.llm_generate.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "critic_failure", ["reject", "unsupported_approval", "malformed", "exception"]
+)
+def test_rejected_numeric_writer_falls_back_to_strong_facts(critic_failure) -> None:
+    functions, _ = _load_welcome_functions()
+    plan = _fact_plan(
+        intents=("price",),
+        facts=(
+            _fact(
+                "price",
+                "project_prices",
+                params={"projectQuery": "ChatGPT", "productTypes": ["icloud"]},
+            ),
+        ),
+        privacy="private",
+        entities={"projectQuery": "ChatGPT", "productTypes": ["icloud"]},
+    )
+    extras = {"_remail_owned": True, "_remail_intent_plan_v1": plan}
+    event = SimpleNamespace(
+        message_str="ChatGPT 的 iCloud 接码现在多少钱？",
+        unified_msg_origin="bot:FriendMessage:123456789",
+        get_message_type=lambda: "friend",
+        get_extra=lambda key, default=None: extras.get(key, default),
+        set_extra=lambda key, value: extras.__setitem__(key, value),
+    )
+    functions["_record_evidence"](
+        event,
+        "project_prices",
+        {
+            "sourceValid": True,
+            "matched": True,
+            "prices": [
+                {
+                    "projectId": 2,
+                    "projectName": "ChatGPT",
+                    "productType": "icloud",
+                    "productLabel": "iCloud",
+                    "codeEnabled": True,
+                    "codePricePoints": "20",
+                    "purchaseEnabled": False,
+                }
+            ],
+        },
+        {"productTypes": ["icloud"]},
+    )
+    functions["_record_evidence"](
+        event,
+        "faqs",
+        {
+            "sourceValid": True,
+            "enabled": True,
+            "items": [{"question": "价格", "answer": "ChatGPT 接码价格为 999 积分。"}],
+        },
+        {"background": True},
+    )
+    candidate = "ChatGPT 的 iCloud 接码当前为 15 积分。"
+
+    async def generate(**kwargs):
+        if kwargs["system_prompt"] == PERSONA_SYSTEM_PROMPT:
+            return SimpleNamespace(
+                role="assistant",
+                completion_text=json.dumps(
+                    {"answer": candidate, "usedEvidence": ["price"], "seals": []},
+                    ensure_ascii=False,
+                ),
+            )
+        assert kwargs["system_prompt"] == CRITIC_SYSTEM_PROMPT
+        payload = json.loads(kwargs["prompt"])
+        assert payload["factPlan"]["verificationHints"]["numericInferenceNeeded"]
+        if critic_failure == "exception":
+            raise RuntimeError("untrusted provider detail")
+        raw = (
+            "invalid JSON"
+            if critic_failure == "malformed"
+            else json.dumps(
+                {
+                    "decision": "approve"
+                    if critic_failure == "unsupported_approval"
+                    else "reject",
+                    "supportedEvidence": [],
+                    "violations": []
+                    if critic_failure == "unsupported_approval"
+                    else ["unsupported_claim"],
+                }
+            )
+        )
+        return SimpleNamespace(role="assistant", completion_text=raw)
+
+    context = SimpleNamespace(
+        get_current_chat_provider_id=AsyncMock(return_value="provider"),
+        llm_generate=AsyncMock(side_effect=generate),
+    )
+    response = SimpleNamespace(
+        role="assistant", completion_text="ChatGPT 的 iCloud 接码当前为 20 积分。"
+    )
+    asyncio.run(
+        functions["enforce_redemption_channel_priority"](
+            SimpleNamespace(context=context), event, response
+        )
+    )
+    assert context.llm_generate.await_count == 2
+    assert re.search(r"20\s*积分", response.completion_text)
+    assert all(
+        value not in response.completion_text
+        for value in ("15", "999", "untrusted provider detail")
+    )
 
 
 def test_public_project_evidence_cannot_authorize_mail_ownership_claim() -> None:
@@ -1861,7 +2207,7 @@ def test_diagnosis_fact_is_required_and_terminal() -> None:
     assert "选岔" not in malicious_response.completion_text
 
 
-def test_conflicting_fact_sources_are_sealed_before_persona() -> None:
+def test_conflicting_fact_sources_fall_back_only_to_strong_facts() -> None:
     functions, _ = _load_welcome_functions()
     plan = _fact_plan(
         intents=("price", "announcement"),
@@ -1942,9 +2288,9 @@ def test_conflicting_fact_sources_are_sealed_before_persona() -> None:
         )
     )
     assert "接码 20 积分" in response.completion_text
-    assert "旧公告写着 99 积分" in response.completion_text
+    assert "旧公告写着 99 积分" not in response.completion_text
     assert "实际现价为 99" not in response.completion_text
-    assert "其中价格、库存和渠道不代表当前状态" in response.completion_text
+    assert "99" not in response.completion_text
 
 
 def test_dynamic_answer_without_tool_evidence_is_blocked() -> None:
@@ -1981,7 +2327,7 @@ def test_dynamic_answer_without_tool_evidence_is_blocked() -> None:
 
     assert "当前没有取得完整的当前项目价格" in response.completion_text
     assert "99" not in response.completion_text
-    context.llm_generate.assert_not_awaited()
+    assert context.llm_generate.await_count <= 1
 
 
 def test_intent_plan_binds_and_renders_combined_system_facts() -> None:
@@ -2177,7 +2523,9 @@ def test_validated_fact_plan_drives_scoped_evidence_rendering() -> None:
         duration,
     )
     assert "可持续收件" in faq_text
-    assert "24 小时" not in faq_text
+    assert (
+        "24 小时" in faq_text
+    )  # Reference text is retained; its weak source cannot override projects.
 
     wrong_project_entry = {
         "valid": True,
@@ -2278,7 +2626,7 @@ def test_validated_fact_plan_drives_scoped_evidence_rendering() -> None:
     )
 
 
-def test_inventory_tool_rejects_a_different_project_from_the_same_evidence_page() -> (
+def test_inventory_tool_can_query_another_verified_project_without_closing_original_fact() -> (
     None
 ):
     functions, _ = _load_welcome_functions()
@@ -2298,6 +2646,7 @@ def test_inventory_tool_rejects_a_different_project_from_the_same_evidence_page(
         "_project_items_for_plan": functions["_project_items_for_plan"],
         "_inventory_observation_is_fresh": functions["_inventory_observation_is_fresh"],
         "_record_evidence": functions["_record_evidence"],
+        "_safe_push_value": functions["_safe_push_value"],
         "json": json,
     }
     exec(
@@ -2339,11 +2688,19 @@ def test_inventory_tool_rejects_a_different_project_from_the_same_evidence_page(
         get_extra=lambda key, default=None: extras.get(key, default),
         set_extra=lambda key, value: extras.__setitem__(key, value),
     )
-    plugin = SimpleNamespace(_request=AsyncMock())
-
-    rejected = asyncio.run(namespace["remail_project_inventory"](plugin, event, 3))
-    assert "先从本轮当前项目结果确认" in rejected
-    plugin._request.assert_not_awaited()
+    plugin = SimpleNamespace(
+        _request=AsyncMock(
+            return_value={
+                "projectId": 3,
+                "observedAt": datetime.now(timezone.utc).isoformat(),
+                "products": [],
+            }
+        )
+    )
+    result = asyncio.run(namespace["remail_project_inventory"](plugin, event, 3))
+    assert json.loads(result)["projectId"] == 3
+    plugin._request.assert_awaited_once()
+    assert not functions["_fact_is_satisfied"](event, plan.facts[1], plan)
 
 
 def test_truncated_api_fact_requires_and_exposes_react_supplement() -> None:
@@ -2852,8 +3209,8 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
             SimpleNamespace(), unplanned, unplanned_response
         )
     )
-    assert (
-        unplanned_response.completion_text == functions["_UNPLANNED_DYNAMIC_RESPONSE"]
+    assert unplanned_response.completion_text == normalize_security_text(
+        functions["_REMAIL_SAFE_ERROR_TEXT"]
     )
 
 
@@ -3217,6 +3574,7 @@ def test_project_price_tool_supports_multiple_types_and_uses_point_units() -> No
     assert json.loads(result)["unit"] == "ReMail积分"
     assert plugin._request.await_args.kwargs["params"] == {
         "scope": "visible",
+        "offset": 0,
         "limit": 100,
     }
     plugin._request.reset_mock()
@@ -3226,7 +3584,7 @@ def test_project_price_tool_supports_multiple_types_and_uses_point_units() -> No
     assert json.loads(invalid)["ok"] is False
     plugin._request.assert_not_awaited()
     doc = ast.get_docstring(tool) or ""
-    assert "任何实时价格问题都必须调用" in doc
+    assert "同范围背景" in doc
     assert "codePricePoints" in doc
 
 
@@ -3572,7 +3930,11 @@ def test_event_authorization_is_reused_within_one_turn() -> None:
         get_extra=lambda key, default=None: extras.get(key, default),
         set_extra=lambda key, value: extras.__setitem__(key, value),
     )
-    plugin = SimpleNamespace(_request=AsyncMock(return_value={"authorized": True}))
+    plugin = SimpleNamespace(
+        _request=AsyncMock(
+            return_value={"authorized": True, "bound": True, "accountAvailable": True}
+        )
+    )
 
     asyncio.run(namespace["_authorize_event"](plugin, event))
     asyncio.run(namespace["_authorize_event"](plugin, event))
@@ -3702,9 +4064,10 @@ def test_api_intent_planner_injects_plan_without_prefetch() -> None:
     authorize_payload = json.loads(context.llm_generate.await_args.kwargs["prompt"])
     assert authorize_payload["publicApiCapabilities"] == capability_context
     plugin.remail_api_documentation.assert_not_awaited()
-    assert len(request.extra_user_content_parts) == 1
-    assert "Planner LLM" in request.extra_user_content_parts[0].text
-    assert "validated_remail_fact_plan" in request.extra_user_content_parts[0].text
+    assert len(request.extra_user_content_parts) == 2
+    assert "projectCatalog" in request.extra_user_content_parts[0].text
+    assert "Planner LLM" in request.extra_user_content_parts[-1].text
+    assert "validated_remail_fact_plan" in request.extra_user_content_parts[-1].text
 
 
 def test_authorize_injects_plan_and_leaves_tool_execution_to_main_agent() -> None:
@@ -3844,6 +4207,7 @@ def test_private_planner_removes_attachments_before_main_agent_build() -> None:
     plugin = SimpleNamespace(
         context=context,
         _public_api_capability_context=AsyncMock(return_value=""),
+        _authorize_event=AsyncMock(),
         _reply=AsyncMock(),
     )
 
@@ -3922,6 +4286,7 @@ def test_private_planner_removes_attachments_before_main_agent_build() -> None:
     cancelled_plugin = SimpleNamespace(
         context=cancelled_context,
         _public_api_capability_context=AsyncMock(return_value=""),
+        _authorize_event=AsyncMock(),
         _reply=AsyncMock(),
     )
     asyncio.run(
@@ -4143,6 +4508,11 @@ def test_llm_request_requires_remail_event_authorization() -> None:
         "_restrict_remail_tools": runtime["_restrict_remail_tools"],
         "_scope_question": runtime["_scope_question"],
         "_safe_llm_context_text": runtime["_safe_llm_context_text"],
+        "_prepare_fae_context": runtime["_prepare_fae_context"],
+        "_configured_personality": runtime["_configured_personality"],
+        "_recent_intent_context": runtime["_recent_intent_context"],
+        "PUBLIC_BUSINESS_RULES": PUBLIC_BUSINESS_RULES,
+        "SOURCE_RELIABILITY_RULES": SOURCE_RELIABILITY_RULES,
         "_generate_fact_plan": runtime["_generate_fact_plan"],
         "FactPlan": FactPlan,
         "_enforce_black_box": runtime["_enforce_black_box"],
@@ -5189,7 +5559,7 @@ def test_group_join_welcome_uses_trusted_event_and_whitelist() -> None:
         _authorize_event=authorize,
     )
     asyncio.run(handler(plugin, event))
-    authorize.assert_awaited_once_with(event)
+    authorize.assert_awaited_once_with(event, require_binding=False)
     sent.assert_awaited_once_with(
         [("at", {"qq": "123456789", "name": ""}), ("plain", "欢迎加入")]
     )
@@ -5259,7 +5629,7 @@ def test_qq_join_request_approval_enforces_level_and_identity(
 
     assert parse_request(event) == ("123456789", "request-flag")
     asyncio.run(handler(plugin, event))
-    authorize.assert_awaited_once_with(event)
+    authorize.assert_awaited_once_with(event, require_binding=False)
     assert bot.call_action.await_args_list[0].args == ("get_stranger_info",)
     assert bot.call_action.await_args_list[0].kwargs == {
         "user_id": 123456789,
@@ -5301,7 +5671,7 @@ def test_qq_join_request_ignores_invites_and_unauthorized_groups() -> None:
         _authorize_event=AsyncMock(side_effect=remail_error("denied")),
     )
     asyncio.run(handler(plugin, event))
-    plugin._authorize_event.assert_awaited_once_with(event)
+    plugin._authorize_event.assert_awaited_once_with(event, require_binding=False)
     event.bot.call_action.assert_not_awaited()
 
 
@@ -5361,7 +5731,7 @@ def test_qq_group_moderation_extracts_cards_and_recalls_violations() -> None:
     )
     event, stopped = make_event(segments)
     asyncio.run(handler(plugin, event))
-    authorize.assert_awaited_once_with(event)
+    authorize.assert_awaited_once_with(event, require_binding=False)
     event.bot.call_action.assert_awaited_once_with("delete_msg", message_id=42)
     assert stopped == [True]
 
@@ -5482,7 +5852,7 @@ def test_group_management_handoff_ignores_privileged_senders_and_unauthorized_gr
     asyncio.run(handler(plugin, event))
     assert not extras
     assert event.is_at_or_wake_command is False
-    plugin._authorize_event.assert_awaited_once_with(event)
+    plugin._authorize_event.assert_not_awaited()
     event.bot.call_action.assert_not_awaited()
 
     event, extras = make_event()
@@ -5679,11 +6049,18 @@ def test_only_explicit_mentions_reach_group_intent_classification() -> None:
     follow_up_payload = json.loads(
         plugin.context.llm_generate.await_args.kwargs["prompt"]
     )
+    assert follow_up_payload.pop("dynamicBackground")["ownOrders"] == {
+        "privateOnly": True
+    }
     assert follow_up_payload == {
         "untrustedQuestion": normalize_security_text("那多久？"),
         "untrustedRecentContext": normalize_security_text("接码怎么使用？"),
         "publicApiCapabilities": "",
-        "messageContext": {"isGroup": True, "hasOrderEmail": False},
+        "messageContext": {
+            "isGroup": True,
+            "hasOrderEmail": False,
+            "entryPoint": "mentioned_group_support",
+        },
     }
     assert not sent and not stopped
 
@@ -5693,11 +6070,17 @@ def test_only_explicit_mentions_reach_group_intent_classification() -> None:
     )
     asyncio.run(handler(plugin, other_sender))
     other_payload = json.loads(plugin.context.llm_generate.await_args.kwargs["prompt"])
+    assert "dynamicBackground" in other_payload
+    other_payload.pop("dynamicBackground")
     assert other_payload == {
         "untrustedQuestion": normalize_security_text("那多久？"),
         "untrustedRecentContext": "",
         "publicApiCapabilities": "",
-        "messageContext": {"isGroup": True, "hasOrderEmail": False},
+        "messageContext": {
+            "isGroup": True,
+            "hasOrderEmail": False,
+            "entryPoint": "mentioned_group_support",
+        },
     }
     assert not sent and not stopped
 

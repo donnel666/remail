@@ -101,6 +101,7 @@ type RechargeTierResponse struct {
 type RechargeConfigResponse struct {
 	Enabled                   bool                   `json:"enabled"`
 	PaymentMethods            []string               `json:"paymentMethods"`
+	PaymentCurrencies         map[string]string      `json:"paymentCurrencies,omitempty"`
 	MinPoints                 string                 `json:"minPoints"`
 	FeeRate                   string                 `json:"feeRate"`
 	FeeCapPoints              string                 `json:"feeCapPoints"`

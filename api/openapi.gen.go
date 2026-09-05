@@ -2109,6 +2109,57 @@ func (e BotOrderRankingsResponseTimezone) Valid() bool {
 	}
 }
 
+// Defines values for BotOrderSummaryServiceMode.
+const (
+	BotOrderSummaryServiceModeCode     BotOrderSummaryServiceMode = "code"
+	BotOrderSummaryServiceModePurchase BotOrderSummaryServiceMode = "purchase"
+)
+
+// Valid indicates whether the value is a known member of the BotOrderSummaryServiceMode enum.
+func (e BotOrderSummaryServiceMode) Valid() bool {
+	switch e {
+	case BotOrderSummaryServiceModeCode:
+		return true
+	case BotOrderSummaryServiceModePurchase:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BotOrderSummaryStatus.
+const (
+	BotOrderSummaryStatusActive         BotOrderSummaryStatus = "active"
+	BotOrderSummaryStatusClosed         BotOrderSummaryStatus = "closed"
+	BotOrderSummaryStatusCompleted      BotOrderSummaryStatus = "completed"
+	BotOrderSummaryStatusFailed         BotOrderSummaryStatus = "failed"
+	BotOrderSummaryStatusPaid           BotOrderSummaryStatus = "paid"
+	BotOrderSummaryStatusPendingPayment BotOrderSummaryStatus = "pending_payment"
+	BotOrderSummaryStatusRefunded       BotOrderSummaryStatus = "refunded"
+)
+
+// Valid indicates whether the value is a known member of the BotOrderSummaryStatus enum.
+func (e BotOrderSummaryStatus) Valid() bool {
+	switch e {
+	case BotOrderSummaryStatusActive:
+		return true
+	case BotOrderSummaryStatusClosed:
+		return true
+	case BotOrderSummaryStatusCompleted:
+		return true
+	case BotOrderSummaryStatusFailed:
+		return true
+	case BotOrderSummaryStatusPaid:
+		return true
+	case BotOrderSummaryStatusPendingPayment:
+		return true
+	case BotOrderSummaryStatusRefunded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BotProfileResponseRole.
 const (
 	BotProfileResponseRoleAdmin      BotProfileResponseRole = "admin"
@@ -3726,6 +3777,24 @@ func (e PublicLotterySummaryStatus) Valid() bool {
 	}
 }
 
+// Defines values for RechargeConfigResponsePaymentCurrencies.
+const (
+	RechargeConfigResponsePaymentCurrenciesCNY  RechargeConfigResponsePaymentCurrencies = "CNY"
+	RechargeConfigResponsePaymentCurrenciesUSDT RechargeConfigResponsePaymentCurrencies = "USDT"
+)
+
+// Valid indicates whether the value is a known member of the RechargeConfigResponsePaymentCurrencies enum.
+func (e RechargeConfigResponsePaymentCurrencies) Valid() bool {
+	switch e {
+	case RechargeConfigResponsePaymentCurrenciesCNY:
+		return true
+	case RechargeConfigResponsePaymentCurrenciesUSDT:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RechargeConfigResponsePaymentMethods.
 const (
 	RechargeConfigResponsePaymentMethodsAlipay         RechargeConfigResponsePaymentMethods = "alipay"
@@ -3791,16 +3860,16 @@ func (e RechargeQuoteRequestPaymentMethod) Valid() bool {
 
 // Defines values for RechargeQuoteResponsePaymentCurrency.
 const (
-	CNY  RechargeQuoteResponsePaymentCurrency = "CNY"
-	USDT RechargeQuoteResponsePaymentCurrency = "USDT"
+	RechargeQuoteResponsePaymentCurrencyCNY  RechargeQuoteResponsePaymentCurrency = "CNY"
+	RechargeQuoteResponsePaymentCurrencyUSDT RechargeQuoteResponsePaymentCurrency = "USDT"
 )
 
 // Valid indicates whether the value is a known member of the RechargeQuoteResponsePaymentCurrency enum.
 func (e RechargeQuoteResponsePaymentCurrency) Valid() bool {
 	switch e {
-	case CNY:
+	case RechargeQuoteResponsePaymentCurrencyCNY:
 		return true
-	case USDT:
+	case RechargeQuoteResponsePaymentCurrencyUSDT:
 		return true
 	default:
 		return false
@@ -5295,6 +5364,42 @@ func (e PostBotCodeDiagnosisParamsXBotScene) Valid() bool {
 	}
 }
 
+// Defines values for GetBotOrdersParamsXBotChannel.
+const (
+	GetBotOrdersParamsXBotChannelQq       GetBotOrdersParamsXBotChannel = "qq"
+	GetBotOrdersParamsXBotChannelTelegram GetBotOrdersParamsXBotChannel = "telegram"
+)
+
+// Valid indicates whether the value is a known member of the GetBotOrdersParamsXBotChannel enum.
+func (e GetBotOrdersParamsXBotChannel) Valid() bool {
+	switch e {
+	case GetBotOrdersParamsXBotChannelQq:
+		return true
+	case GetBotOrdersParamsXBotChannelTelegram:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetBotOrdersParamsXBotScene.
+const (
+	GetBotOrdersParamsXBotSceneGroup   GetBotOrdersParamsXBotScene = "group"
+	GetBotOrdersParamsXBotScenePrivate GetBotOrdersParamsXBotScene = "private"
+)
+
+// Valid indicates whether the value is a known member of the GetBotOrdersParamsXBotScene enum.
+func (e GetBotOrdersParamsXBotScene) Valid() bool {
+	switch e {
+	case GetBotOrdersParamsXBotSceneGroup:
+		return true
+	case GetBotOrdersParamsXBotScenePrivate:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetBotProfileParamsXBotChannel.
 const (
 	GetBotProfileParamsXBotChannelQq       GetBotProfileParamsXBotChannel = "qq"
@@ -5628,6 +5733,42 @@ func (e GetBotRechargeConfigParamsXBotScene) Valid() bool {
 	}
 }
 
+// Defines values for PostBotRechargeQuoteParamsXBotChannel.
+const (
+	PostBotRechargeQuoteParamsXBotChannelQq       PostBotRechargeQuoteParamsXBotChannel = "qq"
+	PostBotRechargeQuoteParamsXBotChannelTelegram PostBotRechargeQuoteParamsXBotChannel = "telegram"
+)
+
+// Valid indicates whether the value is a known member of the PostBotRechargeQuoteParamsXBotChannel enum.
+func (e PostBotRechargeQuoteParamsXBotChannel) Valid() bool {
+	switch e {
+	case PostBotRechargeQuoteParamsXBotChannelQq:
+		return true
+	case PostBotRechargeQuoteParamsXBotChannelTelegram:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostBotRechargeQuoteParamsXBotScene.
+const (
+	PostBotRechargeQuoteParamsXBotSceneGroup   PostBotRechargeQuoteParamsXBotScene = "group"
+	PostBotRechargeQuoteParamsXBotScenePrivate PostBotRechargeQuoteParamsXBotScene = "private"
+)
+
+// Valid indicates whether the value is a known member of the PostBotRechargeQuoteParamsXBotScene enum.
+func (e PostBotRechargeQuoteParamsXBotScene) Valid() bool {
+	switch e {
+	case PostBotRechargeQuoteParamsXBotSceneGroup:
+		return true
+	case PostBotRechargeQuoteParamsXBotScenePrivate:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ConnectBotWebSocketParamsXBotChannel.
 const (
 	Qq       ConnectBotWebSocketParamsXBotChannel = "qq"
@@ -5783,16 +5924,16 @@ func (e PostOrderParamsSupply) Valid() bool {
 
 // Defines values for PostOrderBatchParamsServiceMode.
 const (
-	Code     PostOrderBatchParamsServiceMode = "code"
-	Purchase PostOrderBatchParamsServiceMode = "purchase"
+	PostOrderBatchParamsServiceModeCode     PostOrderBatchParamsServiceMode = "code"
+	PostOrderBatchParamsServiceModePurchase PostOrderBatchParamsServiceMode = "purchase"
 )
 
 // Valid indicates whether the value is a known member of the PostOrderBatchParamsServiceMode enum.
 func (e PostOrderBatchParamsServiceMode) Valid() bool {
 	switch e {
-	case Code:
+	case PostOrderBatchParamsServiceModeCode:
 		return true
-	case Purchase:
+	case PostOrderBatchParamsServiceModePurchase:
 		return true
 	default:
 		return false
@@ -6029,19 +6170,19 @@ func (e GetTicketsParamsTicketType) Valid() bool {
 
 // Defines values for GetTicketsParamsStatus.
 const (
-	GetTicketsParamsStatusClosed     GetTicketsParamsStatus = "closed"
-	GetTicketsParamsStatusOpen       GetTicketsParamsStatus = "open"
-	GetTicketsParamsStatusProcessing GetTicketsParamsStatus = "processing"
+	Closed     GetTicketsParamsStatus = "closed"
+	Open       GetTicketsParamsStatus = "open"
+	Processing GetTicketsParamsStatus = "processing"
 )
 
 // Valid indicates whether the value is a known member of the GetTicketsParamsStatus enum.
 func (e GetTicketsParamsStatus) Valid() bool {
 	switch e {
-	case GetTicketsParamsStatusClosed:
+	case Closed:
 		return true
-	case GetTicketsParamsStatusOpen:
+	case Open:
 		return true
-	case GetTicketsParamsStatusProcessing:
+	case Processing:
 		return true
 	default:
 		return false
@@ -8640,8 +8781,14 @@ type BotCodeDiagnosisRequest struct {
 
 // BotContextResponse defines model for BotContextResponse.
 type BotContextResponse struct {
+	// AccountAvailable True only for an active bound account. No user ID, email or account profile is returned.
+	AccountAvailable bool `json:"accountAvailable"`
+
 	// Authorized Always true. Unauthorized contexts receive 401 instead of a response body with scope details.
 	Authorized BotContextResponseAuthorized `json:"authorized"`
+
+	// Bound Trusted sender binding state, for plugin access control only; never expose it in group replies or LLM inputs.
+	Bound bool `json:"bound"`
 }
 
 // BotContextResponseAuthorized Always true. Unauthorized contexts receive 401 instead of a response body with scope details.
@@ -8718,6 +8865,18 @@ type BotLeaderboardRewardsResponse struct {
 	SettledAt    *time.Time                 `json:"settledAt"`
 }
 
+// BotOrderListResponse defines model for BotOrderListResponse.
+type BotOrderListResponse struct {
+	AccountUnavailable *bool             `json:"accountUnavailable,omitempty"`
+	Available          bool              `json:"available"`
+	BindingRequired    *bool             `json:"bindingRequired,omitempty"`
+	Items              []BotOrderSummary `json:"items"`
+	Limit              int               `json:"limit"`
+	Offset             int               `json:"offset"`
+	Total              int               `json:"total"`
+	Truncated          bool              `json:"truncated"`
+}
+
 // BotOrderRankingsResponse defines model for BotOrderRankingsResponse.
 type BotOrderRankingsResponse struct {
 	BusinessDate openapi_types.Date               `json:"businessDate"`
@@ -8728,6 +8887,25 @@ type BotOrderRankingsResponse struct {
 
 // BotOrderRankingsResponseTimezone defines model for BotOrderRankingsResponse.Timezone.
 type BotOrderRankingsResponseTimezone string
+
+// BotOrderSummary defines model for BotOrderSummary.
+type BotOrderSummary struct {
+	ActivatedAt    *time.Time                 `json:"activatedAt,omitempty"`
+	AfterSaleUntil *time.Time                 `json:"afterSaleUntil,omitempty"`
+	CreatedAt      time.Time                  `json:"createdAt"`
+	ProductType    string                     `json:"productType"`
+	ProjectId      int                        `json:"projectId"`
+	ProjectName    string                     `json:"projectName"`
+	ReceiveUntil   *time.Time                 `json:"receiveUntil,omitempty"`
+	ServiceMode    BotOrderSummaryServiceMode `json:"serviceMode"`
+	Status         BotOrderSummaryStatus      `json:"status"`
+}
+
+// BotOrderSummaryServiceMode defines model for BotOrderSummary.ServiceMode.
+type BotOrderSummaryServiceMode string
+
+// BotOrderSummaryStatus defines model for BotOrderSummary.Status.
+type BotOrderSummaryStatus string
 
 // BotProfileResponse defines model for BotProfileResponse.
 type BotProfileResponse struct {
@@ -10948,6 +11126,9 @@ type RechargeConfigResponse struct {
 	// MinPoints Non-negative point amount with up to 6 decimal places; canonical responses retain at least 2 decimal places and the value must fit DECIMAL(18,6).
 	MinPoints NonNegativeLedgerAmount `json:"minPoints"`
 
+	// PaymentCurrencies Enabled payment method identifier to its quoted payment currency. System balances and product prices use points; CNY and USDT are payment currencies, and USDT is not USD. Omitted when no methods are enabled or by older servers.
+	PaymentCurrencies *map[string]RechargeConfigResponsePaymentCurrencies `json:"paymentCurrencies,omitempty"`
+
 	// PaymentMethods Enabled payment method identifiers.
 	PaymentMethods []RechargeConfigResponsePaymentMethods `json:"paymentMethods"`
 
@@ -10955,6 +11136,9 @@ type RechargeConfigResponse struct {
 	RedemptionCodePurchaseUrl *string        `json:"redemptionCodePurchaseUrl,omitempty"`
 	Tiers                     []RechargeTier `json:"tiers"`
 }
+
+// RechargeConfigResponsePaymentCurrencies defines model for RechargeConfigResponse.PaymentCurrencies.
+type RechargeConfigResponsePaymentCurrencies string
 
 // RechargeConfigResponsePaymentMethods defines model for RechargeConfigResponse.PaymentMethods.
 type RechargeConfigResponsePaymentMethods string
@@ -11291,6 +11475,7 @@ type SystemAnnouncementType string
 // SystemAnnouncementsResponse defines model for SystemAnnouncementsResponse.
 type SystemAnnouncementsResponse struct {
 	Announcements []SystemAnnouncement `json:"announcements"`
+	Truncated     *bool                `json:"truncated,omitempty"`
 }
 
 // SystemFAQ defines model for SystemFAQ.
@@ -11303,8 +11488,9 @@ type SystemFAQ struct {
 
 // SystemFAQsResponse defines model for SystemFAQsResponse.
 type SystemFAQsResponse struct {
-	Enabled bool        `json:"enabled"`
-	Items   []SystemFAQ `json:"items"`
+	Enabled   bool        `json:"enabled"`
+	Items     []SystemFAQ `json:"items"`
+	Truncated *bool       `json:"truncated,omitempty"`
 }
 
 // SystemNoticeResponse defines model for SystemNoticeResponse.
@@ -13619,6 +13805,11 @@ type PostAdminWalletWithdrawParams struct {
 	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
 }
 
+// GetSystemAnnouncementsParams defines parameters for GetSystemAnnouncements.
+type GetSystemAnnouncementsParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // GetApiKeysParams defines parameters for GetApiKeys.
 type GetApiKeysParams struct {
 	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
@@ -13761,6 +13952,27 @@ type PostBotCodeDiagnosisParamsXBotScene string
 type PostBotCodeDiagnosis503JSONResponseBody struct {
 	union json.RawMessage
 }
+
+// GetBotOrdersParams defines parameters for GetBotOrders.
+type GetBotOrdersParams struct {
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// XBotChannel Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument.
+	XBotChannel GetBotOrdersParamsXBotChannel `json:"X-Bot-Channel"`
+
+	// XBotSubject Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument.
+	XBotSubject BotSubject `json:"X-Bot-Subject"`
+
+	// XBotScene Private scenes may use the current bound account and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group; binding remains private-only, while diagnosis is available for the current sender's own bound account.
+	XBotScene GetBotOrdersParamsXBotScene `json:"X-Bot-Scene"`
+}
+
+// GetBotOrdersParamsXBotChannel defines parameters for GetBotOrders.
+type GetBotOrdersParamsXBotChannel string
+
+// GetBotOrdersParamsXBotScene defines parameters for GetBotOrders.
+type GetBotOrdersParamsXBotScene string
 
 // GetBotProfileParams defines parameters for GetBotProfile.
 type GetBotProfileParams struct {
@@ -13941,6 +14153,27 @@ type GetBotRechargeConfigParamsXBotChannel string
 // GetBotRechargeConfigParamsXBotScene defines parameters for GetBotRechargeConfig.
 type GetBotRechargeConfigParamsXBotScene string
 
+// PostBotRechargeQuoteParams defines parameters for PostBotRechargeQuote.
+type PostBotRechargeQuoteParams struct {
+	// XBotChannel Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument.
+	XBotChannel PostBotRechargeQuoteParamsXBotChannel `json:"X-Bot-Channel"`
+
+	// XBotSubject Positive decimal QQ or Telegram user ID supplied only by the authenticated bot adapter. It is stored as the channel-scoped third-party identity and is never accepted from a request body or LLM argument.
+	XBotSubject BotSubject `json:"X-Bot-Subject"`
+
+	// XBotScene Private scenes may use the current bound account and must omit X-Bot-Group. Group scenes require an allowed X-Bot-Group; binding remains private-only, while diagnosis is available for the current sender's own bound account.
+	XBotScene PostBotRechargeQuoteParamsXBotScene `json:"X-Bot-Scene"`
+
+	// XBotGroup Trusted platform group id supplied by the bot adapter. QQ values are positive decimal group numbers and Telegram values are non-zero decimal Chat IDs (normally negative). Required only when X-Bot-Scene is group, where it must match the authenticated Bot System Key's allowedGroupIds; omit it for private scenes. It is never accepted from an end-user argument.
+	XBotGroup *BotGroup `json:"X-Bot-Group,omitempty"`
+}
+
+// PostBotRechargeQuoteParamsXBotChannel defines parameters for PostBotRechargeQuote.
+type PostBotRechargeQuoteParamsXBotChannel string
+
+// PostBotRechargeQuoteParamsXBotScene defines parameters for PostBotRechargeQuote.
+type PostBotRechargeQuoteParamsXBotScene string
+
 // ConnectBotWebSocketParams defines parameters for ConnectBotWebSocket.
 type ConnectBotWebSocketParams struct {
 	// XBotChannel Channel resolved from the trusted AstrBot event. After authenticating the System Key, ReMail requires this value to match the key's immutable platform type; a QQ key cannot authorize Telegram traffic and vice versa. It is never accepted from an end-user or LLM argument.
@@ -13981,6 +14214,11 @@ type PostDomainParams struct {
 type GetDomainMailboxesParams struct {
 	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
 	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetSystemFAQsParams defines parameters for GetSystemFAQs.
+type GetSystemFAQsParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // PostPublicLotteryEntryParams defines parameters for PostPublicLotteryEntry.
@@ -14762,6 +15000,9 @@ type PostBotBindingJSONRequestBody = BotBindingRequest
 
 // PostBotCodeDiagnosisJSONRequestBody defines body for PostBotCodeDiagnosis for application/json ContentType.
 type PostBotCodeDiagnosisJSONRequestBody = BotCodeDiagnosisRequest
+
+// PostBotRechargeQuoteJSONRequestBody defines body for PostBotRechargeQuote for application/json ContentType.
+type PostBotRechargeQuoteJSONRequestBody = RechargeQuoteRequest
 
 // PostCardRedeemJSONRequestBody defines body for PostCardRedeem for application/json ContentType.
 type PostCardRedeemJSONRequestBody = RedeemCardRequest
@@ -16624,7 +16865,7 @@ type ServerInterface interface {
 	PostAdminWalletWithdraw(c *gin.Context, userId int, params PostAdminWalletWithdrawParams)
 	// List active system announcements
 	// (GET /v1/announcements)
-	GetSystemAnnouncements(c *gin.Context)
+	GetSystemAnnouncements(c *gin.Context, params GetSystemAnnouncementsParams)
 	// List API keys for the current user
 	// (GET /v1/apikeys)
 	GetApiKeys(c *gin.Context, params GetApiKeysParams)
@@ -16661,6 +16902,9 @@ type ServerInterface interface {
 	// Safely diagnose why the current bound user has not received a code
 	// (POST /v1/bot/diagnoses/code)
 	PostBotCodeDiagnosis(c *gin.Context, params PostBotCodeDiagnosisParams)
+	// Read the current bound user's private order summaries
+	// (GET /v1/bot/orders)
+	GetBotOrders(c *gin.Context, params GetBotOrdersParams)
 	// Read the current bound user's safe account summary
 	// (GET /v1/bot/profile)
 	GetBotProfile(c *gin.Context, params GetBotProfileParams)
@@ -16682,6 +16926,9 @@ type ServerInterface interface {
 	// Read the current public recharge configuration
 	// (GET /v1/bot/recharges/config)
 	GetBotRechargeConfig(c *gin.Context, params GetBotRechargeConfigParams)
+	// Quote point credit and the selected method's payment amount
+	// (POST /v1/bot/recharges/quote)
+	PostBotRechargeQuote(c *gin.Context, params PostBotRechargeQuoteParams)
 	// Open the persistent Bot WebSocket transport
 	// (GET /v1/bot/ws)
 	ConnectBotWebSocket(c *gin.Context, params ConnectBotWebSocketParams)
@@ -16705,7 +16952,7 @@ type ServerInterface interface {
 	PostEmailCode(c *gin.Context)
 	// List published frequently asked questions
 	// (GET /v1/faqs)
-	GetSystemFAQs(c *gin.Context)
+	GetSystemFAQs(c *gin.Context, params GetSystemFAQsParams)
 	// Login and create a session
 	// (POST /v1/login)
 	PostLogin(c *gin.Context)
@@ -16871,7 +17118,7 @@ type ServerInterface interface {
 	// Get public recharge configuration
 	// (GET /v1/recharges/config)
 	GetRechargeConfig(c *gin.Context)
-	// Quote a recharge entirely in points
+	// Quote point credit and a payment amount in the selected currency
 	// (POST /v1/recharges/quote)
 	PostRechargeQuote(c *gin.Context, params PostRechargeQuoteParams)
 	// Get one recharge order
@@ -30721,6 +30968,20 @@ func (siw *ServerInterfaceWrapper) PostAdminWalletWithdraw(c *gin.Context) {
 // GetSystemAnnouncements operation middleware
 func (siw *ServerInterfaceWrapper) GetSystemAnnouncements(c *gin.Context) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetSystemAnnouncementsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -30728,7 +30989,7 @@ func (siw *ServerInterfaceWrapper) GetSystemAnnouncements(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.GetSystemAnnouncements(c)
+	siw.Handler.GetSystemAnnouncements(c, params)
 }
 
 // GetApiKeys operation middleware
@@ -31481,6 +31742,111 @@ func (siw *ServerInterfaceWrapper) PostBotCodeDiagnosis(c *gin.Context) {
 	}
 
 	siw.Handler.PostBotCodeDiagnosis(c, params)
+}
+
+// GetBotOrders operation middleware
+func (siw *ServerInterfaceWrapper) GetBotOrders(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(SystemKeyAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetBotOrdersParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-Bot-Channel" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Channel")]; found {
+		var XBotChannel GetBotOrdersParamsXBotChannel
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Channel, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Channel", valueList[0], &XBotChannel, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Channel: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotChannel = XBotChannel
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Channel is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Subject" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Subject")]; found {
+		var XBotSubject BotSubject
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Subject, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Subject", valueList[0], &XBotSubject, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Subject: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotSubject = XBotSubject
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Subject is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Scene" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Scene")]; found {
+		var XBotScene GetBotOrdersParamsXBotScene
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Scene, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Scene", valueList[0], &XBotScene, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Scene: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotScene = XBotScene
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Scene is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetBotOrders(c, params)
 }
 
 // GetBotProfile operation middleware
@@ -32361,6 +32727,114 @@ func (siw *ServerInterfaceWrapper) GetBotRechargeConfig(c *gin.Context) {
 	siw.Handler.GetBotRechargeConfig(c, params)
 }
 
+// PostBotRechargeQuote operation middleware
+func (siw *ServerInterfaceWrapper) PostBotRechargeQuote(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(SystemKeyAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostBotRechargeQuoteParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-Bot-Channel" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Channel")]; found {
+		var XBotChannel PostBotRechargeQuoteParamsXBotChannel
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Channel, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Channel", valueList[0], &XBotChannel, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Channel: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotChannel = XBotChannel
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Channel is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Subject" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Subject")]; found {
+		var XBotSubject BotSubject
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Subject, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Subject", valueList[0], &XBotSubject, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Subject: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotSubject = XBotSubject
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Subject is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-Bot-Scene" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Scene")]; found {
+		var XBotScene PostBotRechargeQuoteParamsXBotScene
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Scene, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Scene", valueList[0], &XBotScene, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Scene: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotScene = XBotScene
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-Bot-Scene is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional header parameter "X-Bot-Group" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Bot-Group")]; found {
+		var XBotGroup BotGroup
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Bot-Group, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Bot-Group", valueList[0], &XBotGroup, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Bot-Group: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XBotGroup = &XBotGroup
+
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostBotRechargeQuote(c, params)
+}
+
 // ConnectBotWebSocket operation middleware
 func (siw *ServerInterfaceWrapper) ConnectBotWebSocket(c *gin.Context) {
 
@@ -32668,6 +33142,20 @@ func (siw *ServerInterfaceWrapper) PostEmailCode(c *gin.Context) {
 // GetSystemFAQs operation middleware
 func (siw *ServerInterfaceWrapper) GetSystemFAQs(c *gin.Context) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetSystemFAQsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -32675,7 +33163,7 @@ func (siw *ServerInterfaceWrapper) GetSystemFAQs(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.GetSystemFAQs(c)
+	siw.Handler.GetSystemFAQs(c, params)
 }
 
 // PostLogin operation middleware
@@ -36204,6 +36692,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/bot/bindings", wrapper.PostBotBinding)
 	router.GET(options.BaseURL+"/v1/bot/context", wrapper.GetBotContext)
 	router.POST(options.BaseURL+"/v1/bot/diagnoses/code", wrapper.PostBotCodeDiagnosis)
+	router.GET(options.BaseURL+"/v1/bot/orders", wrapper.GetBotOrders)
 	router.GET(options.BaseURL+"/v1/bot/profile", wrapper.GetBotProfile)
 	router.GET(options.BaseURL+"/v1/bot/projects", wrapper.GetBotProjects)
 	router.GET(options.BaseURL+"/v1/bot/projects/:projectId", wrapper.GetBotProject)
@@ -36211,6 +36700,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/bot/rankings/orders", wrapper.GetBotOrderRankings)
 	router.GET(options.BaseURL+"/v1/bot/rankings/rewards/latest", wrapper.GetBotLatestLeaderboardRewards)
 	router.GET(options.BaseURL+"/v1/bot/recharges/config", wrapper.GetBotRechargeConfig)
+	router.POST(options.BaseURL+"/v1/bot/recharges/quote", wrapper.PostBotRechargeQuote)
 	router.GET(options.BaseURL+"/v1/bot/ws", wrapper.ConnectBotWebSocket)
 	router.POST(options.BaseURL+"/v1/cards/redeem", wrapper.PostCardRedeem)
 	router.GET(options.BaseURL+"/v1/customer-service", wrapper.GetCustomerService)

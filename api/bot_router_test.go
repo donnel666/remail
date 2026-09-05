@@ -85,7 +85,7 @@ func TestBotRoutesRequireBotSystemKeyAndMatchContract(t *testing.T) {
 	t.Cleanup(func() { _ = rdb.Close() })
 	registerBotRoutes(router.Group("/v1"), router, botRouterAuthenticator(func(context.Context, string) (*settingsdomain.SystemKey, error) {
 		return nil, settingsdomain.ErrInvalidSystemKey
-	}), nil, nil, nil, nil, nil, rdb)
+	}), nil, nil, nil, nil, nil, nil, rdb)
 
 	got := make([]string, 0, 12)
 	for _, route := range router.Routes() {
@@ -96,6 +96,7 @@ func TestBotRoutesRequireBotSystemKeyAndMatchContract(t *testing.T) {
 		"DELETE /v1/bot/binding",
 		"GET /v1/bot/binding",
 		"GET /v1/bot/context",
+		"GET /v1/bot/orders",
 		"GET /v1/bot/profile",
 		"GET /v1/bot/projects",
 		"GET /v1/bot/projects/:projectId",
@@ -106,6 +107,7 @@ func TestBotRoutesRequireBotSystemKeyAndMatchContract(t *testing.T) {
 		"GET /v1/bot/ws",
 		"POST /v1/bot/bindings",
 		"POST /v1/bot/diagnoses/code",
+		"POST /v1/bot/recharges/quote",
 	}
 	sort.Strings(want)
 	if !slices.Equal(got, want) {
@@ -131,10 +133,11 @@ func TestEveryBotBusinessRouteRequiresSubjectAndGroupContext(t *testing.T) {
 			Platform: "qq", SubjectNamespace: "qq:main", AllowedGroupIDs: []string{"10001"},
 		}, nil
 	})
-	registerBotRoutes(router.Group("/v1"), router, auth, nil, nil, nil, nil, nil, rdb)
+	registerBotRoutes(router.Group("/v1"), router, auth, nil, nil, nil, nil, nil, nil, rdb)
 	routes := []struct{ method, path string }{
 		{http.MethodGet, "/v1/bot/context"},
 		{http.MethodGet, "/v1/bot/profile"},
+		{http.MethodGet, "/v1/bot/orders"},
 		{http.MethodPost, "/v1/bot/bindings"},
 		{http.MethodGet, "/v1/bot/binding"},
 		{http.MethodDelete, "/v1/bot/binding"},
@@ -142,6 +145,7 @@ func TestEveryBotBusinessRouteRequiresSubjectAndGroupContext(t *testing.T) {
 		{http.MethodGet, "/v1/bot/projects/1"},
 		{http.MethodGet, "/v1/bot/projects/1/inventory"},
 		{http.MethodGet, "/v1/bot/recharges/config"},
+		{http.MethodPost, "/v1/bot/recharges/quote"},
 		{http.MethodGet, "/v1/bot/rankings/orders"},
 		{http.MethodGet, "/v1/bot/rankings/rewards/latest"},
 		{http.MethodPost, "/v1/bot/diagnoses/code"},
@@ -213,7 +217,7 @@ func TestBotContextReturnsOnlyAuthorizationAndUsesSubjectLimit(t *testing.T) {
 			Platform: "qq", SubjectNamespace: "qq:main", AllowedGroupIDs: []string{"10001"},
 		}, nil
 	})
-	registerBotRoutes(router.Group("/v1"), router, auth, nil, nil, nil, nil, nil, rdb)
+	registerBotRoutes(router.Group("/v1"), router, auth, nil, nil, nil, nil, nil, nil, rdb)
 	wrongChannel := httptest.NewRequest(http.MethodGet, "/v1/bot/context", nil)
 	wrongChannel.Header.Set(middleware.SystemKeyHeaderName, "sk_test")
 	wrongChannel.Header.Set(middleware.BotChannelHeaderName, "telegram")
@@ -234,7 +238,8 @@ func TestBotContextReturnsOnlyAuthorizationAndUsesSubjectLimit(t *testing.T) {
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, request)
 		if attempt <= botSubjectReadsPerMinute {
-			if response.Code != http.StatusOK || response.Body.String() != `{"authorized":true}` {
+			// No IAM module is configured in this fixture: binding must fail closed.
+			if response.Code != http.StatusServiceUnavailable || strings.Contains(response.Body.String(), `"authorized":true`) {
 				t.Fatalf("context attempt %d = %d %s", attempt, response.Code, response.Body.String())
 			}
 			continue

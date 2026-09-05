@@ -261,10 +261,17 @@ func (h *BillingHandler) GetRechargeConfig(c *gin.Context) {
 			FeePoints: tier.FeePoints, CreditedPoints: tier.CreditedPoints,
 		}
 	}
+	currencies := make(map[string]string, len(result.PaymentMethods))
+	for _, method := range result.PaymentMethods {
+		if currency := billingapp.RechargePaymentCurrency(method); currency != "" {
+			currencies[method] = currency
+		}
+	}
 	c.JSON(http.StatusOK, RechargeConfigResponse{
 		Enabled: result.Enabled, MinPoints: result.MinPoints,
-		PaymentMethods: result.PaymentMethods,
-		FeeRate:        result.FeeRate, FeeCapPoints: result.FeeCapPoints, Tiers: tiers,
+		PaymentMethods:    result.PaymentMethods,
+		PaymentCurrencies: currencies,
+		FeeRate:           result.FeeRate, FeeCapPoints: result.FeeCapPoints, Tiers: tiers,
 		RedemptionCodePurchaseURL: strings.TrimSpace(runtimeconfig.String("redemption_code_purchase_url", "")),
 	})
 }
@@ -274,6 +281,10 @@ func (h *BillingHandler) PostRechargeQuote(c *gin.Context) {
 	var request RechargeQuoteRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		writeInvalidBody(c, err)
+		return
+	}
+	if h == nil || h.module == nil || h.module.RechargeUseCase == nil {
+		writeBillingError(c, domain.ErrRechargeConfigUnavailable)
 		return
 	}
 	result, err := h.module.RechargeUseCase.Quote(request.Points, request.PaymentMethod)

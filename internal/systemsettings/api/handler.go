@@ -28,7 +28,17 @@ func NewHandler(module *Module, checker middleware.PermissionChecker) *Handler {
 
 func (h *Handler) GetAnnouncements(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, gin.H{"announcements": runtimeconfig.ActiveAnnouncements(time.Now(), 20)})
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if err != nil || limit < 1 || limit > 100 || len(c.QueryArray("limit")) > 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters."})
+		return
+	}
+	items := runtimeconfig.ActiveAnnouncements(time.Now(), limit+1)
+	truncated := len(items) > limit
+	if truncated {
+		items = items[:limit]
+	}
+	c.JSON(http.StatusOK, gin.H{"announcements": items, "truncated": truncated})
 }
 
 func (h *Handler) GetNotice(c *gin.Context) {
@@ -38,8 +48,17 @@ func (h *Handler) GetNotice(c *gin.Context) {
 
 func (h *Handler) GetFAQs(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
-	enabled, items := runtimeconfig.PublicFAQs(20)
-	c.JSON(http.StatusOK, gin.H{"enabled": enabled, "items": items})
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if err != nil || limit < 1 || limit > 100 || len(c.QueryArray("limit")) > 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters."})
+		return
+	}
+	enabled, items := runtimeconfig.PublicFAQs(limit + 1)
+	truncated := len(items) > limit
+	if truncated {
+		items = items[:limit]
+	}
+	c.JSON(http.StatusOK, gin.H{"enabled": enabled, "items": items, "truncated": truncated})
 }
 
 func (h *Handler) GetCustomerService(c *gin.Context) {

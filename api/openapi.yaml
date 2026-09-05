@@ -54,6 +54,14 @@ paths:
       summary: List active system announcements
       tags:
         - System
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
       responses:
         "200":
           description: Active system announcements, most recently started first
@@ -61,6 +69,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SystemAnnouncementsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
 
   /v1/notice:
     get:
@@ -82,6 +92,14 @@ paths:
       summary: List published frequently asked questions
       tags:
         - System
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
       responses:
         "200":
           description: Published FAQs ordered by weight and recency
@@ -89,6 +107,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SystemFAQsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
 
   /v1/customer-service:
     get:
@@ -2205,11 +2225,13 @@ paths:
       operationId: getBotContext
       summary: Verify the current trusted bot event context
       description: |
-        Returns only an authorization acknowledgement. In a private scene, send the trusted subject
+        Returns an authorization acknowledgement and the trusted sender's bound/accountAvailable
+        flags for plugin access control only; never place these flags in group replies or LLM inputs.
+        In a private scene, send the trusted subject
         and `X-Bot-Scene: private` without a group header. In a group scene, `X-Bot-Group` is required
         and must match one of the authenticated Bot System Key's `allowedGroupIds`. Missing or invalid
         keys, subjects, scenes, group ids, and non-whitelisted groups all receive the same 401 response;
-        this endpoint never returns platform scope, namespace, binding, or account information.
+        This endpoint never returns platform scope, namespace, user ID, email, or account profile.
       tags: [Bot]
       security:
         - systemKeyAuth: []
@@ -2543,6 +2565,42 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/bot/orders:
+    get:
+      operationId: getBotOrders
+      summary: Read the current bound user's private order summaries
+      description: Private conversations only. Identity is resolved from the trusted bot binding; user ID, scope overrides and email searches are not accepted. Returns recent orders without order numbers, emails, payment amounts, credentials or mail contents. Order status does not prove mail receipt or project mismatch.
+      tags: [Bot]
+      security:
+        - systemKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BotChannel"
+        - $ref: "#/components/parameters/BotSubject"
+        - $ref: "#/components/parameters/BotScene"
+        - name: offset
+          in: query
+          schema: {type: integer, minimum: 0, maximum: 10000, default: 0}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 100}
+      responses:
+        "200":
+          description: Owner-scoped order summaries, or binding/account unavailability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotOrderListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /v1/bot/recharges/config:
     get:
       operationId: getBotRechargeConfig
@@ -2565,6 +2623,48 @@ paths:
                 $ref: "#/components/schemas/RechargeConfigResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/bot/recharges/quote:
+    post:
+      operationId: postBotRechargeQuote
+      summary: Quote point credit and the selected method's payment amount
+      description: Read-only calculation using the current recharge configuration. Accepts only points and an optional paymentMethod; no query parameters, user IDs, subjects or scope overrides are accepted. It never creates a recharge, contacts a payment gateway, deducts funds or credits a wallet. The point fields use system points; paymentAmount uses exactly paymentCurrency (CNY or USDT, never USD). A quote does not prove payment or credit; the eventual payment page supplies the final transfer amount, network and address.
+      tags: [Bot]
+      security:
+        - systemKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BotChannel"
+        - $ref: "#/components/parameters/BotSubject"
+        - $ref: "#/components/parameters/BotScene"
+        - $ref: "#/components/parameters/BotGroup"
+      requestBody:
+        required: true
+        description: One JSON object, at most 4 KiB.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RechargeQuoteRequest"
+      responses:
+        "200":
+          description: Point principal, bonus, fee and credit, with a separately denominated payment quote
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RechargeQuoteResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          description: Invalid points or payment method, or payment below the configured minimum
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "503":
@@ -7513,8 +7613,8 @@ paths:
   /v1/recharges/quote:
     post:
       operationId: postRechargeQuote
-      summary: Quote a recharge entirely in points
-      description: Returns the point principal, bonus, fee, and credited total.
+      summary: Quote point credit and a payment amount in the selected currency
+      description: Returns the point principal, bonus, fee, and credited total separately from paymentAmount and its CNY or USDT paymentCurrency. This is a read-only calculation and does not create or pay a recharge.
       tags:
         - Billing
       security:
@@ -7529,7 +7629,7 @@ paths:
               $ref: "#/components/schemas/RechargeQuoteRequest"
       responses:
         "200":
-          description: Point quote
+          description: Point credit and payment quote
           content:
             application/json:
               schema:
@@ -16631,6 +16731,12 @@ components:
           items:
             type: string
             enum: [alipay, epusdt_usdt_tron]
+        paymentCurrencies:
+          type: object
+          description: Enabled payment method identifier to its quoted payment currency. System balances and product prices use points; CNY and USDT are payment currencies, and USDT is not USD. Omitted when no methods are enabled or by older servers.
+          additionalProperties:
+            type: string
+            enum: [CNY, USDT]
         minPoints:
           $ref: "#/components/schemas/NonNegativeLedgerAmount"
         feeRate:
@@ -18740,9 +18846,11 @@ components:
       properties:
         announcements:
           type: array
-          maxItems: 20
+          maxItems: 100
           items:
             $ref: "#/components/schemas/SystemAnnouncement"
+        truncated:
+          type: boolean
       additionalProperties: false
 
     SystemNoticeResponse:
@@ -18793,9 +18901,11 @@ components:
           type: boolean
         items:
           type: array
-          maxItems: 20
+          maxItems: 100
           items:
             $ref: "#/components/schemas/SystemFAQ"
+        truncated:
+          type: boolean
       additionalProperties: false
 
     CustomerServiceResponse:
@@ -18947,12 +19057,18 @@ components:
 
     BotContextResponse:
       type: object
-      required: [authorized]
+      required: [authorized, bound, accountAvailable]
       properties:
         authorized:
           type: boolean
           enum: [true]
           description: Always true. Unauthorized contexts receive 401 instead of a response body with scope details.
+        bound:
+          type: boolean
+          description: Trusted sender binding state, for plugin access control only; never expose it in group replies or LLM inputs.
+        accountAvailable:
+          type: boolean
+          description: True only for an active bound account. No user ID, email or account profile is returned.
       additionalProperties: false
 
     BotProfileResponse:
@@ -19098,6 +19214,39 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/BotLeaderboardRewardItem"
+      additionalProperties: false
+
+    BotOrderSummary:
+      type: object
+      required: [projectId, projectName, productType, serviceMode, status, createdAt]
+      properties:
+        projectId: {type: integer, minimum: 1}
+        projectName: {type: string}
+        productType: {type: string}
+        serviceMode: {type: string, enum: [code, purchase]}
+        status: {type: string, enum: [pending_payment, paid, active, completed, refunded, failed, closed]}
+        createdAt: {type: string, format: date-time}
+        activatedAt: {type: string, format: date-time}
+        receiveUntil: {type: string, format: date-time}
+        afterSaleUntil: {type: string, format: date-time}
+      additionalProperties: false
+
+    BotOrderListResponse:
+      type: object
+      required: [available, items, total, offset, limit, truncated]
+      properties:
+        available: {type: boolean}
+        bindingRequired: {type: boolean}
+        accountUnavailable: {type: boolean}
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/BotOrderSummary"
+        total: {type: integer, minimum: 0}
+        offset: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 100}
+        truncated: {type: boolean}
       additionalProperties: false
 
     BotProjectListResponse:
