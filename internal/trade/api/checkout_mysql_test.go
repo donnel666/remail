@@ -390,10 +390,12 @@ func TestGmailSpecialCodeUsesSharedTimeoutLifecycleMySQL(t *testing.T) {
 	require.NoError(t, err)
 	var mailbox string
 	require.NoError(t, db.Table("gmail_allocations").Where("order_no = ?", result.Order.OrderNo).Pluck("mailbox", &mailbox).Error)
-	localPart, _, found := strings.Cut(result.Order.DeliveryEmail, "@")
+	localPart, host, found := strings.Cut(result.Order.DeliveryEmail, "@")
 	require.True(t, found)
+	require.Contains(t, []string{"gmail.com", "googlemail.com"}, host)
 	if mailbox == "dot" {
-		require.Contains(t, localPart, ".")
+		require.Equal(t, "variant", strings.ReplaceAll(localPart, ".", ""))
+		require.NotEqual(t, "variant@gmail.com", result.Order.DeliveryEmail)
 	} else {
 		require.Equal(t, "plus", mailbox)
 		require.Contains(t, localPart, "+")

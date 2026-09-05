@@ -78,6 +78,14 @@ func TestGmailCandidatesRotateAcrossDotAndPlusAllocations(t *testing.T) {
 	}
 
 	if err := db.Exec(`INSERT INTO gmail_allocations VALUES ('local', 1, 10, 'dot', 'a.b@gmail.com')`).Error; err != nil {
+		t.Fatalf("seed first Gmail dot alias: %v", err)
+	}
+	if got := list(domain.GmailMailboxDot); got[0] != 1 || got[1] != 2 {
+		t.Fatalf("dot candidates with Googlemail variants remaining = %v, want [1 2]", got)
+	}
+	if err := db.Exec(`INSERT INTO gmail_allocations VALUES
+		('local', 1, 10, 'dot', 'ab@googlemail.com'),
+		('local', 1, 10, 'dot', 'a.b@googlemail.com')`).Error; err != nil {
 		t.Fatalf("exhaust first Gmail dot aliases: %v", err)
 	}
 	candidates, err := repo.ListGmailSourceCandidates(ctx, 10, 2, domain.SupplyScopePublic, domain.GmailMailboxDot, nil, 1)
