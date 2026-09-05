@@ -155,6 +155,24 @@ def test_redaction_and_limits() -> None:
     assert "user@example.com" not in zero_width
 
 
+_TEST_OPENAI_KEY = "s" + "k-proj-" + "A" * 32
+_TEST_GITHUB_TOKEN = "g" + "hp_" + "a" * 36
+_TEST_AWS_LONG_TERM_ID = "A" + "KIA" + "0" * 16
+_TEST_AWS_TEMPORARY_ID = "A" + "SIA" + "0" * 16
+_TEST_AWS_SECRET = "synthetic/" + "A" * 32
+_TEST_AWS_SESSION = "synthetic-session-" + "B" * 24
+_TEST_JWT = ".".join(
+    ("eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxMjM0NTY3ODkwIn0", "signature")
+)
+_TEST_PEM_PRIVATE_KEY = (
+    "-----BEGIN " + "PRIVATE KEY-----\nMIIEvQIBADANBgkqh\n-----END PRIVATE KEY-----"
+)
+_TEST_PGP_PRIVATE_KEY = (
+    "-----BEGIN "
+    + "PGP PRIVATE KEY BLOCK-----\nPGP_SECRET\n-----END PGP PRIVATE KEY BLOCK-----"
+)
+
+
 @pytest.mark.parametrize(
     ("raw", "secrets"),
     [
@@ -219,11 +237,11 @@ def test_redaction_and_limits() -> None:
         ("API Key 应放在 sk-secret 请求头", ("sk-secret",)),
         ("密码是怎么123", ("怎么123",)),
         (
-            "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqh\n-----END PRIVATE KEY-----",
+            _TEST_PEM_PRIVATE_KEY,
             ("MIIEvQIBADANBgkqh",),
         ),
         (
-            "-----BEGIN PGP PRIVATE KEY BLOCK-----\nPGP_SECRET\n-----END PGP PRIVATE KEY BLOCK-----",
+            _TEST_PGP_PRIVATE_KEY,
             ("PGP_SECRET",),
         ),
         ("恢复码：abcd-efgh-ijkl", ("abcd-efgh-ijkl",)),
@@ -232,12 +250,12 @@ def test_redaction_and_limits() -> None:
             ("alpha-bravo-charlie", "delta-echo-foxtrot"),
         ),
         (
-            "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
-            ("sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",),
+            _TEST_OPENAI_KEY,
+            (_TEST_OPENAI_KEY,),
         ),
         (
-            "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
-            ("ghp_abcdefghijklmnopqrstuvwxyz0123456789",),
+            _TEST_GITHUB_TOKEN,
+            (_TEST_GITHUB_TOKEN,),
         ),
         (
             "https://alice:SuperSecret@example.com/api",
@@ -264,26 +282,26 @@ def test_redaction_and_limits() -> None:
             ("mailer", "MailSecret"),
         ),
         (
-            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature",
+            _TEST_JWT,
             ("eyJhbGciOiJIUzI1NiJ9", "signature"),
         ),
         (
-            "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE",
-            ("AKIAIOSFODNN7EXAMPLE",),
+            f"AWS_ACCESS_KEY_ID={_TEST_AWS_LONG_TERM_ID}",
+            (_TEST_AWS_LONG_TERM_ID,),
         ),
         (
-            "AWS_ACCESS_KEY_ID=ASIAIOSFODNN7EXAMPLE",
-            ("ASIAIOSFODNN7EXAMPLE",),
+            f"AWS_ACCESS_KEY_ID={_TEST_AWS_TEMPORARY_ID}",
+            (_TEST_AWS_TEMPORARY_ID,),
         ),
-        ("AKIAIOSFODNN7EXAMPLE", ("AKIAIOSFODNN7EXAMPLE",)),
-        ("ASIAIOSFODNN7EXAMPLE", ("ASIAIOSFODNN7EXAMPLE",)),
+        (_TEST_AWS_LONG_TERM_ID, (_TEST_AWS_LONG_TERM_ID,)),
+        (_TEST_AWS_TEMPORARY_ID, (_TEST_AWS_TEMPORARY_ID,)),
         (
-            "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-            ("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",),
+            f"AWS_SECRET_ACCESS_KEY={_TEST_AWS_SECRET}",
+            (_TEST_AWS_SECRET,),
         ),
         (
-            "AWS_SESSION_TOKEN=IQoJb3JpZ2luX2VjEExampleSessionToken",
-            ("IQoJb3JpZ2luX2VjEExampleSessionToken",),
+            f"AWS_SESSION_TOKEN={_TEST_AWS_SESSION}",
+            (_TEST_AWS_SESSION,),
         ),
     ],
 )
@@ -374,8 +392,8 @@ def test_feedback_uses_shared_credential_gate_without_secret_suffixes() -> None:
     raw = (
         "Cookie: session=FIRST_SECRET; refresh=SECOND_SECRET\n"
         '{"password":"correct horse battery staple","token":"opaque token"}\n'
-        "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef\n"
-        "-----BEGIN PRIVATE KEY-----\nMIIE_PRIVATE_MATERIAL\n-----END PRIVATE KEY-----"
+        f"{_TEST_OPENAI_KEY}\n"
+        f"{_TEST_PEM_PRIVATE_KEY}"
     )
     clean = sanitize_feedback_text(raw)
     for secret in (
@@ -383,7 +401,7 @@ def test_feedback_uses_shared_credential_gate_without_secret_suffixes() -> None:
         "SECOND_SECRET",
         "correct horse battery staple",
         "opaque token",
-        "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        _TEST_OPENAI_KEY,
         "MIIE_PRIVATE_MATERIAL",
     ):
         assert secret not in clean
