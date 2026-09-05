@@ -748,6 +748,21 @@ INSERT INTO gmail_allocations(
 	pickupScope, err := repo.LoadPickupScope(ctx, "gmail-alias-token", "first.name+tag@googlemail.com")
 	require.NoError(t, err)
 	require.Equal(t, "plus", pickupScope.RecipientKind)
+
+	require.NoError(t, db.Table("gmail_allocations").Where("order_no = 'OR_GMAIL_ALIAS_SCOPE'").Updates(map[string]any{
+		"mailbox": "dot", "email": "firstname@googlemail.com",
+	}).Error)
+	require.NoError(t, db.Table("orders").Where("order_no = 'OR_GMAIL_ALIAS_SCOPE'").
+		Update("delivery_email", "firstname@googlemail.com").Error)
+	scopes, err = repo.ListMatchingScopesByRecipient(ctx, domain.ResourceTypeGmail, 100, "firstname@googlemail.com", now)
+	require.NoError(t, err)
+	require.Len(t, scopes, 1)
+	require.Equal(t, "OR_GMAIL_ALIAS_SCOPE", scopes[0].OrderNo)
+	require.Equal(t, "dot", scopes[0].RecipientKind)
+	scopes, err = repo.ListMatchingScopesByRecipient(ctx, domain.ResourceTypeGmail, 100, "firstname@gmail.com", now)
+	require.NoError(t, err)
+	require.Len(t, scopes, 1)
+	require.Equal(t, "OR_GMAIL_SCOPE", scopes[0].OrderNo)
 }
 
 func seedGmailMailmatchScope(t *testing.T, db *gorm.DB, now time.Time) {

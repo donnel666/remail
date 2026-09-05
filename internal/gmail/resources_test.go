@@ -116,7 +116,7 @@ func TestUnifiedGmailAllocationIgnoresLegacyRemoteHistoryButKeepsLocalHistory(t 
 	require.ErrorIs(t, err, allocdomain.ErrInsufficientInventory)
 }
 
-func TestLocalGmailSpecialFallsBackWhenDotAliasesAreExhausted(t *testing.T) {
+func TestLocalGmailVariantFallsBackWhenFiniteAliasesAreExhausted(t *testing.T) {
 	db := newLocalGmailAllocationTestDB(t, "gmail-local-dot-supply-exhausted")
 	require.NoError(t, db.Exec(`INSERT INTO project_products(
 		id, project_id, type, status, code_enabled, purchase_enabled,
@@ -130,12 +130,14 @@ func TestLocalGmailSpecialFallsBackWhenDotAliasesAreExhausted(t *testing.T) {
 		ForSale: true, Status: LocalResourceNormal,
 	}).Error)
 	resourceID := root.ID
-	require.NoError(t, db.Create(&allocationModel{
-		OrderNo: "DOT-EXHAUSTED", GuardType: "gmail", ProjectID: 11, ProductID: 13,
-		Source: SourceLocal, ServiceMode: string(allocdomain.GmailServiceModeCode), ResourceID: &resourceID,
-		SupplyScope: AllocationSupplyPublic, Mailbox: GmailMailboxDot, Email: "a.b@gmail.com",
-		Status: AllocationStatusReleased,
-	}).Error)
+	for index, email := range []string{"ab@googlemail.com", "a.b@gmail.com", "a.b@googlemail.com"} {
+		require.NoError(t, db.Create(&allocationModel{
+			OrderNo: fmt.Sprintf("DOT-EXHAUSTED-%d", index), GuardType: "gmail", ProjectID: 11, ProductID: 13,
+			Source: SourceLocal, ServiceMode: string(allocdomain.GmailServiceModeCode), ResourceID: &resourceID,
+			SupplyScope: AllocationSupplyPublic, Mailbox: GmailMailboxDot, Email: email,
+			Status: AllocationStatusReleased,
+		}).Error)
+	}
 
 	allocation := allocateLocalGmailTest(
 		t, allocapp.NewUseCase(allocinfra.NewRepo(db)), "SPECIAL-AFTER-DOT", 2, 13,
@@ -260,7 +262,7 @@ INSERT INTO project_products(
 			_, err := allocator.ReleaseByOrder(context.Background(), candidateOrderNo)
 			require.NoError(t, err)
 		}
-		t.Fatalf("Gmail special allocation never selected %s", mailbox)
+		t.Fatalf("Gmail variant allocation never selected %s", mailbox)
 		return allocationModel{}
 	}
 

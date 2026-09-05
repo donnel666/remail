@@ -122,6 +122,7 @@ const statusMeta: Record<
   validating: { color: "orange", label: "Validating" },
   identifying: { color: "blue", label: "Identifying" },
   normal: { color: "green", label: "Normal" },
+  cooldown: { color: "blue", label: "Cooldown" },
   abnormal: { color: "orange", label: "Abnormal" },
   disabled: { color: "grey", label: "Disabled" },
   deleted: { color: "red", label: "Deleted" },
@@ -133,6 +134,7 @@ const EMPTY_FACETS: AdminGmailResourceList["facets"] = {
   validating: 0,
   identifying: 0,
   normal: 0,
+  cooldown: 0,
   abnormal: 0,
   disabled: 0,
   deleted: 0,
@@ -495,8 +497,19 @@ function ResourceStatusTag({ item }: { item: AdminGmailResourceItem }) {
       {t(meta.label)}
     </Tag>
   );
-  return item.lastSafeError ? (
-    <Tooltip content={item.lastSafeError}>{tag}</Tooltip>
+  const remainingSeconds = item.cooldownUntil
+    ? Math.max(0, Math.ceil((Date.parse(item.cooldownUntil) - Date.now()) / 1000))
+    : 0;
+  const cooldownHint = item.status === "cooldown"
+    ? item.cooldownUntil
+      ? `${remainingSeconds < 60
+        ? t("Recovers in {{seconds}} seconds", { seconds: remainingSeconds })
+        : t("Recovers in {{minutes}} minutes", { minutes: Math.ceil(remainingSeconds / 60) })} (${formatTime(item.cooldownUntil)})`
+      : t("Cooldown recovery pending")
+    : "";
+  const tooltip = cooldownHint || item.lastSafeError;
+  return tooltip ? (
+    <Tooltip content={tooltip}>{tag}</Tooltip>
   ) : (
     tag
   );

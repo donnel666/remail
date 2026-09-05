@@ -3168,7 +3168,7 @@ func microsoftDotCapacityExpression(tableAlias string) string {
 func gmailDotCapacityExpression(tableAlias string) string {
 	localPart := "REPLACE(SUBSTRING_INDEX(" + tableAlias + ".email, '@', 1), '.', '')"
 	return fmt.Sprintf(
-		"(CASE WHEN CHAR_LENGTH(%s) BETWEEN 2 AND %d THEN CAST(POWER(2, CHAR_LENGTH(%s) - 1) AS UNSIGNED) - 1 ELSE 0 END)",
+		"(CASE WHEN CHAR_LENGTH(%s) BETWEEN 2 AND %d THEN CAST(POWER(2, CHAR_LENGTH(%s)) AS UNSIGNED) - 1 ELSE 0 END)",
 		localPart, allocapp.GmailDotMaxLocalCharacters, localPart,
 	)
 }
@@ -3179,7 +3179,7 @@ func gmailDotCandidateCapacityExpression(db *gorm.DB, tableAlias string) string 
 	}
 	localPart := "REPLACE(SUBSTR(" + tableAlias + ".email, 1, INSTR(" + tableAlias + ".email, '@') - 1), '.', '')"
 	return fmt.Sprintf(
-		"(CASE WHEN LENGTH(%s) BETWEEN 2 AND %d THEN (1 << (LENGTH(%s) - 1)) - 1 ELSE 0 END)",
+		"(CASE WHEN LENGTH(%s) BETWEEN 2 AND %d THEN (1 << LENGTH(%s)) - 1 ELSE 0 END)",
 		localPart, allocapp.GmailDotMaxLocalCharacters, localPart,
 	)
 }

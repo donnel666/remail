@@ -1,9 +1,13 @@
 package runtimeconfig
 
-import "github.com/donnel666/remail/internal/systemsettings/domain"
+import (
+	"time"
+
+	"github.com/donnel666/remail/internal/systemsettings/domain"
+)
 
 const (
-	DefaultSettingsCount                         = 282
+	DefaultSettingsCount                         = 283
 	NodeLocCallbackURL                           = "https://remail.aishop6.com/oauth/nodeloc"
 	RechargeTimeoutMinutesKey                    = "recharge_timeout_minutes"
 	MicrosoftPriceMultiplierKey                  = "product_price_multiplier_microsoft"
@@ -20,6 +24,7 @@ const (
 	ICloudPhoneSendFailureThresholdKey           = "icloud_phone_send_failure_threshold"
 	ICloudPhoneBlacklistHoursKey                 = "icloud_phone_blacklist_hours"
 	ICloudOnboardingMaxAttemptsKey               = "icloud_onboarding_max_attempts"
+	GmailVariantCooldownMinutesKey               = "gmail_variant_cooldown_minutes"
 	DomainSaleTLDWhitelistKey                    = "domain_sale_tld_whitelist"
 	DomainSaleQualityMinOrdersKey                = "domain_sale_quality_min_orders"
 	DomainSaleQualityMinSuccessPercentKey        = "domain_sale_quality_min_success_percent"
@@ -31,9 +36,15 @@ const (
 	DefaultDomainSaleMinSuccessPercent           = 60
 	DefaultDomainSaleQualityWindowHours          = 1
 	DefaultDomainSaleQualityCheckIntervalSeconds = 30
+	defaultGmailVariantCooldown                  = 5 * time.Minute
+	maxGmailVariantCooldown                      = 24 * time.Hour
 )
 
 const DefaultDomainSaleTLDWhitelist = "com,cn,net,org,info,biz,xyz,top,site,online,store,shop,club,me,io,co,cc,us,uk,de,fr,jp,kr,ca,au,nz,in,ai,app,dev,tech,cloud,live,world,vip,pro,name,mobi,tv,com.cn,net.cn,org.cn,gov.cn,com.hk,com.tw,co.uk,org.uk,me.uk,com.au,net.au,org.au,co.nz,co.jp,co.kr,co.in,co.za,edu,edu.kg,edu.*"
+
+func GmailVariantCooldown() time.Duration {
+	return min(Duration(GmailVariantCooldownMinutesKey, defaultGmailVariantCooldown, time.Minute, 0), maxGmailVariantCooldown)
+}
 
 // DefaultSettings is the single source of initial values for runtime-managed
 // settings. Startup inserts only keys that are not in storage.
@@ -159,6 +170,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "product_price_multiplier_domain", Value: "1"},
 
 	{Key: "microsoft_domain_whitelist", Value: "outlook.com,hotmail.com,outlook.sa,outlook.com.ar,outlook.com.au,outlook.at,outlook.be,outlook.com.br,outlook.cl,outlook.cz,outlook.fr,outlook.de,outlook.com.gr,outlook.co.il,outlook.in,outlook.co.id,outlook.ie,outlook.it,outlook.hu,outlook.jp,outlook.kr,outlook.lv,outlook.my,outlook.co.nz,outlook.ph,outlook.pt,outlook.sg,outlook.sk,outlook.es,outlook.co.th,outlook.com.tr,outlook.com.vn"},
+	{Key: "gmail_variant_cooldown_minutes", Value: "5"},
 	{Key: "icloud_forwarding_suffixes", Value: ""},
 	{Key: "icloud_cookie_keepalive_minutes", Value: "8"},
 	{Key: "icloud_phone_hourly_sms_limit", Value: "10"},

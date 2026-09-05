@@ -458,6 +458,10 @@ func localGmailHistoryRecipient(mainEmail string, recipients []string) (string, 
 	if !ok {
 		return "", "", false
 	}
+	mainLocal, _, _ := strings.Cut(mainExact, "@")
+	mainPlusLocal, _, _ := strings.Cut(mainPlus, "@")
+	mainExact = mainLocal + "@gmail.com"
+	mainPlus = mainPlusLocal + "@gmail.com"
 	recipientExact, recipientPlus, recipientDots, ok := localGmailHistoryAliasForms(recipient)
 	if !ok || recipientDots != mainDots {
 		return "", "", false
@@ -483,8 +487,8 @@ func localGmailHistoryAliasForms(value string) (exact string, plusBase string, d
 	if plus := strings.IndexByte(plusLocal, '+'); plus > 0 {
 		plusLocal = plusLocal[:plus]
 	}
-	exact = local + "@gmail.com"
-	plusBase = plusLocal + "@gmail.com"
+	exact = local + "@" + host
+	plusBase = plusLocal + "@" + host
 	dotBase = strings.ReplaceAll(plusLocal, ".", "") + "@gmail.com"
 	return exact, plusBase, dotBase, true
 }

@@ -101,6 +101,7 @@ export function filterProducts(
             product.productType === "gmail_variant"
               ? translate(product.suffix)
               : "",
+            product.productType === "gmail_variant" ? "googlemail.com" : "",
             product.emailSuffix,
             product.productType,
           ]

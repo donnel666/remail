@@ -1,5 +1,6 @@
 export const EMAIL_RESOURCE_KEYS = [
   "microsoft_domain_whitelist",
+  "gmail_variant_cooldown_minutes",
   "icloud_forwarding_suffixes",
   "icloud_cookie_keepalive_minutes",
   "icloud_onboarding_max_attempts",

@@ -36,6 +36,8 @@ describe("admin Gmail page layout", () => {
 
     expect(gmailSource).toContain("<StatisticFilterOption");
     expect(gmailSource).toContain("<CompactModeToggle");
+    expect(gmailSource).toContain('cooldown: { color: "blue", label: "Cooldown" }');
+    expect(gmailSource).toContain('t("Recovers in {{minutes}} minutes"');
     for (const fragment of [
       "rowSelection=",
       "useSelectionNotification({",

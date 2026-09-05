@@ -149,6 +149,10 @@ type HistoricalMicrosoftAliasPort interface {
 	BackfillExistingAliases(ctx context.Context, resourceID uint, aliases []string) error
 }
 
+type GmailVariantCooldownPort interface {
+	StartVariantCooldown(ctx context.Context, resourceID uint) error
+}
+
 type InventoryStats struct {
 	ProjectID                  uint
 	Microsoft                  MicrosoftInventoryStats

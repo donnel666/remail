@@ -39,12 +39,13 @@ func (a gmailMailIngestAdapter) IngestGmailMail(
 	ctx context.Context,
 	resourceID uint,
 	recipient string,
+	recipients []string,
 	raw []byte,
 	receivedAt time.Time,
 	providerMessageID, folder string,
 	fence func(context.Context) error,
 ) (int, int, error) {
-	return a.ingest(ctx, mailmatchdomain.ResourceTypeGmail, resourceID, recipient, raw, receivedAt, providerMessageID, folder, fence)
+	return a.ingest(ctx, mailmatchdomain.ResourceTypeGmail, resourceID, recipient, recipients, raw, receivedAt, providerMessageID, folder, fence)
 }
 
 func (a gmailMailIngestAdapter) ingest(
@@ -52,6 +53,7 @@ func (a gmailMailIngestAdapter) ingest(
 	resourceType mailmatchdomain.ResourceType,
 	resourceID uint,
 	recipient string,
+	recipients []string,
 	raw []byte,
 	receivedAt time.Time,
 	providerMessageID, folder string,
@@ -62,7 +64,7 @@ func (a gmailMailIngestAdapter) ingest(
 	}
 	return a.mailmatch.IngestInboundMailWithFence(ctx, mailmatchapp.InboundMailRequest{
 		EmailResourceID: resourceID, ResourceType: resourceType,
-		Recipient: recipient, Raw: raw, ReceivedAt: receivedAt,
+		Recipient: recipient, Recipients: recipients, Raw: raw, ReceivedAt: receivedAt,
 		ProviderMessageID: providerMessageID, Protocol: "imap", Folder: folder,
 	}, fence)
 }

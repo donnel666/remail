@@ -30,13 +30,14 @@ const (
 )
 
 type MailIngestPort interface {
-	IngestGmailMail(ctx context.Context, resourceID uint, recipient string, raw []byte, receivedAt time.Time, providerMessageID, folder string, fence func(context.Context) error) (stored int, matched int, err error)
+	IngestGmailMail(ctx context.Context, resourceID uint, recipient string, recipients []string, raw []byte, receivedAt time.Time, providerMessageID, folder string, fence func(context.Context) error) (stored int, matched int, err error)
 }
 
 type localGmailFetchedMessage struct {
 	UID               uint64
 	Folder            string
 	Recipient         string
+	Recipients        []string
 	ProviderMessageID string
 	Raw               []byte
 	ReceivedAt        time.Time
@@ -179,12 +180,12 @@ func fetchSelectedLocalGmailFolder(
 		if !effectiveSince.IsZero() && receivedAt.Before(effectiveSince) {
 			continue
 		}
-		recipient := localGmailOriginalRecipient(rootEmail, raw)
-		if recipient == "" {
+		recipients := localGmailOriginalRecipients(rootEmail, raw)
+		if len(recipients) == 0 {
 			continue
 		}
 		messages = append(messages, localGmailFetchedMessage{
-			UID: uid, Folder: folder.Label, Recipient: recipient,
+			UID: uid, Folder: folder.Label, Recipient: recipients[0], Recipients: recipients,
 			ProviderMessageID: localGmailProviderMessageID(folder.Label, uidValidity, uid),
 			Raw:               raw, ReceivedAt: receivedAt,
 		})
@@ -318,12 +319,12 @@ func uniqueLocalGmailFolders(folders []localGmailFolder) []localGmailFolder {
 	return out
 }
 
-func localGmailOriginalRecipient(rootEmail string, raw []byte) string {
+func localGmailOriginalRecipients(rootEmail string, raw []byte) []string {
 	message, err := stdmail.ReadMessage(bytes.NewReader(raw))
 	if err != nil {
-		return ""
+		return nil
 	}
-	for _, header := range []string{"Delivered-To", "X-Original-To", "Envelope-To", "To", "Cc"} {
+	headerMatches := func(header string) []string {
 		matches := make([]string, 0, 1)
 		seen := map[string]struct{}{}
 		for _, candidate := range localGmailHistoryAddressCandidates(message.Header.Get(header)) {
@@ -337,14 +338,43 @@ func localGmailOriginalRecipient(rootEmail string, raw []byte) string {
 			seen[candidate] = struct{}{}
 			matches = append(matches, candidate)
 		}
+		return matches
+	}
+	for _, header := range []string{"Delivered-To", "X-Original-To", "Envelope-To", "To", "Cc"} {
+		matches := headerMatches(header)
 		if len(matches) == 1 {
-			return matches[0]
+			if header == "Delivered-To" {
+				deliveredLocal, deliveredHost, _ := strings.Cut(matches[0], "@")
+				if deliveredHost == "gmail.com" {
+					for _, originalHeader := range []string{"X-Original-To", "Envelope-To", "To", "Cc"} {
+						originals := headerMatches(originalHeader)
+						if len(originals) != 1 {
+							continue
+						}
+						originalLocal, originalHost, _ := strings.Cut(originals[0], "@")
+						if originalLocal != deliveredLocal {
+							continue
+						}
+						if originalHost == "googlemail.com" {
+							return originals
+						}
+						if originalHost == "gmail.com" {
+							return matches
+						}
+					}
+					// Gmail rewrites Googlemail's Delivered-To domain. Without one
+					// corroborating original header, let MailMatch resolve both exact
+					// domains and reject the message if two active orders make it ambiguous.
+					return []string{matches[0], deliveredLocal + "@googlemail.com"}
+				}
+			}
+			return matches
 		}
 		if len(matches) > 1 {
-			return ""
+			return nil
 		}
 	}
-	return ""
+	return nil
 }
 
 func localGmailRecipientBelongsTo(rootEmail, candidate string) bool {
@@ -463,7 +493,7 @@ func (s *Service) fetchLocalResourceMail(ctx context.Context, resourceID uint, e
 	result := localOrderMailFetch{ResourceID: resource.ID, Cursors: cursors, Fetched: len(messages)}
 	for _, message := range messages {
 		storedCount, matchedCount, err := s.mail.IngestGmailMail(
-			ctx, resource.ID, message.Recipient, message.Raw, message.ReceivedAt, message.ProviderMessageID, message.Folder, fence,
+			ctx, resource.ID, message.Recipient, message.Recipients, message.Raw, message.ReceivedAt, message.ProviderMessageID, message.Folder, fence,
 		)
 		if err != nil {
 			return result, fmt.Errorf("ingest local Gmail resource mail: %w", err)

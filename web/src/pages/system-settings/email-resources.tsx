@@ -69,6 +69,14 @@ export default function EmailResourceSection({ options, onBulkSave }: SectionPro
         <TagInput aria-label={t("微软邮箱域名白名单")} value={domains} separator={[",", "，", " ", "\n"]} allowDuplicates={false} addOnBlur showClear placeholder={t("输入邮箱域名后回车")} onChange={(values) => update("microsoft_domain_whitelist", values.map((value) => value.trim()).filter(Boolean).join(","))} style={{ width: "100%" }} />
         <p className="text-xs text-[var(--semi-color-text-2)]">{t("每个允许导入的微软邮箱域名单独显示；留空使用系统内置白名单")}</p>
       </FormItem>
+      <SettingsNumberField
+        label={t("谷歌变种冷却时间（分钟）")}
+        description={t("主邮箱分配谷歌变种后暂停再次分配；0 表示关闭")}
+        value={number(form.gmail_variant_cooldown_minutes)}
+        onChange={(value) => update("gmail_variant_cooldown_minutes", value)}
+        min={0}
+        max={1440}
+      />
       <FormItem spanFull>
         <FormLabel>{t("iCloud 授权转发域名后缀")}</FormLabel>
         <Select

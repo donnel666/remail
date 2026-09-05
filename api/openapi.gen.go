@@ -525,6 +525,7 @@ func (e AdminGmailOwnerSummaryRole) Valid() bool {
 // Defines values for AdminGmailResourceStatus.
 const (
 	AdminGmailResourceStatusAbnormal    AdminGmailResourceStatus = "abnormal"
+	AdminGmailResourceStatusCooldown    AdminGmailResourceStatus = "cooldown"
 	AdminGmailResourceStatusDeleted     AdminGmailResourceStatus = "deleted"
 	AdminGmailResourceStatusDisabled    AdminGmailResourceStatus = "disabled"
 	AdminGmailResourceStatusIdentifying AdminGmailResourceStatus = "identifying"
@@ -537,6 +538,8 @@ const (
 func (e AdminGmailResourceStatus) Valid() bool {
 	switch e {
 	case AdminGmailResourceStatusAbnormal:
+		return true
+	case AdminGmailResourceStatusCooldown:
 		return true
 	case AdminGmailResourceStatusDeleted:
 		return true
@@ -6458,7 +6461,7 @@ type AdminDashboardStats struct {
 	GmailVariantPurchaseActivationSuccessRate    float32 `json:"gmailVariantPurchaseActivationSuccessRate"`
 	GmailVariantPurchaseActivations              int     `json:"gmailVariantPurchaseActivations"`
 
-	// GmailVariantTotalEmails Gmail source accounts are shared by the primary Gmail and Gmail special products.
+	// GmailVariantTotalEmails Gmail source accounts are shared by the primary Gmail and Gmail variant products, including @googlemail.com equivalents.
 	GmailVariantTotalEmails int `json:"gmailVariantTotalEmails"`
 
 	// IcloudAvailableEmails Normal public iCloud source accounts with at least one currently unallocated usable alias.
@@ -6810,6 +6813,7 @@ type AdminGmailOwnerSummaryRole string
 type AdminGmailResourceFacets struct {
 	Abnormal    int64                  `json:"abnormal"`
 	All         int64                  `json:"all"`
+	Cooldown    int64                  `json:"cooldown"`
 	Deleted     int64                  `json:"deleted"`
 	Disabled    int64                  `json:"disabled"`
 	ForSale     AdminGmailBooleanFacet `json:"forSale"`
@@ -6824,7 +6828,10 @@ type AdminGmailResourceItem struct {
 	AppPasswordConfigured bool `json:"appPasswordConfigured"`
 
 	// BindingEmail Optional imported binding email used for Google account challenges.
-	BindingEmail        *openapi_types.Email     `json:"bindingEmail,omitempty"`
+	BindingEmail *openapi_types.Email `json:"bindingEmail,omitempty"`
+
+	// CooldownUntil Redis TTL-derived recovery time for a cooling Gmail resource.
+	CooldownUntil       *time.Time               `json:"cooldownUntil"`
 	CreatedAt           time.Time                `json:"createdAt"`
 	CredentialRevision  int64                    `json:"credentialRevision"`
 	CredentialUpdatedAt time.Time                `json:"credentialUpdatedAt"`
@@ -9062,7 +9069,7 @@ type CreateOrderBatchItemResponseStatus string
 
 // CreateOrderBatchRequest defines model for CreateOrderBatchRequest.
 type CreateOrderBatchRequest struct {
-	// EmailSuffix Product selector. gmail.com selects the original local Gmail primary address, gmail_variant selects the local Gmail special product and allocates either a dot alias or a plus alias, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
+	// EmailSuffix Product selector. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
 	EmailSuffix string `json:"emailSuffix"`
 	ProjectId   int    `json:"projectId"`
 
@@ -9075,7 +9082,7 @@ type CreateOrderBatchResponse = []CreateOrderBatchItemResponse
 
 // CreateOrderRequest defines model for CreateOrderRequest.
 type CreateOrderRequest struct {
-	// EmailSuffix Product selector. gmail.com selects the original local Gmail primary address, gmail_variant selects the local Gmail special product and allocates either a dot alias or a plus alias, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
+	// EmailSuffix Product selector. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted.
 	EmailSuffix string `json:"emailSuffix"`
 	ProjectId   int    `json:"projectId"`
 }

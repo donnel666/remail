@@ -276,7 +276,7 @@ func TestGmailAdminFetchMigrationStartsSafeSharedCursorAndPreservesRollbackMySQL
 	require.True(t, ok)
 	source := filepath.Clean(filepath.Join(filepath.Dir(file), "../..", "migrations"))
 	through132 := testmysql.MigrationsThrough(t, source, 132)
-	through133 := testmysql.MigrationsThrough(t, source, 133)
+	through134 := testmysql.MigrationsThrough(t, source, 134)
 	db := gmailLatestMigrationMySQL.Database(t, through132)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
@@ -308,8 +308,9 @@ func TestGmailAdminFetchMigrationStartsSafeSharedCursorAndPreservesRollbackMySQL
 		order_no, source, source_ref, service_mode, email, status, codes_json, next_poll_at
 	) VALUES ('GMAIL-CURSOR-1', 'local', '1', 'code', 'cursor+one@gmail.com', 'active', JSON_ARRAY(), NOW(3))`).Error)
 
-	require.NoError(t, platform.RunMigrations(sqlDB, through133))
-	requireMigrationVersion(t, sqlDB, 133)
+	require.NoError(t, platform.RunMigrations(sqlDB, through134))
+	requireMigrationVersion(t, sqlDB, 134)
+	require.Contains(t, migrationCheckClause(t, db, "gmail_resources", "chk_gmail_resources_status"), LocalResourceCooldown)
 	var cursor struct {
 		Inbox uint64 `gorm:"column:provider_cursor"`
 		Spam  uint64 `gorm:"column:provider_spam_cursor"`
@@ -334,11 +335,14 @@ func TestGmailAdminFetchMigrationStartsSafeSharedCursorAndPreservesRollbackMySQL
 		email_resource_id, status, generation, operation_kind
 	) VALUES (990074, 'normal', 5, 'gmail_resource_fetch')`).Error)
 	require.NoError(t, db.Table("gmail_resources").Where("id = ?", 990074).Updates(map[string]any{
-		"provider_cursor": 789, "provider_spam_cursor": 987,
+		"provider_cursor": 789, "provider_spam_cursor": 987, "status": LocalResourceCooldown,
 	}).Error)
 
-	require.NoError(t, goose.DownTo(sqlDB, through133, 132))
+	require.NoError(t, goose.DownTo(sqlDB, through134, 132))
 	requireMigrationVersion(t, sqlDB, 132)
+	var restoredStatus string
+	require.NoError(t, db.Table("gmail_resources").Where("id = ?", 990074).Pluck("status", &restoredStatus).Error)
+	require.Equal(t, localResourceRollbackNormal, restoredStatus)
 	require.False(t, db.Migrator().HasColumn("gmail_resources", "provider_cursor"))
 	require.NoError(t, db.Table("gmail_allocations").Where("order_no = ?", "GMAIL-CURSOR-1").Take(&cursor).Error)
 	require.EqualValues(t, 789, cursor.Inbox)

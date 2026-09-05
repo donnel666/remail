@@ -42,7 +42,7 @@ var integerRanges = map[string]integerRange{
 	RechargeTimeoutMinutesKey:             positive(1440),
 	"async_check_request_timeout_seconds": {min: 1, max: 30},
 
-	"domain_max_subdomains_per_registrable_domain": positive(1000), "default_plus_daily_limit": positive(2_147_483_647), "default_mailbox_daily_limit": positive(2_147_483_647), "resource_validation_max_failures": positive(100), ICloudCookieKeepaliveMinutesKey: {min: 1, max: 12},
+	"domain_max_subdomains_per_registrable_domain": positive(1000), "default_plus_daily_limit": positive(2_147_483_647), "default_mailbox_daily_limit": positive(2_147_483_647), "resource_validation_max_failures": positive(100), GmailVariantCooldownMinutesKey: {min: 0, max: 1440}, ICloudCookieKeepaliveMinutesKey: {min: 1, max: 12},
 	DomainSaleQualityMinOrdersKey: positive(1_000_000), DomainSaleQualityMinSuccessPercentKey: {min: 1, max: 100}, DomainSaleQualityWindowHoursKey: positive(8760), DomainSaleQualityCheckIntervalSecondsKey: positive(86400),
 	ICloudPhoneHourlySMSLimitKey: positive(1000), ICloudPhoneCooldownBaseSecondsKey: positive(3600), ICloudPhoneCooldownMaxSecondsKey: positive(86400), ICloudPhoneSendFailureThresholdKey: positive(100), ICloudPhoneBlacklistHoursKey: positive(8760), ICloudOnboardingMaxAttemptsKey: positive(100),
 	"resource_import_max_bytes": positive(512 << 20), "max_project_logo_bytes": positive(20 << 20), "project_name_max": positive(120), "project_description_max": positive(1000), "project_target_platform_max": positive(120),

@@ -111,6 +111,9 @@ gr.last_safe_error, gr.last_checked_at, gr.created_at, gr.updated_at`).
 	for i := range rows {
 		items[i] = localResourceItemFromRow(rows[i])
 	}
+	if err := s.enrichVariantCooldowns(ctx, items); err != nil {
+		return nil, err
+	}
 	facets, err := s.localResourceFacets(ctx, filter)
 	if err != nil {
 		return nil, err
@@ -138,7 +141,11 @@ gr.last_safe_error, gr.last_checked_at, gr.created_at, gr.updated_at`).
 		return nil, fmt.Errorf("get local Gmail resource: %w", err)
 	}
 	item := localResourceItemFromRow(row)
-	return &item, nil
+	items := []LocalResourceItem{item}
+	if err := s.enrichVariantCooldowns(ctx, items); err != nil {
+		return nil, err
+	}
+	return &items[0], nil
 }
 
 func (s *Service) ListAdminGmailAliases(ctx context.Context, resourceID uint, offset, limit int) (*AdminGmailAliasList, error) {
@@ -293,6 +300,8 @@ func (s *Service) localResourceFacets(ctx context.Context, filter LocalResourceL
 			facets.Identifying = item.Count
 		case LocalResourceNormal, localResourceRollbackNormal, localResourceRollbackLeased, localResourceRollbackSold:
 			facets.Normal += item.Count
+		case LocalResourceCooldown:
+			facets.Cooldown = item.Count
 		case LocalResourceAbnormal:
 			facets.Abnormal = item.Count
 		case LocalResourceDisabled:
@@ -662,7 +671,7 @@ func (s *Service) SetAdminLocalResourceForSale(
 
 func isLocalResourceStatus(status string) bool {
 	switch status {
-	case LocalResourcePending, LocalResourceValidating, LocalResourceIdentifying, LocalResourceNormal, LocalResourceAbnormal, LocalResourceDisabled, LocalResourceDeleted:
+	case LocalResourcePending, LocalResourceValidating, LocalResourceIdentifying, LocalResourceNormal, LocalResourceCooldown, LocalResourceAbnormal, LocalResourceDisabled, LocalResourceDeleted:
 		return true
 	default:
 		return false

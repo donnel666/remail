@@ -181,6 +181,7 @@ type InboundMailRequest struct {
 	EmailResourceID   uint
 	ResourceType      domain.ResourceType
 	Recipient         string
+	Recipients        []string
 	EnvelopeFrom      string
 	Raw               []byte
 	ReceivedAt        time.Time
@@ -1980,6 +1981,10 @@ func fetchedRecipientCandidates(item FetchedMessage) []string {
 
 func inboundFetchedMessage(req InboundMailRequest) FetchedMessage {
 	recipient := normalizeEmail(req.Recipient)
+	recipients := normalizeRecipientCandidates(append([]string{recipient}, req.Recipients...))
+	if recipient == "" && len(recipients) > 0 {
+		recipient = recipients[0]
+	}
 	receivedAt := req.ReceivedAt
 	if receivedAt.IsZero() {
 		receivedAt = time.Now().UTC()
@@ -1989,7 +1994,7 @@ func inboundFetchedMessage(req InboundMailRequest) FetchedMessage {
 		EmailResourceID:   req.EmailResourceID,
 		ResourceType:      req.ResourceType,
 		Recipient:         recipient,
-		Recipients:        []string{recipient},
+		Recipients:        recipients,
 		Sender:            strings.TrimSpace(req.EnvelopeFrom),
 		Body:              body,
 		BodyPreview:       bodyPreview(body),

@@ -54,7 +54,7 @@ type localMailIngestSpy struct {
 	failAt      int
 }
 
-func (s *localMailIngestSpy) IngestGmailMail(ctx context.Context, resourceID uint, recipient string, _ []byte, _ time.Time, messageID, folder string, fence func(context.Context) error) (int, int, error) {
+func (s *localMailIngestSpy) IngestGmailMail(ctx context.Context, resourceID uint, recipient string, _ []string, _ []byte, _ time.Time, messageID, folder string, fence func(context.Context) error) (int, int, error) {
 	if fence != nil {
 		s.fences++
 		if err := fence(ctx); err != nil {
@@ -158,22 +158,42 @@ func TestLocalGmailOriginalRecipientUsesProviderDeliveryHeaders(t *testing.T) {
 	tests := []struct {
 		name string
 		raw  string
-		want string
+		want []string
 	}{
 		{
 			name: "delivered-to wins",
 			raw:  "Delivered-To: first.name+actual@googlemail.com\r\nTo: firstname+wrong@gmail.com\r\n\r\nbody",
-			want: "first.name+actual@googlemail.com",
+			want: []string{"first.name+actual@googlemail.com"},
+		},
+		{
+			name: "googlemail domain restored after provider rewrite",
+			raw:  "Delivered-To: first.name+actual@gmail.com\r\nTo: first.name+actual@googlemail.com\r\n\r\nbody",
+			want: []string{"first.name+actual@googlemail.com"},
+		},
+		{
+			name: "different googlemail tag cannot override delivered-to",
+			raw:  "Delivered-To: first.name+actual@gmail.com\r\nTo: first.name+wrong@googlemail.com\r\n\r\nbody",
+			want: []string{"first.name+actual@gmail.com", "first.name+actual@googlemail.com"},
+		},
+		{
+			name: "missing original recipient keeps both exact domains",
+			raw:  "Delivered-To: first.name+actual@gmail.com\r\nSubject: hidden recipient\r\n\r\nbody",
+			want: []string{"first.name+actual@gmail.com", "first.name+actual@googlemail.com"},
+		},
+		{
+			name: "same local Gmail header confirms delivered domain",
+			raw:  "Delivered-To: first.name+actual@gmail.com\r\nTo: first.name+actual@gmail.com\r\n\r\nbody",
+			want: []string{"first.name+actual@gmail.com"},
 		},
 		{
 			name: "x-original-to fallback",
 			raw:  "X-Original-To: first.name@gmail.com\r\nTo: unrelated@example.com\r\n\r\nbody",
-			want: "first.name@gmail.com",
+			want: []string{"first.name@gmail.com"},
 		},
 		{
 			name: "envelope-to fallback",
 			raw:  "Envelope-To: firstname+legacy@gmail.com\r\n\r\nbody",
-			want: "firstname+legacy@gmail.com",
+			want: []string{"firstname+legacy@gmail.com"},
 		},
 		{
 			name: "ambiguous same account aliases",
@@ -186,7 +206,7 @@ func TestLocalGmailOriginalRecipientUsesProviderDeliveryHeaders(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			require.Equal(t, test.want, localGmailOriginalRecipient("firstname@gmail.com", []byte(test.raw)))
+			require.Equal(t, test.want, localGmailOriginalRecipients("firstname@gmail.com", []byte(test.raw)))
 		})
 	}
 }

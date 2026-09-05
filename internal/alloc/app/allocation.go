@@ -80,6 +80,7 @@ type UseCase struct {
 	queue                      InventoryRefreshQueue
 	adminAllocationEnrichment  AdminAllocationEnrichmentPort
 	historicalMicrosoftAliases HistoricalMicrosoftAliasPort
+	gmailVariantCooldown       GmailVariantCooldownPort
 	inventoryCache             InventoryCache
 }
 
@@ -92,6 +93,12 @@ func (uc *UseCase) SetInventoryCache(cache InventoryCache) {
 func (uc *UseCase) SetHistoricalMicrosoftAliasPort(port HistoricalMicrosoftAliasPort) {
 	if uc != nil {
 		uc.historicalMicrosoftAliases = port
+	}
+}
+
+func (uc *UseCase) SetGmailVariantCooldownPort(port GmailVariantCooldownPort) {
+	if uc != nil {
+		uc.gmailVariantCooldown = port
 	}
 }
 
@@ -1669,7 +1676,7 @@ func (uc *UseCase) tryGmailCandidate(
 	var emails []string
 	switch mailbox {
 	case domain.GmailMailboxMain:
-		emails = []string{candidate.Email}
+		emails = []string{gmailPrimaryAddress(candidate.Email)}
 	case domain.GmailMailboxDot:
 		historyCount, err := uc.repo.CountGmailDotHistory(ctx, candidate.ResourceID, config.ProjectID)
 		if err != nil {
@@ -1706,7 +1713,7 @@ func (uc *UseCase) tryGmailCandidate(
 		}
 		return nil, errCandidateUnavailable
 	case domain.GmailMailboxPlus:
-		emails = gmailPlusAliasVariants(candidate.Email)
+		emails = gmailPlusAliasVariants(candidate.Email, cmd.OrderNo)
 	default:
 		return nil, domain.ErrInvalidAllocationRequest
 	}
@@ -1755,6 +1762,11 @@ func (uc *UseCase) createGmailAllocation(
 	}
 	if err := uc.repo.TouchGmailAllocated(ctx, resourceID, now); err != nil {
 		return nil, err
+	}
+	if mailbox != domain.GmailMailboxMain && uc.gmailVariantCooldown != nil {
+		if err := uc.gmailVariantCooldown.StartVariantCooldown(ctx, resourceID); err != nil {
+			return nil, err
+		}
 	}
 	return &domain.UnifiedAllocation{
 		Type: domain.AllocationTypeGmail, ID: allocation.ID, OrderNo: allocation.OrderNo,
@@ -2475,6 +2487,7 @@ func dotAliasVariants(email string) []string {
 
 func gmailDotAliasParts(email string) ([]rune, string, uint64, uint64, bool) {
 	local, domainPart, ok := splitEmail(email)
+	_, _, domainsOK := gmailAliasDomains(domainPart)
 	characters := make([]rune, 0, len(local))
 	originalMask := uint64(0)
 	for _, character := range local {
@@ -2486,10 +2499,12 @@ func gmailDotAliasParts(email string) ([]rune, string, uint64, uint64, bool) {
 		}
 		characters = append(characters, character)
 	}
-	if !ok || len(characters) < 2 || len(characters) > GmailDotMaxLocalCharacters {
+	if !ok || !domainsOK || len(characters) < 2 || len(characters) > GmailDotMaxLocalCharacters {
 		return nil, "", 0, 0, false
 	}
-	aliasCount := (uint64(1) << (len(characters) - 1)) - 1
+	// Every dot mask exists on both equivalent domains. Exclude only the
+	// resource's original address, which belongs to the primary Gmail product.
+	aliasCount := (uint64(1) << len(characters)) - 1
 	return characters, domainPart, originalMask, aliasCount, true
 }
 
@@ -2510,14 +2525,24 @@ func gmailDotAliasVariantBatch(email string, offset uint64, limit int) []string 
 	if !ok || limit <= 0 {
 		return nil
 	}
+	primaryDomain, alternateDomain, _ := gmailAliasDomains(domainPart)
+	masksPerDomain := uint64(1) << (len(characters) - 1)
 	if uint64(limit) > aliasCount {
 		limit = int(aliasCount)
 	}
 	result := make([]string, 0, limit)
 	for i := uint64(0); i < aliasCount && len(result) < limit; i++ {
-		mask := (offset + i) % aliasCount
-		if mask >= originalMask {
-			mask++
+		position := (offset + i) % aliasCount
+		mask, aliasDomain := originalMask, alternateDomain
+		if position > 0 {
+			maskPosition := (position - 1) % (masksPerDomain - 1)
+			if maskPosition >= originalMask {
+				maskPosition++
+			}
+			mask = maskPosition
+			if position < masksPerDomain {
+				aliasDomain = primaryDomain
+			}
 		}
 		var alias strings.Builder
 		for i, character := range characters {
@@ -2527,10 +2552,28 @@ func gmailDotAliasVariantBatch(email string, offset uint64, limit int) []string 
 			}
 		}
 		alias.WriteByte('@')
-		alias.WriteString(domainPart)
+		alias.WriteString(aliasDomain)
 		result = append(result, alias.String())
 	}
 	return result
+}
+
+func gmailAliasDomains(domainPart string) (string, string, bool) {
+	switch strings.ToLower(strings.TrimSpace(domainPart)) {
+	case "gmail.com", "googlemail.com":
+		return "gmail.com", "googlemail.com", true
+	default:
+		return "", "", false
+	}
+}
+
+func gmailPrimaryAddress(email string) string {
+	local, domainPart, ok := splitEmail(email)
+	_, _, domainsOK := gmailAliasDomains(domainPart)
+	if !ok || !domainsOK || local == "" {
+		return ""
+	}
+	return local + "@gmail.com"
 }
 
 func allocationUsageDate(value time.Time) string {
@@ -2592,11 +2635,14 @@ const (
 	gmailPlusAliasChars   = gmailPlusAliasLetters + gmailPlusAliasDigits
 )
 
-func gmailPlusAliasVariants(email string) []string {
+func gmailPlusAliasVariants(email, orderNo string) []string {
 	local, domainPart, ok := splitEmail(email)
-	if !ok || local == "" {
+	primaryDomain, alternateDomain, domainsOK := gmailAliasDomains(domainPart)
+	if !ok || !domainsOK || local == "" {
 		return nil
 	}
+	domains := [...]string{primaryDomain, alternateDomain}
+	domainOffset := int(hash64(orderNo+"|gmail-plus-domain") % uint64(len(domains)))
 	window := aliasGenerationWindowValue()
 	result := make([]string, 0, window)
 	seen := make(map[string]struct{}, window)
@@ -2608,7 +2654,8 @@ func gmailPlusAliasVariants(email string) []string {
 			suffix[i] = gmailPlusAliasChars[rand.IntN(len(gmailPlusAliasChars))]
 		}
 		rand.Shuffle(len(suffix), func(i, j int) { suffix[i], suffix[j] = suffix[j], suffix[i] })
-		alias := local + "+" + string(suffix) + "@" + domainPart
+		aliasDomain := domains[(domainOffset+len(result))%len(domains)]
+		alias := local + "+" + string(suffix) + "@" + aliasDomain
 		if _, exists := seen[alias]; exists {
 			continue
 		}

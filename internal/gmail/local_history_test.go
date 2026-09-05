@@ -188,6 +188,13 @@ func TestLocalGmailHistoryRequiresOneOriginalRecipient(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, GmailMailboxPlus, mailbox)
 	require.Equal(t, "first.name+legacy@googlemail.com", recipient)
+
+	mailbox, recipient, ok = localGmailHistoryRecipient("firstname@gmail.com", []string{
+		"firstname@googlemail.com",
+	})
+	require.True(t, ok)
+	require.Equal(t, GmailMailboxDot, mailbox)
+	require.Equal(t, "firstname@googlemail.com", recipient)
 }
 
 func TestLocalGmailHistoryRoutesMailboxByProductAndIgnoresRecipientRules(t *testing.T) {

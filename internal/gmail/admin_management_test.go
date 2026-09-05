@@ -70,11 +70,16 @@ func TestAdminGmailManagementCoversBatchEditDeleteRecoverAndMaintenance(t *testi
 		OrderNo: "order-dot-history", Source: SourceLocal, Mailbox: GmailMailboxDot,
 		Email: "allo.cated@gmail.com", CreatedAt: now,
 	}).Error)
+	require.NoError(t, db.Create(&allocationModel{
+		ID: 4, ResourceID: &allocatedResourceID, Status: AllocationStatusReleased,
+		OrderNo: "order-googlemail-history", Source: SourceLocal, Mailbox: GmailMailboxDot,
+		Email: "allocated@googlemail.com", CreatedAt: now,
+	}).Error)
 
 	service := NewService(db, nil)
 	service.now = func() time.Time { return now.Add(time.Hour) }
 	ctx := context.Background()
-	for _, alias := range []string{"allocated+special@gmail.com", "allo.cated@gmail.com"} {
+	for _, alias := range []string{"allocated+special@gmail.com", "allo.cated@gmail.com", "allocated@googlemail.com"} {
 		result, err := service.ListLocalResources(ctx, LocalResourceListFilter{Search: alias})
 		require.NoError(t, err)
 		require.EqualValues(t, 1, result.Total, alias)

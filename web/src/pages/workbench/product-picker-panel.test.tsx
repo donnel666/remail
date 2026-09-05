@@ -199,7 +199,7 @@ describe("ProductPickerPanel", () => {
         : key === "Gmail variant suffix"
           ? "变种@gmail"
           : key;
-    for (const search of ["谷歌变种", "变种@gmail"]) {
+    for (const search of ["谷歌变种", "变种@gmail", "googlemail.com"]) {
       expect(
         filterProducts(products, search, "purchase", translate).map(
           (product) => product.id,

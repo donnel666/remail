@@ -5881,12 +5881,12 @@ export interface components {
         };
         CreateOrderRequest: {
             projectId: number;
-            /** @description Product selector. gmail.com selects the original local Gmail primary address, gmail_variant selects the local Gmail special product and allocates either a dot alias or a plus alias, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
+            /** @description Product selector. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
             emailSuffix: string;
         };
         CreateOrderBatchRequest: {
             projectId: number;
-            /** @description Product selector. gmail.com selects the original local Gmail primary address, gmail_variant selects the local Gmail special product and allocates either a dot alias or a plus alias, icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
+            /** @description Product selector. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud, a configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; both choices are weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Full mailbox addresses are not accepted. */
             emailSuffix: string;
             /** @description Number of independent orders to create. */
             quantity: number;
@@ -6513,7 +6513,7 @@ export interface components {
             gmailPurchaseActivations: number;
             gmailPurchaseActivationSuccessRate: number;
             gmailAveragePurchaseActivationSeconds: number;
-            /** @description Gmail source accounts are shared by the primary Gmail and Gmail special products. */
+            /** @description Gmail source accounts are shared by the primary Gmail and Gmail variant products, including @googlemail.com equivalents. */
             gmailVariantTotalEmails: number;
             /** @description Available Gmail source accounts that can generate plus-address variants. */
             gmailVariantAvailableEmails: number;
@@ -9793,7 +9793,7 @@ export interface components {
             note: string;
         };
         /** @enum {string} */
-        AdminGmailResourceStatus: "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
+        AdminGmailResourceStatus: "pending" | "validating" | "identifying" | "normal" | "cooldown" | "abnormal" | "disabled" | "deleted";
         AdminGmailBooleanFacet: {
             /** Format: int64 */
             all: number;
@@ -9813,6 +9813,8 @@ export interface components {
             identifying: number;
             /** Format: int64 */
             normal: number;
+            /** Format: int64 */
+            cooldown: number;
             /** Format: int64 */
             abnormal: number;
             /** Format: int64 */
@@ -9856,6 +9858,11 @@ export interface components {
             validationFailures: number;
             /** Format: date-time */
             lastAllocatedAt?: string | null;
+            /**
+             * Format: date-time
+             * @description Redis TTL-derived recovery time for a cooling Gmail resource.
+             */
+            cooldownUntil: string | null;
             lastSafeError?: string;
             /** Format: date-time */
             lastCheckedAt?: string | null;

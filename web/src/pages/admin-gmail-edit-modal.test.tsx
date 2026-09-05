@@ -108,6 +108,7 @@ const target = {
   credentialRevision: 2,
   credentialUpdatedAt: "2026-08-08T08:00:00Z",
   validationFailures: 0,
+  cooldownUntil: null,
   createdAt: "2026-08-08T08:00:00Z",
   updatedAt: "2026-08-08T08:00:00Z",
 } satisfies AdminGmailResourceItem;

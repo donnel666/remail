@@ -12,6 +12,7 @@ const (
 	LocalResourceValidating  = "validating"
 	LocalResourceIdentifying = "identifying"
 	LocalResourceNormal      = "normal"
+	LocalResourceCooldown    = "cooldown"
 	LocalResourceAbnormal    = "abnormal"
 	LocalResourceDisabled    = "disabled"
 	LocalResourceDeleted     = "deleted"
@@ -38,6 +39,7 @@ var (
 	ErrLocalResourceVersion      = errors.New("gmail: local resource version conflict")
 	ErrLocalValidationConflict   = errors.New("gmail: validation idempotency conflict")
 	ErrLocalValidationDependency = errors.New("gmail: validation dependency unavailable")
+	ErrLocalCooldownDependency   = errors.New("gmail: variant cooldown dependency unavailable")
 )
 
 type localResourceModel struct {
@@ -139,6 +141,7 @@ type LocalResourceItem struct {
 	CredentialUpdatedAt   time.Time          `json:"credentialUpdatedAt"`
 	ValidationFailures    int                `json:"validationFailures"`
 	LastAllocatedAt       *time.Time         `json:"lastAllocatedAt,omitempty"`
+	CooldownUntil         *time.Time         `json:"cooldownUntil"`
 	LastSafeError         string             `json:"lastSafeError,omitempty"`
 	LastCheckedAt         *time.Time         `json:"lastCheckedAt,omitempty"`
 	CreatedAt             time.Time          `json:"createdAt"`
@@ -166,6 +169,7 @@ type LocalResourceFacets struct {
 	Validating  int64                      `json:"validating"`
 	Identifying int64                      `json:"identifying"`
 	Normal      int64                      `json:"normal"`
+	Cooldown    int64                      `json:"cooldown"`
 	Abnormal    int64                      `json:"abnormal"`
 	Disabled    int64                      `json:"disabled"`
 	Deleted     int64                      `json:"deleted"`

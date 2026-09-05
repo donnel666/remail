@@ -33,6 +33,6 @@ describe("Gmail variant product contract", () => {
   it("recognizes variant purchases and documents the checkout selector", () => {
     expect(orderDetailSource).toContain('order.productType === "gmail_variant"');
     expect(publicOpenApiSource).toContain("gmail_variant");
-    expect(publicOpenApiSource).toContain("点号别名或加号别名");
+    expect(publicOpenApiSource).toContain("@googlemail.com 地址");
   });
 });

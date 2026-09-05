@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -663,24 +664,34 @@ func TestDotAliasVariantsSkipPositionsAdjacentToExistingDots(t *testing.T) {
 
 func TestGmailDotAliasVariantsCoverEveryDotCombination(t *testing.T) {
 	want := map[string]bool{
-		"abc@gmail.com":   true,
-		"ab.c@gmail.com":  true,
-		"a.b.c@gmail.com": true,
+		"abc@gmail.com":        true,
+		"ab.c@gmail.com":       true,
+		"a.b.c@gmail.com":      true,
+		"a.bc@googlemail.com":  true,
+		"abc@googlemail.com":   true,
+		"ab.c@googlemail.com":  true,
+		"a.b.c@googlemail.com": true,
 	}
-	got := gmailDotAliasVariants("a.bc@Gmail.com", 0)
-	if len(got) != len(want) {
-		t.Fatalf("gmailDotAliasVariants() returned %d aliases, want %d: %v", len(got), len(want), got)
-	}
-	for _, alias := range got {
-		if !want[alias] {
-			t.Fatalf("gmailDotAliasVariants() returned unexpected alias %q", alias)
+	for _, source := range []string{"a.bc@Gmail.com", "a.bc@googlemail.com"} {
+		remaining := maps.Clone(want)
+		got := gmailDotAliasVariants(source, 0)
+		if len(got) != len(remaining) {
+			t.Fatalf("gmailDotAliasVariants(%q) returned %d aliases, want %d: %v", source, len(got), len(remaining), got)
 		}
-		delete(want, alias)
+		for _, alias := range got {
+			if !remaining[alias] {
+				t.Fatalf("gmailDotAliasVariants(%q) returned unexpected alias %q", source, alias)
+			}
+			delete(remaining, alias)
+		}
+	}
+	if got := gmailPrimaryAddress("User.Name@googlemail.com"); got != "user.name@gmail.com" {
+		t.Fatalf("gmailPrimaryAddress() = %q, want user.name@gmail.com", got)
 	}
 }
 
 func TestGmailDotAliasCapacitySupportsMaximumLocalPart(t *testing.T) {
-	if got, want := gmailDotAliasCapacity(strings.Repeat("a", GmailDotMaxLocalCharacters)+"@gmail.com"), uint64(1<<29)-1; got != want {
+	if got, want := gmailDotAliasCapacity(strings.Repeat("a", GmailDotMaxLocalCharacters)+"@gmail.com"), uint64(1<<30)-1; got != want {
 		t.Fatalf("maximum Gmail dot capacity = %d, want %d", got, want)
 	}
 	if got := gmailDotAliasCapacity(strings.Repeat("a", GmailDotMaxLocalCharacters+1) + "@gmail.com"); got != 0 {
@@ -702,12 +713,12 @@ func TestGmailMailboxPreferencesAreFixedByProduct(t *testing.T) {
 		})
 		if len(variant) != 2 || variant[0] == variant[1] ||
 			!slices.Contains(variant, domain.GmailMailboxDot) || !slices.Contains(variant, domain.GmailMailboxPlus) {
-			t.Fatalf("gmail special preferences = %v, want dot and plus", variant)
+			t.Fatalf("gmail variant preferences = %v, want dot and plus", variant)
 		}
 		firstKinds[variant[0]] = true
 	}
 	if !firstKinds[domain.GmailMailboxDot] || !firstKinds[domain.GmailMailboxPlus] {
-		t.Fatalf("gmail special first choices = %v, want balanced dot and plus choices", firstKinds)
+		t.Fatalf("gmail variant first choices = %v, want balanced dot and plus choices", firstKinds)
 	}
 }
 
@@ -876,11 +887,12 @@ func TestGmailPlusAliasVariantsUseShortAlphanumericSuffixes(t *testing.T) {
 	runtimeconfig.Set("alias_generation_window", "32")
 	t.Cleanup(func() { runtimeconfig.Delete("alias_generation_window") })
 
-	variants := gmailPlusAliasVariants("User.Name@GMAIL.COM")
+	variants := gmailPlusAliasVariants("User.Name@GMAIL.COM", "gmail-plus-domains")
 	if len(variants) != 32 {
 		t.Fatalf("got %d Gmail plus aliases, want 32", len(variants))
 	}
 	seen := make(map[string]struct{}, len(variants))
+	domains := make(map[string]int, 2)
 	for _, email := range variants {
 		parts := strings.SplitN(email, "@", 2)
 		if len(parts) != 2 {
@@ -888,9 +900,10 @@ func TestGmailPlusAliasVariantsUseShortAlphanumericSuffixes(t *testing.T) {
 		}
 		local, domainPart := parts[0], strings.ToLower(parts[1])
 		plus := strings.IndexByte(local, '+')
-		if plus <= 0 || plus == len(local)-1 || domainPart != "gmail.com" {
+		if plus <= 0 || plus == len(local)-1 || domainPart != "gmail.com" && domainPart != "googlemail.com" {
 			t.Fatalf("invalid Gmail plus alias %q", email)
 		}
+		domains[domainPart]++
 		suffix := local[plus+1:]
 		if len(suffix) < 4 || len(suffix) > 12 {
 			t.Fatalf("Gmail plus suffix length = %d, want 4..12: %q", len(suffix), email)
@@ -913,6 +926,9 @@ func TestGmailPlusAliasVariantsUseShortAlphanumericSuffixes(t *testing.T) {
 			t.Fatalf("duplicate Gmail plus alias %q", email)
 		}
 		seen[email] = struct{}{}
+	}
+	if domains["gmail.com"] != 16 || domains["googlemail.com"] != 16 {
+		t.Fatalf("Gmail plus domains = %v, want 16 aliases on each equivalent domain", domains)
 	}
 }
 

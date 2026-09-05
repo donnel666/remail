@@ -19,7 +19,9 @@ import (
 type matchingRepoStub struct {
 	Repository
 	scopes               []OrderScope
+	scopesByRecipient    map[string][]OrderScope
 	matchedResourceTypes []domain.ResourceType
+	matchedRecipients    []string
 	purchaseDelivery     *domain.Message
 }
 
@@ -119,8 +121,12 @@ func (r *appendFenceRepoStub) InsertMessageProjections(_ context.Context, messag
 	return projected, newlyMatched, nil
 }
 
-func (r *matchingRepoStub) ListMatchingScopesByRecipient(_ context.Context, resourceType domain.ResourceType, _ uint, _ string, _ time.Time) ([]OrderScope, error) {
+func (r *matchingRepoStub) ListMatchingScopesByRecipient(_ context.Context, resourceType domain.ResourceType, _ uint, recipient string, _ time.Time) ([]OrderScope, error) {
 	r.matchedResourceTypes = append(r.matchedResourceTypes, resourceType)
+	r.matchedRecipients = append(r.matchedRecipients, recipient)
+	if r.scopesByRecipient != nil {
+		return r.scopesByRecipient[recipient], nil
+	}
 	return r.scopes, nil
 }
 
@@ -568,6 +574,59 @@ func TestGmailInboundUsesItsOwnResourceType(t *testing.T) {
 	require.Equal(t, domain.ResourceTypeGmail, matches.results[0].ResourceType)
 	require.Equal(t, "code", matches.results[0].ServiceMode)
 	require.Equal(t, "123456", matches.results[0].VerificationCode)
+}
+
+func TestGmailInboundResolvesUncertainGooglemailDomainWithoutCrossOrder(t *testing.T) {
+	now := time.Date(2026, 9, 5, 3, 0, 0, 0, time.UTC)
+	scope := func(id uint, orderNo, recipient string) OrderScope {
+		return OrderScope{
+			OrderID: id, OrderNo: orderNo, AllocationType: domain.ResourceTypeGmail,
+			EmailResourceID: 7, Recipient: recipient, RecipientKind: "plus",
+			ServiceMode: "code", OrderStatus: "active", LooseMatch: true,
+			Rules: []MailRule{
+				{Type: MailRuleRecipient, Pattern: "plus", Enabled: true},
+				{Type: MailRuleSender, Pattern: `sender@example\.net`, Enabled: true},
+				{Type: MailRuleBody, Pattern: `code:\s*(\d{6})`, Enabled: true},
+			},
+		}
+	}
+	gmailRecipient := "first.name+hidden@gmail.com"
+	googlemailRecipient := "first.name+hidden@googlemail.com"
+
+	t.Run("unique Googlemail order", func(t *testing.T) {
+		repo := &matchingRepoStub{scopesByRecipient: map[string][]OrderScope{
+			googlemailRecipient: {scope(51, "OR_GOOGLEMAIL", googlemailRecipient)},
+		}}
+		item := inboundFetchedMessage(InboundMailRequest{
+			EmailResourceID: 7, ResourceType: domain.ResourceTypeGmail,
+			Recipient: gmailRecipient, Recipients: []string{gmailRecipient, googlemailRecipient},
+			EnvelopeFrom: "sender@example.net", Raw: []byte("From: sender@example.net\r\n\r\ncode: 123456"), ReceivedAt: now,
+		})
+		message, matchedScope, _, err := NewUseCase(repo, nil, nil, nil).fetchedMessageToDomain(context.Background(), item)
+		require.NoError(t, err)
+		require.Equal(t, []string{gmailRecipient, googlemailRecipient}, repo.matchedRecipients)
+		require.Equal(t, domain.MessageStatusMatched, message.Status)
+		require.Equal(t, googlemailRecipient, message.Recipient)
+		require.NotNil(t, matchedScope)
+		require.Equal(t, "OR_GOOGLEMAIL", matchedScope.OrderNo)
+	})
+
+	t.Run("Gmail and Googlemail orders are ambiguous", func(t *testing.T) {
+		repo := &matchingRepoStub{scopesByRecipient: map[string][]OrderScope{
+			gmailRecipient:      {scope(51, "OR_GMAIL", gmailRecipient)},
+			googlemailRecipient: {scope(52, "OR_GOOGLEMAIL", googlemailRecipient)},
+		}}
+		item := inboundFetchedMessage(InboundMailRequest{
+			EmailResourceID: 7, ResourceType: domain.ResourceTypeGmail,
+			Recipient: gmailRecipient, Recipients: []string{gmailRecipient, googlemailRecipient},
+			EnvelopeFrom: "sender@example.net", Raw: []byte("From: sender@example.net\r\n\r\ncode: 123456"), ReceivedAt: now,
+		})
+		message, matchedScope, _, err := NewUseCase(repo, nil, nil, nil).fetchedMessageToDomain(context.Background(), item)
+		require.NoError(t, err)
+		require.Equal(t, domain.MessageStatusReceived, message.Status)
+		require.Contains(t, message.MatchDiagnostic, "multiple")
+		require.Nil(t, matchedScope)
+	})
 }
 
 func TestICloudInboundUsesExactSelectedAliasAndReplaysItsResourceType(t *testing.T) {
@@ -1520,6 +1579,10 @@ func TestLocalGmailOnlyMatchesTheAllocatedAddress(t *testing.T) {
 		{name: "dot rejects main", allocated: "user.name@gmail.com", recipient: "username@gmail.com"},
 		{name: "plus exact", allocated: "username+p123@gmail.com", recipient: "username+p123@gmail.com", wantMatch: true},
 		{name: "plus rejects another tag", allocated: "username+p123@gmail.com", recipient: "username+p456@gmail.com"},
+		{name: "googlemail exact", allocated: "username@googlemail.com", recipient: "username@googlemail.com", wantMatch: true},
+		{name: "googlemail rejects gmail", allocated: "username@googlemail.com", recipient: "username@gmail.com"},
+		{name: "googlemail dot exact", allocated: "user.name@googlemail.com", recipient: "user.name@googlemail.com", wantMatch: true},
+		{name: "googlemail plus exact", allocated: "username+p123@googlemail.com", recipient: "username+p123@googlemail.com", wantMatch: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
