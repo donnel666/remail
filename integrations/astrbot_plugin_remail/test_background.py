@@ -54,7 +54,68 @@ def test_static_service_and_clarification_are_valid_without_dynamic_facts():
     ):
         assert concept in PUBLIC_BUSINESS_RULES
     assert PUBLIC_BUSINESS_RULES in PLANNER_SYSTEM_PROMPT
-    assert "facts []" in PLANNER_SYSTEM_PROMPT
+    assert "facts=[]" in PLANNER_SYSTEM_PROMPT
+
+
+def test_social_keeps_prefetched_orders_out_of_model_and_output_evidence():
+    functions, _ = _load_welcome_functions()
+    event = event_for(question="你好")
+    plan = _fact_plan(intents=("social",))
+    event.set_extra("_remail_initial_intent", plan)
+    plugin = SimpleNamespace(
+        config={},
+        _request=AsyncMock(return_value={"available": True, "items": [], "total": 0}),
+        _public_request=AsyncMock(),
+        _public_api_capability_context=AsyncMock(),
+    )
+    background = asyncio.run(functions["_prepare_fae_context"](plugin, event))
+    assert plugin._request.await_count == 1
+    assert plugin._request.await_args.args[1] == "/v1/bot/orders"
+    plugin._public_request.assert_not_awaited()
+    plugin._public_api_capability_context.assert_not_awaited()
+    assert background["groupContext"]["status"] == "not_applicable"
+    assert "ownOrders" not in functions["_model_background"](background, plan)
+    assert set(functions["_persona_evidence_packet"](event, plan)) == {
+        "policy.business"
+    }
+
+
+def test_public_api_recovery_prefetches_contract_even_after_refusal_plan():
+    functions, _ = _load_welcome_functions()
+    event = event_for(question="如何通过API购买谷歌变种邮箱？")
+    event.set_extra("_remail_initial_intent", _fact_plan(intents=(), answer_mode="refuse_internal"))
+    plugin = SimpleNamespace(
+        config={},
+        _request=AsyncMock(),
+        _public_request=AsyncMock(),
+        _public_api_capability_context=AsyncMock(
+            return_value='{"operations":[{"method":"POST","path":"/v1/open/orders"}]}'
+        ),
+    )
+    background = asyncio.run(functions["_prepare_fae_context"](plugin, event))
+    plugin._public_api_capability_context.assert_awaited_once_with(event)
+    assert "/v1/open/orders" in background["publicApiCapabilities"]
+
+
+def test_public_console_instructions_are_not_rejected_for_internal_sounding_question():
+    functions, _ = _load_welcome_functions()
+    for question, answer in (
+        (
+            "后台怎么充值？",
+            "打开钱包的充值页面，选择当前可用方式，按页面提示付款并确认积分到账。",
+        ),
+        (
+            "退款判定标准是什么？",
+            "接码窗口内未收到有效邮件按接码规则处理，具体订单结果需要查询本人记录。",
+        ),
+    ):
+        assert functions["_enforce_black_box"](
+            answer, question
+        ) == normalize_security_text(answer)
+    assert (
+        functions["_enforce_black_box"]("系统通过分桶探测和同项目历史排除分配邮箱。")
+        == functions["_BLACK_BOX_RESPONSE"]
+    )
 
 
 def test_planner_gets_context_and_repairs_format_without_echoing_raw_output():
@@ -90,6 +151,47 @@ def test_planner_gets_context_and_repairs_format_without_echoing_raw_output():
     assert "projectCatalog" in payload["dynamicBackground"]
     assert "private@example.test" not in retry["prompt"]
     assert retry["tools"] is None and retry["contexts"] is None
+
+
+def test_intent_retries_a_public_api_request_misclassified_as_internal():
+    functions, _ = _load_welcome_functions()
+    event = event_for(question="如何通过API购买谷歌变种邮箱？")
+    accepted = _fact_plan(
+        intents=("api",),
+        answer_mode="public_api",
+        facts=(
+            _fact(
+                "api-doc",
+                "api_documentation",
+                params={"query": "如何通过API购买谷歌变种邮箱"},
+            ),
+        ),
+    )
+    refusal = _fact_plan(intents=(), answer_mode="refuse_internal")
+    context = SimpleNamespace(
+        get_current_chat_provider_id=AsyncMock(return_value="provider"),
+        llm_generate=AsyncMock(
+            side_effect=[
+                SimpleNamespace(
+                    role="assistant", completion_text=json.dumps(refusal.to_dict())
+                ),
+                SimpleNamespace(
+                    role="assistant", completion_text=json.dumps(accepted.to_dict())
+                ),
+            ]
+        ),
+    )
+    actual = asyncio.run(
+        functions["_generate_fact_plan"](
+            context, event, event.message_str, phase="intent"
+        )
+    )
+    assert actual == accepted
+    assert context.llm_generate.await_count == 2
+    retry = context.llm_generate.await_args.kwargs
+    feedback = json.loads(retry["prompt"])["validationFeedback"]
+    assert "公开 API" in feedback["error"]
+    assert "public_api" in feedback["instruction"]
 
 
 def test_background_sources_are_bounded_scoped_and_reused_per_event():
@@ -173,7 +275,7 @@ def test_background_sources_are_bounded_scoped_and_reused_per_event():
         event, _fact_plan(intents=("service",))
     )
     assert "policy.business" in service_packet
-    assert any('"strength":"strong"' in text for text in service_packet.values())
+    assert set(service_packet) == {"policy.business"}
     group = event_for(private=False)
     plugin._request.reset_mock()
     asyncio.run(functions["_prepare_fae_context"](plugin, group))
@@ -181,7 +283,8 @@ def test_background_sources_are_bounded_scoped_and_reused_per_event():
         call.args[1] != "/v1/bot/orders" for call in plugin._request.await_args_list
     )
     assert group.get_extra("_remail_dynamic_background")["ownOrders"] == {
-        "privateOnly": True
+        "privateOnly": True,
+        "status": "not_applicable",
     }
 
 
@@ -212,7 +315,9 @@ def test_static_answers_reach_persona_and_critic_without_faq(question, answer):
         if kwargs["system_prompt"] == PERSONA_SYSTEM_PROMPT:
             assert "沉稳" in payload["personalityStyle"]
             assert payload["immutableSeals"] == []
-            assert any(item["id"] == "policy.business" for item in payload["evidence"])
+            assert "evidence" not in payload and "agentDraft" not in payload
+            assert payload["requiredEvidence"] == ["policy.business"]
+            assert payload["authoritativeAnswer"] == normalize_security_text(answer)
             return SimpleNamespace(
                 role="assistant",
                 completion_text=json.dumps(
@@ -225,6 +330,12 @@ def test_static_answers_reach_persona_and_critic_without_faq(question, answer):
                 ),
             )
         assert kwargs["system_prompt"] == CRITIC_SYSTEM_PROMPT
+        assert any(item["id"] == "policy.business" for item in payload["evidence"])
+        if payload["reviewMode"] == "facts":
+            assert payload["approvedAnswer"] == "" and payload["personalityStyle"] == ""
+        else:
+            assert payload["reviewMode"] == "delivery"
+            assert payload["approvedAnswer"] == normalize_security_text(answer)
         return SimpleNamespace(
             role="assistant",
             completion_text=json.dumps(
@@ -247,7 +358,7 @@ def test_static_answers_reach_persona_and_critic_without_faq(question, answer):
         )
     )
     assert response.completion_text == normalize_security_text(answer)
-    assert context.llm_generate.await_count == 2
+    assert context.llm_generate.await_count == 3
 
 
 def test_multiple_public_sources_use_llms_not_immutable_answer_templates():
@@ -285,7 +396,10 @@ def test_multiple_public_sources_use_llms_not_immutable_answer_templates():
         payload = json.loads(kwargs["prompt"])
         if kwargs["system_prompt"] == PERSONA_SYSTEM_PROMPT:
             assert payload["immutableSeals"] == []
-            assert "REMAIL_SEAL" not in payload["agentDraft"]
+            assert "evidence" not in payload and "agentDraft" not in payload
+            assert "REMAIL_SEAL" not in payload["authoritativeAnswer"]
+            assert payload["authoritativeAnswer"] == normalize_security_text(answer)
+            assert payload["requiredEvidence"] == ["rules", "project"]
             return SimpleNamespace(
                 completion_text=json.dumps(
                     {
@@ -295,6 +409,11 @@ def test_multiple_public_sources_use_llms_not_immutable_answer_templates():
                     }
                 )
             )
+        assert kwargs["system_prompt"] == CRITIC_SYSTEM_PROMPT
+        assert {item["id"] for item in payload["evidence"]}.issuperset({"rules", "project"})
+        assert payload["approvedAnswer"] == (
+            "" if payload["reviewMode"] == "facts" else normalize_security_text(answer)
+        )
         return SimpleNamespace(
             completion_text=json.dumps(
                 {
@@ -315,7 +434,7 @@ def test_multiple_public_sources_use_llms_not_immutable_answer_templates():
             SimpleNamespace(context=context), event, response
         )
     )
-    assert context.llm_generate.await_count == 2
+    assert context.llm_generate.await_count == 3
     assert response.completion_text == normalize_security_text(answer)
 
 

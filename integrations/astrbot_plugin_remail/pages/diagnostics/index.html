@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ReMail 会话调试</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <header class="page-header">
+        <div><p class="eyebrow">ReMail</p><h1>会话调试</h1></div>
+        <p id="recording" class="muted">正在连接 AstrBot……</p>
+      </header>
+      <form id="filter-form">
+        <fieldset id="filters" disabled>
+          <legend class="sr-only">查找会话与显示设置</legend>
+          <div class="field search-field">
+            <label for="qq">提问者 QQ</label>
+            <input id="qq" name="qq" type="text" inputmode="numeric" maxlength="64" placeholder="输入 QQ，留空查看全部会话" autocomplete="off" />
+          </div>
+          <button type="submit" class="primary">查找会话</button>
+          <button id="refresh" type="button">刷新</button>
+          <div class="field">
+            <label for="display-mode">数据流视图</label>
+            <select id="display-mode"><option value="rendered">渲染</option><option value="raw">原文</option></select>
+          </div>
+          <label class="follow-label"><input id="follow" type="checkbox" checked />每 3 秒自动刷新</label>
+        </fieldset>
+      </form>
+      <div class="status-line">
+        <p id="status" role="status" aria-live="polite">正在连接 AstrBot……</p>
+        <p id="follow-state" class="muted">连接后每 3 秒自动刷新</p>
+      </div>
+      <p id="storage-warning" class="warning notice" role="alert" hidden></p>
+      <div class="workspace">
+        <aside class="session-pane" aria-labelledby="sessions-heading">
+          <div class="pane-header">
+            <h2 id="sessions-heading">会话</h2><span id="session-count" class="muted"></span>
+            <button id="clear-all" type="button" class="danger-text" title="删除所有调试历史，不受当前筛选影响" disabled>清理全部</button>
+            <button id="reset-all" type="button" title="重置所有 ReMail 模型会话，保留调试记录" disabled>重置全部上下文</button>
+          </div>
+          <ol id="sessions" class="session-list"></ol>
+          <nav class="pagination" aria-label="会话分页">
+            <button id="previous" type="button" disabled>上一页</button>
+            <span id="page-summary" class="muted">尚未加载</span>
+            <button id="next" type="button" disabled>下一页</button>
+          </nav>
+        </aside>
+        <section id="conversation" class="conversation-pane" aria-labelledby="conversation-title" aria-busy="false">
+          <div class="pane-header conversation-header">
+            <div><h2 id="conversation-title">选择会话</h2><p id="conversation-meta" class="muted">按 QQ 查看连续问答及每轮执行过程。</p></div>
+            <div class="session-export">
+              <div class="session-actions">
+                <button id="export-session" class="primary" type="button" aria-describedby="session-export-help" disabled>导出整个会话</button>
+                <button id="clear-session" type="button" class="danger-text" title="删除当前会话的调试历史" disabled>清理当前会话</button>
+                <button id="reset-session" type="button" title="从空白上下文重新调试当前会话，保留记录" disabled>重置会话上下文</button>
+              </div>
+              <p id="session-export-help" class="muted">当前会话的全部保留轮次</p>
+            </div>
+          </div>
+          <div class="turn-navigation"><button id="earlier" type="button" disabled>加载更早轮次</button><span id="turn-count" class="muted"></span></div>
+          <ol id="turns" class="turn-list"></ol>
+        </section>
+      </div>
+      <p class="format-note muted">渲染只排版，复制与导出使用原文。</p>
+      <p id="retention" class="muted">导出包含该会话当前保留的全部轮次。</p>
+      <noscript>此页面需要启用 JavaScript，并从 AstrBot 插件详情页打开。</noscript>
+    </main>
+    <dialog id="clear-dialog" aria-labelledby="clear-title" aria-describedby="clear-scope clear-note">
+      <form id="clear-form">
+        <h2 id="clear-title">删除调试历史</h2>
+        <p id="clear-scope"></p>
+        <p id="clear-note" class="muted">只删除调试历史，不改原生会话上下文、账号绑定或业务数据。需要保留请先导出。</p>
+        <p id="clear-error" class="warning" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button id="clear-cancel" type="button" autofocus>取消</button>
+          <button id="clear-confirm" class="danger" type="submit">删除调试历史</button>
+        </div>
+      </form>
+    </dialog>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

@@ -43,6 +43,36 @@
     "description": "ReMail 请求超时秒数",
     "default": 10
   },
+  "orders_timeout_seconds": {
+    "type": "int",
+    "description": "本人订单查询超时秒数",
+    "hint": "默认 90 秒，有效范围 30～300 秒。私聊通过授权后，在意图识别前优先查询本人订单，背景组合复用同一次请求。仅影响本插件的订单查询，不修改 AstrBot 全局配置或其他请求超时。",
+    "default": 90
+  },
+  "auxiliary_provider_id": {
+    "type": "string",
+    "description": "意图、答案核对和润色模型（可选）",
+    "hint": "留空沿用当前会话模型。填写已配置的 AstrBot 模型提供商 ID 后，只让本插件的意图识别、ReAct 收尾核对／修正、人格润色和保真复核使用该模型，可自行选择延迟较低的模型；规划和主 Agent 沿用会话模型。不会修改任何提供商或全局推理配置。",
+    "default": ""
+  },
+  "llm_call_timeout_seconds": {
+    "type": "int",
+    "description": "单次模型等待上限（秒）",
+    "hint": "默认90秒，范围10～180秒，仅作用于ReMail本轮意图、规划、主模型、润色与复核。超时明确记录；已有核对通过的最终答案时保留原文，尚无最终答案时安全结束。不改提供商全局配置。",
+    "default": 90
+  },
+  "llm_workflow_timeout_seconds": {
+    "type": "int",
+    "description": "本轮模型流程等待预算（秒）",
+    "hint": "默认240秒，范围60～600秒，从本轮进入意图流程计时；后续模型调用共用剩余预算，重试不重新计时。本人订单仍保持独立90秒查询设置。",
+    "default": 240
+  },
+  "diagnostics_enabled": {
+    "type": "bool",
+    "description": "会话调试记录",
+    "hint": "默认开启。按 QQ、会话和轮次记录各节点的完整输入、输出、模型调用、工具结果、门禁及发送状态；日志不脱敏、不截断，页面只整理展示格式。仅 AstrBot 后台可查看。保留最近 200 个已结束轮次，进行中的轮次完整保留。",
+    "default": true
+  },
   "transport_mode": {
     "type": "string",
     "description": "ReMail Bot 传输模式",

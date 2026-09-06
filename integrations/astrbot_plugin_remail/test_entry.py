@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from .test_security import _load_welcome_functions
+from .test_security import _RESULT_TYPES, _load_welcome_functions
 from .security import (
     contains_sensitive_command,
     normalize_security_text,
@@ -63,10 +63,29 @@ class Plain:
     def __init__(self, text):
         self.text = text
 
+    def toDict(self):
+        return {"type": "text", "data": {"text": self.text}}
+
 
 class At:
     def __init__(self, qq, name=""):
         self.qq, self.name = qq, name
+
+    def toDict(self):
+        return {"type": "at", "data": {"qq": str(self.qq)}}
+
+
+class AtAll(At):
+    def __init__(self):
+        super().__init__("all")
+
+
+class Reply:
+    def __init__(self, id, sender_id="", qq="", chain=None):
+        self.id, self.sender_id, self.qq, self.chain = id, sender_id, qq, chain or []
+
+    def toDict(self):
+        return {"type": "reply", "data": {"id": str(self.id)}}
 
 
 class MessageType(enum.Enum):
@@ -77,6 +96,8 @@ class MessageType(enum.Enum):
 class Chain:
     def __init__(self, items=None):
         self.chain = items or []
+        self.result_content_type = _RESULT_TYPES.GENERAL_RESULT
+        self.result_type = "CONTINUE"
 
     def message(self, text):
         self.chain.append(Plain(text))
@@ -85,19 +106,41 @@ class Chain:
     def use_markdown(self, _enabled):
         return self
 
+    def is_llm_result(self):
+        return self.result_content_type == _RESULT_TYPES.LLM_RESULT
+
+    def is_stopped(self):
+        return self.result_type == "STOP"
+
 
 class Event:
-    def __init__(self, text, *, private=False, mention=None, sender="10001"):
+    def __init__(
+        self,
+        text,
+        *,
+        private=False,
+        mention=None,
+        sender="10001",
+        platform_id="qq",
+        platform="aiocqhttp",
+        bot_id="90001",
+        group_id="20001",
+        message_id="123",
+    ):
         self.message_str, self.private, self.sender = text, private, sender
-        self._extras, self.sent = {}, []
+        self.platform_id, self.platform, self.bot_id = platform_id, platform, bot_id
+        self.group_id = "" if private else group_id
+        self._extras, self.sent, self.sent_chains = {}, [], []
+        self._result = None
         self.stopped = self.is_at_or_wake_command = False
         self.role = "member"
-        self.session_id = sender if private else "20001"
+        self.session_id = sender if private else group_id
         segments = [{"type": "at", "data": {"qq": mention}}] if mention else []
         segments.append({"type": "text", "data": {"text": text}})
         self.message_obj = NS(
             type=MessageType.FRIEND_MESSAGE if private else MessageType.GROUP_MESSAGE,
-            message_id="123",
+            message_id=message_id,
+            group_id=self.group_id,
             message=([At(mention)] if mention else []) + [Plain(text)],
             raw_message={"message": segments},
         )
@@ -105,25 +148,25 @@ class Event:
 
     @property
     def unified_msg_origin(self):
-        return f"qq:{'FriendMessage' if self.private else 'GroupMessage'}:{self.session_id}"
+        return f"{self.platform_id}:{'FriendMessage' if self.private else 'GroupMessage'}:{self.session_id}"
 
     def get_message_type(self):
         return self.message_obj.type
 
     def get_platform_name(self):
-        return "aiocqhttp"
+        return self.platform
 
     def get_platform_id(self):
-        return "qq"
+        return self.platform_id
 
     def get_sender_id(self):
         return self.sender
 
     def get_self_id(self):
-        return "90001"
+        return self.bot_id
 
     def get_group_id(self):
-        return "" if self.private else "20001"
+        return self.group_id
 
     def get_message_str(self):
         return self.message_str
@@ -141,13 +184,23 @@ class Event:
         return False
 
     def is_stopped(self):
-        return self.stopped
+        return self.stopped or bool(
+            self._result is not None
+            and callable(getattr(self._result, "is_stopped", None))
+            and self._result.is_stopped()
+        )
 
     def stop_event(self):
         self.stopped = True
 
     def clear_result(self):
-        pass
+        self._result = None
+
+    def get_result(self):
+        return self._result
+
+    def set_result(self, result):
+        self._result = Chain([Plain(result)]) if isinstance(result, str) else result
 
     def set_extra(self, key, value):
         self._extras[key] = value
@@ -156,6 +209,7 @@ class Event:
         return self._extras if key is None else self._extras.get(key, default)
 
     async def send(self, chain):
+        self.sent_chains.append(chain.chain)
         self.sent.append("".join(getattr(item, "text", "") for item in chain.chain))
 
 
@@ -177,8 +231,8 @@ def lifecycle(monkeypatch):
         At=At,
         Plain=Plain,
         MessageType=MessageType,
-        AtAll=type("AtAll", (), {}),
-        Reply=type("Reply", (), {}),
+        AtAll=AtAll,
+        Reply=Reply,
         MessageChain=Chain,
         MessageEventResult=Chain,
         CommandResult=type("CommandResult", (), {}),
@@ -265,6 +319,7 @@ def lifecycle(monkeypatch):
         "_authorize_event",
         "require_bound_service_user",
         "prepare_remail_llm_response",
+        "classify_mentioned_group_question",
         "moderate_qq_group_message",
         "handoff_group_manager_mentions",
         "welcome_new_members",

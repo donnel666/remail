@@ -141,12 +141,25 @@ def test_price_search_and_page_parameters_match_the_fact_scope():
     )
     assert functions["_fact_is_satisfied"](event, plan.facts[0], plan)
     assert (page["offset"], page["nextOffset"], page["truncated"]) == (100, 120, False)
+    zero_float = json.loads(
+        asyncio.run(functions["remail_project_prices"](plugin, event, offset=0.0))
+    )
+    assert zero_float["offset"] == 0
     target = json.loads(
         asyncio.run(
             functions["remail_project_prices"](plugin, event, search="  Project120  ")
         )
     )
     assert [item["projectId"] for item in target["prices"]] == [120]
+    typed = json.loads(
+        asyncio.run(
+            functions["remail_project_prices"](
+                plugin, event, product_types="icloud", search=""
+            )
+        )
+    )
+    assert typed["requestedProductTypes"] == ["icloud"]
+    assert calls[-1][2]["params"]["productType"] == "icloud"
     before = len(calls)
     for invalid in (-1, True, 1.5, 10001):
         result = json.loads(

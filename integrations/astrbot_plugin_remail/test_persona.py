@@ -3,8 +3,16 @@ import json
 import pytest
 
 from .diagnosis import DiagnosisFact, seal_diagnosis_fact
+from .knowledge import (
+    INTERNAL_MODULE_KNOWLEDGE,
+    PUBLIC_DISCLOSURE_RULES,
+    is_trusted_public_rule,
+    trusted_public_rule,
+)
 from .persona import (
     CRITIC_SYSTEM_PROMPT,
+    CRITIC_VIOLATIONS,
+    FACT_REPAIR_SYSTEM_PROMPT,
     MAX_AGENT_DRAFT_CHARS,
     MAX_AUTHORITATIVE_CHARS,
     MAX_CRITIC_CANDIDATE_CHARS,
@@ -13,12 +21,16 @@ from .persona import (
     build_critic_payload,
     build_persona_payload,
     has_unsupported_concrete_facts,
+    parse_critic_feedback,
     parse_critic_response,
     restore_seals,
+    sanitize_model_text,
     unsupported_sensitive_states,
     validate_persona_response,
 )
 from .security import normalize_security_text
+from .sources import SOURCE_RELIABILITY_RULES, evidence_block
+from .workflow import PUBLIC_BUSINESS_RULES
 
 
 def _response(
@@ -51,6 +63,307 @@ def _critic_response(
         },
         ensure_ascii=False,
     )
+
+
+def test_code_owned_public_policy_keeps_original_scope_in_writer_and_critic() -> None:
+    original = evidence_block("policy.business", PUBLIC_BUSINESS_RULES)
+    evidence = {"policy.business": trusted_public_rule(original)}
+    writer = build_persona_payload(
+        question="谁可以查询订单？",
+        agent_draft="只能查询本人允许访问的订单。",
+        authoritative_answer="只能查询本人允许访问的订单。",
+        evidence=evidence,
+    )
+    critic = build_critic_payload(
+        question="谁可以查询订单？",
+        candidate_answer="只能查询本人允许访问的订单。",
+        evidence=evidence,
+    )
+    for payload in (writer, critic):
+        recorded = json.loads(payload.to_json())["evidence"][0]["summary"]
+        assert recorded == original
+        assert "诊断只针对当前发送者自己的订单" in recorded
+        assert "不能透露其他项目的邮件、项目身份或匹配细节" in recorded
+        assert "[邮件详情已隐藏]" not in recorded
+    assert (
+        validate_persona_response(
+            _response("password=sentinel-secret", used=["policy.business"]),
+            writer,
+            enforce_semantic_heuristics=False,
+        )
+        == ""
+    )
+
+
+def test_model_text_keeps_points_and_public_shop_paths_but_hides_explicit_secrets() -> (
+    None
+):
+    public = "我要充值10000积分，卡网地址 https://cards.example.test/shop/aishop6"
+    raw = public + (
+        "\naccount=customer-demo\n账号:private-account\nQQ:123456789"
+        "\n验证码:654321\notp:876543\ncode:345678\npassword=sentinel-secret"
+        "\n邮件主题:PRIVATE_SUBJECT\norderId=ORDER_PRIVATE\nuser@example.test"
+    )
+    safe = sanitize_model_text(raw)
+    writer = build_persona_payload(
+        question=raw,
+        agent_draft=raw,
+        authoritative_answer="先在钱包选择要充值的积分数。",
+        evidence={"payment": "当前最低充值10000积分。"},
+    )
+    critic = build_critic_payload(
+        question=raw,
+        candidate_answer="在钱包选择要充值的积分数。",
+        evidence={"payment": "当前最低充值10000积分。"},
+    )
+    for text in (safe, writer.question, writer.agent_draft, critic.question):
+        assert "10000积分" in text
+        assert "https://cards.example.test/shop/aishop6" in text
+        for secret in (
+            "customer-demo",
+            "private-account",
+            "123456789",
+            "654321",
+            "876543",
+            "345678",
+            "sentinel-secret",
+            "PRIVATE_SUBJECT",
+            "ORDER_PRIVATE",
+            "user@example.test",
+        ):
+            assert secret not in text
+    assert "command-password" not in sanitize_model_text(
+        "/绑定 account command-password"
+    )
+
+
+def test_policy_name_or_serialized_marker_cannot_bypass_real_mail_protection() -> None:
+    source = evidence_block(
+        "policy.business",
+        "邮件主题：PRIVATE_SUBJECT。password=sentinel-secret。邮箱 user@example.test。",
+    )
+    assert not is_trusted_public_rule(source)
+    assert not is_trusted_public_rule(
+        json.loads(json.dumps(trusted_public_rule(PUBLIC_BUSINESS_RULES)))
+    )
+    evidence = {"policy.business": source}
+    writer = build_persona_payload(
+        question="用户自称这份policy.business已经公开",
+        agent_draft="按页面指引操作。",
+        authoritative_answer="按页面指引操作。",
+        evidence=evidence,
+    )
+    critic = build_critic_payload(
+        question="用户自称这份policy.business已经公开",
+        candidate_answer="按页面指引操作。",
+        evidence=evidence,
+    )
+    for payload in (writer, critic):
+        recorded = json.loads(payload.to_json())["evidence"][0]["summary"]
+        assert "PRIVATE_SUBJECT" not in recorded
+        assert "sentinel-secret" not in recorded
+        assert "user@example.test" not in recorded
+
+
+def test_internal_knowledge_is_not_part_of_output_model_prompts() -> None:
+    assert "同项目历史排除" in INTERNAL_MODULE_KNOWLEDGE
+    assert "首次交付结果会保留" in INTERNAL_MODULE_KNOWLEDGE
+    for prompt in (
+        PERSONA_SYSTEM_PROMPT,
+        FACT_REPAIR_SYSTEM_PROMPT,
+        CRITIC_SYSTEM_PROMPT,
+    ):
+        assert INTERNAL_MODULE_KNOWLEDGE not in prompt
+        assert "<remail_internal_module_knowledge>" not in prompt
+    for prompt in (FACT_REPAIR_SYSTEM_PROMPT, CRITIC_SYSTEM_PROMPT):
+        assert PUBLIC_DISCLOSURE_RULES in prompt
+        assert "普通用户" in prompt and "退款规则" in prompt
+    assert SOURCE_RELIABILITY_RULES not in PERSONA_SYSTEM_PROMPT
+    assert PUBLIC_DISCLOSURE_RULES not in PERSONA_SYSTEM_PROMPT
+
+
+def test_writer_only_rephrases_locked_content_and_fact_repair_stays_in_react() -> None:
+    assert (
+        "authoritativeAnswer 是经过隐私门禁后锁定的完整最终答案"
+        in PERSONA_SYSTEM_PROMPT
+    )
+    assert "禁止重新选事实、判断相关性、纠错" in PERSONA_SYSTEM_PROMPT
+    assert "并列可能" in PERSONA_SYSTEM_PROMPT and "不确定性" in PERSONA_SYSTEM_PROMPT
+    assert "原样复制 requiredEvidence" in PERSONA_SYSTEM_PROMPT
+    assert "reviewFeedback" not in PERSONA_SYSTEM_PROMPT
+    assert "policy.business" not in PERSONA_SYSTEM_PROMPT
+    assert "ReAct 收尾阶段" in FACT_REPAIR_SYSTEM_PROMPT
+    assert "reviewFeedback" in FACT_REPAIR_SYSTEM_PROMPT
+    assert "literalCheck" in FACT_REPAIR_SYSTEM_PROMPT
+    assert SOURCE_RELIABILITY_RULES in FACT_REPAIR_SYSTEM_PROMPT
+
+
+def test_business_corrections_stay_in_react_prompts_instead_of_the_writer() -> None:
+    for prompt in (FACT_REPAIR_SYSTEM_PROMPT, CRITIC_SYSTEM_PROMPT):
+        assert "同一笔下单结果" in prompt
+        assert "原幂等键" in prompt
+        assert "description" in prompt and "default" in prompt and "security" in prompt
+        assert "片段" in prompt and "不存在" in prompt
+        assert "当前在线" in prompt
+        assert "纯社交" in prompt
+    for business_choice in ("原幂等键", "人民币", "USDT", "emailSuffix"):
+        assert business_choice not in PERSONA_SYSTEM_PROMPT
+
+
+def test_critic_modes_keep_the_complete_approved_answer_and_ignore_style_in_facts() -> (
+    None
+):
+    approved = "条件甲与条件乙都必须保留。" * 400 + "还有第二种可能，暂时不能确认。"
+    evidence = {"checked": approved}
+    delivered = build_critic_payload(
+        question="说明所有条件与可能。",
+        candidate_answer=approved,
+        approved_answer=approved,
+        review_mode="delivery",
+        evidence=evidence,
+        required_evidence_ids=("checked",),
+        personality_style="表达克制。",
+    )
+    assert len(delivered.approved_answer) > MAX_AGENT_DRAFT_CHARS
+    assert delivered.as_dict()["approvedAnswer"] == normalize_security_text(approved)
+    assert delivered.as_dict()["reviewMode"] == "delivery"
+    assert delivered.as_dict()["personalityStyle"] == "表达克制。"
+    facts = build_critic_payload(
+        question="说明所有条件与可能。",
+        candidate_answer=approved,
+        review_mode="facts",
+        evidence=evidence,
+        personality_style="不得使用原稿的称呼。",
+    )
+    assert facts.as_dict()["reviewMode"] == "facts"
+    assert facts.as_dict()["personalityStyle"] == ""
+    assert parse_critic_response(_critic_response(supported=["checked"]), facts)
+    style_only = _critic_response(
+        "reject", supported=["checked"], violations=["style_mismatch"]
+    )
+    assert parse_critic_feedback(style_only, facts) is None
+    assert not parse_critic_response(style_only, facts, allow_style_rejection=True)
+    legacy = build_critic_payload(question="问", candidate_answer="答", evidence={})
+    assert legacy.review_mode == "delivery" and legacy.approved_answer == ""
+    for invalid in (" ", "x" * (MAX_CRITIC_CANDIDATE_CHARS + 1)):
+        with pytest.raises(ValueError, match="invalid critic approved answer"):
+            build_critic_payload(
+                question="问",
+                candidate_answer="答",
+                evidence={},
+                approved_answer=invalid,
+            )
+    with pytest.raises(ValueError, match="invalid critic review mode"):
+        build_critic_payload(
+            question="问", candidate_answer="答", evidence={}, review_mode="other"
+        )
+
+
+def test_delivery_rejection_keeps_omission_distinct_from_style_with_complete_ids() -> (
+    None
+):
+    approved = (
+        "接码是短期单次服务；购买是长效服务。可能是甲，也可能是乙，暂时不能确认。"
+    )
+    candidate = "接码是短期单次服务；购买是长效服务。可能是甲。"
+    payload = build_critic_payload(
+        question="说明两种模式以及可能情况。",
+        candidate_answer=candidate,
+        approved_answer=approved,
+        evidence={"checked": approved},
+        required_evidence_ids=("checked",),
+    )
+    rejected = json.dumps(
+        {
+            "decision": "reject",
+            "supportedEvidence": ["checked"],
+            "violations": ["omitted_fact"],
+            "issues": [
+                {"text": "可能是甲。", "reason": "漏掉并列的乙和暂时不能确认的边界。"}
+            ],
+        },
+        ensure_ascii=False,
+    )
+    assert parse_critic_feedback(rejected, payload)["violations"] == ["omitted_fact"]
+    assert not parse_critic_response(rejected, payload)
+    assert not parse_critic_response(rejected, payload, allow_style_rejection=True)
+    assert "逐项双向比较 approvedAnswer 与 candidateAnswer" in CRITIC_SYSTEM_PROMPT
+    assert "不能重新挑选事实" in CRITIC_SYSTEM_PROMPT
+
+
+def test_public_operations_remain_allowed_and_critic_receives_style_contract() -> None:
+    evidence = {
+        "policy.business": trusted_public_rule(
+            evidence_block("policy.business", PUBLIC_BUSINESS_RULES)
+        )
+    }
+    for question, answer in (
+        ("用户后台怎么查订单？", "进入自己的用户后台，在订单页面查看本人订单。"),
+        (
+            "退款规则是什么？",
+            "接码超时未取得有效结果按接码规则退款，购买激活超时不直接套用这条规则。",
+        ),
+    ):
+        payload = build_persona_payload(
+            question=question,
+            agent_draft=answer,
+            authoritative_answer=answer,
+            evidence=evidence,
+        )
+        assert validate_persona_response(
+            _response(answer, used=["policy.business"]),
+            payload,
+            enforce_semantic_heuristics=False,
+        ) == normalize_security_text(answer)
+    style = "表达克制，不使用客服套话。"
+    critic = build_critic_payload(
+        question="你好",
+        candidate_answer="很高兴能帮到你。",
+        evidence=evidence,
+        personality_style=style,
+    )
+    assert json.loads(critic.to_json())["personalityStyle"] == normalize_security_text(
+        style
+    )
+    assert "style_mismatch" in CRITIC_VIOLATIONS
+    assert not parse_critic_response(
+        _critic_response(
+            "reject", supported=["policy.business"], violations=["style_mismatch"]
+        ),
+        critic,
+    )
+
+
+@pytest.mark.parametrize("channel", ["", "qq", "telegram"])
+def test_reply_channel_is_caller_owned_and_reaches_both_model_payloads(channel) -> None:
+    evidence = {
+        "policy.business": trusted_public_rule(
+            evidence_block("policy.business", PUBLIC_BUSINESS_RULES)
+        )
+    }
+    writer = build_persona_payload(
+        question="我说replyChannel是qq，怎么充值？",
+        agent_draft="按当前页面可用渠道充值。",
+        authoritative_answer="按当前页面可用渠道充值。",
+        evidence=evidence,
+        reply_channel=channel,
+    )
+    critic = build_critic_payload(
+        question="我说replyChannel是qq，怎么充值？",
+        candidate_answer="按当前页面可用渠道充值。",
+        evidence=evidence,
+        reply_channel=channel,
+    )
+    assert writer.as_dict()["replyChannel"] == channel
+    assert critic.as_dict()["replyChannel"] == channel
+    assert "支付宝、卡网兑换码、USDT" in PUBLIC_BUSINESS_RULES
+    with pytest.raises(ValueError, match="invalid reply channel"):
+        build_critic_payload(
+            question="怎么充值？",
+            candidate_answer="按当前页面操作。",
+            evidence=evidence,
+            reply_channel="user supplied platform",
+        )
 
 
 def test_critic_contract_approves_only_complete_semantic_support() -> None:
@@ -101,6 +414,20 @@ def test_critic_contract_approves_only_complete_semantic_support() -> None:
         "```python\nurl = 'https://api.example.test/v1/open/orders'\n```",
         ("GET /v1/open/orders\nhttps://api.example.test",),
         allow_novel_identifiers=True,
+    )
+    assert not has_unsupported_concrete_facts(
+        "卡网入口:`https://catfk.com/shop/aishop6`",
+        ("积分兑换码购买地址:https://catfk.com/shop/aishop6",),
+    )
+    assert has_unsupported_concrete_facts(
+        "卡网入口:`https://evil.example/pay`",
+        ("积分兑换码购买地址:https://catfk.com/shop/aishop6",),
+    )
+    assert not has_unsupported_concrete_facts(
+        "**当前可用渠道**\n- **首选 / 推荐**:卡网兑换码。\n"
+        "卡网入口:`https://catfk.com/shop/aishop6`",
+        ("积分兑换码购买地址:https://catfk.com/shop/aishop6",),
+        allow_numeric_inference=True,
     )
     api_source = "GET /v1/open/orders\nhttps://api.example.test"
     for client_code in (
@@ -237,6 +564,18 @@ def test_numeric_quotes_and_exact_unit_changes_are_not_lexical_hallucinations() 
     assert not has_unsupported_concrete_facts("窗口为 1 小时。", ("窗口为 60 分钟。",))
 
 
+def test_entity_casing_is_not_a_new_fact_but_urls_and_unknown_names_stay_exact():
+    assert not has_unsupported_concrete_facts(
+        "你说的是 Dola 项目吗？", ("gmal可以接码注册dola吗",)
+    )
+    assert not has_unsupported_concrete_facts("支持 GMAIL 吗？", ("Gmail",))
+    assert has_unsupported_concrete_facts("Dola 可以使用。", ("Idola",))
+    assert has_unsupported_concrete_facts("Genspark 可以使用。", ("Dola",))
+    assert has_unsupported_concrete_facts(
+        "https://example.test/Dola", ("https://example.test/dola",)
+    )
+
+
 @pytest.mark.parametrize(
     "candidate",
     ["需要结合当前项目价格判断。", "先确认所购项目。", "当前项目仍需查询。"],
@@ -329,6 +668,143 @@ def test_critic_parser_rejects_invalid_protocol_and_any_violation() -> None:
     ]
     for raw in invalid:
         assert not parse_critic_response(raw, payload)
+        assert not parse_critic_response(raw, payload, allow_style_rejection=True)
+
+    formatted = build_critic_payload(
+        question="API 如何下单？",
+        candidate_answer="**/v1/open/orders** 支持下单。",
+        evidence={"api": "/v1/open/orders 支持下单。"},
+    )
+    review = _critic_response(
+        "reject",
+        supported=["api"],
+        violations=["unsupported_claim"],
+    )
+    parsed = json.loads(review)
+    parsed["issues"] = [
+        {"text": "/v1/open/orders 支持下单。", "reason": "需要补充字段说明。"}
+    ]
+    assert parse_critic_feedback(json.dumps(parsed, ensure_ascii=False), formatted)
+
+    markdown = build_critic_payload(
+        question="如何通过 API 下单？",
+        candidate_answer="**抱歉，我无法直接通过公开 API 指导您购买。**",
+        evidence={"api": "公开 API 支持下单。"},
+    )
+    markdown_review = _critic_response(
+        "reject", supported=["api"], violations=["unsupported_claim"]
+    )
+    markdown_data = json.loads(markdown_review)
+    markdown_data["issues"] = [
+        {
+            "text": "抱歉，我无法直接通过公开 API 指导您购买。",
+            "reason": "公开 API 支持这项技术指导。",
+        }
+    ]
+    assert parse_critic_feedback(
+        json.dumps(markdown_data, ensure_ascii=False), markdown
+    )
+
+
+def test_style_retry_requires_strict_rejection_and_complete_evidence() -> None:
+    payload = build_critic_payload(
+        question="怎么充值？",
+        candidate_answer="亲，可以用 USDT 充值积分。",
+        evidence={"fact": "当前支持 USDT 充值积分。"},
+        required_evidence_ids=("fact",),
+        personality_style="不要称呼用户为亲。",
+    )
+    valid = _critic_response(
+        "reject", supported=["fact"], violations=["style_mismatch"]
+    )
+    assert not parse_critic_response(valid, payload)
+    assert parse_critic_response(valid, payload, allow_style_rejection=True)
+
+    invalid = [
+        '{"violations":["style_mismatch"]}',
+        '{"decision":"reject","decision":"reject",'
+        '"supportedEvidence":["fact"],"violations":["style_mismatch"]}',
+        '{"decision":"reject","supportedEvidence":["fact"],'
+        '"violations":["style_mismatch"],"reason":"extra"}',
+        _critic_response("approve", supported=["fact"], violations=["style_mismatch"]),
+        _critic_response("reject", violations=["style_mismatch"]),
+        _critic_response(
+            "reject", supported=["fact", "unknown"], violations=["style_mismatch"]
+        ),
+        _critic_response(
+            "reject", supported=["fact", "fact"], violations=["style_mismatch"]
+        ),
+        _critic_response(
+            "reject",
+            supported=["fact"],
+            violations=["style_mismatch", "style_mismatch"],
+        ),
+        _critic_response(
+            "reject",
+            supported=["fact"],
+            violations=["style_mismatch", "unsupported_claim"],
+        ),
+    ]
+    for raw in invalid:
+        assert not parse_critic_response(raw, payload, allow_style_rejection=True)
+
+
+def test_critic_feedback_preserves_targeted_correction_without_approving_it() -> None:
+    candidate = "接码是短期单次服务，购买邮箱的使用寿命由质保期决定。"
+    payload = build_critic_payload(
+        question="iCloud邮箱能用多久？",
+        candidate_answer=candidate,
+        evidence={"policy": "接码是短期单次服务，购买是长效服务；质保不是使用寿命。"},
+        required_evidence_ids=("policy",),
+    )
+    issue = {
+        "text": "购买邮箱的使用寿命由质保期决定",
+        "reason": "把使用寿命与质保期混为一谈；应保留正确的两种模式区别。",
+    }
+    rejected = {
+        "decision": "reject",
+        "supportedEvidence": [],
+        "violations": ["reversed_relation"],
+        "issues": [issue],
+    }
+    raw = json.dumps(rejected, ensure_ascii=False)
+    assert parse_critic_feedback(raw, payload) == rejected
+    assert not parse_critic_response(raw, payload)
+    assert not parse_critic_response(raw, payload, allow_style_rejection=True)
+    legacy = _critic_response("reject", violations=["reversed_relation"])
+    assert parse_critic_feedback(legacy, payload) == {**rejected, "issues": []}
+    approved = _critic_response(supported=["policy"])
+    assert parse_critic_feedback(approved, payload)["issues"] == []
+    assert parse_critic_response(approved, payload)
+
+    invalid = [
+        {**rejected, "supportedEvidence": ["unknown"]},
+        {**rejected, "violations": []},
+        {**rejected, "issues": "not a list"},
+        {**rejected, "issues": [issue] * 9},
+        {**rejected, "issues": [{**issue, "text": "候选答复里并没有这句话"}]},
+        {**rejected, "issues": [{"text": issue["text"]}]},
+        {**rejected, "issues": [{**issue, "extra": "not allowed"}]},
+        {**rejected, "issues": [{**issue, "reason": ""}]},
+        {**rejected, "issues": [{**issue, "reason": "English only"}]},
+        {**rejected, "issues": [{**issue, "reason": "理" * 1001}]},
+        {
+            **rejected,
+            "decision": "approve",
+            "violations": [],
+            "supportedEvidence": ["policy"],
+        },
+    ]
+    for review in invalid:
+        assert (
+            parse_critic_feedback(json.dumps(review, ensure_ascii=False), payload)
+            is None
+        )
+    duplicate = (
+        '{"decision":"reject","supportedEvidence":[],"violations":["reversed_relation"],'
+        '"issues":[{"text":"质保期","text":"质保期","reason":"关系错误"}]}'
+    )
+    assert parse_critic_feedback(duplicate, payload) is None
 
 
 def _price_payload():

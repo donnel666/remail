@@ -51,7 +51,7 @@ func registerBotRoutes(
 	contextReads.GET("/profile", func(c *gin.Context) { getBotProfile(c, iamMod, billingMod) })
 	var orderList botOrderList
 	if tradeMod != nil && tradeMod.UseCase != nil {
-		orderList = tradeMod.UseCase.ListOrders
+		orderList = tradeMod.UseCase.ListBotOrders
 	}
 	contextReads.GET("/orders", middleware.BotPrivateRequired(), func(c *gin.Context) {
 		getBotOrders(c, botDiagnosisUserResolver(iamMod), orderList)

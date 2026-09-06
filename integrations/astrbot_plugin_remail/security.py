@@ -57,8 +57,11 @@ _STRUCTURED_CREDENTIAL_PREFIX = re.compile(
 )
 _AUTHORIZATION = re.compile(
     r"(?ix)\b(?:basic|bearer)[ \t]+(?:"
-    r"\[[^\]\r\n]{1,80}\]|<[^>\r\n]{1,80}>|\$\{[^}\r\n]{1,80}\}|"
-    r"[^\s,，;；}\]\r\n]+)"
+    r"\"[^\"\r\n]*\"|'[^'\r\n]*'|`[^`\r\n]*`|"
+    r"[\"'`][^\r\n]*|"
+    r"(?:\[[^\]\r\n]{1,80}\]|<[^>\r\n]{1,80}>|\$\{[^}\r\n]{1,80}\})"
+    r"(?![\w+./=-])|"
+    r"[^\s,，;；}\]\"'`\r\n]+)"
 )
 _CREDENTIAL_PREFIX = re.compile(
     r"(?ix)(?<![\w-])(?P<prefix>[\"']?(?P<label>"
@@ -75,7 +78,7 @@ _CREDENTIAL_PREFIX = re.compile(
     r"设置成|设为|设成|改成|改为|换成|修改成|定为)[ \t]*|"
     r"(?P<space_separator>[ \t]+)))"
 )
-_VALUE_DELIMITERS = frozenset(";；}]。！？\"'")
+_VALUE_DELIMITERS = frozenset(";；}]。！？\"'`")
 _LINE_VALUE_LABELS = frozenset(
     {
         "cookie",
@@ -101,6 +104,8 @@ _NON_SECRET_DESCRIPTION = re.compile(
     r"(?:参数|字段|请求头|header)(?:应|应该|需要|可以)?(?:使用|填写|传入|传递|"
     r"放置|保存|配置)(?:[ \t]+(?:bearer|basic|authorization|api[ _-]?key|token))?"
     r"[ \t]*(?:格式|方式|请求头|header)|"
+    r"(?:只|仅)(?:在|应在)(?:你|您)(?:自己)?的客户端(?:中)?使用"
+    r"(?:[，,](?:请)?不要(?:发到|发送到|粘贴到)(?:聊天|群聊)中)?|"
     r"(?:(?:how[ \t]+to|cannot|should|must)[ \t]+)?(?:be[ \t]+)?(?:not[ \t]+)?"
     r"(?:required|optional|encrypted|stored|reset|empty|missing|invalid|incorrect|"
     r"expired|unavailable|disabled|enabled|used|saved|changed|configured)"
@@ -120,7 +125,8 @@ _DESCRIPTION_TRAILING_VALUE = re.compile(
     r"(?:怎么|如何|什么|重置|加密|保存|配置|使用)[a-z0-9._~+/=-]{3,}\s*$"
 )
 _PLACEHOLDER_NAME = (
-    r"(?:YOUR[ ._-]?)?(?:API[ ._-]?KEY|SYSTEM[ ._-]?KEY|TOKEN|ACCESS[ ._-]?TOKEN|"
+    r"(?:YOUR[ ._-]?|你的[ \t]*|您的[ \t]*)?(?:"
+    r"API[ ._-]?KEY|SYSTEM[ ._-]?KEY|TOKEN|SERVICE[ ._-]?TOKEN|ACCESS[ ._-]?TOKEN|"
     r"REFRESH[ _-]?TOKEN|PASSWORD|PASSPHRASE|SECRET|CLIENT[ _-]?SECRET|COOKIE|"
     r"AUTHORIZATION|OTP|VERIFICATION[ _-]?CODE|RECOVERY[ _-]?CODES?|PRIVATE[ _-]?KEY|"
     r"CREDENTIALS?|AWS[ _-]?ACCESS[ _-]?KEY[ _-]?ID|AWS[ _-]?SECRET[ _-]?ACCESS[ _-]?KEY|"
@@ -128,7 +134,7 @@ _PLACEHOLDER_NAME = (
 )
 _SAFE_PLACEHOLDER = re.compile(
     rf"(?ix)(?:<{_PLACEHOLDER_NAME}>|\$\{{{_PLACEHOLDER_NAME}\}}|"
-    r"\[(?:REDACTED|已脱敏|敏感信息已隐藏|凭证已隐藏)\]|REDACTED|REPLACE[ _-]?ME)"
+    r"\[(?:REDACTED|已脱敏|敏感信息已隐藏|凭证已隐藏)\]|REDACTED|REPLACE[ _-]?ME|rk-\.{3})"
 )
 _HIDDEN_VALUE = "[敏感信息已隐藏]"
 
@@ -160,14 +166,24 @@ def _line_end(text: str, start: int) -> int:
 
 def _credential_value_end(text: str, start: int, *, whole_line: bool) -> int:
     line_end = _line_end(text, start)
+    # Keep the closing markup outside a value when the label is inside it.
+    line_start = text.rfind("\n", 0, start) + 1
+    for marker in ("```", "`", "**", "__"):
+        tail = text[start:line_end].rstrip()
+        if tail.endswith(marker) and text[line_start:start].count(marker) % 2:
+            line_end = start + len(tail) - len(marker)
     if start >= line_end:
         return start
     closing = {"<": ">", "[": "]", "$": "}"}.get(text[start])
     if closing and (text[start] != "$" or text.startswith("${", start)):
         end = text.find(closing, start + 1, line_end)
-        if end >= 0:
+        if end >= 0 and (
+            end + 1 == line_end
+            or text[end + 1].isspace()
+            or text[end + 1] in _VALUE_DELIMITERS
+        ):
             return end + 1
-    quote = text[start] if text[start] in "\"'" else ""
+    quote = text[start] if text[start] in "\"'`" else ""
     if quote:
         escaped = False
         for index in range(start + 1, line_end):
@@ -191,7 +207,7 @@ def _credential_value_end(text: str, start: int, *, whole_line: bool) -> int:
 
 def _unquoted(value: str) -> str:
     stripped = value.strip()
-    if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in "\"'":
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in "\"'`":
         return stripped[1:-1]
     return stripped
 
@@ -293,7 +309,7 @@ def _redact_structured_credential_assignments(text: str) -> str:
 
 def _redact_authorization(match: re.Match[str]) -> str:
     scheme, value = match.group(0).split(None, 1)
-    if _SAFE_PLACEHOLDER.fullmatch(value) or _is_non_secret_description(value):
+    if _is_safe_placeholder(value) or _is_non_secret_description(value):
         return match.group(0)
     return f"{scheme} {_HIDDEN_VALUE}"
 

@@ -9,14 +9,165 @@ import pytest
 
 from .persona import (
     CRITIC_SYSTEM_PROMPT,
+    FACT_REPAIR_SYSTEM_PROMPT,
     PERSONA_SYSTEM_PROMPT,
+    build_critic_payload,
     build_persona_payload,
     has_unsupported_concrete_facts,
 )
-from .sources import SOURCE_RELIABILITY_RULES, evidence_block, source_metadata
+from .sources import (
+    PublicAPIContract,
+    SOURCE_RELIABILITY_RULES,
+    evidence_block,
+    evidence_text,
+    source_disclosure,
+    source_metadata,
+)
 from .test_background import event_for
-from .test_security import _fact, _fact_plan, _load_welcome_functions
+from .test_security import _fact, _fact_plan, _load_openapi_excerpt, _load_welcome_functions
 from .workflow import PLANNER_SYSTEM_PROMPT, PUBLIC_BUSINESS_RULES
+from .knowledge import trusted_public_rule
+
+
+def test_source_disclosure_is_code_owned_and_independent_of_strength():
+    for source, strength, disclosure in (
+        ("projects", "strong", "public"),
+        ("api_documentation", "strong", "public"),
+        ("orders", "strong", "self"),
+        ("binding_status", "strong", "self"),
+        ("code_diagnosis", "strong", "self"),
+        ("group_context", "weak", "group"),
+        ("policy.business", "static", "public"),
+        ("policy.internal", "static", "internal"),
+        ("unknown_source", "weak", "internal"),
+    ):
+        metadata = source_metadata(
+            source, params={"disclosure": "public", "source": "policy.business"}
+        )
+        assert metadata["strength"] == strength
+        assert metadata["disclosure"] == source_disclosure(source) == disclosure
+        assert metadata["source"] == source
+    assert source_disclosure(None) == "internal"
+    assert source_disclosure({"source": "policy.business"}) == "internal"
+
+
+def _api_contract_spec(description="gmail_variant 选择谷歌变种，不接受完整邮箱地址。"):
+    return {
+        "info": {"title": "公开契约", "version": "1.0"},
+        "servers": [{"url": "https://api.example.test"}],
+        "paths": {
+            "/v1/open/orders": {"post": {
+                "operationId": "createOrder", "summary": "创建购买订单",
+                "description": "使用 serviceMode 查询参数指定模式。",
+                "security": [{"remailApiKey": []}],
+                "parameters": [
+                    {"name": "Idempotency-Key", "in": "header", "required": True,
+                     "description": "同一请求结果不明时复用原键。",
+                     "schema": {"type": "string", "minLength": 1, "maxLength": 128}},
+                    {"name": "supply", "in": "query", "required": False,
+                     "description": "默认 private_first。",
+                     "schema": {"type": "string", "default": "private_first",
+                                "enum": ["private_first", "public_only"]}},
+                ],
+                "requestBody": {"$ref": "#/components/requestBodies/PurchaseBody"},
+                "responses": {"201": {"$ref": "#/components/responses/Created"}},
+            }},
+        },
+        "components": {
+            "securitySchemes": {"remailApiKey": {
+                "type": "http", "scheme": "bearer", "bearerFormat": "API Key",
+                "description": "填入 rk- 开头的 API Key，示例为 <API_KEY>。",
+            }},
+            "requestBodies": {"PurchaseBody": {
+                "required": True,
+                "content": {"application/json": {"schema": {
+                    "$ref": "#/components/schemas/CreateOrderRequest"
+                }}},
+            }},
+            "responses": {"Created": {
+                "description": "已创建订单。",
+                "headers": {"Location": {"$ref": "#/components/headers/OrderLocation"}},
+                "content": {"application/json": {"schema": {
+                    "$ref": "#/components/schemas/APIKeyProfile"
+                }}},
+            }},
+            "headers": {"OrderLocation": {
+                "description": "订单详情位置。", "schema": {"type": "string"},
+            }},
+            "schemas": {
+                "CreateOrderRequest": {
+                    "type": "object", "required": ["projectId", "emailSuffix"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "projectId": {"type": "integer", "format": "int64", "minimum": 1,
+                                      "maximum": 2**63 - 1, "example": 1001},
+                        "emailSuffix": {"type": "string", "description": description,
+                                        "example": "gmail_variant", "pattern": "^[a-z_.]+$"},
+                    },
+                },
+                "APIKeyProfile": {"type": "object", "properties": {
+                    "prefix": {"type": "string", "description": "公开的 Key 前缀。"}
+                }},
+            },
+        },
+    }
+
+
+def test_api_contract_projection_and_factual_review_inputs_keep_complete_metadata():
+    excerpt = _load_openapi_excerpt()(_api_contract_spec(), "createOrder emailSuffix")
+    excerpt["documentationUrl"] = "https://api.example.test/docs"
+    functions, _ = _load_welcome_functions()
+    rendered = functions["_render_api_evidence"](excerpt)
+    assert isinstance(rendered, PublicAPIContract)
+    assert json.loads(rendered) == excerpt
+    marked = evidence_block("api_documentation", rendered)
+    assert isinstance(marked, PublicAPIContract)
+    evidence = {"contract": marked}
+    repair = build_persona_payload(
+        question="如何购买谷歌变种？", agent_draft="按公开契约下单。",
+        authoritative_answer="按公开契约下单。", evidence=evidence,
+    )
+    critic = build_critic_payload(
+        question="如何购买谷歌变种？", candidate_answer="按公开契约下单。",
+        evidence=evidence, review_mode="facts",
+    )
+    for payload in (repair, critic):
+        actual = json.loads(evidence_text(dict(payload.evidence)["contract"]))
+        assert actual == excerpt
+        assert actual["operations"][0]["responses"]["201"] == {
+            "$ref": "#/components/responses/Created"
+        }
+        assert actual["components"]["headers"]["OrderLocation"]["schema"]["type"] == "string"
+        assert actual["components"]["schemas"]["APIKeyProfile"]["properties"]["prefix"]["type"] == "string"
+
+
+@pytest.mark.parametrize("description_chars,available", [(12_000, True), (61_000, False)])
+def test_large_primary_api_operation_is_complete_or_explicitly_unavailable(
+    description_chars, available
+):
+    description = "明" * description_chars
+    excerpt = _load_openapi_excerpt()(
+        _api_contract_spec(description), "createOrder emailSuffix"
+    )
+    assert excerpt["truncated"] is True
+    if available:
+        assert excerpt["sourceValid"] is True
+        assert excerpt["operations"][0]["responses"]["201"]["$ref"] == "#/components/responses/Created"
+        assert excerpt["components"]["schemas"]["CreateOrderRequest"]["properties"]["emailSuffix"]["description"] == description
+    else:
+        assert excerpt["sourceValid"] is False
+        assert excerpt["operations"] == [] and excerpt["components"] == {}
+        assert "unavailableReason" in excerpt
+
+
+def test_missing_api_reference_is_reported_as_incomplete_without_erasing_the_ref():
+    spec = _api_contract_spec()
+    del spec["components"]["headers"]["OrderLocation"]
+    excerpt = _load_openapi_excerpt()(spec, "createOrder")
+    assert excerpt["truncated"] is True
+    assert excerpt["components"]["responses"]["Created"]["headers"]["Location"] == {
+        "$ref": "#/components/headers/OrderLocation"
+    }
 
 
 def _project(warranty=60):
@@ -48,25 +199,35 @@ def _context(answer, *, approve=True):
     async def generate(**kwargs):
         payload = json.loads(kwargs["prompt"])
         calls.append((kwargs["system_prompt"], payload))
-        if kwargs["system_prompt"] == PERSONA_SYSTEM_PROMPT:
+        if kwargs["system_prompt"] in {PERSONA_SYSTEM_PROMPT, FACT_REPAIR_SYSTEM_PROMPT}:
+            used = (
+                [item["id"] for item in payload["evidence"]]
+                if kwargs["system_prompt"] == FACT_REPAIR_SYSTEM_PROMPT
+                else payload["requiredEvidence"]
+            )
             return SimpleNamespace(
                 role="assistant",
                 completion_text=json.dumps(
                     {
                         "answer": answer,
-                        "usedEvidence": payload["requiredEvidence"],
+                        "usedEvidence": used,
                         "seals": [],
                     },
                     ensure_ascii=False,
                 ),
             )
         assert kwargs["system_prompt"] == CRITIC_SYSTEM_PROMPT
+        supported = (
+            [item["id"] for item in payload["evidence"]]
+            if payload["reviewMode"] == "facts"
+            else payload["requiredEvidence"]
+        )
         return SimpleNamespace(
             role="assistant",
             completion_text=json.dumps(
                 {
                     "decision": "approve" if approve else "reject",
-                    "supportedEvidence": payload["requiredEvidence"],
+                    "supportedEvidence": supported,
                     "violations": [] if approve else ["provenance_error"],
                 }
             ),
@@ -83,8 +244,8 @@ def test_strong_prefetch_overrides_old_faq_in_normal_and_failure_paths(approve):
     functions, _ = _load_welcome_functions()
     event = event_for(question="Demo 的常见问题里那个质保怎么理解？")
     plan = _fact_plan(
-        intents=("faq",),
-        facts=(_fact("faq", "faqs"),),
+        intents=("faq", "project"),
+        facts=(_fact("faq", "faqs"), _fact("project", "projects")),
         entities={"projectQuery": "Demo"},
     )
     event.set_extra("_remail_owned", True)
@@ -111,8 +272,16 @@ def test_strong_prefetch_overrides_old_faq_in_normal_and_failure_paths(approve):
             SimpleNamespace(context=context), event, response
         )
     )
-    assert len(calls) == 2
+    assert [prompt for prompt, _ in calls] == [
+        CRITIC_SYSTEM_PROMPT,
+        PERSONA_SYSTEM_PROMPT if approve else FACT_REPAIR_SYSTEM_PROMPT,
+        CRITIC_SYSTEM_PROMPT,
+    ]
     for prompt, payload in calls:
+        if prompt == PERSONA_SYSTEM_PROMPT:
+            assert "evidence" not in payload and "agentDraft" not in payload
+            assert payload["authoritativeAnswer"] == functions["normalize_security_text"](answer)
+            continue
         assert SOURCE_RELIABILITY_RULES in prompt
         evidence = payload["evidence"]
         assert any(
@@ -123,7 +292,16 @@ def test_strong_prefetch_overrides_old_faq_in_normal_and_failure_paths(approve):
             '"strength":"weak"' in item["summary"] and "1440 分钟" in item["summary"]
             for item in evidence
         )
-    assert "60 分钟" in response.completion_text
+    if approve:
+        assert "60 分钟" in response.completion_text
+    else:
+        assert "60 分钟" in calls[1][1]["authoritativeAnswer"]
+        assert "1440" not in calls[1][1]["authoritativeAnswer"]
+        assert "60 分钟" in calls[2][1]["candidateAnswer"]
+        assert "1440" not in calls[2][1]["candidateAnswer"]
+        assert response.completion_text == functions["normalize_security_text"](
+            functions["_REMAIL_SAFE_ERROR_TEXT"]
+        )
     assert "1440" not in response.completion_text
 
 
@@ -146,7 +324,10 @@ def test_static_capability_language_is_not_a_dynamic_failure(answer):
             SimpleNamespace(context=context), event, response
         )
     )
-    assert len(calls) == 2
+    assert len(calls) == 3
+    assert calls[0][1]["reviewMode"] == "facts"
+    assert calls[2][1]["reviewMode"] == "delivery"
+    assert calls[2][1]["approvedAnswer"] == functions["normalize_security_text"](answer)
     assert "质保不是邮箱使用期限" in response.completion_text
     assert "请稍后重试" not in response.completion_text
 
@@ -223,7 +404,9 @@ def test_notice_dates_are_not_replaced_by_fetch_time_or_lost():
 
 def test_four_large_sources_and_exact_unit_conversion_remain_valid():
     evidence = {
-        "policy.business": evidence_block("policy.business", PUBLIC_BUSINESS_RULES),
+        "policy.business": trusted_public_rule(
+            evidence_block("policy.business", PUBLIC_BUSINESS_RULES)
+        ),
         **{f"fact{i}": "公开事实。" * 799 for i in range(4)},
     }
     assert (

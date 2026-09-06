@@ -1783,6 +1783,38 @@ func (uc *UseCase) GetOrderPickupCredentials(ctx context.Context, orderNos []str
 	return result, nil
 }
 
+// ListBotOrders reads the owner's summary without console facets, deliveries or allocation details.
+func (uc *UseCase) ListBotOrders(ctx context.Context, filter OrderListFilter, offset int, afterID uint, limit int) (*OrderListResult, error) {
+	if filter.UserID == 0 || filter.IsAdmin || filter.Scope != "mine" {
+		return nil, domain.ErrOrderForbidden
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	items, nextAfterID, err := uc.repo.ListOrders(ctx, filter, offset, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	total, err := uc.repo.CountOrders(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]CheckoutResult, len(items))
+	for i := range items {
+		if items[i].UserID != filter.UserID {
+			return nil, domain.ErrOrderForbidden
+		}
+		results[i].Order = items[i]
+	}
+	if err := uc.attachProjectDisplays(ctx, results, nil); err != nil {
+		return nil, err
+	}
+	return &OrderListResult{Items: results, Total: total, NextAfterID: nextAfterID}, nil
+}
+
 func (uc *UseCase) ListOrders(ctx context.Context, filter OrderListFilter, offset int, afterID uint, limit int) (*OrderListResult, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 20

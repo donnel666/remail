@@ -60,7 +60,7 @@ def test_recharge_units_are_static_but_channels_and_amounts_require_current_fact
     ):
         assert term in PUBLIC_BUSINESS_RULES
     assert "recharge_quote" in PLANNER_SYSTEM_PROMPT
-    assert "do not silently interpret '充10元' as 10 points" in PLANNER_SYSTEM_PROMPT
+    assert "“充10元”不是 10 积分" in PLANNER_SYSTEM_PROMPT
     assert "remail_recharge_quote" in functions["_ALLOWED_REMAIL_TOOLS"]
     assert "recharge_quote" in functions["STRONG_SOURCES"]
     config = functions["_recharge_config_view"](
