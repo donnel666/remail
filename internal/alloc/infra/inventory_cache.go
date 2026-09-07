@@ -76,11 +76,11 @@ func (c *InventoryCache) GetProductInventorySnapshots(ctx context.Context, proje
 		if err := json.Unmarshal([]byte(fmt.Sprint(payload)), &totals); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", keys[i], err)
 		}
-		// Gmail products and iCloud share one inventory pool across both service modes.
+		// Gmail, iCloud, and Proto products share one inventory pool across both service modes.
 		// Tolerate snapshots written without the mode-specific fields.
 		for itemIndex := range totals.Items {
 			item := &totals.Items[itemIndex]
-			if item.ProductType != coredomain.ProductTypeGmail && item.ProductType != coredomain.ProductTypeGmailVariant && item.ProductType != coredomain.ProductTypeICloud {
+			if item.ProductType != coredomain.ProductTypeGmail && item.ProductType != coredomain.ProductTypeGmailVariant && item.ProductType != coredomain.ProductTypeICloud && item.ProductType != coredomain.ProductTypeProto {
 				continue
 			}
 			if item.CodeAvailable == nil {

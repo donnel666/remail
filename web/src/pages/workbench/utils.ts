@@ -109,6 +109,7 @@ export function productTypeLabel(type: OrderProductType, t: (key: string) => str
   if (type === "gmail") return t("Gmail email");
   if (type === "gmail_variant") return t("Gmail variant");
   if (type === "icloud") return t("iCloud email");
+  if (type === "proto") return t("Proto email");
   return t("Random email");
 }
 

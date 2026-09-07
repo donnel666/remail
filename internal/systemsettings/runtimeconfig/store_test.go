@@ -25,12 +25,16 @@ func TestProductPriceMultiplier(t *testing.T) {
 	Replace([]domain.Setting{
 		{Key: MicrosoftPriceMultiplierKey, Value: " 0.8 "},
 		{Key: GmailPriceMultiplierKey, Value: "0.7"},
+		{Key: ProtoPriceMultiplierKey, Value: "0.6"},
 	})
 	t.Cleanup(func() { Replace(nil) })
 
 	require.Equal(t, "0.8", ProductPriceMultiplier("MICROSOFT"))
 	require.Equal(t, "0.7", ProductPriceMultiplier("gmail"))
 	require.Equal(t, "0.7", ProductPriceMultiplier("gmail_variant"))
+	require.Equal(t, "0.6", ProductPriceMultiplier("proto"))
+	require.NoError(t, Validate(ProtoPriceMultiplierKey, "0.6"))
+	require.ErrorIs(t, Validate(ProtoPriceMultiplierKey, "1.01"), domain.ErrInvalidValue)
 	require.Equal(t, "1", ProductPriceMultiplier("retired"))
 	require.Equal(t, "1", ProductPriceMultiplier("icloud"))
 }

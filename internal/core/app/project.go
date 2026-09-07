@@ -48,6 +48,10 @@ var projectPriceFallbacks = map[string]string{
 	"default_project_icloud_code_supplier_price":            "5",
 	"default_project_icloud_purchase_price":                 "10",
 	"default_project_icloud_purchase_supplier_price":        "7",
+	"default_project_proto_code_price":                      "8",
+	"default_project_proto_code_supplier_price":             "5",
+	"default_project_proto_purchase_price":                  "10",
+	"default_project_proto_purchase_supplier_price":         "7",
 }
 
 var projectServiceFallbacks = map[string]bool{
@@ -61,6 +65,8 @@ var projectServiceFallbacks = map[string]bool{
 	"default_project_gmail_variant_purchase_enabled": false,
 	"default_project_icloud_code_enabled":            true,
 	"default_project_icloud_purchase_enabled":        true,
+	"default_project_proto_code_enabled":             true,
+	"default_project_proto_purchase_enabled":         true,
 }
 
 func projectNameMaxValue() int {
@@ -161,6 +167,7 @@ type ProjectProductTypeFacets struct {
 	Gmail        int64
 	GmailVariant int64
 	ICloud       int64
+	Proto        int64
 }
 
 type ProjectListFacets struct {
@@ -259,6 +266,7 @@ type ProjectUseCase struct {
 	owners              OwnerQueryPort
 	historyScan         func(context.Context, uint, string) error
 	gmailHistoryScan    func(context.Context, uint, string) error
+	protoHistoryScan    func(context.Context, uint, string) error
 	applicationNotifier func(context.Context, domain.Project, string) error
 }
 
@@ -272,6 +280,10 @@ func (uc *ProjectUseCase) SetHistoryScan(scan func(context.Context, uint, string
 
 func (uc *ProjectUseCase) SetGmailHistoryScan(scan func(context.Context, uint, string) error) {
 	uc.gmailHistoryScan = scan
+}
+
+func (uc *ProjectUseCase) SetProtoHistoryScan(scan func(context.Context, uint, string) error) {
+	uc.protoHistoryScan = scan
 }
 
 func (uc *ProjectUseCase) SetOwnerQueryPort(owners OwnerQueryPort) {
@@ -501,6 +513,7 @@ func (uc *ProjectUseCase) AdminCreateListed(ctx context.Context, operatorUserID 
 	}
 	uc.scheduleHistoryScan(ctx, detail, requestID)
 	uc.scheduleGmailHistoryScan(ctx, detail, requestID)
+	uc.scheduleProtoHistoryScan(ctx, detail, requestID)
 	return detail, nil
 }
 
@@ -549,6 +562,7 @@ func (uc *ProjectUseCase) AdminUpdate(ctx context.Context, operatorUserID, proje
 	if err := uc.projects.UpdateWithLog(ctx, detail, log); err != nil {
 		return nil, err
 	}
+	uc.scheduleProtoHistoryScan(ctx, detail, requestID)
 	return detail, nil
 }
 
@@ -578,6 +592,7 @@ func (uc *ProjectUseCase) AdminApprove(ctx context.Context, operatorUserID, proj
 	}
 	uc.scheduleHistoryScan(ctx, detail, requestID)
 	uc.scheduleGmailHistoryScan(ctx, detail, requestID)
+	uc.scheduleProtoHistoryScan(ctx, detail, requestID)
 	return detail, nil
 }
 
@@ -619,6 +634,7 @@ func (uc *ProjectUseCase) AdminApproveWithConfig(ctx context.Context, operatorUs
 	}
 	uc.scheduleHistoryScan(ctx, detail, requestID)
 	uc.scheduleGmailHistoryScan(ctx, detail, requestID)
+	uc.scheduleProtoHistoryScan(ctx, detail, requestID)
 	return detail, nil
 }
 
@@ -637,6 +653,20 @@ func (uc *ProjectUseCase) scheduleGmailHistoryScan(ctx context.Context, detail *
 	}
 	if err := uc.gmailHistoryScan(context.WithoutCancel(ctx), detail.Project.ID, requestID); err != nil {
 		slog.Warn("Gmail project history scan enqueue failed", "project_id", detail.Project.ID, "request_id", requestID, "error", err)
+	}
+}
+
+func (uc *ProjectUseCase) scheduleProtoHistoryScan(ctx context.Context, detail *domain.ProjectDetail, requestID string) {
+	if uc.protoHistoryScan == nil || detail == nil || detail.Project.ID == 0 {
+		return
+	}
+	for _, product := range detail.Products {
+		if product.Type == domain.ProductTypeProto {
+			if err := uc.protoHistoryScan(context.WithoutCancel(ctx), detail.Project.ID, requestID); err != nil {
+				slog.Warn("Proto project history scan enqueue failed", "project_id", detail.Project.ID, "request_id", requestID, "error", err)
+			}
+			return
+		}
 	}
 }
 
@@ -997,6 +1027,10 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled, 
 			product.MainWeight = 0
 			product.DotWeight = 0
 			product.PlusWeight = 1
+		case domain.ProductTypeProto:
+			product.MainWeight = 1
+			product.DotWeight = 0
+			product.PlusWeight = 0
 		}
 		if product.CodeEnabled && product.CodeWindowMinutes <= 0 {
 			return nil, domain.ErrInvalidProduct
@@ -1004,7 +1038,7 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled, 
 		if product.PurchaseEnabled && (product.ActivationWindowMinutes <= 0 || product.WarrantyMinutes <= 0) {
 			return nil, domain.ErrInvalidProduct
 		}
-		if (product.Type == domain.ProductTypeMicrosoft || product.Type == domain.ProductTypeGmail || product.Type == domain.ProductTypeGmailVariant || product.Type == domain.ProductTypeICloud) && product.MainWeight+product.DotWeight+product.PlusWeight <= 0 {
+		if (product.Type == domain.ProductTypeMicrosoft || product.Type == domain.ProductTypeGmail || product.Type == domain.ProductTypeGmailVariant || product.Type == domain.ProductTypeICloud || product.Type == domain.ProductTypeProto) && product.MainWeight+product.DotWeight+product.PlusWeight <= 0 {
 			return nil, domain.ErrInvalidProduct
 		}
 		if product.Type == domain.ProductTypeDomain {

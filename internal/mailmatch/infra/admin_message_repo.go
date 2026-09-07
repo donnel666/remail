@@ -94,6 +94,8 @@ func (r *AdminMessageRepo) AdminMessageResourceExists(ctx context.Context, resou
 		query = query.Joins("JOIN gmail_resources gr ON gr.id = er.id")
 	case domain.ResourceTypeICloud:
 		query = query.Joins("JOIN icloud_resources ir ON ir.id = er.id")
+	case domain.ResourceTypeProto:
+		query = query.Joins("JOIN proto_resources pr ON pr.id = er.id AND pr.resource_type = 'proto'")
 	default:
 		query = query.Joins("JOIN microsoft_resources mr ON mr.id = er.id")
 	}
@@ -228,6 +230,8 @@ func adminMessageBaseQueryDB(db *gorm.DB, resourceID uint, resourceType domain.R
 		db = db.Joins("JOIN gmail_resources gr ON gr.id = m.email_resource_id")
 	case domain.ResourceTypeICloud:
 		db = db.Joins("JOIN icloud_resources ir ON ir.id = m.email_resource_id")
+	case domain.ResourceTypeProto:
+		db = db.Joins("JOIN proto_resources pr ON pr.id = m.email_resource_id AND pr.resource_type = 'proto'")
 	default:
 		db = db.Joins("JOIN microsoft_resources mr ON mr.id = m.email_resource_id")
 	}
@@ -252,7 +256,7 @@ func escapeAdminMessageLike(value string) string {
 
 func adminMessageMailboxSelect(resourceType domain.ResourceType) string {
 	switch resourceType {
-	case domain.ResourceTypeDomain:
+	case domain.ResourceTypeDomain, domain.ResourceTypeProto:
 		return "'main'"
 	case domain.ResourceTypeGmail:
 		return adminGmailMessageMailboxSQL

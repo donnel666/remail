@@ -162,6 +162,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
       const gmailLabel = t("Gmail code receipts");
       const gmailVariantLabel = t("Gmail variant code receipts");
       const iCloudLabel = t("iCloud code receipts");
+      const protoLabel = t("Proto code receipts");
       const values = (data?.trend ?? []).flatMap((point) => [
         { Count: point.microsoftReceivedCodes, Metric: microsoftLabel, Time: point.label },
         { Count: point.domainReceivedCodes, Metric: domainLabel, Time: point.label },
@@ -172,6 +173,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
           Time: point.label,
         },
         { Count: point.icloudReceivedCodes, Metric: iCloudLabel, Time: point.label },
+        { Count: point.protoReceivedCodes, Metric: protoLabel, Time: point.label },
       ]);
 
       return asChartSpec({
@@ -182,6 +184,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
             [gmailVariantLabel]: "#f59e0b",
             [iCloudLabel]: "#06b6d4",
             [microsoftLabel]: "#3b82f6",
+            [protoLabel]: "#14b8a6",
           },
         },
         data: [{ id: "adminCodeTrendData", values }],
@@ -203,6 +206,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
       const gmailLabel = t("Gmail code success rate");
       const gmailVariantLabel = t("Gmail variant code success rate");
       const iCloudLabel = t("iCloud code success rate");
+      const protoLabel = t("Proto code success rate");
       const values = (data?.trend ?? []).flatMap((point) => [
         { Metric: microsoftLabel, Rate: point.microsoftCodeSuccessRate, Time: point.label },
         { Metric: domainLabel, Rate: point.domainCodeSuccessRate, Time: point.label },
@@ -213,6 +217,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
           Time: point.label,
         },
         { Metric: iCloudLabel, Rate: point.icloudCodeSuccessRate, Time: point.label },
+        { Metric: protoLabel, Rate: point.protoCodeSuccessRate, Time: point.label },
       ]);
 
       return asChartSpec({
@@ -229,6 +234,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
             [gmailVariantLabel]: "#f59e0b",
             [iCloudLabel]: "#06b6d4",
             [microsoftLabel]: "#22a06b",
+            [protoLabel]: "#14b8a6",
           },
         },
         data: [{ id: "adminSuccessRateData", values }],
@@ -247,6 +253,8 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
     const labels = {
       domainAvailable: t("Available domain emails"),
       domainTotal: t("Total domain emails"),
+      protoAvailable: t("Available Proto emails"),
+      protoTotal: t("Total Proto emails"),
       microsoftAvailable: t("Available Microsoft emails"),
       microsoftTotal: t("Total Microsoft emails"),
     };
@@ -263,6 +271,8 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
         Metric: labels.domainAvailable,
         Time: point.label,
       },
+      { Count: point.protoTotalEmails, Metric: labels.protoTotal, Time: point.label },
+      { Count: point.protoAvailableEmails, Metric: labels.protoAvailable, Time: point.label },
     ]);
 
     return asChartSpec({
@@ -272,6 +282,8 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
           [labels.microsoftAvailable]: "#06b6d4",
           [labels.domainTotal]: "#8b5cf6",
           [labels.domainAvailable]: "#ec4899",
+          [labels.protoTotal]: "#14b8a6",
+          [labels.protoAvailable]: "#0f766e",
         },
       },
       data: [{ id: "adminInventoryTrendData", values }],
@@ -279,7 +291,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
       seriesField: "Metric",
       title: chartTitle(
         t("Inventory trend"),
-        `${labels.microsoftAvailable}：${(data?.stats.microsoftAvailableEmails ?? 0).toLocaleString("zh-CN")} / ${labels.domainAvailable}：${(data?.stats.domainAvailableMailboxes ?? 0).toLocaleString("zh-CN")}`,
+          `${labels.microsoftAvailable}：${(data?.stats.microsoftAvailableEmails ?? 0).toLocaleString("zh-CN")} / ${labels.domainAvailable}：${(data?.stats.domainAvailableMailboxes ?? 0).toLocaleString("zh-CN")} / ${labels.protoAvailable}：${(data?.stats.protoAvailableEmails ?? 0).toLocaleString("zh-CN")}`,
       ),
       type: "line",
       xField: "Time",

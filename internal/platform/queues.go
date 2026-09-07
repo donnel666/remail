@@ -82,6 +82,12 @@ const (
 	QueueBackgroundProjectHistory = "background_project_history"
 	// QueueBackgroundGmailIdentification carries Gmail validation-history and project-history identification.
 	QueueBackgroundGmailIdentification = "background_gmail_identification"
+	// QueueBackgroundProtoImport carries Proto import batches.
+	QueueBackgroundProtoImport = "background_proto_import"
+	// QueueBackgroundProtoValidation carries Proto validation tasks.
+	QueueBackgroundProtoValidation = "background_proto_validation"
+	// QueueBackgroundProtoHistory carries Proto project-history tasks.
+	QueueBackgroundProtoHistory = "background_proto_history"
 	// QueueBackgroundInventory refreshes Redis read models such as inventory and dashboard rankings.
 	QueueBackgroundInventory = "background_inventory"
 )
@@ -102,5 +108,8 @@ var AllQueueNames = []string{
 	QueueResource,
 	QueueBackgroundProjectHistory,
 	QueueBackgroundGmailIdentification,
+	QueueBackgroundProtoImport,
+	QueueBackgroundProtoValidation,
+	QueueBackgroundProtoHistory,
 	QueueBackgroundInventory,
 }

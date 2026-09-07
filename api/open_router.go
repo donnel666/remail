@@ -6,6 +6,7 @@ import (
 	coreapi "github.com/donnel666/remail/internal/core/api"
 	icloudapi "github.com/donnel666/remail/internal/icloud"
 	openapiapi "github.com/donnel666/remail/internal/openapi/api"
+	protoapi "github.com/donnel666/remail/internal/proto/api"
 	tradeapi "github.com/donnel666/remail/internal/trade/api"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -26,12 +27,18 @@ func registerOpenRoutes(
 	systemKeys middleware.SystemKeyAuthenticator,
 	checker middleware.PermissionChecker,
 	rdb redis.UniversalClient,
+	protoModules ...*protoapi.Module,
 ) {
 	icloudapi.RegisterSystemKeyRoutes(v1, icloudMod, systemKeys, rdb)
 
 	open := v1.Group("/open")
 	open.Use(openapiapi.LoadAPIKey(openapiMod.UseCase))
 	open.Use(openapiapi.KeyRequired())
+	var protoModule *protoapi.Module
+	if len(protoModules) > 0 {
+		protoModule = protoModules[0]
+	}
+	protoapi.RegisterOpenRoutes(open, protoModule, checker)
 
 	openHandler := openapiapi.NewHandler(openapiMod)
 	coreHandler := coreapi.NewOpenCoreHandler(coreMod, checker)

@@ -31,6 +31,7 @@ import (
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	openapiapi "github.com/donnel666/remail/internal/openapi/api"
 	"github.com/donnel666/remail/internal/platform"
+	protoapi "github.com/donnel666/remail/internal/proto/api"
 	proxyapi "github.com/donnel666/remail/internal/proxy/api"
 	systemsettingsapi "github.com/donnel666/remail/internal/systemsettings/api"
 	settingsdomain "github.com/donnel666/remail/internal/systemsettings/domain"
@@ -245,6 +246,45 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		coreapi.RegisterCoreRoutes(v1, coreMod, iamSessionFetcher, iamMod.PermissionChecker, turnstileGuard)
 		allocapi.RegisterRoutes(v1, allocMod, iamSessionFetcher, iamMod.PermissionChecker)
 
+		// Proto owns its resource workflows and joins the existing shared services.
+		protoMod := protoapi.NewModule(p.DB, p.Asynq, fileStore)
+		protoMod.SetAuditLogs(governanceinfra.NewOperationLogRepo(p.DB), governanceinfra.NewSystemLogRepo(p.DB))
+		protoMod.SetRedis(p.Redis)
+		protoMod.SetBackgroundExecutionGate(p.BackgroundLoad)
+		protoMod.ValidateOwner = func(ctx context.Context, ownerID uint) (bool, error) {
+			owner, err := iamMod.AdminResourceOwners.ValidateTargetOwner(ctx, ownerID)
+			return owner != nil && owner.ID != 0 && owner.Enabled, err
+		}
+		protoMod.ValidateSupplierOwner = func(ctx context.Context, ownerID uint) (bool, error) {
+			owner, err := iamMod.AdminResourceOwners.ValidateTargetOwner(ctx, ownerID)
+			return owner != nil && owner.Enabled && (owner.Role == "supplier" || owner.Role == "admin" || owner.Role == "super_admin"), err
+		}
+		protoMod.OwnerSummaries = func(ctx context.Context, ids []uint) (map[uint]protoapi.OwnerSummary, error) {
+			owners, err := iamMod.AdminResourceOwners.GetByIDs(ctx, ids)
+			if err != nil {
+				return nil, err
+			}
+			result := make(map[uint]protoapi.OwnerSummary, len(owners))
+			for id, owner := range owners {
+				result[id] = protoapi.OwnerSummary{ID: owner.ID, Email: owner.Email, Nickname: owner.Nickname, GroupName: owner.GroupName, Role: owner.Role, Enabled: owner.Enabled}
+			}
+			return result, nil
+		}
+		protoMod.SearchOwners = func(ctx context.Context, search string, limit int) ([]uint, error) {
+			owners, err := iamMod.AdminResourceOwners.SearchAdminOwners(ctx, search, limit)
+			if err != nil {
+				return nil, err
+			}
+			ids := make([]uint, 0, len(owners))
+			for _, owner := range owners {
+				ids = append(ids, owner.ID)
+			}
+			return ids, nil
+		}
+		coreMod.ProjectUseCase.SetProtoHistoryScan(protoMod.Service.ScheduleProjectHistory)
+		protoapi.RegisterRoutes(v1, protoMod, iamSessionFetcher, iamMod.PermissionChecker, turnstileGuard)
+		cleanupFuncs = append(cleanupFuncs, protoapi.RegisterTaskHandlers(taskMux, protoMod))
+
 		// Billing module (wallet, recharge ledger and card-key redemption)
 		billingMod := billingapi.NewBillingModule(p.DB, p.Asynq)
 		billingMod.SetUserSelectionResolver(iamMod.AdminUserSelectionResolver)
@@ -326,6 +366,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		mailmatchMod.SetGmailMailFetchPort(gmailMod.Service)
 		mailmatchMod.SetGmailResourceFetchPort(gmailResourceFetchAdapter{service: gmailMod.Service})
 		mailmatchMod.SetICloudMailFetchPort(iCloudMailFetchAdapter{service: icloudMod.Service})
+		mailmatchMod.SetPermanentProtoFetchFailurePort(protoFetchFailureAdapter{resources: protoMod.Service, orders: tradeMod.UseCase})
 		mailmatchMod.SetBotDiagnosisRefresh(mailmatchMod.UseCase)
 		gmailMod.Service.SetMailIngest(gmailMailIngestAdapter{mailmatch: mailmatchMod.UseCase})
 		mailmatchMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
@@ -342,7 +383,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		mailmatchapi.RegisterRoutes(v1, mailmatchMod)
 		mailmatchapi.RegisterAdminRoutes(v1, mailmatchMod, iamSessionFetcher, iamMod.PermissionChecker)
 
-		registerOpenRoutes(v1, openapiMod, coreMod, billingMod, tradeMod, icloudMod, systemSettingsMod.SystemKeys, iamMod.PermissionChecker, p.Redis)
+		registerOpenRoutes(v1, openapiMod, coreMod, billingMod, tradeMod, icloudMod, systemSettingsMod.SystemKeys, iamMod.PermissionChecker, p.Redis, protoMod)
 
 		// Dashboard module (read-only console analytics; self-contained raw-SQL
 		// aggregates over orders, code receipts, wallets, projects and users).

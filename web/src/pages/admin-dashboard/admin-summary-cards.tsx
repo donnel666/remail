@@ -196,9 +196,9 @@ export function AdminDashboardSummaryCards({
         },
       ],
     },
-    {
-      color: "bg-[color-mix(in_oklch,#06b6d4_12%,var(--semi-color-bg-0))]",
-      title: groupTitle(<Database size={16} />, t("Microsoft Emails")),
+	    {
+	      color: "bg-[color-mix(in_oklch,#06b6d4_12%,var(--semi-color-bg-0))]",
+	      title: groupTitle(<Database size={16} />, t("Microsoft Emails")),
       items: [
         {
           avatarColor: "blue",
@@ -237,6 +237,52 @@ export function AdminDashboardSummaryCards({
           trendColor: "#8b5cf6",
           value: `${stats?.microsoftAverageCodeReceiptSeconds ?? 0}s - ${stats?.microsoftAveragePurchaseActivationSeconds ?? 0}s`,
         },
+	      ],
+	    },
+	    {
+	      color: "bg-[color-mix(in_oklch,#14b8a6_12%,var(--semi-color-bg-0))]",
+	      title: groupTitle(<Mail size={16} />, t("Proto Emails")),
+	      items: [
+	        {
+	          avatarColor: "cyan",
+	          icon: <Mail size={16} />,
+	          title: t("Total Proto emails"),
+	          trendColor: "#14b8a6",
+	          trendData: trend.map((point) => point.protoTotalEmails),
+	          value: formatCount(stats?.protoTotalEmails),
+	        },
+	        {
+	          avatarColor: "green",
+	          icon: <MailCheck size={16} />,
+	          title: t("Available Proto emails"),
+	          trendColor: "#22a06b",
+	          trendData: trend.map((point) => point.protoAvailableEmails),
+	          value: formatCount(stats?.protoAvailableEmails),
+	        },
+	        {
+	          avatarColor: "orange",
+	          icon: <IconTextStroked />,
+	          title: t("Code-purchase count"),
+	          trendColor: "#f59e0b",
+	          value: `${formatCount(stats?.protoCodeReceipts)} - ${formatCount(stats?.protoPurchaseActivations)}`,
+	        },
+
+        {
+	          avatarColor: "green",
+	          icon: <IconPulse />,
+	          title: t("Code-purchase success rate"),
+	          trendColor: "#22a06b",
+	          value: `${formatRate(stats?.protoCodeSuccessRate)} - ${formatRate(stats?.protoPurchaseActivationSuccessRate)}`,
+	        },
+
+        {
+	          avatarColor: "purple",
+	          icon: <IconStopwatchStroked />,
+	          title: t("Code-purchase average time"),
+	          trendColor: "#8b5cf6",
+	          value: `${stats?.protoAverageCodeReceiptSeconds ?? 0}s - ${stats?.protoAveragePurchaseActivationSeconds ?? 0}s`,
+	        },
+
       ],
     },
     {

@@ -57,11 +57,13 @@ type ProjectInventoryResponse struct {
 	Domain                     DomainInventoryResponse    `json:"domain"`
 	Gmail                      GmailInventoryResponse     `json:"gmail"`
 	ICloud                     ICloudInventoryResponse    `json:"icloud"`
+	Proto                      ProtoInventoryResponse     `json:"proto"`
 	TotalAvailable             int64                      `json:"totalAvailable"`
 	ActiveMicrosoftAllocations int64                      `json:"activeMicrosoftAllocations"`
 	ActiveDomainAllocations    int64                      `json:"activeDomainAllocations"`
 	ActiveGmailAllocations     int64                      `json:"activeGmailAllocations"`
 	ActiveICloudAllocations    int64                      `json:"activeICloudAllocations"`
+	ActiveProtoAllocations     int64                      `json:"activeProtoAllocations"`
 }
 
 type ProjectInventoryTotalResponse struct {
@@ -167,5 +169,13 @@ type ICloudInventoryResponse struct {
 	Enabled           bool  `json:"enabled"`
 	EligibleResources int64 `json:"eligibleResources"`
 	AliasAvailable    int64 `json:"aliasAvailable"`
+	TotalAvailable    int64 `json:"totalAvailable"`
+}
+
+type ProtoInventoryResponse struct {
+	Enabled           bool  `json:"enabled"`
+	EligibleResources int64 `json:"eligibleResources"`
+	MainAvailable     int64 `json:"mainAvailable"`
+	PublicAvailable   int64 `json:"publicAvailable"`
 	TotalAvailable    int64 `json:"totalAvailable"`
 }

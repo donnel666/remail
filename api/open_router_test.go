@@ -13,6 +13,7 @@ import (
 
 	mailmatchapi "github.com/donnel666/remail/internal/mailmatch/api"
 	openapiapi "github.com/donnel666/remail/internal/openapi/api"
+	protoapi "github.com/donnel666/remail/internal/proto/api"
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,7 +21,7 @@ func TestOpenRoutesRequireAPIKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	r := gin.New()
-	registerOpenRoutes(r.Group("/v1"), &openapiapi.Module{}, nil, nil, nil, nil, nil, nil, nil)
+	registerOpenRoutes(r.Group("/v1"), &openapiapi.Module{}, nil, nil, nil, nil, nil, nil, nil, protoapi.NewModule(nil, nil))
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/open/projects", nil)
@@ -35,7 +36,7 @@ func TestOpenRoutesMatchPublicOpenAPISpec(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	r := gin.New()
-	registerOpenRoutes(r.Group("/v1"), &openapiapi.Module{}, nil, nil, nil, nil, nil, nil, nil)
+	registerOpenRoutes(r.Group("/v1"), &openapiapi.Module{}, nil, nil, nil, nil, nil, nil, nil, protoapi.NewModule(nil, nil))
 	mailmatchapi.RegisterRoutes(r.Group("/v1"), nil)
 
 	got := make([]string, 0)
@@ -87,7 +88,7 @@ func TestPublicOpenAPISchemaUsesBackendEnums(t *testing.T) {
 	assertSchemaEnum(t, spec, "Project", "status", []string{"reviewing", "listed", "delisted"})
 	assertSchemaEnum(t, spec, "ProjectOwner", "role", []string{"user", "supplier", "admin", "super_admin"})
 	assertSchemaEnum(t, spec, "ProjectMailRule", "ruleType", []string{"sender", "recipient", "subject", "body"})
-	assertSchemaEnum(t, spec, "Order", "allocationType", []string{"microsoft", "domain", "gmail", "icloud"})
+	assertSchemaEnum(t, spec, "Order", "allocationType", []string{"microsoft", "domain", "gmail", "icloud", "proto"})
 	assertSchemaEnum(t, spec, "Order", "clientChannel", []string{"console", "api_key"})
 	assertSchemaEnum(t, spec, "Order", "serviceCleanupStatus", []string{"none", "succeeded", "partial_failure"})
 	assertSchemaEnum(t, spec, "Order", "failureCode", []string{

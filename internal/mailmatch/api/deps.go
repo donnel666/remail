@@ -56,6 +56,18 @@ func (m *Module) SetICloudMailFetchPort(port mailmatchapp.ICloudMailFetchPort) {
 	}
 }
 
+func (m *Module) SetProtoMailFetchPort(port mailmatchapp.ProtoMailFetchPort) {
+	if m != nil && m.UseCase != nil {
+		m.UseCase.SetProtoMailFetchPort(port)
+	}
+}
+
+func (m *Module) SetPermanentProtoFetchFailurePort(port mailmatchapp.PermanentProtoFetchFailurePort) {
+	if m != nil && m.UseCase != nil {
+		m.UseCase.SetPermanentProtoFetchFailurePort(port)
+	}
+}
+
 func (m *Module) SetBackgroundExecutionGate(gate BackgroundExecutionGate) {
 	if m != nil {
 		m.BackgroundExecution = gate

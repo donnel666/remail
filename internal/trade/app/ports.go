@@ -439,6 +439,7 @@ type OrderProductTypeFacets struct {
 	Gmail        int64
 	GmailVariant int64
 	ICloud       int64
+	Proto        int64
 }
 
 type OrderProjectFacet struct {
@@ -980,6 +981,11 @@ func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.P
 				return domain.ErrInvalidOrderRequest
 			}
 			prepared.emailSuffix = ""
+		case domain.ProductTypeProto:
+			if prepared.selectorSuffix != "proto" {
+				return domain.ErrInvalidOrderRequest
+			}
+			prepared.emailSuffix = ""
 		default:
 			return domain.ErrInvalidOrderRequest
 		}
@@ -1014,7 +1020,7 @@ func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.P
 				prepared.emailSuffix = normalized
 			}
 		}
-	case domain.ProductTypeLegacyRandom, domain.ProductTypeGmail, domain.ProductTypeGmailVariant, domain.ProductTypeICloud:
+	case domain.ProductTypeLegacyRandom, domain.ProductTypeGmail, domain.ProductTypeGmailVariant, domain.ProductTypeICloud, domain.ProductTypeProto:
 		prepared.emailSuffix = ""
 	default:
 		return domain.ErrInvalidOrderRequest
@@ -2177,7 +2183,7 @@ func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrder
 	now := uc.now()
 	result := &ExpireOrdersResult{}
 	if uc.allocation != nil {
-		recoveries, err := uc.repo.ListCheckoutAllocationRecoveries(ctx, now.Add(-staleCheckoutRecoveryAfter), limit)
+		recoveries, err := uc.listCheckoutAllocationRecoveries(ctx, now.Add(-staleCheckoutRecoveryAfter), limit)
 		if err != nil {
 			return nil, err
 		}
@@ -2248,6 +2254,9 @@ func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrder
 		if refunded {
 			result.ResourceUnavailableRefunded++
 		}
+	}
+	if err := uc.expireUnavailableProtoOrders(ctx, limit, result); err != nil {
+		return nil, err
 	}
 	codeExpired, err := uc.repo.ListExpiredCodeOrderNos(ctx, now, limit)
 	if err != nil {
@@ -2686,6 +2695,9 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 
 		case domain.OrderStatusPaid:
 			allocation := currentAllocation
+			if !uc.protoFulfillmentReady(order, allocation) {
+				return &CheckoutResult{Order: order}, domain.ErrProjectUnavailable
+			}
 			if allocation == nil {
 				var err error
 				allocation, err = uc.allocate(ctx, order, emailSuffix)
@@ -2706,6 +2718,9 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 					}
 					return &CheckoutResult{Order: *failed}, checkoutInventoryError(*failed, err)
 				}
+			}
+			if !uc.protoFulfillmentReady(order, allocation) {
+				return &CheckoutResult{Order: order}, domain.ErrProjectUnavailable
 			}
 			receiveStartedAt := uc.now()
 			receiveUntil := serviceReceiveUntil(receiveStartedAt, quote, order.ServiceMode)
@@ -3186,6 +3201,8 @@ func checkoutProductTypeForSuffix(suffix string) (domain.ProductType, error) {
 		return domain.ProductTypeGmailVariant, nil
 	case "icloud.com":
 		return domain.ProductTypeICloud, nil
+	case "proto":
+		return domain.ProductTypeProto, nil
 	case coredomain.RandomMicrosoftSuffixSelector:
 		return domain.ProductTypeMicrosoft, nil
 	case coredomain.RandomDomainSuffixSelector:

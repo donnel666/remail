@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"embed"
+	"flag"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -20,6 +21,9 @@ import (
 var frontendFS embed.FS
 
 func main() {
+	migrateOnly := flag.Bool("migrate-only", false, "apply database migrations and exit without starting HTTP or workers")
+	flag.Parse()
+
 	// Load configuration
 	cfg, err := platform.Load()
 	if err != nil {
@@ -40,11 +44,6 @@ func main() {
 	}
 	defer cleanup()
 
-	runtimeDiagnosticsCtx, stopRuntimeDiagnostics := context.WithCancel(context.Background())
-	defer stopRuntimeDiagnostics()
-	pprofSrv := startPprofServer(p.Diagnostics)
-	startPprofCPUMonitor(runtimeDiagnosticsCtx, p.Diagnostics)
-
 	// Resolve migrations directory:
 	//   1. cfg.Migrations.Dir (MIGRATIONS_DIR, Docker sets this)
 	//   2. <exe-dir>/migrations (flat deploy layout)
@@ -64,6 +63,16 @@ func main() {
 		slog.Error("points unit migration verification failed", "error", err)
 		os.Exit(1)
 	}
+	if *migrateOnly {
+		slog.Info("database migration command completed")
+		return
+	}
+
+	runtimeDiagnosticsCtx, stopRuntimeDiagnostics := context.WithCancel(context.Background())
+	defer stopRuntimeDiagnostics()
+	pprofSrv := startPprofServer(p.Diagnostics)
+	startPprofCPUMonitor(runtimeDiagnosticsCtx, p.Diagnostics)
+
 	// Get embedded frontend filesystem (subdirectory)
 	var feFS fs.FS
 	if sub, err := fs.Sub(frontendFS, "webdist"); err == nil {

@@ -46,8 +46,9 @@ var turnstileActions = map[string]string{
 	// allowance would spare routine bulk work, but the token has to exist
 	// before a multipart upload starts, so a "challenge now required" retry
 	// would mean re-uploading the file. Revisit if suppliers complain.
-	"/v1/resources/imports": "resource_import",
-	"/v1/domains":           "domain_import",
+	"/v1/resources/imports":       "resource_import",
+	"/v1/proto/resources/imports": "resource_import",
+	"/v1/domains":                 "domain_import",
 }
 
 // TurnstileVerifier validates a single-use Cloudflare Turnstile token.

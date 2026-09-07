@@ -41,6 +41,7 @@ const (
 	ProductTypeGmail        ProductType = "gmail"
 	ProductTypeGmailVariant ProductType = "gmail_variant"
 	ProductTypeICloud       ProductType = "icloud"
+	ProductTypeProto        ProductType = "proto"
 )
 
 const (
@@ -154,7 +155,7 @@ func IsValidProductStatus(status ProductStatus) bool {
 
 func IsValidProductType(productType ProductType) bool {
 	switch productType {
-	case ProductTypeMicrosoft, ProductTypeDomain, ProductTypeGmail, ProductTypeGmailVariant, ProductTypeICloud:
+	case ProductTypeMicrosoft, ProductTypeDomain, ProductTypeGmail, ProductTypeGmailVariant, ProductTypeICloud, ProductTypeProto:
 		return true
 	default:
 		return false
@@ -217,6 +218,8 @@ func NormalizeProductType(productType string) (ProductType, bool) {
 		return ProductTypeGmailVariant, true
 	case ProductTypeICloud:
 		return ProductTypeICloud, true
+	case ProductTypeProto:
+		return ProductTypeProto, true
 	default:
 		return "", false
 	}

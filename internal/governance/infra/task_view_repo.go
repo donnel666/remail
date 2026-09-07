@@ -247,6 +247,7 @@ SELECT
     CASE state.operation_kind
         WHEN 'gmail_resource_fetch' THEN 'gmail_resource'
         WHEN 'icloud_resource_fetch' THEN 'icloud_resource'
+        WHEN 'proto_resource_fetch' THEN 'proto_resource'
         ELSE 'microsoft_resource'
     END AS biz_type,
     state.email_resource_id AS biz_id,
@@ -272,7 +273,7 @@ SELECT
     0 AS progress_failed,
     NULL AS reason_buckets
 FROM mailmatch_admin_resource_fetch_states AS state
-WHERE state.operation_kind IN ('resource_fetch', 'gmail_resource_fetch', 'icloud_resource_fetch')`
+WHERE state.operation_kind IN ('resource_fetch', 'gmail_resource_fetch', 'icloud_resource_fetch', 'proto_resource_fetch')`
 
 const resourceHistoryTaskSelect = `
 SELECT
@@ -445,6 +446,99 @@ SELECT
 FROM icloud_resources AS resource
 WHERE resource.task_kind IN ('refresh', 'cookie_recovery')`
 
+// Proto tasks deliberately read only Proto-owned tables.  The validation and
+// history rows are present even while their provider adapters are TODO, so the
+// administrator task view never has to infer a successful validation from a
+// resource status.
+const protoResourceImportTaskSelect = `
+SELECT
+    'proto_import' AS source,
+    imp.id AS source_id,
+    item.resource_id AS resource_scope_id,
+    'proto_resource_import' AS biz_type,
+    imp.id AS biz_id,
+    'import' AS kind,
+    CASE
+        WHEN imp.status = 'failed' THEN 'failed'
+        WHEN imp.status = 'imported' THEN 'succeeded'
+        WHEN imp.dispatch_status IN ('pending', 'queued') THEN 'queued'
+        WHEN imp.dispatch_status = 'running' OR imp.status = 'processing' THEN 'running'
+        ELSE 'failed'
+    END AS status,
+    imp.attempts AS attempts,
+    imp.max_attempts AS max_attempts,
+    NULL AS credential_revision,
+    imp.created_at AS queued_at,
+    imp.started_at AS started_at,
+    imp.finished_at AS finished_at,
+    imp.updated_at AS updated_at,
+    CASE
+        WHEN imp.accepted_count > imp.imported_count + imp.skipped_count + imp.failed_count
+            THEN imp.accepted_count
+        ELSE imp.imported_count + imp.skipped_count + imp.failed_count
+    END AS progress_total,
+    imp.imported_count + imp.skipped_count + imp.failed_count AS progress_processed,
+    imp.imported_count AS progress_succeeded,
+    imp.skipped_count AS progress_skipped,
+    imp.failed_count AS progress_failed,
+    NULL AS reason_buckets
+FROM proto_resource_imports AS imp
+JOIN (
+    SELECT DISTINCT import_id, resource_id
+    FROM proto_resource_import_items
+    WHERE resource_id IS NOT NULL
+) AS item ON item.import_id = imp.id`
+
+const protoValidationTaskSelect = `
+SELECT
+    'proto_validation' AS source,
+    run.id AS source_id,
+    run.resource_id AS resource_scope_id,
+    'proto_resource' AS biz_type,
+    run.resource_id AS biz_id,
+    'validation' AS kind,
+    run.status AS status,
+    run.attempts AS attempts,
+    run.max_attempts AS max_attempts,
+    run.credential_revision AS credential_revision,
+    run.queued_at AS queued_at,
+    run.started_at AS started_at,
+    run.finished_at AS finished_at,
+    run.updated_at AS updated_at,
+    NULL AS progress_total,
+    NULL AS progress_processed,
+    NULL AS progress_succeeded,
+    NULL AS progress_skipped,
+    NULL AS progress_failed,
+    NULL AS reason_buckets
+FROM proto_maintenance_runs AS run
+WHERE run.kind = 'validation'`
+
+const protoHistoryTaskSelect = `
+SELECT
+    'proto_history' AS source,
+    run.id AS source_id,
+    run.resource_id AS resource_scope_id,
+    'proto_resource' AS biz_type,
+    run.resource_id AS biz_id,
+    'history' AS kind,
+    run.status AS status,
+    run.attempts AS attempts,
+    run.max_attempts AS max_attempts,
+    run.credential_revision AS credential_revision,
+    run.queued_at AS queued_at,
+    run.started_at AS started_at,
+    run.finished_at AS finished_at,
+    run.updated_at AS updated_at,
+    NULL AS progress_total,
+    NULL AS progress_processed,
+    NULL AS progress_succeeded,
+    NULL AS progress_skipped,
+    NULL AS progress_failed,
+    NULL AS reason_buckets
+FROM proto_maintenance_runs AS run
+WHERE run.kind = 'history'`
+
 // Redis-only bulk cursors are absent from per-resource lists. Their bounded
 // live status remains available through the source-qualified lookup below.
 const microsoftResourceTaskUnion = importResourceTaskSelect + `
@@ -475,6 +569,14 @@ UNION ALL
 ` + iCloudValidationTaskSelect + `
 UNION ALL
 ` + iCloudRefreshTaskSelect + `
+UNION ALL
+` + fetchTaskSelect
+
+const protoResourceTaskUnion = protoResourceImportTaskSelect + `
+UNION ALL
+` + protoValidationTaskSelect + `
+UNION ALL
+` + protoHistoryTaskSelect + `
 UNION ALL
 ` + fetchTaskSelect
 
@@ -539,6 +641,40 @@ SELECT
     CASE WHEN imp.accepted_count > imp.imported_count THEN imp.accepted_count - imp.imported_count ELSE 0 END AS progress_failed,
     NULL AS reason_buckets
 FROM icloud_resource_imports AS imp`
+
+const protoImportSingleTaskSelect = `
+SELECT
+    'proto_import' AS source,
+    imp.id AS source_id,
+    imp.id AS resource_scope_id,
+    'proto_resource_import' AS biz_type,
+    imp.id AS biz_id,
+    'import' AS kind,
+    CASE
+        WHEN imp.status = 'failed' THEN 'failed'
+        WHEN imp.status = 'imported' THEN 'succeeded'
+        WHEN imp.dispatch_status IN ('pending', 'queued') THEN 'queued'
+        WHEN imp.dispatch_status = 'running' OR imp.status = 'processing' THEN 'running'
+        ELSE 'failed'
+    END AS status,
+    imp.attempts AS attempts,
+    imp.max_attempts AS max_attempts,
+    NULL AS credential_revision,
+    imp.created_at AS queued_at,
+    imp.started_at AS started_at,
+    imp.finished_at AS finished_at,
+    imp.updated_at AS updated_at,
+    CASE
+        WHEN imp.accepted_count > imp.imported_count + imp.skipped_count + imp.failed_count
+            THEN imp.accepted_count
+        ELSE imp.imported_count + imp.skipped_count + imp.failed_count
+    END AS progress_total,
+    imp.imported_count + imp.skipped_count + imp.failed_count AS progress_processed,
+    imp.imported_count AS progress_succeeded,
+    imp.skipped_count AS progress_skipped,
+    imp.failed_count AS progress_failed,
+    NULL AS reason_buckets
+FROM proto_resource_imports AS imp`
 
 const iCloudOnboardingSingleTaskSelect = `
 SELECT
@@ -642,6 +778,21 @@ func (r *AdminTaskViewRepo) ICloudResourceExists(ctx context.Context, resourceID
 	return count > 0, nil
 }
 
+func (r *AdminTaskViewRepo) ProtoResourceExists(ctx context.Context, resourceID uint) (bool, error) {
+	if r == nil || r.db == nil || resourceID == 0 {
+		return false, nil
+	}
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Table("email_resources AS root").
+		Joins("JOIN proto_resources AS proto ON proto.id = root.id").
+		Where("root.id = ? AND root.type = ?", resourceID, "proto").
+		Count(&count).Error; err != nil {
+		return false, fmt.Errorf("check proto task resource: %w", err)
+	}
+	return count > 0, nil
+}
+
 func (r *AdminTaskViewRepo) ListForMicrosoftResource(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
 	return r.listForResource(ctx, filter, microsoftResourceTaskUnion)
 }
@@ -660,6 +811,14 @@ func (r *AdminTaskViewRepo) ListForICloudResource(ctx context.Context, filter go
 
 func (r *AdminTaskViewRepo) ListForICloudImports(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
 	return r.listForResource(ctx, filter, iCloudImportTaskUnion)
+}
+
+func (r *AdminTaskViewRepo) ListForProtoResource(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
+	return r.listForResource(ctx, filter, protoResourceTaskUnion)
+}
+
+func (r *AdminTaskViewRepo) ListForProtoImports(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
+	return r.listForResource(ctx, filter, protoImportSingleTaskSelect)
 }
 
 func (r *AdminTaskViewRepo) listForResource(ctx context.Context, filter governanceapp.AdminTaskListFilter, taskUnion string) ([]governanceapp.AdminTaskView, int64, int64, error) {
@@ -701,6 +860,9 @@ LIMIT ? OFFSET ?`, pageArgs...).Scan(&rows).Error; err != nil {
 	if err := r.attachImportReasonCounts(ctx, items, governanceapp.AdminTaskSourceICloudImport, "icloud_resource_import_items"); err != nil {
 		return nil, 0, 0, err
 	}
+	if err := r.attachImportReasonCounts(ctx, items, governanceapp.AdminTaskSourceProtoImport, "proto_resource_import_items"); err != nil {
+		return nil, 0, 0, err
+	}
 	return items, aggregate.Total, aggregate.Succeeded, nil
 }
 
@@ -710,6 +872,9 @@ func (r *AdminTaskViewRepo) FindByRef(ctx context.Context, ref governanceapp.Adm
 	}
 	if ref.Source == governanceapp.AdminTaskSourceBulk {
 		return r.findBulkTask(ctx, ref.ID)
+	}
+	if ref.Source == governanceapp.AdminTaskSourceProtoBulk {
+		return r.findProtoBulkTask(ctx, ref.ID)
 	}
 	if r.db == nil {
 		return nil, errors.New("administrator task database is unavailable")
@@ -741,6 +906,11 @@ LIMIT 1`, ref.ID).Scan(&row)
 	}
 	if ref.Source == governanceapp.AdminTaskSourceICloudImport {
 		if err := r.attachImportReasonCounts(ctx, items, governanceapp.AdminTaskSourceICloudImport, "icloud_resource_import_items"); err != nil {
+			return nil, err
+		}
+	}
+	if ref.Source == governanceapp.AdminTaskSourceProtoImport {
+		if err := r.attachImportReasonCounts(ctx, items, governanceapp.AdminTaskSourceProtoImport, "proto_resource_import_items"); err != nil {
 			return nil, err
 		}
 	}
@@ -932,6 +1102,12 @@ func singleTaskSelect(source string) (string, error) {
 		return iCloudRefreshTaskSelect, nil
 	case governanceapp.AdminTaskSourceICloudValidate:
 		return iCloudValidationTaskSelect, nil
+	case governanceapp.AdminTaskSourceProtoImport:
+		return protoImportSingleTaskSelect, nil
+	case governanceapp.AdminTaskSourceProtoValidate:
+		return protoValidationTaskSelect, nil
+	case governanceapp.AdminTaskSourceProtoHistory:
+		return protoHistoryTaskSelect, nil
 	default:
 		return "", governanceapp.ErrInvalidAdminTaskQuery
 	}
@@ -1165,3 +1341,4 @@ func nonNegativeInt64(value int64) int64 {
 }
 
 var _ governanceapp.AdminTaskViewRepository = (*AdminTaskViewRepo)(nil)
+var _ governanceapp.ProtoAdminTaskViewRepository = (*AdminTaskViewRepo)(nil)

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/donnel666/remail/internal/alloc/domain"
@@ -82,6 +83,7 @@ type UseCase struct {
 	historicalMicrosoftAliases HistoricalMicrosoftAliasPort
 	gmailVariantCooldown       GmailVariantCooldownPort
 	inventoryCache             InventoryCache
+	protoProtocolReady         atomic.Bool
 }
 
 func (uc *UseCase) SetInventoryCache(cache InventoryCache) {
@@ -150,7 +152,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 
 	var err error
 	if isRandomSuffixSelector(requestedSuffix) {
-		existing, findErr := uc.repo.FindExistingAllocation(ctx, cmd.OrderNo)
+		existing, findErr := uc.findAllocationForFulfillment(ctx, cmd.OrderNo)
 		if findErr != nil {
 			return nil, findErr
 		}
@@ -167,7 +169,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 			FulfillExistingOrder: cmd.FulfillExistingOrder,
 		})
 		if err != nil {
-			existing, findErr = uc.repo.FindExistingAllocation(ctx, cmd.OrderNo)
+			existing, findErr = uc.findAllocationForFulfillment(ctx, cmd.OrderNo)
 			if findErr != nil {
 				return nil, findErr
 			}
@@ -192,7 +194,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 		existingHit = false
 		err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
 			cmd.EmailSuffix = requestedSuffix
-			existing, err := uc.repo.FindExistingAllocation(txCtx, cmd.OrderNo)
+			existing, err := uc.findAllocationForFulfillment(txCtx, cmd.OrderNo)
 			if err != nil {
 				return err
 			}
@@ -279,6 +281,8 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 						result, err = uc.allocateGmail(txCtx, attemptCmd, *config)
 					case coredomain.ProductTypeICloud:
 						result, err = uc.allocateICloud(txCtx, attemptCmd, *config)
+					case coredomain.ProductTypeProto:
+						result, err = uc.allocateProto(txCtx, attemptCmd, *config)
 					default:
 						return domain.ErrProjectNotAllocatable
 					}
@@ -894,7 +898,8 @@ func (uc *UseCase) AssertNoActiveAllocations(ctx context.Context, resourceIDs []
 	return uc.repo.AssertNoActiveAllocations(ctx, resourceIDs)
 }
 
-func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint) (*InventoryStats, error) {
+func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint) (result *InventoryStats, runErr error) {
+	defer func() { result = uc.protoInventoryStats(result) }()
 	if projectID == 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
@@ -921,7 +926,7 @@ func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint) (*Inve
 		}
 		// Legacy placeholders predate Cold and have neither source enabled;
 		// authoritative stats always enable at least one configured product type.
-		if !stats.Microsoft.Enabled && !stats.Domain.Enabled && !stats.Gmail.Enabled && !stats.ICloud.Enabled {
+		if !stats.Microsoft.Enabled && !stats.Domain.Enabled && !stats.Gmail.Enabled && !stats.ICloud.Enabled && !stats.Proto.Enabled {
 			_ = uc.ScheduleInventoryRefresh(ctx)
 			return nil, domain.ErrInventoryRefreshInProgress
 		}
@@ -929,7 +934,8 @@ func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint) (*Inve
 	return stats, nil
 }
 
-func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint, viewerUserID uint) (*ProjectProductInventoryTotals, error) {
+func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint, viewerUserID uint) (totals *ProjectProductInventoryTotals, runErr error) {
+	defer func() { totals = uc.protoInventoryTotals(totals) }()
 	if projectID == 0 || viewerUserID == 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
@@ -956,7 +962,14 @@ func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint
 	if err != nil {
 		return nil, err
 	}
-	if len(privateMicrosoft) == 0 && len(privateDomains) == 0 && len(privateGmail) == 0 && len(privateICloud) == 0 {
+	var privateProto []PrivateSingletonInventoryTotal
+	if protoRepo, ok := uc.repo.(ProtoInventoryRepository); ok {
+		privateProto, err = protoRepo.ListPrivateProtoInventoryTotals(ctx, projectID, viewerUserID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(privateMicrosoft) == 0 && len(privateDomains) == 0 && len(privateGmail) == 0 && len(privateICloud) == 0 && len(privateProto) == 0 {
 		return snapshot, nil
 	}
 	result := cloneProductInventoryTotals(snapshot)
@@ -964,6 +977,7 @@ func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint
 	mergePrivateProductInventory(result, privateDomains, coredomain.ProductTypeDomain)
 	mergePrivateSingletonInventory(result, privateGmail, coredomain.ProductTypeGmail)
 	mergePrivateSingletonInventory(result, privateICloud, coredomain.ProductTypeICloud)
+	mergePrivateSingletonInventory(result, privateProto, coredomain.ProductTypeProto)
 	for i := range result.Items {
 		sort.Slice(result.Items[i].Suffixes, func(left, right int) bool {
 			return result.Items[i].Suffixes[left].Suffix < result.Items[i].Suffixes[right].Suffix
@@ -1112,7 +1126,12 @@ func (uc *UseCase) GetProductInventorySnapshot(ctx context.Context, projectID ui
 // GetProductInventorySnapshots reads shared snapshots for project IDs that the
 // caller has already authorized. Cold keys are seeded as known-zero snapshots
 // and queued for asynchronous refresh.
-func (uc *UseCase) GetProductInventorySnapshots(ctx context.Context, projectIDs []uint) (map[uint]*ProjectProductInventoryTotals, error) {
+func (uc *UseCase) GetProductInventorySnapshots(ctx context.Context, projectIDs []uint) (result map[uint]*ProjectProductInventoryTotals, runErr error) {
+	defer func() {
+		for projectID, totals := range result {
+			result[projectID] = uc.protoInventoryTotals(totals)
+		}
+	}()
 	projectIDs = uniqueInventoryProjectIDs(projectIDs)
 	if len(projectIDs) == 0 {
 		return map[uint]*ProjectProductInventoryTotals{}, nil

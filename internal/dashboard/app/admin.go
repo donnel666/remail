@@ -111,6 +111,8 @@ type InventorySnapshot struct {
 	GmailAvailable     int
 	ICloudTotal        int
 	ICloudAvailable    int
+	ProtoTotal         int
+	ProtoAvailable     int
 }
 
 // ---- assembled read model ------------------------------------------------
@@ -158,6 +160,14 @@ type AdminStats struct {
 	ICloudPurchaseActivations                    int
 	ICloudPurchaseActivationSuccessRate          float64
 	ICloudAveragePurchaseActivationSeconds       int
+	ProtoTotalEmails                             int
+	ProtoAvailableEmails                         int
+	ProtoCodeReceipts                            int
+	ProtoCodeSuccessRate                         float64
+	ProtoAverageCodeReceiptSeconds               int
+	ProtoPurchaseActivations                     int
+	ProtoPurchaseActivationSuccessRate           float64
+	ProtoAveragePurchaseActivationSeconds        int
 	DomainTotalMailboxes                         int
 	DomainAvailableMailboxes                     int
 	DomainCodeReceipts                           int
@@ -197,6 +207,11 @@ type AdminTrendPoint struct {
 	ICloudReceivedCodes                   int
 	ICloudCodeSuccessRate                 float64
 	ICloudAverageCodeReceiptSeconds       int
+	ProtoTotalEmails                      int
+	ProtoAvailableEmails                  int
+	ProtoReceivedCodes                    int
+	ProtoCodeSuccessRate                  float64
+	ProtoAverageCodeReceiptSeconds        int
 	DomainTotalMailboxes                  int
 	DomainAvailableMailboxes              int
 	DomainReceivedCodes                   int
@@ -313,11 +328,13 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 		gmailR := receiptsByType[productBucket{key, "gmail"}]
 		gmailVariantR := receiptsByType[productBucket{key, "gmail_variant"}]
 		iCloudR := receiptsByType[productBucket{key, "icloud"}]
+		protoR := receiptsByType[productBucket{key, "proto"}]
 		msCO := codeOrdersByType[productBucket{key, "microsoft"}]
 		dCO := codeOrdersByType[productBucket{key, "domain"}]
 		gmailCO := codeOrdersByType[productBucket{key, "gmail"}]
 		gmailVariantCO := codeOrdersByType[productBucket{key, "gmail_variant"}]
 		iCloudCO := codeOrdersByType[productBucket{key, "icloud"}]
+		protoCO := codeOrdersByType[productBucket{key, "proto"}]
 		newUsers := newUserByKey[key]
 		activeUsers := activeUserByKey[key]
 		trend = append(trend, AdminTrendPoint{
@@ -328,7 +345,7 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 			WithdrawAmount:                        f.Withdraw,
 			PlatformRevenue:                       f.PlatformRevenue,
 			Orders:                                orderByKey[key],
-			SuccessfulCodeReceipts:                msR.Received + dR.Received + gmailR.Received + gmailVariantR.Received + iCloudR.Received,
+			SuccessfulCodeReceipts:                msR.Received + dR.Received + gmailR.Received + gmailVariantR.Received + iCloudR.Received + protoR.Received,
 			TotalUsers:                            totalUsers,
 			ActiveUsers:                           activeUsers,
 			NewUsers:                              newUsers,
@@ -352,6 +369,11 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 			ICloudReceivedCodes:                   iCloudR.Received,
 			ICloudCodeSuccessRate:                 round1(minFloat(100, pct(iCloudR.Received, iCloudCO))),
 			ICloudAverageCodeReceiptSeconds:       iCloudR.AvgSeconds,
+			ProtoTotalEmails:                      snapshot.ProtoTotal,
+			ProtoAvailableEmails:                  snapshot.ProtoAvailable,
+			ProtoReceivedCodes:                    protoR.Received,
+			ProtoCodeSuccessRate:                  round1(minFloat(100, pct(protoR.Received, protoCO))),
+			ProtoAverageCodeReceiptSeconds:        protoR.AvgSeconds,
 			DomainTotalMailboxes:                  snapshot.DomainTotal,
 			DomainAvailableMailboxes:              snapshot.DomainAvailable,
 			DomainReceivedCodes:                   dR.Received,
@@ -384,10 +406,12 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 	gmail := fulfillmentTotals["gmail"]
 	gmailVariant := fulfillmentTotals["gmail_variant"]
 	iCloud := fulfillmentTotals["icloud"]
+	proto := fulfillmentTotals["proto"]
 	msPurchase := purchasesByType["microsoft"]
 	gmailPurchase := purchasesByType["gmail"]
 	gmailVariantPurchase := purchasesByType["gmail_variant"]
 	iCloudPurchase := purchasesByType["icloud"]
+	protoPurchase := purchasesByType["proto"]
 
 	return &AdminDashboard{
 		Stats: AdminStats{
@@ -433,6 +457,14 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 			ICloudPurchaseActivations:                    iCloudPurchase.Activated,
 			ICloudPurchaseActivationSuccessRate:          round1(minFloat(100, pct(iCloudPurchase.Activated, iCloudPurchase.Orders))),
 			ICloudAveragePurchaseActivationSeconds:       averageSeconds(iCloudPurchase.TotalSeconds, iCloudPurchase.Timed),
+			ProtoTotalEmails:                             snapshot.ProtoTotal,
+			ProtoAvailableEmails:                         snapshot.ProtoAvailable,
+			ProtoCodeReceipts:                            proto.Received,
+			ProtoCodeSuccessRate:                         round1(minFloat(100, pct(proto.Received, proto.CodeOrders))),
+			ProtoAverageCodeReceiptSeconds:               averageSeconds(proto.TotalSeconds, proto.Timed),
+			ProtoPurchaseActivations:                     protoPurchase.Activated,
+			ProtoPurchaseActivationSuccessRate:           round1(minFloat(100, pct(protoPurchase.Activated, protoPurchase.Orders))),
+			ProtoAveragePurchaseActivationSeconds:        averageSeconds(protoPurchase.TotalSeconds, protoPurchase.Timed),
 			DomainTotalMailboxes:                         snapshot.DomainTotal,
 			DomainAvailableMailboxes:                     snapshot.DomainAvailable,
 			DomainCodeReceipts:                           domain.Received,
@@ -469,7 +501,7 @@ func countByBucket(rows []CountBucket) map[string]int {
 	return m
 }
 
-var dashboardProductTypes = [...]string{"microsoft", "domain", "gmail", "gmail_variant", "icloud"}
+var dashboardProductTypes = [...]string{"microsoft", "domain", "gmail", "gmail_variant", "icloud", "proto"}
 
 type productBucket struct {
 	Bucket      string

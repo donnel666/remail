@@ -89,7 +89,7 @@ const projectLogoGalleryStorageKey = "remail.project.logo.gallery.v1";
 
 type ProjectStatusFilter = "all" | "reviewing" | "listed" | "delisted";
 type BooleanFilter = "all" | "yes" | "no";
-const projectProductTypes = ["microsoft", "domain", "gmail", "gmail_variant", "icloud"] as const;
+const projectProductTypes = ["microsoft", "domain", "gmail", "gmail_variant", "icloud", "proto"] as const;
 type ProjectProductType = (typeof projectProductTypes)[number];
 type ProjectProductStatus = "enabled" | "disabled";
 type ProjectProductTypeFilter = "all" | ProjectProductType;
@@ -158,6 +158,15 @@ const gmailProjectPriceDefaults = {
   purchaseSupplierPrice: "0",
 };
 
+const protoProjectPriceDefaults = {
+  codeEnabled: true,
+  codePrice: "8",
+  codeSupplierPrice: "5",
+  purchaseEnabled: true,
+  purchasePrice: "10",
+  purchaseSupplierPrice: "7",
+};
+
 const fallbackProjectPriceDefaults: ProjectPriceDefaults = {
   microsoft: microsoftProjectPriceDefaults,
   icloud: microsoftProjectPriceDefaults,
@@ -171,6 +180,7 @@ const fallbackProjectPriceDefaults: ProjectPriceDefaults = {
   },
   gmail: gmailProjectPriceDefaults,
   gmail_variant: gmailProjectPriceDefaults,
+  proto: protoProjectPriceDefaults,
 };
 
 function projectPriceDefaultsFromValues(
@@ -205,6 +215,7 @@ function projectPriceDefaultsFromValues(
     gmail: readProduct("gmail"),
     gmail_variant: readProduct("gmail_variant"),
     icloud: readProduct("icloud"),
+    proto: readProduct("proto"),
   };
 }
 
@@ -252,7 +263,7 @@ function createDefaultProduct(
     codeSupplierPrice: priceDefaults[type].codeSupplierPrice,
     codeWindowMinutes: "10",
     dotWeight: "0",
-    mainWeight: hasMailboxWeights || type === "gmail" ? "1" : "0",
+    mainWeight: hasMailboxWeights || type === "gmail" || type === "proto" ? "1" : "0",
     plusWeight: type === "gmail_variant" ? "1" : "0",
     purchaseEnabled: priceDefaults[type].purchaseEnabled,
     purchasePrice: priceDefaults[type].purchasePrice,
@@ -309,6 +320,7 @@ function productTypeLabel(type: string, t: (key: string) => string) {
   if (type === "gmail") return t("Gmail email");
   if (type === "gmail_variant") return t("Gmail variant");
   if (type === "icloud") return t("iCloud email");
+  if (type === "proto") return t("Proto email");
   return type;
 }
 
@@ -514,7 +526,7 @@ function productDraftToRequest(
         ? 1
         : hasMailboxWeights
           ? toNonNegativeInt(product.mainWeight)
-          : 0,
+          : product.type === "proto" ? 1 : 0,
     plusWeight:
       product.type === "gmail_variant"
         ? 1
@@ -724,6 +736,11 @@ function ProductDraftCard({
               />
             </label>
           ))}
+        </div>
+      ) : null}
+      {draft.type === "proto" ? (
+        <div className="mt-2 text-xs text-[var(--semi-color-text-2)]">
+          {t("Proto uses the main mailbox only")}
         </div>
       ) : null}
     </div>
@@ -1796,6 +1813,7 @@ export default function AdminProjects() {
         gmail_variant: 0,
         icloud: 0,
         microsoft: 0,
+        proto: 0,
       },
       status: {
         all: total,
@@ -1825,6 +1843,7 @@ export default function AdminProjects() {
         gmail_variant: facets.productType.gmailVariant,
         icloud: facets.productType.icloud,
         microsoft: facets.productType.microsoft,
+        proto: facets.productType.proto,
       },
       status: {
         all: facets.status.all,

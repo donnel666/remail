@@ -412,7 +412,7 @@ func (r *Repo) MarkActive(ctx context.Context, cmd tradeapp.MarkActiveCommand) (
 			updates["activated_at"] = cmd.ActivatedAt.UTC()
 		}
 		switch cmd.AllocationType {
-		case domain.AllocationTypeMicrosoft, domain.AllocationTypeDomain, domain.AllocationTypeICloud:
+		case domain.AllocationTypeMicrosoft, domain.AllocationTypeDomain, domain.AllocationTypeICloud, domain.AllocationTypeProto:
 			if cmd.AllocationID == 0 {
 				return domain.ErrInvalidOrderRequest
 			}
@@ -838,6 +838,7 @@ func (r *Repo) OrderFacets(ctx context.Context, filter tradeapp.OrderListFilter)
 		Gmail        int64 `gorm:"column:gmail_count"`
 		GmailVariant int64 `gorm:"column:gmail_variant_count"`
 		ICloud       int64 `gorm:"column:icloud_count"`
+		Proto        int64 `gorm:"column:proto_count"`
 	}
 	if err := applyOrderFilter(r.dbFor(ctx).Model(&OrderModel{}), productTypeBase).
 		Select(
@@ -847,13 +848,15 @@ func (r *Repo) OrderFacets(ctx context.Context, filter tradeapp.OrderListFilter)
 			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS random_count,
 			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS gmail_count,
 			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS gmail_variant_count,
-			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS icloud_count`,
+			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS icloud_count,
+			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS proto_count`,
 			string(domain.ProductTypeMicrosoft),
 			string(domain.ProductTypeDomain),
 			string(domain.ProductTypeLegacyRandom),
 			string(domain.ProductTypeGmail),
 			string(domain.ProductTypeGmailVariant),
 			string(domain.ProductTypeICloud),
+			string(domain.ProductTypeProto),
 		).
 		Scan(&productTypeRow).Error; err != nil {
 		return nil, fmt.Errorf("order product type facets: %w", err)
@@ -866,6 +869,7 @@ func (r *Repo) OrderFacets(ctx context.Context, filter tradeapp.OrderListFilter)
 		Gmail:        productTypeRow.Gmail,
 		GmailVariant: productTypeRow.GmailVariant,
 		ICloud:       productTypeRow.ICloud,
+		Proto:        productTypeRow.Proto,
 	}
 
 	projectBase := filter
@@ -968,24 +972,33 @@ func (r *Repo) ListExpiredPurchaseWarrantyOrderNos(ctx context.Context, now time
 }
 
 func (r *Repo) ListCheckoutAllocationRecoveries(ctx context.Context, staleBefore time.Time, limit int) ([]tradeapp.CheckoutAllocationRecovery, error) {
+	return r.listCheckoutAllocationRecoveries(ctx, staleBefore, limit, false)
+}
+
+func (r *Repo) listCheckoutAllocationRecoveries(ctx context.Context, staleBefore time.Time, limit int, excludeProtoPaid bool) ([]tradeapp.CheckoutAllocationRecovery, error) {
 	if limit <= 0 {
 		limit = 200
 	}
 	var recoveries []tradeapp.CheckoutAllocationRecovery
 	// Keep orders as the driving table: allocation guards are much larger than
 	// the pending/paid/failed recovery status ranges in production.
-	if err := r.dbFor(ctx).Table("orders AS o").
+	query := r.dbFor(ctx).Table("orders AS o").
 		Select("o.order_no, o.status, o.product_type").
 		Joins("STRAIGHT_JOIN allocation_order_guards AS g ON g.order_no = o.order_no").
 		Joins("LEFT JOIN microsoft_allocations AS ma ON g.type = ? AND ma.order_no = g.order_no AND ma.status = ?", domain.AllocationTypeMicrosoft, "allocated").
 		Joins("LEFT JOIN domain_allocations AS da ON g.type = ? AND da.order_no = g.order_no AND da.status = ?", domain.AllocationTypeDomain, "allocated").
 		Joins("LEFT JOIN gmail_allocations AS ga ON g.type = ? AND ga.order_no = g.order_no AND ga.source = ? AND ga.status = ?", domain.AllocationTypeGmail, "local", "allocated").
 		Joins("LEFT JOIN icloud_allocations AS ia ON g.type = ? AND ia.order_no = g.order_no AND ia.status = ?", domain.AllocationTypeICloud, "allocated").
-		Where("(ma.id IS NOT NULL OR da.id IS NOT NULL OR ga.id IS NOT NULL OR ia.id IS NOT NULL) AND (o.status = ? OR (o.status = ? AND COALESCE(ma.created_at, da.created_at, ga.created_at, ia.created_at) < ?) OR (o.status = ? AND o.updated_at < ?))",
+		Joins("LEFT JOIN proto_allocations AS pa ON g.type = ? AND pa.order_no = g.order_no AND pa.guard_type = ? AND pa.status = ?", domain.AllocationTypeProto, domain.AllocationTypeProto, "allocated").
+		Where("(ma.id IS NOT NULL OR da.id IS NOT NULL OR ga.id IS NOT NULL OR ia.id IS NOT NULL OR pa.id IS NOT NULL) AND (o.status = ? OR (o.status = ? AND COALESCE(ma.created_at, da.created_at, ga.created_at, ia.created_at, pa.created_at) < ?) OR (o.status = ? AND o.updated_at < ?))",
 			domain.OrderStatusFailed,
 			domain.OrderStatusPendingPayment, staleBefore.UTC(),
-			domain.OrderStatusPaid, staleBefore.UTC()).
-		Order("o.created_at ASC, o.id ASC").
+			domain.OrderStatusPaid, staleBefore.UTC())
+	if excludeProtoPaid {
+		// Paused Proto payments must not occupy every slot in the shared recovery batch.
+		query = query.Where("o.status <> ? OR (o.product_type <> ? AND g.type <> ?)", domain.OrderStatusPaid, domain.ProductTypeProto, domain.AllocationTypeProto)
+	}
+	if err := query.Order("o.created_at ASC, o.id ASC").
 		Limit(limit).
 		Scan(&recoveries).Error; err != nil {
 		return nil, fmt.Errorf("list checkout allocation recoveries: %w", err)

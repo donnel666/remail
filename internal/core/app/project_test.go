@@ -441,6 +441,31 @@ func TestProjectUseCaseGmailHistoryScanRunsAfterCreateButNotUpdate(t *testing.T)
 	require.Equal(t, 1, scans)
 }
 
+func TestProjectUseCaseProtoHistoryUsesIndependentHook(t *testing.T) {
+	uc := NewProjectUseCase(&fakeProjectRepo{})
+	var requests []string
+	uc.SetProtoHistoryScan(func(_ context.Context, projectID uint, requestID string) error {
+		require.Equal(t, uint(101), projectID)
+		requests = append(requests, requestID)
+		return nil
+	})
+	uc.SetHistoryScan(func(context.Context, uint, string) error {
+		t.Fatal("Proto must not schedule Microsoft history")
+		return nil
+	})
+	req := validProjectCreateRequest()
+	req.Products[0].Type = "proto"
+	created, err := uc.AdminCreateListed(context.Background(), 9, req, "proto-create", "/v1/admin/projects")
+	require.NoError(t, err)
+	_, err = uc.AdminUpdate(context.Background(), 9, created.Project.ID, req, "proto-update", "/v1/admin/projects/:projectId")
+	require.NoError(t, err)
+	require.Equal(t, []string{"proto-create", "proto-update"}, requests)
+	req.Products[0].Type = "gmail"
+	_, err = uc.AdminCreateListed(context.Background(), 9, req, "gmail-create", "/v1/admin/projects")
+	require.NoError(t, err)
+	require.Len(t, requests, 2)
+}
+
 func TestProjectUseCaseGmailHistoryScanRunsAfterApprove(t *testing.T) {
 	detail := validProjectDetailForUseCase()
 	detail.Products[0].Type = domain.ProductTypeGmail

@@ -15,7 +15,8 @@ export type ProductType =
   | "domain"
   | "gmail"
   | "gmail_variant"
-  | "icloud";
+  | "icloud"
+  | "proto";
 export type OrderProductType = ProductType | "random";
 export type ServiceMode = "purchase" | "code";
 export type ServiceState =

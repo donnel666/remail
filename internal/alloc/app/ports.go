@@ -98,6 +98,15 @@ type GmailCandidate struct {
 	LastAllocatedAt *time.Time
 }
 
+// ProtoCandidate is the provider-neutral inventory projection used by the
+// Proto allocation adapter. Credentials never leave the Proto context.
+type ProtoCandidate struct {
+	ResourceID      uint
+	OwnerUserID     uint
+	Email           string
+	LastAllocatedAt *time.Time
+}
+
 type DomainCandidate struct {
 	ResourceID        uint
 	OwnerUserID       uint
@@ -160,13 +169,23 @@ type InventoryStats struct {
 	Domain                     DomainInventoryStats
 	Gmail                      GmailInventoryStats
 	ICloud                     ICloudInventoryStats
+	Proto                      ProtoInventoryStats
 	TotalAvailable             int64
 	ActiveMicrosoftAllocations int64
 	ActiveDomainAllocations    int64
 	ActiveGmailAllocations     int64
 	ActiveICloudAllocations    int64
+	ActiveProtoAllocations     int64
 	// Cold distinguishes an unrefreshed placeholder from a real zero inventory.
 	Cold bool
+}
+
+type ProtoInventoryStats struct {
+	Enabled           bool
+	EligibleResources int64
+	MainAvailable     int64
+	PublicAvailable   int64
+	TotalAvailable    int64
 }
 
 type GmailInventoryStats struct {
@@ -495,4 +514,17 @@ type Repository interface {
 	ListPrivateDomainInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]PrivateProductInventoryTotal, error)
 	ListPrivateGmailInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]PrivateSingletonInventoryTotal, error)
 	ListPrivateICloudInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]PrivateSingletonInventoryTotal, error)
+}
+
+// ProtoRepository keeps the provider implementation separate from existing
+// allocation adapters. A missing Proto implementation is a configuration error.
+type ProtoRepository interface {
+	ListProtoSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int) ([]ProtoCandidate, error)
+	LockProtoCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope) (*ProtoCandidate, error)
+	CreateProtoAllocation(ctx context.Context, allocation *domain.ProtoAllocation) error
+	TouchProtoAllocated(ctx context.Context, resourceID uint, allocatedAt time.Time) error
+}
+
+type ProtoInventoryRepository interface {
+	ListPrivateProtoInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]PrivateSingletonInventoryTotal, error)
 }

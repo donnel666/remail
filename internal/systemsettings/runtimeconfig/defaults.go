@@ -7,13 +7,14 @@ import (
 )
 
 const (
-	DefaultSettingsCount                         = 283
+	DefaultSettingsCount                         = 293
 	NodeLocCallbackURL                           = "https://remail.aishop6.com/oauth/nodeloc"
 	RechargeTimeoutMinutesKey                    = "recharge_timeout_minutes"
 	MicrosoftPriceMultiplierKey                  = "product_price_multiplier_microsoft"
 	GmailPriceMultiplierKey                      = "product_price_multiplier_gmail"
 	ICloudPriceMultiplierKey                     = "product_price_multiplier_icloud"
 	DomainPriceMultiplierKey                     = "product_price_multiplier_domain"
+	ProtoPriceMultiplierKey                      = "product_price_multiplier_proto"
 	ICloudForwardingSuffixesKey                  = "icloud_forwarding_suffixes"
 	ICloudCookieKeepaliveMinutesKey              = "icloud_cookie_keepalive_minutes"
 	ICloudMailmatchScanLimitKey                  = "icloud_mailmatch_scan_limit"
@@ -164,10 +165,17 @@ var defaultSettings = []domain.Setting{
 	{Key: "default_project_icloud_purchase_supplier_price", Value: "7"},
 	{Key: "default_project_icloud_code_enabled", Value: "true"},
 	{Key: "default_project_icloud_purchase_enabled", Value: "true"},
+	{Key: "default_project_proto_code_price", Value: "8"},
+	{Key: "default_project_proto_code_supplier_price", Value: "5"},
+	{Key: "default_project_proto_purchase_price", Value: "10"},
+	{Key: "default_project_proto_purchase_supplier_price", Value: "7"},
+	{Key: "default_project_proto_code_enabled", Value: "true"},
+	{Key: "default_project_proto_purchase_enabled", Value: "true"},
 	{Key: "product_price_multiplier_microsoft", Value: "1"},
 	{Key: "product_price_multiplier_gmail", Value: "1"},
 	{Key: "product_price_multiplier_icloud", Value: "1"},
 	{Key: "product_price_multiplier_domain", Value: "1"},
+	{Key: ProtoPriceMultiplierKey, Value: "1"},
 
 	{Key: "microsoft_domain_whitelist", Value: "outlook.com,hotmail.com,outlook.sa,outlook.com.ar,outlook.com.au,outlook.at,outlook.be,outlook.com.br,outlook.cl,outlook.cz,outlook.fr,outlook.de,outlook.com.gr,outlook.co.il,outlook.in,outlook.co.id,outlook.ie,outlook.it,outlook.hu,outlook.jp,outlook.kr,outlook.lv,outlook.my,outlook.co.nz,outlook.ph,outlook.pt,outlook.sg,outlook.sk,outlook.es,outlook.co.th,outlook.com.tr,outlook.com.vn"},
 	{Key: "gmail_variant_cooldown_minutes", Value: "5"},
@@ -306,6 +314,9 @@ var defaultSettings = []domain.Setting{
 	{Key: "asynq_queue_resource_weight", Value: "2"},
 	{Key: "asynq_queue_background_project_history_weight", Value: "1"},
 	{Key: "asynq_queue_background_gmail_identification_weight", Value: "1"},
+	{Key: "asynq_queue_background_proto_import_weight", Value: "1"},
+	{Key: "asynq_queue_background_proto_validation_weight", Value: "1"},
+	{Key: "asynq_queue_background_proto_history_weight", Value: "1"},
 	{Key: "asynq_queue_background_inventory_weight", Value: "1"},
 	{Key: "asynq_shutdown_timeout_seconds", Value: "5"},
 	{Key: "validation_dispatch_maximum", Value: "128"},

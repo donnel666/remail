@@ -71,10 +71,17 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 	require.Equal(t, "5", keys["default_project_icloud_code_supplier_price"])
 	require.Equal(t, "10", keys["default_project_icloud_purchase_price"])
 	require.Equal(t, "7", keys["default_project_icloud_purchase_supplier_price"])
+	require.Equal(t, "8", keys["default_project_proto_code_price"])
+	require.Equal(t, "5", keys["default_project_proto_code_supplier_price"])
+	require.Equal(t, "10", keys["default_project_proto_purchase_price"])
+	require.Equal(t, "7", keys["default_project_proto_purchase_supplier_price"])
+	require.Equal(t, "true", keys["default_project_proto_code_enabled"])
+	require.Equal(t, "true", keys["default_project_proto_purchase_enabled"])
 	require.Equal(t, "1", keys[MicrosoftPriceMultiplierKey])
 	require.Equal(t, "1", keys[GmailPriceMultiplierKey])
 	require.Equal(t, "1", keys[ICloudPriceMultiplierKey])
 	require.Equal(t, "1", keys[DomainPriceMultiplierKey])
+	require.Equal(t, "1", keys[ProtoPriceMultiplierKey])
 	require.Equal(t, "3", keys["gmail_code_retain_days"])
 	require.Equal(t, "300", keys["fetch_dispatcher_timeout_seconds"])
 	require.Equal(t, "10000", keys["resource_fetch_dispatch_limit"])
@@ -85,6 +92,9 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 	require.Equal(t, "1", keys["asynq_queue_background_gmail_validation_weight"])
 	require.Equal(t, "1", keys["asynq_queue_background_icloud_validation_weight"])
 	require.Equal(t, "1", keys["asynq_queue_background_gmail_identification_weight"])
+	require.Equal(t, "1", keys["asynq_queue_background_proto_import_weight"])
+	require.Equal(t, "1", keys["asynq_queue_background_proto_validation_weight"])
+	require.Equal(t, "1", keys["asynq_queue_background_proto_history_weight"])
 	whitelistValue := ""
 	for _, setting := range defaults {
 		if setting.Key == "microsoft_domain_whitelist" {

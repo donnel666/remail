@@ -682,6 +682,7 @@ func toOrderListFacetsResponse(facets *tradeapp.OrderListFacets) *OrderListFacet
 			Gmail:        facets.ProductType.Gmail,
 			GmailVariant: facets.ProductType.GmailVariant,
 			ICloud:       facets.ProductType.ICloud,
+			Proto:        facets.ProductType.Proto,
 		},
 		Projects: projects,
 		Domains:  domains,

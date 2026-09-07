@@ -133,11 +133,13 @@ func (h *Handler) GetProjectInventory(c *gin.Context) {
 		Domain:                     domainInventoryResponse(stats.Domain),
 		Gmail:                      gmailInventoryResponse(stats.Gmail),
 		ICloud:                     icloudInventoryResponse(stats.ICloud),
+		Proto:                      protoInventoryResponse(stats.Proto),
 		TotalAvailable:             stats.TotalAvailable,
 		ActiveMicrosoftAllocations: stats.ActiveMicrosoftAllocations,
 		ActiveDomainAllocations:    stats.ActiveDomainAllocations,
 		ActiveGmailAllocations:     stats.ActiveGmailAllocations,
 		ActiveICloudAllocations:    stats.ActiveICloudAllocations,
+		ActiveProtoAllocations:     stats.ActiveProtoAllocations,
 	})
 }
 
@@ -314,6 +316,14 @@ func icloudInventoryResponse(stats allocapp.ICloudInventoryStats) ICloudInventor
 	return ICloudInventoryResponse{
 		Enabled: stats.Enabled, EligibleResources: stats.EligibleResources,
 		AliasAvailable: stats.AliasAvailable, TotalAvailable: stats.TotalAvailable,
+	}
+}
+
+func protoInventoryResponse(stats allocapp.ProtoInventoryStats) ProtoInventoryResponse {
+	return ProtoInventoryResponse{
+		Enabled: stats.Enabled, EligibleResources: stats.EligibleResources,
+		MainAvailable: stats.MainAvailable, PublicAvailable: stats.PublicAvailable,
+		TotalAvailable: stats.TotalAvailable,
 	}
 }
 

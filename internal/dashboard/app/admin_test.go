@@ -194,3 +194,38 @@ func TestAdminDashboardAssembly(t *testing.T) {
 		t.Errorf("inventory ranking wrong: %+v", got.ProjectInventoryRanking)
 	}
 }
+
+func TestAdminDashboardIncludesProtoMetrics(t *testing.T) {
+	oldLocal := time.Local
+	time.Local = time.UTC
+	defer func() { time.Local = oldLocal }()
+
+	from := time.Date(2026, 9, 7, 0, 0, 0, 0, time.UTC)
+	to := from.Add(23 * time.Hour)
+	key := bucketStart(from, granularity(from, to)).Format(bucketLayout(granularity(from, to)))
+	view := &fakeAdminView{
+		orders:    []CountBucket{{Bucket: key, Count: 2}},
+		codeOrder: []TypeCountBucket{{Bucket: key, ProductType: "proto", Count: 4}},
+		receipts:  []TypeReceiptBucket{{Bucket: key, ProductType: "proto", Received: 3, AvgSeconds: 12, TotalSeconds: 36, Timed: 3}},
+		purchases: []TypePurchaseSummary{{ProductType: "proto", PurchaseSummary: PurchaseSummary{Orders: 2, Activated: 1, TotalSeconds: 20, Timed: 1}}},
+		snapshot:  InventorySnapshot{ProtoTotal: 9, ProtoAvailable: 5},
+	}
+	svc := NewAdminQueryService(view, fakeFinance{}, fakeInventory{})
+	svc.now = func() time.Time { return to.Add(time.Hour) }
+	got, err := svc.AdminDashboard(context.Background(), &from, &to)
+	if err != nil {
+		t.Fatalf("AdminDashboard: %v", err)
+	}
+	if got.Stats.ProtoTotalEmails != 9 || got.Stats.ProtoAvailableEmails != 5 {
+		t.Fatalf("proto inventory stats: %+v", got.Stats)
+	}
+	if got.Stats.ProtoCodeReceipts != 3 || got.Stats.ProtoCodeSuccessRate != 75 || got.Stats.ProtoAverageCodeReceiptSeconds != 12 {
+		t.Fatalf("proto code stats: %+v", got.Stats)
+	}
+	if got.Stats.ProtoPurchaseActivations != 1 || got.Stats.ProtoPurchaseActivationSuccessRate != 50 || got.Stats.ProtoAveragePurchaseActivationSeconds != 20 {
+		t.Fatalf("proto purchase stats: %+v", got.Stats)
+	}
+	if len(got.Trend) < 1 || got.Trend[0].ProtoReceivedCodes != 3 || got.Trend[0].SuccessfulCodeReceipts != 3 {
+		t.Fatalf("proto trend stats: %+v", got.Trend)
+	}
+}

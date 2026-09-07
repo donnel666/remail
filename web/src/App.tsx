@@ -65,10 +65,12 @@ const pageLoaders = {
   orders: () => import("./pages/Orders"),
   tickets: () => import("./pages/Tickets"),
   microsoftEmails: () => import("./pages/MicrosoftEmails"),
+  protoEmails: () => import("./pages/ProtoEmails"),
   domainEmails: () => import("./pages/DomainEmails"),
   adminDashboard: () => import("./pages/AdminDashboard"),
   adminSystemMonitoring: () => import("./pages/AdminSystemMonitoring"),
   adminMicrosoftEmails: () => import("./pages/AdminMicrosoftEmails"),
+  adminProtoEmails: () => import("./pages/AdminProtoEmails"),
   adminKitesim: () => import("./pages/AdminKitesim"),
   adminICloudEmails: () => import("./pages/AdminICloudEmails"),
   adminGmailEmails: () => import("./pages/AdminGmailEmails"),
@@ -104,10 +106,12 @@ const PaymentReturn = lazy(pageLoaders.paymentReturn);
 const Orders = lazy(pageLoaders.orders);
 const Tickets = lazy(pageLoaders.tickets);
 const MicrosoftEmails = lazy(pageLoaders.microsoftEmails);
+const ProtoEmails = lazy(pageLoaders.protoEmails);
 const DomainEmails = lazy(pageLoaders.domainEmails);
 const AdminDashboard = lazy(pageLoaders.adminDashboard);
 const AdminSystemMonitoring = lazy(pageLoaders.adminSystemMonitoring);
 const AdminMicrosoftEmails = lazy(pageLoaders.adminMicrosoftEmails);
+const AdminProtoEmails = lazy(pageLoaders.adminProtoEmails);
 const AdminKitesim = lazy(pageLoaders.adminKitesim);
 const AdminICloudEmails = lazy(pageLoaders.adminICloudEmails);
 const AdminGmailEmails = lazy(pageLoaders.adminGmailEmails);
@@ -138,10 +142,12 @@ const routePreloadPriority = [
   "finance",
   "wallet",
   "microsoftEmails",
+  "protoEmails",
   "domainEmails",
   "adminDashboard",
   "adminSystemMonitoring",
   "adminMicrosoftEmails",
+  "adminProtoEmails",
   "adminKitesim",
   "adminICloudEmails",
   "adminGmailEmails",
@@ -183,6 +189,7 @@ const preloadRouteByLoader: Partial<Record<PageLoaderKey, string>> = {
   adminICloudEmails: "/admin/icloud",
   adminKitesim: "/admin/kitesim",
   adminMicrosoftEmails: "/admin/microsoft",
+  adminProtoEmails: "/admin/proto",
   adminProjects: "/admin/projects",
   adminTickets: "/admin/tickets",
   adminLotteries: "/admin/lotteries",
@@ -193,6 +200,7 @@ const preloadRouteByLoader: Partial<Record<PageLoaderKey, string>> = {
   finance: "/finance",
   invite: "/invite",
   microsoftEmails: "/microsoft",
+  protoEmails: "/proto",
   orders: "/orders",
   pickup: "/pickup",
   projects: "/projects",
@@ -552,6 +560,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/orders", component: Orders }),
   createRoute({ getParentRoute: () => rootRoute, path: "/tickets", component: Tickets }),
   createRoute({ getParentRoute: () => rootRoute, path: "/microsoft", component: MicrosoftEmails }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/proto", component: ProtoEmails }),
   createRoute({ getParentRoute: () => rootRoute, path: "/domains", component: DomainEmails }),
   createRoute({ getParentRoute: () => rootRoute, path: "/invite", component: Invite }),
   createRoute({ getParentRoute: () => rootRoute, path: "/recharge", component: Recharge }),
@@ -569,6 +578,11 @@ const routeTree = rootRoute.addChildren([
     getParentRoute: () => rootRoute,
     path: "/admin/microsoft",
     component: AdminMicrosoftEmails,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/admin/proto",
+    component: AdminProtoEmails,
   }),
   createRoute({
     getParentRoute: () => rootRoute,

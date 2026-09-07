@@ -56,6 +56,14 @@ type AdminDashboardStats struct {
 	ICloudPurchaseActivations                    int     `json:"icloudPurchaseActivations"`
 	ICloudPurchaseActivationSuccessRate          float64 `json:"icloudPurchaseActivationSuccessRate"`
 	ICloudAveragePurchaseActivationSeconds       int     `json:"icloudAveragePurchaseActivationSeconds"`
+	ProtoTotalEmails                             int     `json:"protoTotalEmails"`
+	ProtoAvailableEmails                         int     `json:"protoAvailableEmails"`
+	ProtoCodeReceipts                            int     `json:"protoCodeReceipts"`
+	ProtoCodeSuccessRate                         float64 `json:"protoCodeSuccessRate"`
+	ProtoAverageCodeReceiptSeconds               int     `json:"protoAverageCodeReceiptSeconds"`
+	ProtoPurchaseActivations                     int     `json:"protoPurchaseActivations"`
+	ProtoPurchaseActivationSuccessRate           float64 `json:"protoPurchaseActivationSuccessRate"`
+	ProtoAveragePurchaseActivationSeconds        int     `json:"protoAveragePurchaseActivationSeconds"`
 	DomainTotalMailboxes                         int     `json:"domainTotalMailboxes"`
 	DomainAvailableMailboxes                     int     `json:"domainAvailableMailboxes"`
 	DomainCodeReceipts                           int     `json:"domainCodeReceipts"`
@@ -95,6 +103,11 @@ type AdminDashboardTrendPoint struct {
 	ICloudReceivedCodes                   int     `json:"icloudReceivedCodes"`
 	ICloudCodeSuccessRate                 float64 `json:"icloudCodeSuccessRate"`
 	ICloudAverageCodeReceiptSeconds       int     `json:"icloudAverageCodeReceiptSeconds"`
+	ProtoTotalEmails                      int     `json:"protoTotalEmails"`
+	ProtoAvailableEmails                  int     `json:"protoAvailableEmails"`
+	ProtoReceivedCodes                    int     `json:"protoReceivedCodes"`
+	ProtoCodeSuccessRate                  float64 `json:"protoCodeSuccessRate"`
+	ProtoAverageCodeReceiptSeconds        int     `json:"protoAverageCodeReceiptSeconds"`
 	DomainTotalMailboxes                  int     `json:"domainTotalMailboxes"`
 	DomainAvailableMailboxes              int     `json:"domainAvailableMailboxes"`
 	DomainReceivedCodes                   int     `json:"domainReceivedCodes"`

@@ -7,4 +7,9 @@ const (
 	ConnectBotWebSocketParamsXBotChannelTelegram ConnectBotWebSocketParamsXBotChannel = Telegram
 	GetProjectsParamsAccessTypePrivate           GetProjectsParamsAccessType          = Private
 	GetProjectsParamsAccessTypePublic            GetProjectsParamsAccessType          = Public
+	// Keep the historical short names exported by older oapi-codegen output.
+	Disable      PatchAdminDomainRequestStatusCommand = PatchAdminDomainRequestStatusCommandDisable
+	Enable       PatchAdminDomainRequestStatusCommand = PatchAdminDomainRequestStatusCommandEnable
+	MarkAbnormal PatchAdminDomainRequestStatusCommand = PatchAdminDomainRequestStatusCommandMarkAbnormal
+	MarkNormal   PatchAdminDomainRequestStatusCommand = PatchAdminDomainRequestStatusCommandMarkNormal
 )

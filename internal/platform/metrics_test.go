@@ -64,6 +64,7 @@ func TestNormalizeAllocationTypeKeepsSupportedTypesVisible(t *testing.T) {
 	require.Equal(t, "gmail", normalizeAllocationType("gmail"))
 	require.Equal(t, "gmail", normalizeAllocationType("gmail_variant"))
 	require.Equal(t, "icloud", normalizeAllocationType("icloud"))
+	require.Equal(t, "proto", normalizeAllocationType("proto"))
 	require.Equal(t, "unknown", normalizeAllocationType("retired"))
 }
 

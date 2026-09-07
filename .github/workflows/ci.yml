@@ -443,7 +443,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [image]
     runs-on: [self-hosted, linux, x64, remail-test]
-    timeout-minutes: 15
+    timeout-minutes: 45
     concurrency:
       group: remail-test-deploy
       cancel-in-progress: false
@@ -580,6 +580,12 @@ jobs:
             docker compose --env-file .env -f compose.yml stop server || deploy_status=$?
           fi
           if [ "$deploy_status" -eq 0 ]; then
+            # Complete schema changes before starting the HTTP health budget.
+            # This one-shot container also starts required dependencies on a
+            # fresh host; it never starts application workers or publishes ports.
+            docker compose --env-file .env -f compose.yml run --rm -T server --migrate-only || deploy_status=$?
+          fi
+          if [ "$deploy_status" -eq 0 ]; then
             docker compose --env-file .env -f compose.yml up -d --scale server=1 server || deploy_status=$?
           fi
 
@@ -593,7 +599,8 @@ jobs:
           echo "New deployment failed; collecting logs before rollback" >&2
           docker compose --env-file .env -f compose.yml logs --tail=200 server || true
           # Wait until the new process is fully gone before reading the marker.
-          # Its migration is then either committed with the marker or rolled back.
+          # MySQL DDL may already be committed even when no version was recorded.
+          # Image rollback is not schema rollback; Proto migrations are resumable.
           docker compose --env-file .env -f compose.yml stop server || true
           POINTS_MIGRATION_STATE=""
           POINTS_MIGRATION_QUERY_OK=false

@@ -74,7 +74,7 @@ var integerRanges = map[string]integerRange{
 	"asynq_worker_concurrency": positive(8096), "asynq_realtime_worker_concurrency": positive(8096), "asynq_background_worker_concurrency": positive(8096),
 	"asynq_queue_mailfetch_weight": positive(10000), "asynq_queue_payment_reconcile_weight": positive(10000), "asynq_queue_mailtransport_weight": positive(10000), "asynq_queue_default_weight": positive(10000),
 	"asynq_queue_background_validation_weight": positive(10000), "asynq_queue_background_gmail_validation_weight": positive(10000), "asynq_queue_background_icloud_validation_weight": positive(10000), "asynq_queue_background_domain_validation_weight": positive(10000), "asynq_queue_background_alias_weight": positive(10000),
-	"asynq_queue_background_token_refresh_weight": positive(10000), "asynq_queue_resource_weight": positive(10000), "asynq_queue_background_project_history_weight": positive(10000), "asynq_queue_background_gmail_identification_weight": positive(10000), "asynq_queue_background_inventory_weight": positive(10000),
+	"asynq_queue_background_token_refresh_weight": positive(10000), "asynq_queue_resource_weight": positive(10000), "asynq_queue_background_project_history_weight": positive(10000), "asynq_queue_background_gmail_identification_weight": positive(10000), "asynq_queue_background_proto_import_weight": positive(10000), "asynq_queue_background_proto_validation_weight": positive(10000), "asynq_queue_background_proto_history_weight": positive(10000), "asynq_queue_background_inventory_weight": positive(10000),
 	"asynq_shutdown_timeout_seconds": positive(300), "validation_dispatch_maximum": positive(10000), "default_inbound_smtp_max_connections": positive(10000),
 
 	"admin_resource_bulk_max_ids": positive(1000), "admin_domain_bulk_max_ids": positive(1000), "admin_domain_bulk_max_filter": positive(10000),
@@ -111,6 +111,7 @@ var booleanKeys = map[string]struct{}{
 	"default_project_gmail_code_enabled": {}, "default_project_gmail_purchase_enabled": {},
 	"default_project_gmail_variant_code_enabled": {}, "default_project_gmail_variant_purchase_enabled": {},
 	"default_project_icloud_code_enabled": {}, "default_project_icloud_purchase_enabled": {},
+	"default_project_proto_code_enabled": {}, "default_project_proto_purchase_enabled": {},
 }
 
 func Validate(key, value string) error {
@@ -163,7 +164,9 @@ func Validate(key, value string) error {
 		"default_project_gmail_variant_code_price", "default_project_gmail_variant_code_supplier_price",
 		"default_project_gmail_variant_purchase_price", "default_project_gmail_variant_purchase_supplier_price",
 		"default_project_icloud_code_price", "default_project_icloud_code_supplier_price",
-		"default_project_icloud_purchase_price", "default_project_icloud_purchase_supplier_price":
+		"default_project_icloud_purchase_price", "default_project_icloud_purchase_supplier_price",
+		"default_project_proto_code_price", "default_project_proto_code_supplier_price",
+		"default_project_proto_purchase_price", "default_project_proto_purchase_supplier_price":
 		amount, err := money.Parse(value)
 		if err != nil || amount.IsNegative() {
 			return domain.ErrInvalidValue
@@ -192,7 +195,7 @@ func Validate(key, value string) error {
 		if err != nil || rate.IsNegative() || rate.GreaterThan(decimal.NewFromInt(100)) {
 			return domain.ErrInvalidValue
 		}
-	case "first_order_rebate_ratio", MicrosoftPriceMultiplierKey, GmailPriceMultiplierKey, ICloudPriceMultiplierKey, DomainPriceMultiplierKey:
+	case "first_order_rebate_ratio", MicrosoftPriceMultiplierKey, GmailPriceMultiplierKey, ICloudPriceMultiplierKey, DomainPriceMultiplierKey, ProtoPriceMultiplierKey:
 		ratio, err := money.Parse(value)
 		if err != nil || ratio.IsNegative() || ratio.GreaterThan(decimal.NewFromInt(1)) {
 			return domain.ErrInvalidValue
@@ -525,7 +528,7 @@ func validateRelationships(values map[string]string) error {
 	if value("outbound_mail_timeout_minutes", 3)*60 < smtpTaskBudgetSeconds(retries) {
 		return domain.ErrInvalidValue
 	}
-	for _, productType := range []string{"microsoft", "domain", "gmail", "gmail_variant", "icloud"} {
+	for _, productType := range []string{"microsoft", "domain", "gmail", "gmail_variant", "icloud", "proto"} {
 		if strings.TrimSpace(values["default_project_"+productType+"_code_enabled"]) == "false" &&
 			strings.TrimSpace(values["default_project_"+productType+"_purchase_enabled"]) == "false" {
 			return domain.ErrInvalidValue

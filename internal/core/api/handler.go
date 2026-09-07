@@ -1642,6 +1642,7 @@ func toProjectListFacetsResponse(facets *coreapp.ProjectListFacets) *ProjectList
 			Gmail:        facets.ProductType.Gmail,
 			GmailVariant: facets.ProductType.GmailVariant,
 			ICloud:       facets.ProductType.ICloud,
+			Proto:        facets.ProductType.Proto,
 		},
 	}
 }

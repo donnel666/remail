@@ -141,6 +141,7 @@ const (
 	AdminAllocationItemTypeGmail     AdminAllocationItemType = "gmail"
 	AdminAllocationItemTypeIcloud    AdminAllocationItemType = "icloud"
 	AdminAllocationItemTypeMicrosoft AdminAllocationItemType = "microsoft"
+	AdminAllocationItemTypeProto     AdminAllocationItemType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the AdminAllocationItemType enum.
@@ -153,6 +154,8 @@ func (e AdminAllocationItemType) Valid() bool {
 	case AdminAllocationItemTypeIcloud:
 		return true
 	case AdminAllocationItemTypeMicrosoft:
+		return true
+	case AdminAllocationItemTypeProto:
 		return true
 	default:
 		return false
@@ -1627,6 +1630,9 @@ const (
 	AdminTaskBizTypeMicrosoftResource       AdminTaskBizType = "microsoft_resource"
 	AdminTaskBizTypeMicrosoftResourceBulk   AdminTaskBizType = "microsoft_resource_bulk"
 	AdminTaskBizTypeMicrosoftResourceImport AdminTaskBizType = "microsoft_resource_import"
+	AdminTaskBizTypeProtoResource           AdminTaskBizType = "proto_resource"
+	AdminTaskBizTypeProtoResourceBulk       AdminTaskBizType = "proto_resource_bulk"
+	AdminTaskBizTypeProtoResourceImport     AdminTaskBizType = "proto_resource_import"
 )
 
 // Valid indicates whether the value is a known member of the AdminTaskBizType enum.
@@ -1648,6 +1654,12 @@ func (e AdminTaskBizType) Valid() bool {
 		return true
 	case AdminTaskBizTypeMicrosoftResourceImport:
 		return true
+	case AdminTaskBizTypeProtoResource:
+		return true
+	case AdminTaskBizTypeProtoResourceBulk:
+		return true
+	case AdminTaskBizTypeProtoResourceImport:
+		return true
 	default:
 		return false
 	}
@@ -1658,6 +1670,7 @@ const (
 	AdminTaskKindAlias          AdminTaskKind = "alias"
 	AdminTaskKindBulkAlias      AdminTaskKind = "bulk_alias"
 	AdminTaskKindBulkDelete     AdminTaskKind = "bulk_delete"
+	AdminTaskKindBulkDisable    AdminTaskKind = "bulk_disable"
 	AdminTaskKindBulkHistory    AdminTaskKind = "bulk_history"
 	AdminTaskKindBulkPublish    AdminTaskKind = "bulk_publish"
 	AdminTaskKindBulkToken      AdminTaskKind = "bulk_token"
@@ -1679,6 +1692,8 @@ func (e AdminTaskKind) Valid() bool {
 	case AdminTaskKindBulkAlias:
 		return true
 	case AdminTaskKindBulkDelete:
+		return true
+	case AdminTaskKindBulkDisable:
 		return true
 	case AdminTaskKindBulkHistory:
 		return true
@@ -1950,6 +1965,7 @@ const (
 	AllocationItemTypeGmail     AllocationItemType = "gmail"
 	AllocationItemTypeIcloud    AllocationItemType = "icloud"
 	AllocationItemTypeMicrosoft AllocationItemType = "microsoft"
+	AllocationItemTypeProto     AllocationItemType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the AllocationItemType enum.
@@ -1962,6 +1978,8 @@ func (e AllocationItemType) Valid() bool {
 	case AllocationItemTypeIcloud:
 		return true
 	case AllocationItemTypeMicrosoft:
+		return true
+	case AllocationItemTypeProto:
 		return true
 	default:
 		return false
@@ -2242,6 +2260,7 @@ const (
 	BotProjectProductTypeGmailVariant BotProjectProductType = "gmail_variant"
 	BotProjectProductTypeIcloud       BotProjectProductType = "icloud"
 	BotProjectProductTypeMicrosoft    BotProjectProductType = "microsoft"
+	BotProjectProductTypeProto        BotProjectProductType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the BotProjectProductType enum.
@@ -2256,6 +2275,8 @@ func (e BotProjectProductType) Valid() bool {
 	case BotProjectProductTypeIcloud:
 		return true
 	case BotProjectProductTypeMicrosoft:
+		return true
+	case BotProjectProductTypeProto:
 		return true
 	default:
 		return false
@@ -2991,6 +3012,7 @@ const (
 	OrderResponseAllocationTypeGmail     OrderResponseAllocationType = "gmail"
 	OrderResponseAllocationTypeIcloud    OrderResponseAllocationType = "icloud"
 	OrderResponseAllocationTypeMicrosoft OrderResponseAllocationType = "microsoft"
+	OrderResponseAllocationTypeProto     OrderResponseAllocationType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the OrderResponseAllocationType enum.
@@ -3003,6 +3025,8 @@ func (e OrderResponseAllocationType) Valid() bool {
 	case OrderResponseAllocationTypeIcloud:
 		return true
 	case OrderResponseAllocationTypeMicrosoft:
+		return true
+	case OrderResponseAllocationTypeProto:
 		return true
 	default:
 		return false
@@ -3064,6 +3088,7 @@ const (
 	OrderResponseProductTypeGmailVariant OrderResponseProductType = "gmail_variant"
 	OrderResponseProductTypeIcloud       OrderResponseProductType = "icloud"
 	OrderResponseProductTypeMicrosoft    OrderResponseProductType = "microsoft"
+	OrderResponseProductTypeProto        OrderResponseProductType = "proto"
 	OrderResponseProductTypeRandom       OrderResponseProductType = "random"
 )
 
@@ -3079,6 +3104,8 @@ func (e OrderResponseProductType) Valid() bool {
 	case OrderResponseProductTypeIcloud:
 		return true
 	case OrderResponseProductTypeMicrosoft:
+		return true
+	case OrderResponseProductTypeProto:
 		return true
 	case OrderResponseProductTypeRandom:
 		return true
@@ -3179,22 +3206,22 @@ func (e PatchAdminDomainRequestPurpose) Valid() bool {
 
 // Defines values for PatchAdminDomainRequestStatusCommand.
 const (
-	Disable      PatchAdminDomainRequestStatusCommand = "disable"
-	Enable       PatchAdminDomainRequestStatusCommand = "enable"
-	MarkAbnormal PatchAdminDomainRequestStatusCommand = "mark_abnormal"
-	MarkNormal   PatchAdminDomainRequestStatusCommand = "mark_normal"
+	PatchAdminDomainRequestStatusCommandDisable      PatchAdminDomainRequestStatusCommand = "disable"
+	PatchAdminDomainRequestStatusCommandEnable       PatchAdminDomainRequestStatusCommand = "enable"
+	PatchAdminDomainRequestStatusCommandMarkAbnormal PatchAdminDomainRequestStatusCommand = "mark_abnormal"
+	PatchAdminDomainRequestStatusCommandMarkNormal   PatchAdminDomainRequestStatusCommand = "mark_normal"
 )
 
 // Valid indicates whether the value is a known member of the PatchAdminDomainRequestStatusCommand enum.
 func (e PatchAdminDomainRequestStatusCommand) Valid() bool {
 	switch e {
-	case Disable:
+	case PatchAdminDomainRequestStatusCommandDisable:
 		return true
-	case Enable:
+	case PatchAdminDomainRequestStatusCommandEnable:
 		return true
-	case MarkAbnormal:
+	case PatchAdminDomainRequestStatusCommandMarkAbnormal:
 		return true
-	case MarkNormal:
+	case PatchAdminDomainRequestStatusCommandMarkNormal:
 		return true
 	default:
 		return false
@@ -3307,6 +3334,7 @@ const (
 	ProjectBulkFilterProductTypeGmailVariant ProjectBulkFilterProductType = "gmail_variant"
 	ProjectBulkFilterProductTypeIcloud       ProjectBulkFilterProductType = "icloud"
 	ProjectBulkFilterProductTypeMicrosoft    ProjectBulkFilterProductType = "microsoft"
+	ProjectBulkFilterProductTypeProto        ProjectBulkFilterProductType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the ProjectBulkFilterProductType enum.
@@ -3321,6 +3349,8 @@ func (e ProjectBulkFilterProductType) Valid() bool {
 	case ProjectBulkFilterProductTypeIcloud:
 		return true
 	case ProjectBulkFilterProductTypeMicrosoft:
+		return true
+	case ProjectBulkFilterProductTypeProto:
 		return true
 	default:
 		return false
@@ -3478,6 +3508,7 @@ const (
 	ProjectProductTypeGmailVariant ProjectProductType = "gmail_variant"
 	ProjectProductTypeIcloud       ProjectProductType = "icloud"
 	ProjectProductTypeMicrosoft    ProjectProductType = "microsoft"
+	ProjectProductTypeProto        ProjectProductType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductType enum.
@@ -3493,6 +3524,8 @@ func (e ProjectProductType) Valid() bool {
 		return true
 	case ProjectProductTypeMicrosoft:
 		return true
+	case ProjectProductTypeProto:
+		return true
 	default:
 		return false
 	}
@@ -3505,6 +3538,7 @@ const (
 	ProjectProductInventoryTotalProductTypeGmailVariant ProjectProductInventoryTotalProductType = "gmail_variant"
 	ProjectProductInventoryTotalProductTypeIcloud       ProjectProductInventoryTotalProductType = "icloud"
 	ProjectProductInventoryTotalProductTypeMicrosoft    ProjectProductInventoryTotalProductType = "microsoft"
+	ProjectProductInventoryTotalProductTypeProto        ProjectProductInventoryTotalProductType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductInventoryTotalProductType enum.
@@ -3519,6 +3553,8 @@ func (e ProjectProductInventoryTotalProductType) Valid() bool {
 	case ProjectProductInventoryTotalProductTypeIcloud:
 		return true
 	case ProjectProductInventoryTotalProductTypeMicrosoft:
+		return true
+	case ProjectProductInventoryTotalProductTypeProto:
 		return true
 	default:
 		return false
@@ -3550,6 +3586,7 @@ const (
 	ProjectProductRequestTypeGmailVariant ProjectProductRequestType = "gmail_variant"
 	ProjectProductRequestTypeIcloud       ProjectProductRequestType = "icloud"
 	ProjectProductRequestTypeMicrosoft    ProjectProductRequestType = "microsoft"
+	ProjectProductRequestTypeProto        ProjectProductRequestType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductRequestType enum.
@@ -3564,6 +3601,8 @@ func (e ProjectProductRequestType) Valid() bool {
 	case ProjectProductRequestTypeIcloud:
 		return true
 	case ProjectProductRequestTypeMicrosoft:
+		return true
+	case ProjectProductRequestTypeProto:
 		return true
 	default:
 		return false
@@ -3595,6 +3634,7 @@ const (
 	ProjectProductSummaryTypeGmailVariant ProjectProductSummaryType = "gmail_variant"
 	ProjectProductSummaryTypeIcloud       ProjectProductSummaryType = "icloud"
 	ProjectProductSummaryTypeMicrosoft    ProjectProductSummaryType = "microsoft"
+	ProjectProductSummaryTypeProto        ProjectProductSummaryType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductSummaryType enum.
@@ -3609,6 +3649,290 @@ func (e ProjectProductSummaryType) Valid() bool {
 	case ProjectProductSummaryTypeIcloud:
 		return true
 	case ProjectProductSummaryTypeMicrosoft:
+		return true
+	case ProjectProductSummaryTypeProto:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProtoBulkRequestSelectionMode.
+const (
+	ProtoBulkRequestSelectionModeFilter ProtoBulkRequestSelectionMode = "filter"
+	ProtoBulkRequestSelectionModeIds    ProtoBulkRequestSelectionMode = "ids"
+)
+
+// Valid indicates whether the value is a known member of the ProtoBulkRequestSelectionMode enum.
+func (e ProtoBulkRequestSelectionMode) Valid() bool {
+	switch e {
+	case ProtoBulkRequestSelectionModeFilter:
+		return true
+	case ProtoBulkRequestSelectionModeIds:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProtoBulkTaskAction.
+const (
+	ProtoBulkTaskActionDelete    ProtoBulkTaskAction = "delete"
+	ProtoBulkTaskActionDisable   ProtoBulkTaskAction = "disable"
+	ProtoBulkTaskActionHistory   ProtoBulkTaskAction = "history"
+	ProtoBulkTaskActionPublish   ProtoBulkTaskAction = "publish"
+	ProtoBulkTaskActionUnpublish ProtoBulkTaskAction = "unpublish"
+	ProtoBulkTaskActionValidate  ProtoBulkTaskAction = "validate"
+)
+
+// Valid indicates whether the value is a known member of the ProtoBulkTaskAction enum.
+func (e ProtoBulkTaskAction) Valid() bool {
+	switch e {
+	case ProtoBulkTaskActionDelete:
+		return true
+	case ProtoBulkTaskActionDisable:
+		return true
+	case ProtoBulkTaskActionHistory:
+		return true
+	case ProtoBulkTaskActionPublish:
+		return true
+	case ProtoBulkTaskActionUnpublish:
+		return true
+	case ProtoBulkTaskActionValidate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProtoBulkTaskKind.
+const (
+	ProtoBulkTaskKindProtoResourceBulk ProtoBulkTaskKind = "proto_resource_bulk"
+)
+
+// Valid indicates whether the value is a known member of the ProtoBulkTaskKind enum.
+func (e ProtoBulkTaskKind) Valid() bool {
+	switch e {
+	case ProtoBulkTaskKindProtoResourceBulk:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProtoBulkTaskResourceType.
+const (
+	ProtoBulkTaskResourceTypeProto ProtoBulkTaskResourceType = "proto"
+)
+
+// Valid indicates whether the value is a known member of the ProtoBulkTaskResourceType enum.
+func (e ProtoBulkTaskResourceType) Valid() bool {
+	switch e {
+	case ProtoBulkTaskResourceTypeProto:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProtoBulkTaskStatus.
+const (
+	ProtoBulkTaskStatusFailed    ProtoBulkTaskStatus = "failed"
+	ProtoBulkTaskStatusQueued    ProtoBulkTaskStatus = "queued"
+	ProtoBulkTaskStatusRunning   ProtoBulkTaskStatus = "running"
+	ProtoBulkTaskStatusSucceeded ProtoBulkTaskStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the ProtoBulkTaskStatus enum.
+func (e ProtoBulkTaskStatus) Valid() bool {
+	switch e {
+	case ProtoBulkTaskStatusFailed:
+		return true
+	case ProtoBulkTaskStatusQueued:
+		return true
+	case ProtoBulkTaskStatusRunning:
+		return true
+	case ProtoBulkTaskStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProtoImportItemOutcome.
+const (
+	ProtoImportItemOutcomeFailed   ProtoImportItemOutcome = "failed"
+	ProtoImportItemOutcomeImported ProtoImportItemOutcome = "imported"
+	ProtoImportItemOutcomeRestored ProtoImportItemOutcome = "restored"
+	ProtoImportItemOutcomeSkipped  ProtoImportItemOutcome = "skipped"
+)
+
+// Valid indicates whether the value is a known member of the ProtoImportItemOutcome enum.
+func (e ProtoImportItemOutcome) Valid() bool {
+	switch e {
+	case ProtoImportItemOutcomeFailed:
+		return true
+	case ProtoImportItemOutcomeImported:
+		return true
+	case ProtoImportItemOutcomeRestored:
+		return true
+	case ProtoImportItemOutcomeSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProtoImportResponseDispatchStatus.
+const (
+	ProtoImportResponseDispatchStatusDone      ProtoImportResponseDispatchStatus = "done"
+	ProtoImportResponseDispatchStatusFailed    ProtoImportResponseDispatchStatus = "failed"
+	ProtoImportResponseDispatchStatusPending   ProtoImportResponseDispatchStatus = "pending"
+	ProtoImportResponseDispatchStatusQueued    ProtoImportResponseDispatchStatus = "queued"
+	ProtoImportResponseDispatchStatusRunning   ProtoImportResponseDispatchStatus = "running"
+	ProtoImportResponseDispatchStatusSucceeded ProtoImportResponseDispatchStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the ProtoImportResponseDispatchStatus enum.
+func (e ProtoImportResponseDispatchStatus) Valid() bool {
+	switch e {
+	case ProtoImportResponseDispatchStatusDone:
+		return true
+	case ProtoImportResponseDispatchStatusFailed:
+		return true
+	case ProtoImportResponseDispatchStatusPending:
+		return true
+	case ProtoImportResponseDispatchStatusQueued:
+		return true
+	case ProtoImportResponseDispatchStatusRunning:
+		return true
+	case ProtoImportResponseDispatchStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProtoImportResponseStatus.
+const (
+	ProtoImportResponseStatusFailed     ProtoImportResponseStatus = "failed"
+	ProtoImportResponseStatusImported   ProtoImportResponseStatus = "imported"
+	ProtoImportResponseStatusProcessing ProtoImportResponseStatus = "processing"
+)
+
+// Valid indicates whether the value is a known member of the ProtoImportResponseStatus enum.
+func (e ProtoImportResponseStatus) Valid() bool {
+	switch e {
+	case ProtoImportResponseStatusFailed:
+		return true
+	case ProtoImportResponseStatusImported:
+		return true
+	case ProtoImportResponseStatusProcessing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProtoMaintenanceRunKind.
+const (
+	ProtoMaintenanceRunKindHistory    ProtoMaintenanceRunKind = "history"
+	ProtoMaintenanceRunKindValidation ProtoMaintenanceRunKind = "validation"
+)
+
+// Valid indicates whether the value is a known member of the ProtoMaintenanceRunKind enum.
+func (e ProtoMaintenanceRunKind) Valid() bool {
+	switch e {
+	case ProtoMaintenanceRunKindHistory:
+		return true
+	case ProtoMaintenanceRunKindValidation:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProtoMaintenanceRunStatus.
+const (
+	ProtoMaintenanceRunStatusCanceled  ProtoMaintenanceRunStatus = "canceled"
+	ProtoMaintenanceRunStatusFailed    ProtoMaintenanceRunStatus = "failed"
+	ProtoMaintenanceRunStatusQueued    ProtoMaintenanceRunStatus = "queued"
+	ProtoMaintenanceRunStatusRunning   ProtoMaintenanceRunStatus = "running"
+	ProtoMaintenanceRunStatusSucceeded ProtoMaintenanceRunStatus = "succeeded"
+	ProtoMaintenanceRunStatusUncertain ProtoMaintenanceRunStatus = "uncertain"
+)
+
+// Valid indicates whether the value is a known member of the ProtoMaintenanceRunStatus enum.
+func (e ProtoMaintenanceRunStatus) Valid() bool {
+	switch e {
+	case ProtoMaintenanceRunStatusCanceled:
+		return true
+	case ProtoMaintenanceRunStatusFailed:
+		return true
+	case ProtoMaintenanceRunStatusQueued:
+		return true
+	case ProtoMaintenanceRunStatusRunning:
+		return true
+	case ProtoMaintenanceRunStatusSucceeded:
+		return true
+	case ProtoMaintenanceRunStatusUncertain:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProtoOwnerSummaryRole.
+const (
+	ProtoOwnerSummaryRoleAdmin      ProtoOwnerSummaryRole = "admin"
+	ProtoOwnerSummaryRoleSuperAdmin ProtoOwnerSummaryRole = "super_admin"
+	ProtoOwnerSummaryRoleSupplier   ProtoOwnerSummaryRole = "supplier"
+	ProtoOwnerSummaryRoleUser       ProtoOwnerSummaryRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the ProtoOwnerSummaryRole enum.
+func (e ProtoOwnerSummaryRole) Valid() bool {
+	switch e {
+	case ProtoOwnerSummaryRoleAdmin:
+		return true
+	case ProtoOwnerSummaryRoleSuperAdmin:
+		return true
+	case ProtoOwnerSummaryRoleSupplier:
+		return true
+	case ProtoOwnerSummaryRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProtoResourceStatus.
+const (
+	ProtoResourceStatusAbnormal    ProtoResourceStatus = "abnormal"
+	ProtoResourceStatusDeleted     ProtoResourceStatus = "deleted"
+	ProtoResourceStatusDisabled    ProtoResourceStatus = "disabled"
+	ProtoResourceStatusIdentifying ProtoResourceStatus = "identifying"
+	ProtoResourceStatusNormal      ProtoResourceStatus = "normal"
+	ProtoResourceStatusPending     ProtoResourceStatus = "pending"
+	ProtoResourceStatusValidating  ProtoResourceStatus = "validating"
+)
+
+// Valid indicates whether the value is a known member of the ProtoResourceStatus enum.
+func (e ProtoResourceStatus) Valid() bool {
+	switch e {
+	case ProtoResourceStatusAbnormal:
+		return true
+	case ProtoResourceStatusDeleted:
+		return true
+	case ProtoResourceStatusDisabled:
+		return true
+	case ProtoResourceStatusIdentifying:
+		return true
+	case ProtoResourceStatusNormal:
+		return true
+	case ProtoResourceStatusPending:
+		return true
+	case ProtoResourceStatusValidating:
 		return true
 	default:
 		return false
@@ -3935,13 +4259,13 @@ func (e ResourceBulkSelectionMode) Valid() bool {
 
 // Defines values for ResourceBulkSelection0Mode.
 const (
-	ResourceBulkSelection0ModeIds ResourceBulkSelection0Mode = "ids"
+	Ids ResourceBulkSelection0Mode = "ids"
 )
 
 // Valid indicates whether the value is a known member of the ResourceBulkSelection0Mode enum.
 func (e ResourceBulkSelection0Mode) Valid() bool {
 	switch e {
-	case ResourceBulkSelection0ModeIds:
+	case Ids:
 		return true
 	default:
 		return false
@@ -4341,6 +4665,7 @@ const (
 	GetAdminAllocationsParamsTypeGmail     GetAdminAllocationsParamsType = "gmail"
 	GetAdminAllocationsParamsTypeIcloud    GetAdminAllocationsParamsType = "icloud"
 	GetAdminAllocationsParamsTypeMicrosoft GetAdminAllocationsParamsType = "microsoft"
+	GetAdminAllocationsParamsTypeProto     GetAdminAllocationsParamsType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminAllocationsParamsType enum.
@@ -4353,6 +4678,8 @@ func (e GetAdminAllocationsParamsType) Valid() bool {
 	case GetAdminAllocationsParamsTypeIcloud:
 		return true
 	case GetAdminAllocationsParamsTypeMicrosoft:
+		return true
+	case GetAdminAllocationsParamsTypeProto:
 		return true
 	default:
 		return false
@@ -4410,6 +4737,7 @@ const (
 	GetAdminAllocationParamsTypeGmail     GetAdminAllocationParamsType = "gmail"
 	GetAdminAllocationParamsTypeIcloud    GetAdminAllocationParamsType = "icloud"
 	GetAdminAllocationParamsTypeMicrosoft GetAdminAllocationParamsType = "microsoft"
+	GetAdminAllocationParamsTypeProto     GetAdminAllocationParamsType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminAllocationParamsType enum.
@@ -4422,6 +4750,8 @@ func (e GetAdminAllocationParamsType) Valid() bool {
 	case GetAdminAllocationParamsTypeIcloud:
 		return true
 	case GetAdminAllocationParamsTypeMicrosoft:
+		return true
+	case GetAdminAllocationParamsTypeProto:
 		return true
 	default:
 		return false
@@ -4637,22 +4967,22 @@ func (e GetAdminInvitesParamsKind) Valid() bool {
 
 // Defines values for GetAdminInvitesParamsOwnerRole.
 const (
-	GetAdminInvitesParamsOwnerRoleAdmin      GetAdminInvitesParamsOwnerRole = "admin"
-	GetAdminInvitesParamsOwnerRoleSuperAdmin GetAdminInvitesParamsOwnerRole = "super_admin"
-	GetAdminInvitesParamsOwnerRoleSupplier   GetAdminInvitesParamsOwnerRole = "supplier"
-	GetAdminInvitesParamsOwnerRoleUser       GetAdminInvitesParamsOwnerRole = "user"
+	Admin      GetAdminInvitesParamsOwnerRole = "admin"
+	SuperAdmin GetAdminInvitesParamsOwnerRole = "super_admin"
+	Supplier   GetAdminInvitesParamsOwnerRole = "supplier"
+	User       GetAdminInvitesParamsOwnerRole = "user"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminInvitesParamsOwnerRole enum.
 func (e GetAdminInvitesParamsOwnerRole) Valid() bool {
 	switch e {
-	case GetAdminInvitesParamsOwnerRoleAdmin:
+	case Admin:
 		return true
-	case GetAdminInvitesParamsOwnerRoleSuperAdmin:
+	case SuperAdmin:
 		return true
-	case GetAdminInvitesParamsOwnerRoleSupplier:
+	case Supplier:
 		return true
-	case GetAdminInvitesParamsOwnerRoleUser:
+	case User:
 		return true
 	default:
 		return false
@@ -4692,6 +5022,7 @@ const (
 	GetAdminMessagesParamsTypeGmail     GetAdminMessagesParamsType = "gmail"
 	GetAdminMessagesParamsTypeIcloud    GetAdminMessagesParamsType = "icloud"
 	GetAdminMessagesParamsTypeMicrosoft GetAdminMessagesParamsType = "microsoft"
+	GetAdminMessagesParamsTypeProto     GetAdminMessagesParamsType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminMessagesParamsType enum.
@@ -4705,6 +5036,8 @@ func (e GetAdminMessagesParamsType) Valid() bool {
 		return true
 	case GetAdminMessagesParamsTypeMicrosoft:
 		return true
+	case GetAdminMessagesParamsTypeProto:
+		return true
 	default:
 		return false
 	}
@@ -4716,6 +5049,7 @@ const (
 	GetAdminMessageParamsTypeGmail     GetAdminMessageParamsType = "gmail"
 	GetAdminMessageParamsTypeIcloud    GetAdminMessageParamsType = "icloud"
 	GetAdminMessageParamsTypeMicrosoft GetAdminMessageParamsType = "microsoft"
+	GetAdminMessageParamsTypeProto     GetAdminMessageParamsType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminMessageParamsType enum.
@@ -4728,6 +5062,152 @@ func (e GetAdminMessageParamsType) Valid() bool {
 	case GetAdminMessageParamsTypeIcloud:
 		return true
 	case GetAdminMessageParamsTypeMicrosoft:
+		return true
+	case GetAdminMessageParamsTypeProto:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminProtoResourcesParamsStatus.
+const (
+	GetAdminProtoResourcesParamsStatusAbnormal    GetAdminProtoResourcesParamsStatus = "abnormal"
+	GetAdminProtoResourcesParamsStatusDeleted     GetAdminProtoResourcesParamsStatus = "deleted"
+	GetAdminProtoResourcesParamsStatusDisabled    GetAdminProtoResourcesParamsStatus = "disabled"
+	GetAdminProtoResourcesParamsStatusIdentifying GetAdminProtoResourcesParamsStatus = "identifying"
+	GetAdminProtoResourcesParamsStatusNormal      GetAdminProtoResourcesParamsStatus = "normal"
+	GetAdminProtoResourcesParamsStatusPending     GetAdminProtoResourcesParamsStatus = "pending"
+	GetAdminProtoResourcesParamsStatusValidating  GetAdminProtoResourcesParamsStatus = "validating"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminProtoResourcesParamsStatus enum.
+func (e GetAdminProtoResourcesParamsStatus) Valid() bool {
+	switch e {
+	case GetAdminProtoResourcesParamsStatusAbnormal:
+		return true
+	case GetAdminProtoResourcesParamsStatusDeleted:
+		return true
+	case GetAdminProtoResourcesParamsStatusDisabled:
+		return true
+	case GetAdminProtoResourcesParamsStatusIdentifying:
+		return true
+	case GetAdminProtoResourcesParamsStatusNormal:
+		return true
+	case GetAdminProtoResourcesParamsStatusPending:
+		return true
+	case GetAdminProtoResourcesParamsStatusValidating:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostAdminProtoResourceBatchParamsAction.
+const (
+	PostAdminProtoResourceBatchParamsActionDelete     PostAdminProtoResourceBatchParamsAction = "delete"
+	PostAdminProtoResourceBatchParamsActionDisable    PostAdminProtoResourceBatchParamsAction = "disable"
+	PostAdminProtoResourceBatchParamsActionHistory    PostAdminProtoResourceBatchParamsAction = "history"
+	PostAdminProtoResourceBatchParamsActionPublish    PostAdminProtoResourceBatchParamsAction = "publish"
+	PostAdminProtoResourceBatchParamsActionUnpublish  PostAdminProtoResourceBatchParamsAction = "unpublish"
+	PostAdminProtoResourceBatchParamsActionValidation PostAdminProtoResourceBatchParamsAction = "validation"
+)
+
+// Valid indicates whether the value is a known member of the PostAdminProtoResourceBatchParamsAction enum.
+func (e PostAdminProtoResourceBatchParamsAction) Valid() bool {
+	switch e {
+	case PostAdminProtoResourceBatchParamsActionDelete:
+		return true
+	case PostAdminProtoResourceBatchParamsActionDisable:
+		return true
+	case PostAdminProtoResourceBatchParamsActionHistory:
+		return true
+	case PostAdminProtoResourceBatchParamsActionPublish:
+		return true
+	case PostAdminProtoResourceBatchParamsActionUnpublish:
+		return true
+	case PostAdminProtoResourceBatchParamsActionValidation:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostAdminProtoResourceBulkParamsCommand.
+const (
+	PostAdminProtoResourceBulkParamsCommandDelete    PostAdminProtoResourceBulkParamsCommand = "delete"
+	PostAdminProtoResourceBulkParamsCommandDisable   PostAdminProtoResourceBulkParamsCommand = "disable"
+	PostAdminProtoResourceBulkParamsCommandHistory   PostAdminProtoResourceBulkParamsCommand = "history"
+	PostAdminProtoResourceBulkParamsCommandPublish   PostAdminProtoResourceBulkParamsCommand = "publish"
+	PostAdminProtoResourceBulkParamsCommandUnpublish PostAdminProtoResourceBulkParamsCommand = "unpublish"
+	PostAdminProtoResourceBulkParamsCommandValidate  PostAdminProtoResourceBulkParamsCommand = "validate"
+)
+
+// Valid indicates whether the value is a known member of the PostAdminProtoResourceBulkParamsCommand enum.
+func (e PostAdminProtoResourceBulkParamsCommand) Valid() bool {
+	switch e {
+	case PostAdminProtoResourceBulkParamsCommandDelete:
+		return true
+	case PostAdminProtoResourceBulkParamsCommandDisable:
+		return true
+	case PostAdminProtoResourceBulkParamsCommandHistory:
+		return true
+	case PostAdminProtoResourceBulkParamsCommandPublish:
+		return true
+	case PostAdminProtoResourceBulkParamsCommandUnpublish:
+		return true
+	case PostAdminProtoResourceBulkParamsCommandValidate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostAdminProtoResourceImportMultipartBodyErrorStrategy.
+const (
+	PostAdminProtoResourceImportMultipartBodyErrorStrategyAbort PostAdminProtoResourceImportMultipartBodyErrorStrategy = "abort"
+	PostAdminProtoResourceImportMultipartBodyErrorStrategySkip  PostAdminProtoResourceImportMultipartBodyErrorStrategy = "skip"
+)
+
+// Valid indicates whether the value is a known member of the PostAdminProtoResourceImportMultipartBodyErrorStrategy enum.
+func (e PostAdminProtoResourceImportMultipartBodyErrorStrategy) Valid() bool {
+	switch e {
+	case PostAdminProtoResourceImportMultipartBodyErrorStrategyAbort:
+		return true
+	case PostAdminProtoResourceImportMultipartBodyErrorStrategySkip:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostAdminProtoResourceCommandParamsCommand.
+const (
+	PostAdminProtoResourceCommandParamsCommandDisable   PostAdminProtoResourceCommandParamsCommand = "disable"
+	PostAdminProtoResourceCommandParamsCommandEnable    PostAdminProtoResourceCommandParamsCommand = "enable"
+	PostAdminProtoResourceCommandParamsCommandHistory   PostAdminProtoResourceCommandParamsCommand = "history"
+	PostAdminProtoResourceCommandParamsCommandPublish   PostAdminProtoResourceCommandParamsCommand = "publish"
+	PostAdminProtoResourceCommandParamsCommandRecover   PostAdminProtoResourceCommandParamsCommand = "recover"
+	PostAdminProtoResourceCommandParamsCommandUnpublish PostAdminProtoResourceCommandParamsCommand = "unpublish"
+	PostAdminProtoResourceCommandParamsCommandValidate  PostAdminProtoResourceCommandParamsCommand = "validate"
+)
+
+// Valid indicates whether the value is a known member of the PostAdminProtoResourceCommandParamsCommand enum.
+func (e PostAdminProtoResourceCommandParamsCommand) Valid() bool {
+	switch e {
+	case PostAdminProtoResourceCommandParamsCommandDisable:
+		return true
+	case PostAdminProtoResourceCommandParamsCommandEnable:
+		return true
+	case PostAdminProtoResourceCommandParamsCommandHistory:
+		return true
+	case PostAdminProtoResourceCommandParamsCommandPublish:
+		return true
+	case PostAdminProtoResourceCommandParamsCommandRecover:
+		return true
+	case PostAdminProtoResourceCommandParamsCommandUnpublish:
+		return true
+	case PostAdminProtoResourceCommandParamsCommandValidate:
 		return true
 	default:
 		return false
@@ -4865,28 +5345,28 @@ func (e GetAdminProxyStatsParamsIp) Valid() bool {
 
 // Defines values for GetAdminProxyStatsParamsStatus.
 const (
-	Abnormal GetAdminProxyStatsParamsStatus = "abnormal"
-	Checking GetAdminProxyStatsParamsStatus = "checking"
-	Disabled GetAdminProxyStatsParamsStatus = "disabled"
-	Expired  GetAdminProxyStatsParamsStatus = "expired"
-	Normal   GetAdminProxyStatsParamsStatus = "normal"
-	Pending  GetAdminProxyStatsParamsStatus = "pending"
+	GetAdminProxyStatsParamsStatusAbnormal GetAdminProxyStatsParamsStatus = "abnormal"
+	GetAdminProxyStatsParamsStatusChecking GetAdminProxyStatsParamsStatus = "checking"
+	GetAdminProxyStatsParamsStatusDisabled GetAdminProxyStatsParamsStatus = "disabled"
+	GetAdminProxyStatsParamsStatusExpired  GetAdminProxyStatsParamsStatus = "expired"
+	GetAdminProxyStatsParamsStatusNormal   GetAdminProxyStatsParamsStatus = "normal"
+	GetAdminProxyStatsParamsStatusPending  GetAdminProxyStatsParamsStatus = "pending"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProxyStatsParamsStatus enum.
 func (e GetAdminProxyStatsParamsStatus) Valid() bool {
 	switch e {
-	case Abnormal:
+	case GetAdminProxyStatsParamsStatusAbnormal:
 		return true
-	case Checking:
+	case GetAdminProxyStatsParamsStatusChecking:
 		return true
-	case Disabled:
+	case GetAdminProxyStatsParamsStatusDisabled:
 		return true
-	case Expired:
+	case GetAdminProxyStatsParamsStatusExpired:
 		return true
-	case Normal:
+	case GetAdminProxyStatsParamsStatusNormal:
 		return true
-	case Pending:
+	case GetAdminProxyStatsParamsStatusPending:
 		return true
 	default:
 		return false
@@ -4949,6 +5429,7 @@ const (
 	PostAdminMicrosoftResourceMessagesFetchParamsTypeGmail     PostAdminMicrosoftResourceMessagesFetchParamsType = "gmail"
 	PostAdminMicrosoftResourceMessagesFetchParamsTypeIcloud    PostAdminMicrosoftResourceMessagesFetchParamsType = "icloud"
 	PostAdminMicrosoftResourceMessagesFetchParamsTypeMicrosoft PostAdminMicrosoftResourceMessagesFetchParamsType = "microsoft"
+	PostAdminMicrosoftResourceMessagesFetchParamsTypeProto     PostAdminMicrosoftResourceMessagesFetchParamsType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the PostAdminMicrosoftResourceMessagesFetchParamsType enum.
@@ -4959,6 +5440,8 @@ func (e PostAdminMicrosoftResourceMessagesFetchParamsType) Valid() bool {
 	case PostAdminMicrosoftResourceMessagesFetchParamsTypeIcloud:
 		return true
 	case PostAdminMicrosoftResourceMessagesFetchParamsTypeMicrosoft:
+		return true
+	case PostAdminMicrosoftResourceMessagesFetchParamsTypeProto:
 		return true
 	default:
 		return false
@@ -4972,6 +5455,8 @@ const (
 	GetAdminTasksParamsBizTypeIcloudResource       GetAdminTasksParamsBizType = "icloud_resource"
 	GetAdminTasksParamsBizTypeIcloudResourceImport GetAdminTasksParamsBizType = "icloud_resource_import"
 	GetAdminTasksParamsBizTypeMicrosoftResource    GetAdminTasksParamsBizType = "microsoft_resource"
+	GetAdminTasksParamsBizTypeProtoResource        GetAdminTasksParamsBizType = "proto_resource"
+	GetAdminTasksParamsBizTypeProtoResourceImport  GetAdminTasksParamsBizType = "proto_resource_import"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminTasksParamsBizType enum.
@@ -4986,6 +5471,10 @@ func (e GetAdminTasksParamsBizType) Valid() bool {
 	case GetAdminTasksParamsBizTypeIcloudResourceImport:
 		return true
 	case GetAdminTasksParamsBizTypeMicrosoftResource:
+		return true
+	case GetAdminTasksParamsBizTypeProtoResource:
+		return true
+	case GetAdminTasksParamsBizTypeProtoResourceImport:
 		return true
 	default:
 		return false
@@ -5005,6 +5494,10 @@ const (
 	IcloudRefresh    GetAdminTasksParamsSource = "icloud_refresh"
 	IcloudValidation GetAdminTasksParamsSource = "icloud_validation"
 	Import           GetAdminTasksParamsSource = "import"
+	ProtoBulk        GetAdminTasksParamsSource = "proto_bulk"
+	ProtoHistory     GetAdminTasksParamsSource = "proto_history"
+	ProtoImport      GetAdminTasksParamsSource = "proto_import"
+	ProtoValidation  GetAdminTasksParamsSource = "proto_validation"
 	ResourceHistory  GetAdminTasksParamsSource = "resource_history"
 	Token            GetAdminTasksParamsSource = "token"
 )
@@ -5033,6 +5526,14 @@ func (e GetAdminTasksParamsSource) Valid() bool {
 	case IcloudValidation:
 		return true
 	case Import:
+		return true
+	case ProtoBulk:
+		return true
+	case ProtoHistory:
+		return true
+	case ProtoImport:
+		return true
+	case ProtoValidation:
 		return true
 	case ResourceHistory:
 		return true
@@ -5497,6 +5998,7 @@ const (
 	GetBotProjectsParamsProductTypeGmailVariant GetBotProjectsParamsProductType = "gmail_variant"
 	GetBotProjectsParamsProductTypeIcloud       GetBotProjectsParamsProductType = "icloud"
 	GetBotProjectsParamsProductTypeMicrosoft    GetBotProjectsParamsProductType = "microsoft"
+	GetBotProjectsParamsProductTypeProto        GetBotProjectsParamsProductType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the GetBotProjectsParamsProductType enum.
@@ -5511,6 +6013,8 @@ func (e GetBotProjectsParamsProductType) Valid() bool {
 	case GetBotProjectsParamsProductTypeIcloud:
 		return true
 	case GetBotProjectsParamsProductTypeMicrosoft:
+		return true
+	case GetBotProjectsParamsProductTypeProto:
 		return true
 	default:
 		return false
@@ -5787,6 +6291,75 @@ func (e ConnectBotWebSocketParamsXBotChannel) Valid() bool {
 	}
 }
 
+// Defines values for OpenListProtoResourcesParamsStatus.
+const (
+	OpenListProtoResourcesParamsStatusAbnormal    OpenListProtoResourcesParamsStatus = "abnormal"
+	OpenListProtoResourcesParamsStatusDeleted     OpenListProtoResourcesParamsStatus = "deleted"
+	OpenListProtoResourcesParamsStatusDisabled    OpenListProtoResourcesParamsStatus = "disabled"
+	OpenListProtoResourcesParamsStatusIdentifying OpenListProtoResourcesParamsStatus = "identifying"
+	OpenListProtoResourcesParamsStatusNormal      OpenListProtoResourcesParamsStatus = "normal"
+	OpenListProtoResourcesParamsStatusPending     OpenListProtoResourcesParamsStatus = "pending"
+	OpenListProtoResourcesParamsStatusValidating  OpenListProtoResourcesParamsStatus = "validating"
+)
+
+// Valid indicates whether the value is a known member of the OpenListProtoResourcesParamsStatus enum.
+func (e OpenListProtoResourcesParamsStatus) Valid() bool {
+	switch e {
+	case OpenListProtoResourcesParamsStatusAbnormal:
+		return true
+	case OpenListProtoResourcesParamsStatusDeleted:
+		return true
+	case OpenListProtoResourcesParamsStatusDisabled:
+		return true
+	case OpenListProtoResourcesParamsStatusIdentifying:
+		return true
+	case OpenListProtoResourcesParamsStatusNormal:
+		return true
+	case OpenListProtoResourcesParamsStatusPending:
+		return true
+	case OpenListProtoResourcesParamsStatusValidating:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OpenPostProtoResourceBulkParamsCommand.
+const (
+	OpenPostProtoResourceBulkParamsCommandDelete   OpenPostProtoResourceBulkParamsCommand = "delete"
+	OpenPostProtoResourceBulkParamsCommandValidate OpenPostProtoResourceBulkParamsCommand = "validate"
+)
+
+// Valid indicates whether the value is a known member of the OpenPostProtoResourceBulkParamsCommand enum.
+func (e OpenPostProtoResourceBulkParamsCommand) Valid() bool {
+	switch e {
+	case OpenPostProtoResourceBulkParamsCommandDelete:
+		return true
+	case OpenPostProtoResourceBulkParamsCommandValidate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OpenPostProtoResourceImportMultipartBodyErrorStrategy.
+const (
+	OpenPostProtoResourceImportMultipartBodyErrorStrategyAbort OpenPostProtoResourceImportMultipartBodyErrorStrategy = "abort"
+	OpenPostProtoResourceImportMultipartBodyErrorStrategySkip  OpenPostProtoResourceImportMultipartBodyErrorStrategy = "skip"
+)
+
+// Valid indicates whether the value is a known member of the OpenPostProtoResourceImportMultipartBodyErrorStrategy enum.
+func (e OpenPostProtoResourceImportMultipartBodyErrorStrategy) Valid() bool {
+	switch e {
+	case OpenPostProtoResourceImportMultipartBodyErrorStrategyAbort:
+		return true
+	case OpenPostProtoResourceImportMultipartBodyErrorStrategySkip:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetOrdersParamsScope.
 const (
 	GetOrdersParamsScopeAll  GetOrdersParamsScope = "all"
@@ -5863,6 +6436,7 @@ const (
 	GetOrdersParamsProductTypeGmailVariant GetOrdersParamsProductType = "gmail_variant"
 	GetOrdersParamsProductTypeIcloud       GetOrdersParamsProductType = "icloud"
 	GetOrdersParamsProductTypeMicrosoft    GetOrdersParamsProductType = "microsoft"
+	GetOrdersParamsProductTypeProto        GetOrdersParamsProductType = "proto"
 	GetOrdersParamsProductTypeRandom       GetOrdersParamsProductType = "random"
 )
 
@@ -5878,6 +6452,8 @@ func (e GetOrdersParamsProductType) Valid() bool {
 	case GetOrdersParamsProductTypeIcloud:
 		return true
 	case GetOrdersParamsProductTypeMicrosoft:
+		return true
+	case GetOrdersParamsProductTypeProto:
 		return true
 	case GetOrdersParamsProductTypeRandom:
 		return true
@@ -6025,6 +6601,7 @@ const (
 	GetProjectsParamsProductTypeGmailVariant GetProjectsParamsProductType = "gmail_variant"
 	GetProjectsParamsProductTypeIcloud       GetProjectsParamsProductType = "icloud"
 	GetProjectsParamsProductTypeMicrosoft    GetProjectsParamsProductType = "microsoft"
+	GetProjectsParamsProductTypeProto        GetProjectsParamsProductType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the GetProjectsParamsProductType enum.
@@ -6039,6 +6616,80 @@ func (e GetProjectsParamsProductType) Valid() bool {
 	case GetProjectsParamsProductTypeIcloud:
 		return true
 	case GetProjectsParamsProductTypeMicrosoft:
+		return true
+	case GetProjectsParamsProductTypeProto:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListProtoResourcesParamsStatus.
+const (
+	Abnormal    ListProtoResourcesParamsStatus = "abnormal"
+	Deleted     ListProtoResourcesParamsStatus = "deleted"
+	Disabled    ListProtoResourcesParamsStatus = "disabled"
+	Identifying ListProtoResourcesParamsStatus = "identifying"
+	Normal      ListProtoResourcesParamsStatus = "normal"
+	Pending     ListProtoResourcesParamsStatus = "pending"
+	Validating  ListProtoResourcesParamsStatus = "validating"
+)
+
+// Valid indicates whether the value is a known member of the ListProtoResourcesParamsStatus enum.
+func (e ListProtoResourcesParamsStatus) Valid() bool {
+	switch e {
+	case Abnormal:
+		return true
+	case Deleted:
+		return true
+	case Disabled:
+		return true
+	case Identifying:
+		return true
+	case Normal:
+		return true
+	case Pending:
+		return true
+	case Validating:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostProtoResourceBulkParamsCommand.
+const (
+	PostProtoResourceBulkParamsCommandDelete   PostProtoResourceBulkParamsCommand = "delete"
+	PostProtoResourceBulkParamsCommandPublish  PostProtoResourceBulkParamsCommand = "publish"
+	PostProtoResourceBulkParamsCommandValidate PostProtoResourceBulkParamsCommand = "validate"
+)
+
+// Valid indicates whether the value is a known member of the PostProtoResourceBulkParamsCommand enum.
+func (e PostProtoResourceBulkParamsCommand) Valid() bool {
+	switch e {
+	case PostProtoResourceBulkParamsCommandDelete:
+		return true
+	case PostProtoResourceBulkParamsCommandPublish:
+		return true
+	case PostProtoResourceBulkParamsCommandValidate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostProtoResourceImportMultipartBodyErrorStrategy.
+const (
+	PostProtoResourceImportMultipartBodyErrorStrategyAbort PostProtoResourceImportMultipartBodyErrorStrategy = "abort"
+	PostProtoResourceImportMultipartBodyErrorStrategySkip  PostProtoResourceImportMultipartBodyErrorStrategy = "skip"
+)
+
+// Valid indicates whether the value is a known member of the PostProtoResourceImportMultipartBodyErrorStrategy enum.
+func (e PostProtoResourceImportMultipartBodyErrorStrategy) Valid() bool {
+	switch e {
+	case PostProtoResourceImportMultipartBodyErrorStrategyAbort:
+		return true
+	case PostProtoResourceImportMultipartBodyErrorStrategySkip:
 		return true
 	default:
 		return false
@@ -6092,19 +6743,19 @@ func (e GetRechargesParamsStatus) Valid() bool {
 
 // Defines values for GetResourcesParamsType.
 const (
-	GetResourcesParamsTypeAll       GetResourcesParamsType = "all"
-	GetResourcesParamsTypeDomain    GetResourcesParamsType = "domain"
-	GetResourcesParamsTypeMicrosoft GetResourcesParamsType = "microsoft"
+	All       GetResourcesParamsType = "all"
+	Domain    GetResourcesParamsType = "domain"
+	Microsoft GetResourcesParamsType = "microsoft"
 )
 
 // Valid indicates whether the value is a known member of the GetResourcesParamsType enum.
 func (e GetResourcesParamsType) Valid() bool {
 	switch e {
-	case GetResourcesParamsTypeAll:
+	case All:
 		return true
-	case GetResourcesParamsTypeDomain:
+	case Domain:
 		return true
-	case GetResourcesParamsTypeMicrosoft:
+	case Microsoft:
 		return true
 	default:
 		return false
@@ -6134,16 +6785,16 @@ func (e GetResourcesParamsPurpose) Valid() bool {
 
 // Defines values for PostResourceImportMultipartBodyErrorStrategy.
 const (
-	PostResourceImportMultipartBodyErrorStrategyAbort PostResourceImportMultipartBodyErrorStrategy = "abort"
-	PostResourceImportMultipartBodyErrorStrategySkip  PostResourceImportMultipartBodyErrorStrategy = "skip"
+	Abort PostResourceImportMultipartBodyErrorStrategy = "abort"
+	Skip  PostResourceImportMultipartBodyErrorStrategy = "skip"
 )
 
 // Valid indicates whether the value is a known member of the PostResourceImportMultipartBodyErrorStrategy enum.
 func (e PostResourceImportMultipartBodyErrorStrategy) Valid() bool {
 	switch e {
-	case PostResourceImportMultipartBodyErrorStrategyAbort:
+	case Abort:
 		return true
-	case PostResourceImportMultipartBodyErrorStrategySkip:
+	case Skip:
 		return true
 	default:
 		return false
@@ -6170,19 +6821,19 @@ func (e GetTicketsParamsTicketType) Valid() bool {
 
 // Defines values for GetTicketsParamsStatus.
 const (
-	Closed     GetTicketsParamsStatus = "closed"
-	Open       GetTicketsParamsStatus = "open"
-	Processing GetTicketsParamsStatus = "processing"
+	GetTicketsParamsStatusClosed     GetTicketsParamsStatus = "closed"
+	GetTicketsParamsStatusOpen       GetTicketsParamsStatus = "open"
+	GetTicketsParamsStatusProcessing GetTicketsParamsStatus = "processing"
 )
 
 // Valid indicates whether the value is a known member of the GetTicketsParamsStatus enum.
 func (e GetTicketsParamsStatus) Valid() bool {
 	switch e {
-	case Closed:
+	case GetTicketsParamsStatusClosed:
 		return true
-	case Open:
+	case GetTicketsParamsStatusOpen:
 		return true
-	case Processing:
+	case GetTicketsParamsStatusProcessing:
 		return true
 	default:
 		return false
@@ -6638,13 +7289,25 @@ type AdminDashboardStats struct {
 	MicrosoftTotalEmails         int     `json:"microsoftTotalEmails"`
 	NewUsers                     int     `json:"newUsers"`
 	PlatformRevenue              float32 `json:"platformRevenue"`
-	RechargeAmount               float32 `json:"rechargeAmount"`
-	RefundAmount                 float32 `json:"refundAmount"`
-	SpendAmount                  float32 `json:"spendAmount"`
-	SuccessfulCodeReceipts       int     `json:"successfulCodeReceipts"`
-	TotalOrders                  int     `json:"totalOrders"`
-	TotalUsers                   int     `json:"totalUsers"`
-	WithdrawAmount               float32 `json:"withdrawAmount"`
+
+	// ProtoAvailableEmails Healthy public Proto source accounts owned by active supplier or administrator accounts.
+	ProtoAvailableEmails                  int     `json:"protoAvailableEmails"`
+	ProtoAverageCodeReceiptSeconds        int     `json:"protoAverageCodeReceiptSeconds"`
+	ProtoAveragePurchaseActivationSeconds int     `json:"protoAveragePurchaseActivationSeconds"`
+	ProtoCodeReceipts                     int     `json:"protoCodeReceipts"`
+	ProtoCodeSuccessRate                  float32 `json:"protoCodeSuccessRate"`
+	ProtoPurchaseActivationSuccessRate    float32 `json:"protoPurchaseActivationSuccessRate"`
+	ProtoPurchaseActivations              int     `json:"protoPurchaseActivations"`
+
+	// ProtoTotalEmails Non-deleted Proto source accounts.
+	ProtoTotalEmails       int     `json:"protoTotalEmails"`
+	RechargeAmount         float32 `json:"rechargeAmount"`
+	RefundAmount           float32 `json:"refundAmount"`
+	SpendAmount            float32 `json:"spendAmount"`
+	SuccessfulCodeReceipts int     `json:"successfulCodeReceipts"`
+	TotalOrders            int     `json:"totalOrders"`
+	TotalUsers             int     `json:"totalUsers"`
+	WithdrawAmount         float32 `json:"withdrawAmount"`
 }
 
 // AdminDashboardTrendPoint defines model for AdminDashboardTrendPoint.
@@ -6679,6 +7342,11 @@ type AdminDashboardTrendPoint struct {
 	NewUsers                              int     `json:"newUsers"`
 	Orders                                int     `json:"orders"`
 	PlatformRevenue                       float32 `json:"platformRevenue"`
+	ProtoAvailableEmails                  int     `json:"protoAvailableEmails"`
+	ProtoAverageCodeReceiptSeconds        int     `json:"protoAverageCodeReceiptSeconds"`
+	ProtoCodeSuccessRate                  float32 `json:"protoCodeSuccessRate"`
+	ProtoReceivedCodes                    int     `json:"protoReceivedCodes"`
+	ProtoTotalEmails                      int     `json:"protoTotalEmails"`
 	RechargeAmount                        float32 `json:"rechargeAmount"`
 	RefundAmount                          float32 `json:"refundAmount"`
 	SpendAmount                           float32 `json:"spendAmount"`
@@ -10362,6 +11030,7 @@ type OrderProductTypeFacets struct {
 	GmailVariant int64 `json:"gmailVariant"`
 	Icloud       int64 `json:"icloud"`
 	Microsoft    int64 `json:"microsoft"`
+	Proto        int64 `json:"proto"`
 	Random       int64 `json:"random"`
 }
 
@@ -10679,11 +11348,13 @@ type ProjectInventoryResponse struct {
 	ActiveGmailAllocations     int                `json:"activeGmailAllocations"`
 	ActiveICloudAllocations    int                `json:"activeICloudAllocations"`
 	ActiveMicrosoftAllocations int                `json:"activeMicrosoftAllocations"`
+	ActiveProtoAllocations     *int               `json:"activeProtoAllocations,omitempty"`
 	Domain                     DomainInventory    `json:"domain"`
 	Gmail                      GmailInventory     `json:"gmail"`
 	Icloud                     ICloudInventory    `json:"icloud"`
 	Microsoft                  MicrosoftInventory `json:"microsoft"`
 	ProjectId                  int                `json:"projectId"`
+	Proto                      ProtoInventory     `json:"proto"`
 	TotalAvailable             int                `json:"totalAvailable"`
 }
 
@@ -10947,6 +11618,7 @@ type ProjectProductTypeFacets struct {
 	GmailVariant int `json:"gmailVariant"`
 	Icloud       int `json:"icloud"`
 	Microsoft    int `json:"microsoft"`
+	Proto        int `json:"proto"`
 }
 
 // ProjectStatusFacets defines model for ProjectStatusFacets.
@@ -10958,6 +11630,286 @@ type ProjectStatusFacets struct {
 	Rejected  int `json:"rejected"`
 	Reviewing int `json:"reviewing"`
 }
+
+// ProtoBatchRequest defines model for ProtoBatchRequest.
+type ProtoBatchRequest struct {
+	ResourceIds []int64 `json:"resourceIds"`
+}
+
+// ProtoBooleanFacets defines model for ProtoBooleanFacets.
+type ProtoBooleanFacets struct {
+	All int64 `json:"all"`
+	No  int64 `json:"no"`
+	Yes int64 `json:"yes"`
+}
+
+// ProtoBulkRequest defines model for ProtoBulkRequest.
+type ProtoBulkRequest struct {
+	Selection struct {
+		Filter      *ProtoResourceFilter          `json:"filter,omitempty"`
+		Mode        ProtoBulkRequestSelectionMode `json:"mode"`
+		ResourceIds *[]int64                      `json:"resourceIds,omitempty"`
+	} `json:"selection"`
+}
+
+// ProtoBulkRequestSelectionMode defines model for ProtoBulkRequest.Selection.Mode.
+type ProtoBulkRequestSelectionMode string
+
+// ProtoBulkTask defines model for ProtoBulkTask.
+type ProtoBulkTask struct {
+	Action         ProtoBulkTaskAction `json:"action"`
+	Affected       int                 `json:"affected"`
+	Attempts       *int                `json:"attempts,omitempty"`
+	CreatedAt      time.Time           `json:"createdAt"`
+	FinishedAt     *time.Time          `json:"finishedAt,omitempty"`
+	Kind           ProtoBulkTaskKind   `json:"kind"`
+	MaxAttempts    *int                `json:"maxAttempts,omitempty"`
+	OperatorUserId *int64              `json:"operatorUserId,omitempty"`
+	Processed      int                 `json:"processed"`
+	ReasonCounts   []struct {
+		Count  int    `json:"count"`
+		Reason string `json:"reason"`
+	} `json:"reasonCounts"`
+	RequestId    *string                   `json:"requestId,omitempty"`
+	Requested    int                       `json:"requested"`
+	ResourceType ProtoBulkTaskResourceType `json:"resourceType"`
+	Skipped      int                       `json:"skipped"`
+	StartedAt    *time.Time                `json:"startedAt,omitempty"`
+	Status       ProtoBulkTaskStatus       `json:"status"`
+	TaskId       string                    `json:"taskId"`
+	UpdatedAt    time.Time                 `json:"updatedAt"`
+}
+
+// ProtoBulkTaskAction defines model for ProtoBulkTask.Action.
+type ProtoBulkTaskAction string
+
+// ProtoBulkTaskKind defines model for ProtoBulkTask.Kind.
+type ProtoBulkTaskKind string
+
+// ProtoBulkTaskResourceType defines model for ProtoBulkTask.ResourceType.
+type ProtoBulkTaskResourceType string
+
+// ProtoBulkTaskStatus defines model for ProtoBulkTask.Status.
+type ProtoBulkTaskStatus string
+
+// ProtoCredentialsReplaceRequest defines model for ProtoCredentialsReplaceRequest.
+type ProtoCredentialsReplaceRequest struct {
+	Password *string `json:"password,omitempty"`
+	Version  int64   `json:"version"`
+}
+
+// ProtoImportItem defines model for ProtoImportItem.
+type ProtoImportItem struct {
+	Category      string                 `json:"category"`
+	LastSafeError *string                `json:"lastSafeError,omitempty"`
+	Line          int                    `json:"line"`
+	Outcome       ProtoImportItemOutcome `json:"outcome"`
+	ResourceId    *int64                 `json:"resourceId,omitempty"`
+}
+
+// ProtoImportItemOutcome defines model for ProtoImportItem.Outcome.
+type ProtoImportItemOutcome string
+
+// ProtoImportItemsResponse defines model for ProtoImportItemsResponse.
+type ProtoImportItemsResponse struct {
+	Items  []ProtoImportItem `json:"items"`
+	Limit  int               `json:"limit"`
+	Offset int               `json:"offset"`
+	Total  int64             `json:"total"`
+}
+
+// ProtoImportResponse defines model for ProtoImportResponse.
+type ProtoImportResponse struct {
+	Accepted         int                               `json:"accepted"`
+	CreatedAt        *time.Time                        `json:"createdAt,omitempty"`
+	DispatchAttempts int                               `json:"dispatchAttempts"`
+	DispatchStatus   ProtoImportResponseDispatchStatus `json:"dispatchStatus"`
+	Failed           int                               `json:"failed"`
+	FailureAvailable bool                              `json:"failureAvailable"`
+	ImportId         int64                             `json:"importId"`
+	Imported         int                               `json:"imported"`
+	LastSafeError    *string                           `json:"lastSafeError,omitempty"`
+	Reused           bool                              `json:"reused"`
+	Skipped          int                               `json:"skipped"`
+	Status           ProtoImportResponseStatus         `json:"status"`
+	UpdatedAt        *time.Time                        `json:"updatedAt,omitempty"`
+}
+
+// ProtoImportResponseDispatchStatus defines model for ProtoImportResponse.DispatchStatus.
+type ProtoImportResponseDispatchStatus string
+
+// ProtoImportResponseStatus defines model for ProtoImportResponse.Status.
+type ProtoImportResponseStatus string
+
+// ProtoInventory defines model for ProtoInventory.
+type ProtoInventory struct {
+	EligibleResources int  `json:"eligibleResources"`
+	Enabled           bool `json:"enabled"`
+	MainAvailable     int  `json:"mainAvailable"`
+	PublicAvailable   int  `json:"publicAvailable"`
+	TotalAvailable    int  `json:"totalAvailable"`
+}
+
+// ProtoMaintenanceListResponse defines model for ProtoMaintenanceListResponse.
+type ProtoMaintenanceListResponse struct {
+	Items  []ProtoMaintenanceRun `json:"items"`
+	Limit  int                   `json:"limit"`
+	Offset int                   `json:"offset"`
+	Total  int64                 `json:"total"`
+}
+
+// ProtoMaintenanceRun defines model for ProtoMaintenanceRun.
+type ProtoMaintenanceRun struct {
+	Attempts             int                       `json:"attempts"`
+	CreatedAt            time.Time                 `json:"createdAt"`
+	CredentialRevision   int64                     `json:"credentialRevision"`
+	FinishedAt           *time.Time                `json:"finishedAt,omitempty"`
+	Id                   int64                     `json:"id"`
+	Kind                 ProtoMaintenanceRunKind   `json:"kind"`
+	LastSafeError        *string                   `json:"lastSafeError,omitempty"`
+	MaxAttempts          int                       `json:"maxAttempts"`
+	QueuedAt             time.Time                 `json:"queuedAt"`
+	RequestId            *string                   `json:"requestId,omitempty"`
+	ResourceId           int64                     `json:"resourceId"`
+	StartedAt            *time.Time                `json:"startedAt,omitempty"`
+	Status               ProtoMaintenanceRunStatus `json:"status"`
+	UpdatedAt            time.Time                 `json:"updatedAt"`
+	ValidationGeneration int64                     `json:"validationGeneration"`
+}
+
+// ProtoMaintenanceRunKind defines model for ProtoMaintenanceRun.Kind.
+type ProtoMaintenanceRunKind string
+
+// ProtoMaintenanceRunStatus defines model for ProtoMaintenanceRun.Status.
+type ProtoMaintenanceRunStatus string
+
+// ProtoOwnerSummary defines model for ProtoOwnerSummary.
+type ProtoOwnerSummary struct {
+	Email     string                `json:"email"`
+	Enabled   bool                  `json:"enabled"`
+	GroupName string                `json:"groupName"`
+	Id        int64                 `json:"id"`
+	Nickname  string                `json:"nickname"`
+	Role      ProtoOwnerSummaryRole `json:"role"`
+}
+
+// ProtoOwnerSummaryRole defines model for ProtoOwnerSummary.Role.
+type ProtoOwnerSummaryRole string
+
+// ProtoResource defines model for ProtoResource.
+type ProtoResource struct {
+	CreatedAt           time.Time           `json:"createdAt"`
+	CredentialRevision  int64               `json:"credentialRevision"`
+	CredentialUpdatedAt time.Time           `json:"credentialUpdatedAt"`
+	Email               openapi_types.Email `json:"email"`
+	ForSale             bool                `json:"forSale"`
+	Id                  int64               `json:"id"`
+	LastAllocatedAt     *time.Time          `json:"lastAllocatedAt,omitempty"`
+	LastCheckedAt       *time.Time          `json:"lastCheckedAt,omitempty"`
+	LastSafeError       *string             `json:"lastSafeError,omitempty"`
+
+	// LongLived Supplier-provided lifecycle classification; not a protocol lifetime guarantee.
+	LongLived            bool                `json:"longLived"`
+	Owner                *ProtoOwnerSummary  `json:"owner,omitempty"`
+	OwnerUserId          int64               `json:"ownerUserId"`
+	PasswordConfigured   bool                `json:"passwordConfigured"`
+	QualityScore         int                 `json:"qualityScore"`
+	Status               ProtoResourceStatus `json:"status"`
+	Suffix               string              `json:"suffix"`
+	UpdatedAt            time.Time           `json:"updatedAt"`
+	ValidationFailures   int                 `json:"validationFailures"`
+	ValidationGeneration int64               `json:"validationGeneration"`
+	Version              int64               `json:"version"`
+}
+
+// ProtoResourceCommandRequest defines model for ProtoResourceCommandRequest.
+type ProtoResourceCommandRequest struct {
+	Version int64 `json:"version"`
+}
+
+// ProtoResourceEditRequest Supply email, ownerId, or both. Identity edits are blocked while an active Proto allocation exists.
+type ProtoResourceEditRequest struct {
+	Email        *openapi_types.Email `json:"email,omitempty"`
+	LongLived    *bool                `json:"longLived,omitempty"`
+	OwnerId      *int64               `json:"ownerId,omitempty"`
+	Password     *string              `json:"password,omitempty"`
+	QualityScore *int                 `json:"qualityScore,omitempty"`
+	Version      int64                `json:"version"`
+}
+
+// ProtoResourceFacets defines model for ProtoResourceFacets.
+type ProtoResourceFacets struct {
+	Abnormal    int64              `json:"abnormal"`
+	All         int64              `json:"all"`
+	Deleted     int64              `json:"deleted"`
+	Disabled    int64              `json:"disabled"`
+	ForSale     ProtoBooleanFacets `json:"forSale"`
+	Identifying int64              `json:"identifying"`
+	LongLived   ProtoBooleanFacets `json:"longLived"`
+	Normal      int64              `json:"normal"`
+	Pending     int64              `json:"pending"`
+	Status      struct {
+		Abnormal    int64 `json:"abnormal"`
+		All         int64 `json:"all"`
+		Deleted     int64 `json:"deleted"`
+		Disabled    int64 `json:"disabled"`
+		Identifying int64 `json:"identifying"`
+		Normal      int64 `json:"normal"`
+		Pending     int64 `json:"pending"`
+		Validating  int64 `json:"validating"`
+	} `json:"status"`
+	Suffixes []struct {
+		Count int64  `json:"count"`
+		Key   string `json:"key"`
+	} `json:"suffixes"`
+	Validating int64 `json:"validating"`
+}
+
+// ProtoResourceFilter defines model for ProtoResourceFilter.
+type ProtoResourceFilter struct {
+	CreatedFrom *time.Time           `json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time           `json:"createdTo,omitempty"`
+	ForSale     *bool                `json:"forSale,omitempty"`
+	LongLived   *bool                `json:"longLived,omitempty"`
+	OwnerId     *int64               `json:"ownerId,omitempty"`
+	Search      *string              `json:"search,omitempty"`
+	Status      *ProtoResourceStatus `json:"status,omitempty"`
+	Suffix      *string              `json:"suffix,omitempty"`
+}
+
+// ProtoResourceListResponse defines model for ProtoResourceListResponse.
+type ProtoResourceListResponse struct {
+	Facets      ProtoResourceFacets `json:"facets"`
+	HasMore     bool                `json:"hasMore"`
+	Items       []ProtoResource     `json:"items"`
+	Limit       int                 `json:"limit"`
+	NextAfterId *int64              `json:"nextAfterId,omitempty"`
+	Offset      int                 `json:"offset"`
+
+	// Total Omitted when includeTotal is false.
+	Total *int64 `json:"total,omitempty"`
+}
+
+// ProtoResourceMutationResponse defines model for ProtoResourceMutationResponse.
+type ProtoResourceMutationResponse struct {
+	ForSale              bool                `json:"forSale"`
+	Queued               bool                `json:"queued"`
+	ResourceId           int64               `json:"resourceId"`
+	Reused               bool                `json:"reused"`
+	Status               ProtoResourceStatus `json:"status"`
+	Todo                 bool                `json:"todo"`
+	ValidationGeneration int64               `json:"validationGeneration"`
+	Version              int64               `json:"version"`
+}
+
+// ProtoResourceStatus defines model for ProtoResourceStatus.
+type ProtoResourceStatus string
+
+// ProtoValidationBatchResponse defines model for ProtoValidationBatchResponse.
+type ProtoValidationBatchResponse = ProtoBulkTask
+
+// ProtoValidationResponse defines model for ProtoValidationResponse.
+type ProtoValidationResponse = ProtoResourceMutationResponse
 
 // ProxyBindingItem defines model for ProxyBindingItem.
 type ProxyBindingItem struct {
@@ -11842,6 +12794,21 @@ type OffsetQuery = int
 
 // OptionalCsrfToken defines model for OptionalCsrfToken.
 type OptionalCsrfToken = string
+
+// ProtoBulkTaskId defines model for ProtoBulkTaskId.
+type ProtoBulkTaskId = string
+
+// ProtoIncludeFacetsQuery defines model for ProtoIncludeFacetsQuery.
+type ProtoIncludeFacetsQuery = bool
+
+// ProtoIncludeTotalQuery defines model for ProtoIncludeTotalQuery.
+type ProtoIncludeTotalQuery = bool
+
+// ProtoLongLivedQuery defines model for ProtoLongLivedQuery.
+type ProtoLongLivedQuery = bool
+
+// ProtoSuffixQuery defines model for ProtoSuffixQuery.
+type ProtoSuffixQuery = string
 
 // TicketNoPath defines model for TicketNoPath.
 type TicketNoPath = string
@@ -13126,6 +14093,121 @@ type PostAdminProjectRelistParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// GetAdminProtoResourcesParams defines parameters for GetAdminProtoResources.
+type GetAdminProtoResourcesParams struct {
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *LimitQuery  `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// AfterId Last ticket id from the previous page.
+	AfterId     *AfterIdQuery        `form:"afterId,omitempty" json:"afterId,omitempty"`
+	CreatedFrom *CreatedFromQuery    `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *CreatedToQuery      `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+	Suffix      *ProtoSuffixQuery    `form:"suffix,omitempty" json:"suffix,omitempty"`
+	LongLived   *ProtoLongLivedQuery `form:"longLived,omitempty" json:"longLived,omitempty"`
+
+	// IncludeTotal When false, the response omits total and returns only cursor pagination data.
+	IncludeTotal  *ProtoIncludeTotalQuery  `form:"includeTotal,omitempty" json:"includeTotal,omitempty"`
+	IncludeFacets *ProtoIncludeFacetsQuery `form:"includeFacets,omitempty" json:"includeFacets,omitempty"`
+	OwnerId       *int64                   `form:"ownerId,omitempty" json:"ownerId,omitempty"`
+
+	// Search Resource ID, full mailbox email, exact local part, @suffix, or owner email/nickname.
+	Search  *string                             `form:"search,omitempty" json:"search,omitempty"`
+	Status  *GetAdminProtoResourcesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	ForSale *bool                               `form:"forSale,omitempty" json:"forSale,omitempty"`
+}
+
+// GetAdminProtoResourcesParamsStatus defines parameters for GetAdminProtoResources.
+type GetAdminProtoResourcesParamsStatus string
+
+// PostAdminProtoResourceBatchParams defines parameters for PostAdminProtoResourceBatch.
+type PostAdminProtoResourceBatchParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminProtoResourceBatchParamsAction defines parameters for PostAdminProtoResourceBatch.
+type PostAdminProtoResourceBatchParamsAction string
+
+// PostAdminProtoResourceBulkParams defines parameters for PostAdminProtoResourceBulk.
+type PostAdminProtoResourceBulkParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminProtoResourceBulkParamsCommand defines parameters for PostAdminProtoResourceBulk.
+type PostAdminProtoResourceBulkParamsCommand string
+
+// PostAdminProtoResourceImportMultipartBody defines parameters for PostAdminProtoResourceImport.
+type PostAdminProtoResourceImportMultipartBody struct {
+	ErrorStrategy *PostAdminProtoResourceImportMultipartBodyErrorStrategy `json:"errorStrategy,omitempty"`
+	File          openapi_types.File                                      `json:"file"`
+	LongLived     *bool                                                   `json:"longLived,omitempty"`
+	OwnerId       int64                                                   `json:"ownerId"`
+}
+
+// PostAdminProtoResourceImportParams defines parameters for PostAdminProtoResourceImport.
+type PostAdminProtoResourceImportParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminProtoResourceImportMultipartBodyErrorStrategy defines parameters for PostAdminProtoResourceImport.
+type PostAdminProtoResourceImportMultipartBodyErrorStrategy string
+
+// GetAdminProtoResourceImportItemsParams defines parameters for GetAdminProtoResourceImportItems.
+type GetAdminProtoResourceImportItemsParams struct {
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int         `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostAdminProtoResourceValidationsParams defines parameters for PostAdminProtoResourceValidations.
+type PostAdminProtoResourceValidationsParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// DeleteAdminProtoResourceParams defines parameters for DeleteAdminProtoResource.
+type DeleteAdminProtoResourceParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PatchAdminProtoResourceParams defines parameters for PatchAdminProtoResource.
+type PatchAdminProtoResourceParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PutAdminProtoResourceCredentialsParams defines parameters for PutAdminProtoResourceCredentials.
+type PutAdminProtoResourceCredentialsParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// GetAdminProtoResourceMaintenanceParams defines parameters for GetAdminProtoResourceMaintenance.
+type GetAdminProtoResourceMaintenanceParams struct {
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *LimitQuery  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostAdminProtoResourceRecoverParams defines parameters for PostAdminProtoResourceRecover.
+type PostAdminProtoResourceRecoverParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminProtoResourceCommandParams defines parameters for PostAdminProtoResourceCommand.
+type PostAdminProtoResourceCommandParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminProtoResourceCommandParamsCommand defines parameters for PostAdminProtoResourceCommand.
+type PostAdminProtoResourceCommandParamsCommand string
+
 // GetAdminProxiesParams defines parameters for GetAdminProxies.
 type GetAdminProxiesParams struct {
 	Pool        *GetAdminProxiesParamsPool   `form:"pool,omitempty" json:"pool,omitempty"`
@@ -14253,6 +15335,80 @@ type GetLinuxDOCallbackParams struct {
 	Error *string `form:"error,omitempty" json:"error,omitempty"`
 }
 
+// OpenListProtoResourcesParams defines parameters for OpenListProtoResources.
+type OpenListProtoResourcesParams struct {
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *LimitQuery  `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// AfterId Last ticket id from the previous page.
+	AfterId     *AfterIdQuery        `form:"afterId,omitempty" json:"afterId,omitempty"`
+	CreatedFrom *CreatedFromQuery    `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *CreatedToQuery      `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+	Suffix      *ProtoSuffixQuery    `form:"suffix,omitempty" json:"suffix,omitempty"`
+	LongLived   *ProtoLongLivedQuery `form:"longLived,omitempty" json:"longLived,omitempty"`
+
+	// IncludeTotal When false, the response omits total and returns only cursor pagination data.
+	IncludeTotal  *ProtoIncludeTotalQuery             `form:"includeTotal,omitempty" json:"includeTotal,omitempty"`
+	IncludeFacets *ProtoIncludeFacetsQuery            `form:"includeFacets,omitempty" json:"includeFacets,omitempty"`
+	Search        *string                             `form:"search,omitempty" json:"search,omitempty"`
+	Status        *OpenListProtoResourcesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	ForSale       *bool                               `form:"forSale,omitempty" json:"forSale,omitempty"`
+}
+
+// OpenListProtoResourcesParamsStatus defines parameters for OpenListProtoResources.
+type OpenListProtoResourcesParamsStatus string
+
+// OpenPostProtoResourceBulkParams defines parameters for OpenPostProtoResourceBulk.
+type OpenPostProtoResourceBulkParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// OpenPostProtoResourceBulkParamsCommand defines parameters for OpenPostProtoResourceBulk.
+type OpenPostProtoResourceBulkParamsCommand string
+
+// OpenPostProtoResourceImportMultipartBody defines parameters for OpenPostProtoResourceImport.
+type OpenPostProtoResourceImportMultipartBody struct {
+	ErrorStrategy *OpenPostProtoResourceImportMultipartBodyErrorStrategy `json:"errorStrategy,omitempty"`
+	File          openapi_types.File                                     `json:"file"`
+	LongLived     *bool                                                  `json:"longLived,omitempty"`
+}
+
+// OpenPostProtoResourceImportParams defines parameters for OpenPostProtoResourceImport.
+type OpenPostProtoResourceImportParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// OpenPostProtoResourceImportMultipartBodyErrorStrategy defines parameters for OpenPostProtoResourceImport.
+type OpenPostProtoResourceImportMultipartBodyErrorStrategy string
+
+// OpenGetProtoResourceImportItemsParams defines parameters for OpenGetProtoResourceImportItems.
+type OpenGetProtoResourceImportItemsParams struct {
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int         `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// OpenPostProtoResourceValidationsParams defines parameters for OpenPostProtoResourceValidations.
+type OpenPostProtoResourceValidationsParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// OpenDeleteProtoResourceParams defines parameters for OpenDeleteProtoResource.
+type OpenDeleteProtoResourceParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// OpenPostProtoResourceValidateParams defines parameters for OpenPostProtoResourceValidate.
+type OpenPostProtoResourceValidateParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
 // GetOrdersParams defines parameters for GetOrders.
 type GetOrdersParams struct {
 	Scope       *GetOrdersParamsScope       `form:"scope,omitempty" json:"scope,omitempty"`
@@ -14419,6 +15575,89 @@ type PostProjectResubmitParams struct {
 
 	// XTurnstileToken Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface.
 	XTurnstileToken *TurnstileToken `json:"X-Turnstile-Token,omitempty"`
+}
+
+// ListProtoResourcesParams defines parameters for ListProtoResources.
+type ListProtoResourcesParams struct {
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *LimitQuery  `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// AfterId Last ticket id from the previous page.
+	AfterId     *AfterIdQuery        `form:"afterId,omitempty" json:"afterId,omitempty"`
+	CreatedFrom *CreatedFromQuery    `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *CreatedToQuery      `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+	Suffix      *ProtoSuffixQuery    `form:"suffix,omitempty" json:"suffix,omitempty"`
+	LongLived   *ProtoLongLivedQuery `form:"longLived,omitempty" json:"longLived,omitempty"`
+
+	// IncludeTotal When false, the response omits total and returns only cursor pagination data.
+	IncludeTotal  *ProtoIncludeTotalQuery         `form:"includeTotal,omitempty" json:"includeTotal,omitempty"`
+	IncludeFacets *ProtoIncludeFacetsQuery        `form:"includeFacets,omitempty" json:"includeFacets,omitempty"`
+	Search        *string                         `form:"search,omitempty" json:"search,omitempty"`
+	Status        *ListProtoResourcesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	ForSale       *bool                           `form:"forSale,omitempty" json:"forSale,omitempty"`
+}
+
+// ListProtoResourcesParamsStatus defines parameters for ListProtoResources.
+type ListProtoResourcesParamsStatus string
+
+// PostProtoResourceBulkParams defines parameters for PostProtoResourceBulk.
+type PostProtoResourceBulkParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostProtoResourceBulkParamsCommand defines parameters for PostProtoResourceBulk.
+type PostProtoResourceBulkParamsCommand string
+
+// PostProtoResourceImportMultipartBody defines parameters for PostProtoResourceImport.
+type PostProtoResourceImportMultipartBody struct {
+	ErrorStrategy *PostProtoResourceImportMultipartBodyErrorStrategy `json:"errorStrategy,omitempty"`
+	File          openapi_types.File                                 `json:"file"`
+	LongLived     *bool                                              `json:"longLived,omitempty"`
+}
+
+// PostProtoResourceImportParams defines parameters for PostProtoResourceImport.
+type PostProtoResourceImportParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// XTurnstileToken Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface.
+	XTurnstileToken *TurnstileToken `json:"X-Turnstile-Token,omitempty"`
+}
+
+// PostProtoResourceImportMultipartBodyErrorStrategy defines parameters for PostProtoResourceImport.
+type PostProtoResourceImportMultipartBodyErrorStrategy string
+
+// GetProtoResourceImportItemsParams defines parameters for GetProtoResourceImportItems.
+type GetProtoResourceImportItemsParams struct {
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int         `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostProtoResourceValidationsParams defines parameters for PostProtoResourceValidations.
+type PostProtoResourceValidationsParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// DeleteProtoResourceParams defines parameters for DeleteProtoResource.
+type DeleteProtoResourceParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostProtoResourcePublishParams defines parameters for PostProtoResourcePublish.
+type PostProtoResourcePublishParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostProtoResourceValidateParams defines parameters for PostProtoResourceValidate.
+type PostProtoResourceValidateParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 }
 
 // GetRechargesParams defines parameters for GetRecharges.
@@ -14884,6 +16123,33 @@ type PostAdminProjectDuplicateJSONRequestBody = AdminRejectProjectRequest
 // PostAdminProjectRejectJSONRequestBody defines body for PostAdminProjectReject for application/json ContentType.
 type PostAdminProjectRejectJSONRequestBody = AdminRejectProjectRequest
 
+// PostAdminProtoResourceBatchJSONRequestBody defines body for PostAdminProtoResourceBatch for application/json ContentType.
+type PostAdminProtoResourceBatchJSONRequestBody = ProtoBatchRequest
+
+// PostAdminProtoResourceBulkJSONRequestBody defines body for PostAdminProtoResourceBulk for application/json ContentType.
+type PostAdminProtoResourceBulkJSONRequestBody = ProtoBulkRequest
+
+// PostAdminProtoResourceImportMultipartRequestBody defines body for PostAdminProtoResourceImport for multipart/form-data ContentType.
+type PostAdminProtoResourceImportMultipartRequestBody PostAdminProtoResourceImportMultipartBody
+
+// PostAdminProtoResourceValidationsJSONRequestBody defines body for PostAdminProtoResourceValidations for application/json ContentType.
+type PostAdminProtoResourceValidationsJSONRequestBody = ProtoBatchRequest
+
+// DeleteAdminProtoResourceJSONRequestBody defines body for DeleteAdminProtoResource for application/json ContentType.
+type DeleteAdminProtoResourceJSONRequestBody = ProtoResourceCommandRequest
+
+// PatchAdminProtoResourceJSONRequestBody defines body for PatchAdminProtoResource for application/json ContentType.
+type PatchAdminProtoResourceJSONRequestBody = ProtoResourceEditRequest
+
+// PutAdminProtoResourceCredentialsJSONRequestBody defines body for PutAdminProtoResourceCredentials for application/json ContentType.
+type PutAdminProtoResourceCredentialsJSONRequestBody = ProtoCredentialsReplaceRequest
+
+// PostAdminProtoResourceRecoverJSONRequestBody defines body for PostAdminProtoResourceRecover for application/json ContentType.
+type PostAdminProtoResourceRecoverJSONRequestBody = ProtoResourceCommandRequest
+
+// PostAdminProtoResourceCommandJSONRequestBody defines body for PostAdminProtoResourceCommand for application/json ContentType.
+type PostAdminProtoResourceCommandJSONRequestBody = ProtoResourceCommandRequest
+
 // PostAdminProxyCheckBatchJSONRequestBody defines body for PostAdminProxyCheckBatch for application/json ContentType.
 type PostAdminProxyCheckBatchJSONRequestBody = CheckProxiesRequest
 
@@ -15037,6 +16303,21 @@ type PostNodeLocCompleteJSONRequestBody = LinuxDOCompleteRequest
 // PostNodeLocEmailCodeJSONRequestBody defines body for PostNodeLocEmailCode for application/json ContentType.
 type PostNodeLocEmailCodeJSONRequestBody = LinuxDOEmailCodeRequest
 
+// OpenPostProtoResourceBulkJSONRequestBody defines body for OpenPostProtoResourceBulk for application/json ContentType.
+type OpenPostProtoResourceBulkJSONRequestBody = ProtoBulkRequest
+
+// OpenPostProtoResourceImportMultipartRequestBody defines body for OpenPostProtoResourceImport for multipart/form-data ContentType.
+type OpenPostProtoResourceImportMultipartRequestBody OpenPostProtoResourceImportMultipartBody
+
+// OpenPostProtoResourceValidationsJSONRequestBody defines body for OpenPostProtoResourceValidations for application/json ContentType.
+type OpenPostProtoResourceValidationsJSONRequestBody = ProtoBatchRequest
+
+// OpenDeleteProtoResourceJSONRequestBody defines body for OpenDeleteProtoResource for application/json ContentType.
+type OpenDeleteProtoResourceJSONRequestBody = ProtoResourceCommandRequest
+
+// OpenPostProtoResourceValidateJSONRequestBody defines body for OpenPostProtoResourceValidate for application/json ContentType.
+type OpenPostProtoResourceValidateJSONRequestBody = ProtoResourceCommandRequest
+
 // PostOrderJSONRequestBody defines body for PostOrder for application/json ContentType.
 type PostOrderJSONRequestBody = CreateOrderRequest
 
@@ -15069,6 +16350,24 @@ type PostProjectJSONRequestBody = CreateProjectApplicationRequest
 
 // PostProjectResubmitJSONRequestBody defines body for PostProjectResubmit for application/json ContentType.
 type PostProjectResubmitJSONRequestBody = CreateProjectApplicationRequest
+
+// PostProtoResourceBulkJSONRequestBody defines body for PostProtoResourceBulk for application/json ContentType.
+type PostProtoResourceBulkJSONRequestBody = ProtoBulkRequest
+
+// PostProtoResourceImportMultipartRequestBody defines body for PostProtoResourceImport for multipart/form-data ContentType.
+type PostProtoResourceImportMultipartRequestBody PostProtoResourceImportMultipartBody
+
+// PostProtoResourceValidationsJSONRequestBody defines body for PostProtoResourceValidations for application/json ContentType.
+type PostProtoResourceValidationsJSONRequestBody = ProtoBatchRequest
+
+// DeleteProtoResourceJSONRequestBody defines body for DeleteProtoResource for application/json ContentType.
+type DeleteProtoResourceJSONRequestBody = ProtoResourceCommandRequest
+
+// PostProtoResourcePublishJSONRequestBody defines body for PostProtoResourcePublish for application/json ContentType.
+type PostProtoResourcePublishJSONRequestBody = ProtoResourceCommandRequest
+
+// PostProtoResourceValidateJSONRequestBody defines body for PostProtoResourceValidate for application/json ContentType.
+type PostProtoResourceValidateJSONRequestBody = ProtoResourceCommandRequest
 
 // PostRechargeJSONRequestBody defines body for PostRecharge for application/json ContentType.
 type PostRechargeJSONRequestBody = CreateRechargeRequest
@@ -16617,6 +17916,54 @@ type ServerInterface interface {
 	// Relist a delisted project
 	// (POST /v1/admin/projects/{projectId}/relist)
 	PostAdminProjectRelist(c *gin.Context, projectId int, params PostAdminProjectRelistParams)
+	// List Proto resources for administrators
+	// (GET /v1/admin/proto/resources)
+	GetAdminProtoResources(c *gin.Context, params GetAdminProtoResourcesParams)
+	// Run a lifecycle command for selected Proto resources
+	// (POST /v1/admin/proto/resources/batch/{action})
+	PostAdminProtoResourceBatch(c *gin.Context, action PostAdminProtoResourceBatchParamsAction, params PostAdminProtoResourceBatchParams)
+	// Get a Proto administration bulk task
+	// (GET /v1/admin/proto/resources/bulk-tasks/{taskId})
+	GetAdminProtoResourceBulkTask(c *gin.Context, taskId ProtoBulkTaskId)
+	// Queue a Proto administration command for selected resources or a filter
+	// (POST /v1/admin/proto/resources/bulk/{command})
+	PostAdminProtoResourceBulk(c *gin.Context, command PostAdminProtoResourceBulkParamsCommand, params PostAdminProtoResourceBulkParams)
+	// Import Proto resources for a selected owner
+	// (POST /v1/admin/proto/resources/imports)
+	PostAdminProtoResourceImport(c *gin.Context, params PostAdminProtoResourceImportParams)
+	// Get an administrator Proto import
+	// (GET /v1/admin/proto/resources/imports/{importId})
+	GetAdminProtoResourceImport(c *gin.Context, importId int64)
+	// Download safe Proto import failure details
+	// (GET /v1/admin/proto/resources/imports/{importId}/failures)
+	GetAdminProtoResourceImportFailures(c *gin.Context, importId int64)
+	// List safe per-line Proto import outcomes for administrators
+	// (GET /v1/admin/proto/resources/imports/{importId}/items)
+	GetAdminProtoResourceImportItems(c *gin.Context, importId int64, params GetAdminProtoResourceImportItemsParams)
+	// Queue Proto validation for selected resources
+	// (POST /v1/admin/proto/resources/validations)
+	PostAdminProtoResourceValidations(c *gin.Context, params PostAdminProtoResourceValidationsParams)
+	// Delete one Proto resource as an administrator
+	// (DELETE /v1/admin/proto/resources/{resourceId})
+	DeleteAdminProtoResource(c *gin.Context, resourceId int64, params DeleteAdminProtoResourceParams)
+	// Get one safe Proto resource
+	// (GET /v1/admin/proto/resources/{resourceId})
+	GetAdminProtoResource(c *gin.Context, resourceId int64)
+	// Edit Proto resource identity or owner
+	// (PATCH /v1/admin/proto/resources/{resourceId})
+	PatchAdminProtoResource(c *gin.Context, resourceId int64, params PatchAdminProtoResourceParams)
+	// Replace Proto password as a write-only value
+	// (PUT /v1/admin/proto/resources/{resourceId}/credentials)
+	PutAdminProtoResourceCredentials(c *gin.Context, resourceId int64, params PutAdminProtoResourceCredentialsParams)
+	// List Proto maintenance runs for one resource
+	// (GET /v1/admin/proto/resources/{resourceId}/maintenance)
+	GetAdminProtoResourceMaintenance(c *gin.Context, resourceId int64, params GetAdminProtoResourceMaintenanceParams)
+	// Recover a deleted Proto resource
+	// (POST /v1/admin/proto/resources/{resourceId}/recover)
+	PostAdminProtoResourceRecover(c *gin.Context, resourceId int64, params PostAdminProtoResourceRecoverParams)
+	// Run a lifecycle command for one Proto resource
+	// (POST /v1/admin/proto/resources/{resourceId}/{command})
+	PostAdminProtoResourceCommand(c *gin.Context, resourceId int64, command PostAdminProtoResourceCommandParamsCommand, params PostAdminProtoResourceCommandParams)
 	// List proxy pool entries
 	// (GET /v1/admin/proxies)
 	GetAdminProxies(c *gin.Context, params GetAdminProxiesParams)
@@ -17037,6 +18384,39 @@ type ServerInterface interface {
 	// Read the Apple verification code for a forwarding email
 	// (GET /v1/open/icloud/forwarding-emails/{preparationId})
 	GetSystemICloudForwardingEmail(c *gin.Context, preparationId int)
+	// List the authenticated user's Proto resources
+	// (GET /v1/open/proto/resources)
+	OpenListProtoResources(c *gin.Context, params OpenListProtoResourcesParams)
+	// Get the current user's Proto bulk task
+	// (GET /v1/open/proto/resources/bulk-tasks/{taskId})
+	OpenGetProtoResourceBulkTask(c *gin.Context, taskId ProtoBulkTaskId)
+	// Queue a Proto resource command for selected resources or a filter
+	// (POST /v1/open/proto/resources/bulk/{command})
+	OpenPostProtoResourceBulk(c *gin.Context, command OpenPostProtoResourceBulkParamsCommand, params OpenPostProtoResourceBulkParams)
+	// Import Proto resources in email----password format
+	// (POST /v1/open/proto/resources/imports)
+	OpenPostProtoResourceImport(c *gin.Context, params OpenPostProtoResourceImportParams)
+	// Get Proto import progress
+	// (GET /v1/open/proto/resources/imports/{importId})
+	OpenGetProtoResourceImport(c *gin.Context, importId int64)
+	// Download safe failure details for the current user's Proto import
+	// (GET /v1/open/proto/resources/imports/{importId}/failures)
+	OpenGetProtoResourceImportFailures(c *gin.Context, importId int64)
+	// List safe per-line Proto import outcomes
+	// (GET /v1/open/proto/resources/imports/{importId}/items)
+	OpenGetProtoResourceImportItems(c *gin.Context, importId int64, params OpenGetProtoResourceImportItemsParams)
+	// Queue Proto validation for selected resources
+	// (POST /v1/open/proto/resources/validations)
+	OpenPostProtoResourceValidations(c *gin.Context, params OpenPostProtoResourceValidationsParams)
+	// Delete one Proto resource
+	// (DELETE /v1/open/proto/resources/{resourceId})
+	OpenDeleteProtoResource(c *gin.Context, resourceId int64, params OpenDeleteProtoResourceParams)
+	// Get one Proto resource owned by the authenticated user
+	// (GET /v1/open/proto/resources/{resourceId})
+	OpenGetProtoResource(c *gin.Context, resourceId int64)
+	// Queue validation for one Proto resource
+	// (POST /v1/open/proto/resources/{resourceId}/validate)
+	OpenPostProtoResourceValidate(c *gin.Context, resourceId int64, params OpenPostProtoResourceValidateParams)
 	// List orders
 	// (GET /v1/orders)
 	GetOrders(c *gin.Context, params GetOrdersParams)
@@ -17112,6 +18492,42 @@ type ServerInterface interface {
 	// Resubmit a rejected project application
 	// (POST /v1/projects/{projectId}/resubmit)
 	PostProjectResubmit(c *gin.Context, projectId int, params PostProjectResubmitParams)
+	// List the authenticated user's Proto resources
+	// (GET /v1/proto/resources)
+	ListProtoResources(c *gin.Context, params ListProtoResourcesParams)
+	// Get the current user's Proto bulk task
+	// (GET /v1/proto/resources/bulk-tasks/{taskId})
+	GetProtoResourceBulkTask(c *gin.Context, taskId ProtoBulkTaskId)
+	// Queue a Proto resource command for selected resources or a filter
+	// (POST /v1/proto/resources/bulk/{command})
+	PostProtoResourceBulk(c *gin.Context, command PostProtoResourceBulkParamsCommand, params PostProtoResourceBulkParams)
+	// Import Proto resources in email----password format
+	// (POST /v1/proto/resources/imports)
+	PostProtoResourceImport(c *gin.Context, params PostProtoResourceImportParams)
+	// Get Proto import progress
+	// (GET /v1/proto/resources/imports/{importId})
+	GetProtoResourceImport(c *gin.Context, importId int64)
+	// Download safe failure details for the current user's Proto import
+	// (GET /v1/proto/resources/imports/{importId}/failures)
+	GetProtoResourceImportFailures(c *gin.Context, importId int64)
+	// List safe per-line Proto import outcomes
+	// (GET /v1/proto/resources/imports/{importId}/items)
+	GetProtoResourceImportItems(c *gin.Context, importId int64, params GetProtoResourceImportItemsParams)
+	// Queue Proto validation for selected resources
+	// (POST /v1/proto/resources/validations)
+	PostProtoResourceValidations(c *gin.Context, params PostProtoResourceValidationsParams)
+	// Delete one Proto resource
+	// (DELETE /v1/proto/resources/{resourceId})
+	DeleteProtoResource(c *gin.Context, resourceId int64, params DeleteProtoResourceParams)
+	// Get one Proto resource owned by the authenticated user
+	// (GET /v1/proto/resources/{resourceId})
+	GetProtoResource(c *gin.Context, resourceId int64)
+	// Publish one Proto resource
+	// (POST /v1/proto/resources/{resourceId}/publish)
+	PostProtoResourcePublish(c *gin.Context, resourceId int64, params PostProtoResourcePublishParams)
+	// Queue validation for one Proto resource
+	// (POST /v1/proto/resources/{resourceId}/validate)
+	PostProtoResourceValidate(c *gin.Context, resourceId int64, params PostProtoResourceValidateParams)
 	// List recharge orders
 	// (GET /v1/recharges)
 	GetRecharges(c *gin.Context, params GetRechargesParams)
@@ -26173,6 +27589,808 @@ func (siw *ServerInterfaceWrapper) PostAdminProjectRelist(c *gin.Context) {
 	siw.Handler.PostAdminProjectRelist(c, projectId, params)
 }
 
+// GetAdminProtoResources operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminProtoResources(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminProtoResourcesParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "afterId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "afterId", c.Request.URL.Query(), &params.AfterId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter afterId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "suffix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "suffix", c.Request.URL.Query(), &params.Suffix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter suffix: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "longLived" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "longLived", c.Request.URL.Query(), &params.LongLived, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter longLived: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "includeTotal" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeTotal", c.Request.URL.Query(), &params.IncludeTotal, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeTotal: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "includeFacets" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeFacets", c.Request.URL.Query(), &params.IncludeFacets, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeFacets: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "ownerId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "ownerId", c.Request.URL.Query(), &params.OwnerId, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ownerId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "forSale" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "forSale", c.Request.URL.Query(), &params.ForSale, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter forSale: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminProtoResources(c, params)
+}
+
+// PostAdminProtoResourceBatch operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProtoResourceBatch(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "action" -------------
+	var action PostAdminProtoResourceBatchParamsAction
+
+	err = runtime.BindStyledParameterWithOptions("simple", "action", c.Param("action"), &action, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter action: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProtoResourceBatchParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProtoResourceBatch(c, action, params)
+}
+
+// GetAdminProtoResourceBulkTask operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminProtoResourceBulkTask(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId ProtoBulkTaskId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", c.Param("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter taskId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminProtoResourceBulkTask(c, taskId)
+}
+
+// PostAdminProtoResourceBulk operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProtoResourceBulk(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "command" -------------
+	var command PostAdminProtoResourceBulkParamsCommand
+
+	err = runtime.BindStyledParameterWithOptions("simple", "command", c.Param("command"), &command, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter command: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProtoResourceBulkParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProtoResourceBulk(c, command, params)
+}
+
+// PostAdminProtoResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProtoResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProtoResourceImportParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProtoResourceImport(c, params)
+}
+
+// GetAdminProtoResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminProtoResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminProtoResourceImport(c, importId)
+}
+
+// GetAdminProtoResourceImportFailures operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminProtoResourceImportFailures(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminProtoResourceImportFailures(c, importId)
+}
+
+// GetAdminProtoResourceImportItems operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminProtoResourceImportItems(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminProtoResourceImportItemsParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminProtoResourceImportItems(c, importId, params)
+}
+
+// PostAdminProtoResourceValidations operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProtoResourceValidations(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProtoResourceValidationsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProtoResourceValidations(c, params)
+}
+
+// DeleteAdminProtoResource operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAdminProtoResource(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAdminProtoResourceParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteAdminProtoResource(c, resourceId, params)
+}
+
+// GetAdminProtoResource operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminProtoResource(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminProtoResource(c, resourceId)
+}
+
+// PatchAdminProtoResource operation middleware
+func (siw *ServerInterfaceWrapper) PatchAdminProtoResource(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PatchAdminProtoResourceParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PatchAdminProtoResource(c, resourceId, params)
+}
+
+// PutAdminProtoResourceCredentials operation middleware
+func (siw *ServerInterfaceWrapper) PutAdminProtoResourceCredentials(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PutAdminProtoResourceCredentialsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PutAdminProtoResourceCredentials(c, resourceId, params)
+}
+
+// GetAdminProtoResourceMaintenance operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminProtoResourceMaintenance(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminProtoResourceMaintenanceParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminProtoResourceMaintenance(c, resourceId, params)
+}
+
+// PostAdminProtoResourceRecover operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProtoResourceRecover(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProtoResourceRecoverParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProtoResourceRecover(c, resourceId, params)
+}
+
+// PostAdminProtoResourceCommand operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminProtoResourceCommand(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "command" -------------
+	var command PostAdminProtoResourceCommandParamsCommand
+
+	err = runtime.BindStyledParameterWithOptions("simple", "command", c.Param("command"), &command, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter command: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminProtoResourceCommandParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminProtoResourceCommand(c, resourceId, command, params)
+}
+
 // GetAdminProxies operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminProxies(c *gin.Context) {
 
@@ -33704,6 +35922,529 @@ func (siw *ServerInterfaceWrapper) GetSystemICloudForwardingEmail(c *gin.Context
 	siw.Handler.GetSystemICloudForwardingEmail(c, preparationId)
 }
 
+// OpenListProtoResources operation middleware
+func (siw *ServerInterfaceWrapper) OpenListProtoResources(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params OpenListProtoResourcesParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "afterId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "afterId", c.Request.URL.Query(), &params.AfterId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter afterId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "suffix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "suffix", c.Request.URL.Query(), &params.Suffix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter suffix: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "longLived" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "longLived", c.Request.URL.Query(), &params.LongLived, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter longLived: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "includeTotal" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeTotal", c.Request.URL.Query(), &params.IncludeTotal, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeTotal: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "includeFacets" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeFacets", c.Request.URL.Query(), &params.IncludeFacets, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeFacets: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "forSale" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "forSale", c.Request.URL.Query(), &params.ForSale, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter forSale: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.OpenListProtoResources(c, params)
+}
+
+// OpenGetProtoResourceBulkTask operation middleware
+func (siw *ServerInterfaceWrapper) OpenGetProtoResourceBulkTask(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId ProtoBulkTaskId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", c.Param("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter taskId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.OpenGetProtoResourceBulkTask(c, taskId)
+}
+
+// OpenPostProtoResourceBulk operation middleware
+func (siw *ServerInterfaceWrapper) OpenPostProtoResourceBulk(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "command" -------------
+	var command OpenPostProtoResourceBulkParamsCommand
+
+	err = runtime.BindStyledParameterWithOptions("simple", "command", c.Param("command"), &command, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter command: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params OpenPostProtoResourceBulkParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.OpenPostProtoResourceBulk(c, command, params)
+}
+
+// OpenPostProtoResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) OpenPostProtoResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params OpenPostProtoResourceImportParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.OpenPostProtoResourceImport(c, params)
+}
+
+// OpenGetProtoResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) OpenGetProtoResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.OpenGetProtoResourceImport(c, importId)
+}
+
+// OpenGetProtoResourceImportFailures operation middleware
+func (siw *ServerInterfaceWrapper) OpenGetProtoResourceImportFailures(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.OpenGetProtoResourceImportFailures(c, importId)
+}
+
+// OpenGetProtoResourceImportItems operation middleware
+func (siw *ServerInterfaceWrapper) OpenGetProtoResourceImportItems(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params OpenGetProtoResourceImportItemsParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.OpenGetProtoResourceImportItems(c, importId, params)
+}
+
+// OpenPostProtoResourceValidations operation middleware
+func (siw *ServerInterfaceWrapper) OpenPostProtoResourceValidations(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params OpenPostProtoResourceValidationsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.OpenPostProtoResourceValidations(c, params)
+}
+
+// OpenDeleteProtoResource operation middleware
+func (siw *ServerInterfaceWrapper) OpenDeleteProtoResource(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params OpenDeleteProtoResourceParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.OpenDeleteProtoResource(c, resourceId, params)
+}
+
+// OpenGetProtoResource operation middleware
+func (siw *ServerInterfaceWrapper) OpenGetProtoResource(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.OpenGetProtoResource(c, resourceId)
+}
+
+// OpenPostProtoResourceValidate operation middleware
+func (siw *ServerInterfaceWrapper) OpenPostProtoResourceValidate(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(BearerAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params OpenPostProtoResourceValidateParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.OpenPostProtoResourceValidate(c, resourceId, params)
+}
+
 // GetOrders operation middleware
 func (siw *ServerInterfaceWrapper) GetOrders(c *gin.Context) {
 
@@ -34738,6 +37479,602 @@ func (siw *ServerInterfaceWrapper) PostProjectResubmit(c *gin.Context) {
 	}
 
 	siw.Handler.PostProjectResubmit(c, projectId, params)
+}
+
+// ListProtoResources operation middleware
+func (siw *ServerInterfaceWrapper) ListProtoResources(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListProtoResourcesParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "afterId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "afterId", c.Request.URL.Query(), &params.AfterId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter afterId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "suffix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "suffix", c.Request.URL.Query(), &params.Suffix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter suffix: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "longLived" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "longLived", c.Request.URL.Query(), &params.LongLived, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter longLived: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "includeTotal" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeTotal", c.Request.URL.Query(), &params.IncludeTotal, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeTotal: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "includeFacets" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeFacets", c.Request.URL.Query(), &params.IncludeFacets, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeFacets: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "forSale" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "forSale", c.Request.URL.Query(), &params.ForSale, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter forSale: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListProtoResources(c, params)
+}
+
+// GetProtoResourceBulkTask operation middleware
+func (siw *ServerInterfaceWrapper) GetProtoResourceBulkTask(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId ProtoBulkTaskId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", c.Param("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter taskId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetProtoResourceBulkTask(c, taskId)
+}
+
+// PostProtoResourceBulk operation middleware
+func (siw *ServerInterfaceWrapper) PostProtoResourceBulk(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "command" -------------
+	var command PostProtoResourceBulkParamsCommand
+
+	err = runtime.BindStyledParameterWithOptions("simple", "command", c.Param("command"), &command, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter command: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostProtoResourceBulkParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostProtoResourceBulk(c, command, params)
+}
+
+// PostProtoResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) PostProtoResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostProtoResourceImportParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional header parameter "X-Turnstile-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Turnstile-Token")]; found {
+		var XTurnstileToken TurnstileToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Turnstile-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Turnstile-Token", valueList[0], &XTurnstileToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Turnstile-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XTurnstileToken = &XTurnstileToken
+
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostProtoResourceImport(c, params)
+}
+
+// GetProtoResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) GetProtoResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetProtoResourceImport(c, importId)
+}
+
+// GetProtoResourceImportFailures operation middleware
+func (siw *ServerInterfaceWrapper) GetProtoResourceImportFailures(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetProtoResourceImportFailures(c, importId)
+}
+
+// GetProtoResourceImportItems operation middleware
+func (siw *ServerInterfaceWrapper) GetProtoResourceImportItems(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetProtoResourceImportItemsParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetProtoResourceImportItems(c, importId, params)
+}
+
+// PostProtoResourceValidations operation middleware
+func (siw *ServerInterfaceWrapper) PostProtoResourceValidations(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostProtoResourceValidationsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostProtoResourceValidations(c, params)
+}
+
+// DeleteProtoResource operation middleware
+func (siw *ServerInterfaceWrapper) DeleteProtoResource(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteProtoResourceParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteProtoResource(c, resourceId, params)
+}
+
+// GetProtoResource operation middleware
+func (siw *ServerInterfaceWrapper) GetProtoResource(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetProtoResource(c, resourceId)
+}
+
+// PostProtoResourcePublish operation middleware
+func (siw *ServerInterfaceWrapper) PostProtoResourcePublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostProtoResourcePublishParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostProtoResourcePublish(c, resourceId, params)
+}
+
+// PostProtoResourceValidate operation middleware
+func (siw *ServerInterfaceWrapper) PostProtoResourceValidate(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostProtoResourceValidateParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostProtoResourceValidate(c, resourceId, params)
 }
 
 // GetRecharges operation middleware
@@ -36599,6 +39936,22 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/admin/projects/:projectId/inventory", wrapper.GetAdminProjectInventory)
 	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/reject", wrapper.PostAdminProjectReject)
 	router.POST(options.BaseURL+"/v1/admin/projects/:projectId/relist", wrapper.PostAdminProjectRelist)
+	router.GET(options.BaseURL+"/v1/admin/proto/resources", wrapper.GetAdminProtoResources)
+	router.POST(options.BaseURL+"/v1/admin/proto/resources/batch/:action", wrapper.PostAdminProtoResourceBatch)
+	router.GET(options.BaseURL+"/v1/admin/proto/resources/bulk-tasks/:taskId", wrapper.GetAdminProtoResourceBulkTask)
+	router.POST(options.BaseURL+"/v1/admin/proto/resources/bulk/:command", wrapper.PostAdminProtoResourceBulk)
+	router.POST(options.BaseURL+"/v1/admin/proto/resources/imports", wrapper.PostAdminProtoResourceImport)
+	router.GET(options.BaseURL+"/v1/admin/proto/resources/imports/:importId", wrapper.GetAdminProtoResourceImport)
+	router.GET(options.BaseURL+"/v1/admin/proto/resources/imports/:importId/failures", wrapper.GetAdminProtoResourceImportFailures)
+	router.GET(options.BaseURL+"/v1/admin/proto/resources/imports/:importId/items", wrapper.GetAdminProtoResourceImportItems)
+	router.POST(options.BaseURL+"/v1/admin/proto/resources/validations", wrapper.PostAdminProtoResourceValidations)
+	router.DELETE(options.BaseURL+"/v1/admin/proto/resources/:resourceId", wrapper.DeleteAdminProtoResource)
+	router.GET(options.BaseURL+"/v1/admin/proto/resources/:resourceId", wrapper.GetAdminProtoResource)
+	router.PATCH(options.BaseURL+"/v1/admin/proto/resources/:resourceId", wrapper.PatchAdminProtoResource)
+	router.PUT(options.BaseURL+"/v1/admin/proto/resources/:resourceId/credentials", wrapper.PutAdminProtoResourceCredentials)
+	router.GET(options.BaseURL+"/v1/admin/proto/resources/:resourceId/maintenance", wrapper.GetAdminProtoResourceMaintenance)
+	router.POST(options.BaseURL+"/v1/admin/proto/resources/:resourceId/recover", wrapper.PostAdminProtoResourceRecover)
+	router.POST(options.BaseURL+"/v1/admin/proto/resources/:resourceId/:command", wrapper.PostAdminProtoResourceCommand)
 	router.GET(options.BaseURL+"/v1/admin/proxies", wrapper.GetAdminProxies)
 	router.GET(options.BaseURL+"/v1/admin/proxies/bindings", wrapper.GetAdminProxyBindings)
 	router.POST(options.BaseURL+"/v1/admin/proxies/check", wrapper.PostAdminProxyCheckBatch)
@@ -36739,6 +40092,17 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/oauth/nodeloc/pending", wrapper.GetNodeLocPending)
 	router.POST(options.BaseURL+"/v1/open/icloud/forwarding-emails", wrapper.PostSystemICloudForwardingEmail)
 	router.GET(options.BaseURL+"/v1/open/icloud/forwarding-emails/:preparationId", wrapper.GetSystemICloudForwardingEmail)
+	router.GET(options.BaseURL+"/v1/open/proto/resources", wrapper.OpenListProtoResources)
+	router.GET(options.BaseURL+"/v1/open/proto/resources/bulk-tasks/:taskId", wrapper.OpenGetProtoResourceBulkTask)
+	router.POST(options.BaseURL+"/v1/open/proto/resources/bulk/:command", wrapper.OpenPostProtoResourceBulk)
+	router.POST(options.BaseURL+"/v1/open/proto/resources/imports", wrapper.OpenPostProtoResourceImport)
+	router.GET(options.BaseURL+"/v1/open/proto/resources/imports/:importId", wrapper.OpenGetProtoResourceImport)
+	router.GET(options.BaseURL+"/v1/open/proto/resources/imports/:importId/failures", wrapper.OpenGetProtoResourceImportFailures)
+	router.GET(options.BaseURL+"/v1/open/proto/resources/imports/:importId/items", wrapper.OpenGetProtoResourceImportItems)
+	router.POST(options.BaseURL+"/v1/open/proto/resources/validations", wrapper.OpenPostProtoResourceValidations)
+	router.DELETE(options.BaseURL+"/v1/open/proto/resources/:resourceId", wrapper.OpenDeleteProtoResource)
+	router.GET(options.BaseURL+"/v1/open/proto/resources/:resourceId", wrapper.OpenGetProtoResource)
+	router.POST(options.BaseURL+"/v1/open/proto/resources/:resourceId/validate", wrapper.OpenPostProtoResourceValidate)
 	router.GET(options.BaseURL+"/v1/orders", wrapper.GetOrders)
 	router.POST(options.BaseURL+"/v1/orders", wrapper.PostOrder)
 	router.POST(options.BaseURL+"/v1/orders/batch", wrapper.PostOrderBatch)
@@ -36764,6 +40128,18 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/projects/:projectId", wrapper.GetProject)
 	router.GET(options.BaseURL+"/v1/projects/:projectId/inventory", wrapper.GetProjectInventory)
 	router.POST(options.BaseURL+"/v1/projects/:projectId/resubmit", wrapper.PostProjectResubmit)
+	router.GET(options.BaseURL+"/v1/proto/resources", wrapper.ListProtoResources)
+	router.GET(options.BaseURL+"/v1/proto/resources/bulk-tasks/:taskId", wrapper.GetProtoResourceBulkTask)
+	router.POST(options.BaseURL+"/v1/proto/resources/bulk/:command", wrapper.PostProtoResourceBulk)
+	router.POST(options.BaseURL+"/v1/proto/resources/imports", wrapper.PostProtoResourceImport)
+	router.GET(options.BaseURL+"/v1/proto/resources/imports/:importId", wrapper.GetProtoResourceImport)
+	router.GET(options.BaseURL+"/v1/proto/resources/imports/:importId/failures", wrapper.GetProtoResourceImportFailures)
+	router.GET(options.BaseURL+"/v1/proto/resources/imports/:importId/items", wrapper.GetProtoResourceImportItems)
+	router.POST(options.BaseURL+"/v1/proto/resources/validations", wrapper.PostProtoResourceValidations)
+	router.DELETE(options.BaseURL+"/v1/proto/resources/:resourceId", wrapper.DeleteProtoResource)
+	router.GET(options.BaseURL+"/v1/proto/resources/:resourceId", wrapper.GetProtoResource)
+	router.POST(options.BaseURL+"/v1/proto/resources/:resourceId/publish", wrapper.PostProtoResourcePublish)
+	router.POST(options.BaseURL+"/v1/proto/resources/:resourceId/validate", wrapper.PostProtoResourceValidate)
 	router.GET(options.BaseURL+"/v1/recharges", wrapper.GetRecharges)
 	router.POST(options.BaseURL+"/v1/recharges", wrapper.PostRecharge)
 	router.GET(options.BaseURL+"/v1/recharges/config", wrapper.GetRechargeConfig)

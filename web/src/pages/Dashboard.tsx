@@ -191,8 +191,10 @@ export function toWorkbenchProducts(
         : product.type === "gmail"
           ? "Gmail email"
           : product.type === "gmail_variant"
-            ? "Gmail variant"
-            : "iCloud";
+          ? "Gmail variant"
+          : product.type === "icloud"
+            ? "iCloud"
+            : "Proto";
   const totalAvailable =
     inventory?.totalAvailable ?? product.totalAvailable ?? 0;
   const publicAvailable =
@@ -220,7 +222,9 @@ export function toWorkbenchProducts(
           ? "gmail.com"
           : product.type === "gmail_variant"
             ? "gmail_variant"
-            : "icloud.com";
+            : product.type === "icloud"
+              ? "icloud.com"
+              : "proto";
   const baseProduct: WorkbenchProduct = {
     activationWindowMinutes: product.activationWindowMinutes,
     codeEnabled: product.codeEnabled,

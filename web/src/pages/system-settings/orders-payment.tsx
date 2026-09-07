@@ -21,6 +21,7 @@ const MULTIPLIER_FIELDS = [
   [PRODUCT_PRICE_MULTIPLIER_KEYS[1], "Gmail 倍率"],
   [PRODUCT_PRICE_MULTIPLIER_KEYS[2], "iCloud 倍率"],
   [PRODUCT_PRICE_MULTIPLIER_KEYS[3], "域名邮箱倍率"],
+  [PRODUCT_PRICE_MULTIPLIER_KEYS[4], "Proto 倍率"],
 ] as const;
 
 function ProductMultiplierSection({ options, onBulkSave }: SectionProps) {

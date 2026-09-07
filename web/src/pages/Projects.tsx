@@ -211,6 +211,9 @@ function parseEmailTypes(value?: string) {
     if (normalized.includes("icloud") || normalized.includes("苹果")) {
       types.add("icloud");
     }
+    if (normalized.includes("proto") || normalized.includes("质子")) {
+      types.add("proto");
+    }
   }
   return Array.from(types);
 }
@@ -801,6 +804,7 @@ function ProjectSquareSidebar({
             value: "gmail_variant",
           },
           { count: productTypeCounts.icloud, label: t("iCloud email"), value: "icloud" },
+          { count: productTypeCounts.proto, label: t("Proto email"), value: "proto" },
         ]}
         onChange={onProductTypeChange}
         title={t("Product type")}
@@ -1138,6 +1142,7 @@ export default function Projects() {
     gmail_variant: 0,
     icloud: 0,
     microsoft: 0,
+    proto: 0,
   });
   const [statusCounts, setStatusCounts] = useState<Record<StatusFilter, number>>({
     all: 0,
@@ -1189,6 +1194,7 @@ export default function Projects() {
         gmail_variant: facets?.productType.gmailVariant ?? 0,
         icloud: facets?.productType.icloud ?? 0,
         microsoft: facets?.productType.microsoft ?? 0,
+        proto: facets?.productType.proto ?? 0,
       });
       return { items: listResponse.items, total: listResponse.total };
     },

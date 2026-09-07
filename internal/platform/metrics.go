@@ -393,7 +393,7 @@ func normalizeAllocationType(value string) string {
 		return "gmail"
 	}
 	switch value {
-	case "microsoft", "domain", "gmail", "icloud":
+	case "microsoft", "domain", "gmail", "icloud", "proto":
 		return value
 	default:
 		return "unknown"

@@ -54,6 +54,9 @@ export default function BackgroundJobSection({ options, onBulkSave }: SectionPro
       {field("资源批处理队列权重（resource）", "asynq_queue_resource_weight", 1, 10000)}
       {field("微软识别队列权重（background_project_history）", "asynq_queue_background_project_history_weight", 1, 10000)}
       {field("Gmail 识别队列权重（background_gmail_identification）", "asynq_queue_background_gmail_identification_weight", 1, 10000)}
+      {field("Proto 导入队列权重（background_proto_import）", "asynq_queue_background_proto_import_weight", 1, 10000)}
+      {field("Proto 验证队列权重（background_proto_validation）", "asynq_queue_background_proto_validation_weight", 1, 10000)}
+      {field("Proto 识别队列权重（background_proto_history）", "asynq_queue_background_proto_history_weight", 1, 10000)}
       {field("库存刷新队列权重（background_inventory）", "asynq_queue_background_inventory_weight", 1, 10000)}
       {field("停机超时（秒）", "asynq_shutdown_timeout_seconds", 1, 300)}
       {field("验证调度最大下发数", "validation_dispatch_maximum", 1, 10000)}

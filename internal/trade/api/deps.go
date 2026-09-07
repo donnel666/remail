@@ -310,7 +310,7 @@ func (a coreOrderingAdapter) projectProductIDFromDB(ctx context.Context, project
 
 func isCheckoutProductType(productType domain.ProductType) bool {
 	switch productType {
-	case domain.ProductTypeMicrosoft, domain.ProductTypeDomain, domain.ProductTypeGmail, domain.ProductTypeGmailVariant, domain.ProductTypeICloud:
+	case domain.ProductTypeMicrosoft, domain.ProductTypeDomain, domain.ProductTypeGmail, domain.ProductTypeGmailVariant, domain.ProductTypeICloud, domain.ProductTypeProto:
 		return true
 	default:
 		return false

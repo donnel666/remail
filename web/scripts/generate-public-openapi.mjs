@@ -15,7 +15,7 @@ const json = (schema) => ({
 const jsonBody = (schema) => ({ required: true, ...json(schema) });
 
 const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
-const emailSuffixDescription = "商品选择后缀。gmail.com 选择本地 Gmail 原始主邮箱；gmail_variant 选择谷歌变种商品，分配等价的 @googlemail.com 地址，或 @gmail.com / @googlemail.com 上的点号、加号变种。icloud.com 选择苹果邮箱；outlook.com 等具体后缀精确选择对应库存，特殊值 outlook 会在有货的微软白名单后缀中按库存量加权随机，特殊值 domain 会在有货的域名后缀中按库存量加权随机。private_first 随机时先在自有库存内按数量加权；只有自有后缀无货时才使用公共库存。private_first 下也可指定当前用户自有的完整域名，例如 mydomain.com。不接受完整邮箱地址。";
+const emailSuffixDescription = "商品选择后缀。gmail.com 选择本地 Gmail 原始主邮箱；gmail_variant 选择谷歌变种商品，分配等价的 @googlemail.com 地址，或 @gmail.com / @googlemail.com 上的点号、加号变种。icloud.com 选择苹果邮箱；proto 选择 Proto 主邮箱库存，不支持后缀别名；outlook.com 等具体后缀精确选择对应库存，特殊值 outlook 会在有货的微软白名单后缀中按库存量加权随机，特殊值 domain 会在有货的域名后缀中按库存量加权随机。private_first 随机时先在自有库存内按数量加权；只有自有后缀无货时才使用公共库存。private_first 下也可指定当前用户自有的完整域名，例如 mydomain.com。不接受完整邮箱地址。";
 const batchEmailSuffixDescription = `${emailSuffixDescription} 批量下单只随机一次，所有子订单固定使用该后缀；该后缀库存耗尽后不再随机其他后缀。`;
 const listOf = (name) => ({ type: "array", items: ref(name) });
 const nullable = (type, schema = {}) => ({ type, nullable: true, ...schema });
@@ -47,8 +47,11 @@ const stableEnumVarNames = Object.freeze({
   credited: "Credited",
   debit: "Debit",
   deleted: "Deleted",
+  delete: "Delete",
   delisted: "Delisted",
+  disable: "Disable",
   disabled: "Disabled",
+  done: "Done",
   domain: "Domain",
   enabled: "Enabled",
   epusdt_usdt_tron: "EPUSDTUSDTTRON",
@@ -58,6 +61,7 @@ const stableEnumVarNames = Object.freeze({
   gmail: "Gmail",
   gmail_variant: "GmailVariant",
   icloud: "ICloud",
+  history: "History",
   idempotency_conflict: "IdempotencyConflict",
   identifying: "Identifying",
   ids: "IDs",
@@ -71,6 +75,8 @@ const stableEnumVarNames = Object.freeze({
   manual_adjustment: "ManualAdjustment",
   matched: "Matched",
   microsoft: "Microsoft",
+  proto: "Proto",
+  proto_resource_bulk: "ProtoResourceBulk",
   mine: "Mine",
   none: "None",
   normal: "Normal",
@@ -91,6 +97,8 @@ const stableEnumVarNames = Object.freeze({
   public: "Public",
   public_only: "PublicOnly",
   purchase: "Purchase",
+  publish: "Publish",
+  queued: "Queued",
   random: "Random",
   received: "Received",
   recipient: "Recipient",
@@ -99,11 +107,14 @@ const stableEnumVarNames = Object.freeze({
   refund: "Refund",
   refunded: "Refunded",
   reviewing: "Reviewing",
+  restored: "Restored",
+  running: "Running",
   sale: "Sale",
   sender: "Sender",
   service_token_failed: "ServiceTokenFailed",
   service_unavailable: "ServiceUnavailable",
   skip: "Skip",
+  skipped: "Skipped",
   subject: "Subject",
   succeeded: "Succeeded",
   supplier: "Supplier",
@@ -113,7 +124,9 @@ const stableEnumVarNames = Object.freeze({
   temporarily_unavailable: "TemporarilyUnavailable",
   transfer: "Transfer",
   unknown: "Unknown",
+  unpublish: "Unpublish",
   user: "User",
+  validate: "Validate",
   validating: "Validating",
   visible: "Visible",
   withdrawal: "Withdrawal",
@@ -129,6 +142,7 @@ const stringEnum = (values) => ({
 });
 const microsoftResourceStatuses = ["pending", "validating", "identifying", "normal", "abnormal", "disabled", "deleted"];
 const domainResourceStatuses = ["pending", "validating", "normal", "abnormal", "disabled", "deleted"];
+const protoResourceStatuses = ["pending", "validating", "identifying", "normal", "abnormal", "disabled", "deleted"];
 const resourceStatuses = [...new Set([...microsoftResourceStatuses, ...domainResourceStatuses])];
 const ok = (schema) => ({ description: "请求成功。", ...json(schema) });
 const created = (schema) => ({ description: "资源已创建。", ...json(schema) });
@@ -197,6 +211,13 @@ const idempotencyHeader = {
   schema: { type: "string", minLength: 1, maxLength: 128 },
   description: "幂等键。相同 API Key 下，相同幂等键不会重复创建业务事实。",
 };
+
+const protoPaginationParams = [
+  { name: "offset", in: "query", schema: { type: "integer", minimum: 0, default: 0 } },
+  { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 200, default: 50 } },
+];
+const protoResourcePath = { name: "resourceId", in: "path", required: true, schema: id({ minimum: 1 }), description: "统一邮箱资源根 ID。" };
+const protoImportPath = { name: "importId", in: "path", required: true, schema: id({ minimum: 1 }) };
 
 const schemas = {
   ErrorResponse: {
@@ -323,7 +344,7 @@ const schemas = {
   ProjectProductSummary: {
     type: "object",
     properties: {
-      type: stringEnum(["microsoft", "domain", "gmail", "gmail_variant", "icloud"]),
+      type: stringEnum(["microsoft", "domain", "gmail", "gmail_variant", "icloud", "proto"]),
       status: stringEnum(["enabled", "disabled"]),
       codeEnabled: { type: "boolean", example: true },
       purchaseEnabled: { type: "boolean", example: true },
@@ -486,7 +507,7 @@ const schemas = {
       projectId: id({ example: 1001 }),
       projectName: { type: "string", example: "Microsoft 账号验证码" },
       projectLogoUrl: { type: "string" },
-      productType: stringEnum(["microsoft", "domain", "random", "gmail", "gmail_variant", "icloud"]),
+      productType: stringEnum(["microsoft", "domain", "random", "gmail", "gmail_variant", "icloud", "proto"]),
       serviceMode: stringEnum(["code", "purchase"]),
       supplyPolicy: stringEnum(["private_first", "public_only"]),
       status: stringEnum(["pending_payment", "paid", "active", "completed", "refunded", "failed", "closed"]),
@@ -500,7 +521,7 @@ const schemas = {
       ]),
       payAmount: { type: "string", example: "0.80" },
       refundAmount: { type: "string", example: "0.00" },
-      allocationType: stringEnum(["microsoft", "domain", "gmail", "icloud"]),
+      allocationType: stringEnum(["microsoft", "domain", "gmail", "icloud", "proto"]),
       allocationId: id({ example: 991 }),
       deliveryEmail: { type: "string", example: "mateo.richards@outlook.com" },
       receiveStartedAt: nullable("string", { format: "date-time" }),
@@ -973,6 +994,179 @@ const schemas = {
     },
     required: ["mode"],
   },
+  ProtoResourceStatus: stringEnum(protoResourceStatuses),
+  ProtoResource: {
+    type: "object",
+    properties: {
+      id: id({ description: "平台统一邮箱资源根 ID；不是分配 ID 或导入任务 ID。" }),
+      version: id({ minimum: 1 }),
+      ownerUserId: id(),
+      owner: ref("ProtoOwnerSummary"),
+      email: { type: "string", format: "email" },
+      suffix: { type: "string" },
+      status: ref("ProtoResourceStatus"),
+      forSale: { type: "boolean" },
+      longLived: { type: "boolean", description: "供应者填写的运营分类，不代表协议凭据的寿命保证。" },
+      qualityScore: { type: "integer", minimum: 0, maximum: 100 },
+      passwordConfigured: { type: "boolean", description: "仅表示是否配置密码，不返回原始密码。" },
+      credentialRevision: id(),
+      credentialUpdatedAt: dateTime(),
+      validationGeneration: id(),
+      validationFailures: { type: "integer", minimum: 0 },
+      lastSafeError: { type: "string" },
+      lastCheckedAt: nullable("string", { format: "date-time" }),
+      lastAllocatedAt: nullable("string", { format: "date-time" }),
+      createdAt: dateTime(),
+      updatedAt: dateTime(),
+    },
+    required: ["id", "version", "ownerUserId", "email", "suffix", "status", "forSale", "longLived", "qualityScore",
+      "passwordConfigured", "credentialRevision", "credentialUpdatedAt", "validationGeneration", "validationFailures", "createdAt", "updatedAt"],
+    additionalProperties: false,
+  },
+  ProtoOwnerSummary: {
+    type: "object",
+    properties: {
+      id: id(), email: { type: "string" }, nickname: { type: "string" }, groupName: { type: "string" },
+      role: stringEnum(["user", "supplier", "admin", "super_admin"]), enabled: { type: "boolean" },
+    },
+    required: ["id", "email", "nickname", "groupName", "role", "enabled"],
+    additionalProperties: false,
+  },
+  ProtoStatusFacets: {
+    type: "object",
+    properties: Object.fromEntries(["all", ...protoResourceStatuses].map((name) => [name, id({ minimum: 0 })])),
+    required: ["all", ...protoResourceStatuses],
+    additionalProperties: false,
+  },
+  ProtoBooleanFacets: {
+    type: "object",
+    properties: { all: id({ minimum: 0 }), yes: id({ minimum: 0 }), no: id({ minimum: 0 }) },
+    required: ["all", "yes", "no"],
+    additionalProperties: false,
+  },
+  ProtoSuffixFacet: {
+    type: "object",
+    properties: { key: { type: "string" }, count: id({ minimum: 0 }) },
+    required: ["key", "count"],
+    additionalProperties: false,
+  },
+  ProtoResourceFacets: {
+    type: "object",
+    properties: {
+      ...Object.fromEntries(["all", ...protoResourceStatuses].map((name) => [name, id({ minimum: 0 })])),
+      status: ref("ProtoStatusFacets"), forSale: ref("ProtoBooleanFacets"), longLived: ref("ProtoBooleanFacets"),
+      suffixes: listOf("ProtoSuffixFacet"),
+    },
+    required: ["all", ...protoResourceStatuses, "status", "forSale", "longLived", "suffixes"],
+    additionalProperties: false,
+  },
+  ProtoResourceListResponse: {
+    type: "object",
+    properties: {
+      items: listOf("ProtoResource"), total: id({ minimum: 0, description: "includeTotal=false 时省略。" }), offset: { type: "integer" }, limit: { type: "integer" },
+      nextAfterId: nullable("integer", { format: "int64" }), hasMore: { type: "boolean" }, facets: ref("ProtoResourceFacets"),
+    },
+    required: ["items", "offset", "limit", "hasMore", "facets"],
+    additionalProperties: false,
+  },
+  ProtoImportResponse: {
+    type: "object",
+    properties: {
+      importId: id(), status: stringEnum(["processing", "imported", "failed"]),
+      accepted: { type: "integer" }, imported: { type: "integer" }, skipped: { type: "integer" }, failed: { type: "integer" },
+      dispatchStatus: stringEnum(["pending", "queued", "running", "done", "succeeded", "failed"]),
+      dispatchAttempts: { type: "integer" }, failureAvailable: { type: "boolean" },
+      lastSafeError: { type: "string" }, reused: { type: "boolean" },
+      createdAt: nullable("string", { format: "date-time" }), updatedAt: nullable("string", { format: "date-time" }),
+    },
+    required: ["importId", "status", "accepted", "imported", "skipped", "failed", "dispatchStatus", "dispatchAttempts", "failureAvailable", "reused"],
+    additionalProperties: false,
+  },
+  ProtoImportItem: {
+    type: "object",
+    properties: {
+      line: { type: "integer", minimum: 1 }, resourceId: nullable("integer", { format: "int64" }),
+      outcome: stringEnum(["imported", "restored", "skipped", "failed"]), category: { type: "string" }, lastSafeError: { type: "string" },
+    },
+    required: ["line", "outcome", "category"],
+    additionalProperties: false,
+  },
+  ProtoImportItemsResponse: {
+    type: "object",
+    properties: { items: listOf("ProtoImportItem"), total: id(), offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 1, maximum: 200 } },
+    required: ["items", "total", "offset", "limit"],
+    additionalProperties: false,
+  },
+  ProtoResourceCommandRequest: {
+    type: "object",
+    properties: { version: id({ minimum: 1, description: "最近一次资源查询返回的根版本；不匹配时返回 409。" }) },
+    required: ["version"],
+    additionalProperties: false,
+  },
+  ProtoResourceMutationResponse: {
+    type: "object",
+    properties: {
+      resourceId: id(), version: id(), status: ref("ProtoResourceStatus"), forSale: { type: "boolean" },
+      validationGeneration: id(), queued: { type: "boolean" }, todo: { type: "boolean" }, reused: { type: "boolean" },
+    },
+    required: ["resourceId", "version", "status", "forSale", "validationGeneration", "queued", "todo", "reused"],
+    additionalProperties: false,
+  },
+  ProtoResourceFilter: {
+    type: "object",
+    description: "仅筛选当前 API Key 所属用户的资源，不能指定其他归属人。",
+    properties: {
+      search: { type: "string", maxLength: 320 }, status: ref("ProtoResourceStatus"), suffix: { type: "string", maxLength: 255 },
+      forSale: { type: "boolean" }, longLived: { type: "boolean" }, createdFrom: dateTime(), createdTo: dateTime(),
+    },
+    additionalProperties: false,
+  },
+  ProtoBulkRequest: {
+    type: "object",
+    properties: {
+      selection: {
+        type: "object",
+        properties: {
+          mode: stringEnum(["ids", "filter"]),
+          resourceIds: { type: "array", minItems: 1, maxItems: 10000, items: id({ minimum: 1 }) },
+          filter: ref("ProtoResourceFilter"),
+        },
+        required: ["mode"],
+        additionalProperties: false,
+      },
+    },
+    required: ["selection"],
+    additionalProperties: false,
+  },
+  ProtoBatchRequest: {
+    type: "object",
+    properties: { resourceIds: { type: "array", minItems: 1, maxItems: 1000, items: id({ minimum: 1 }) } },
+    required: ["resourceIds"],
+    additionalProperties: false,
+  },
+  ProtoBulkTask: {
+    type: "object",
+    properties: {
+      taskId: { type: "string", pattern: "^proto_bulk:[1-9][0-9]*$" }, kind: stringEnum(["proto_resource_bulk"]),
+      resourceType: stringEnum(["proto"]), status: stringEnum(["queued", "running", "succeeded", "failed"]),
+      action: stringEnum(["validate", "history", "disable", "publish", "unpublish", "delete"]),
+      operatorUserId: id(), attempts: { type: "integer", minimum: 0 }, maxAttempts: { type: "integer", minimum: 1 },
+      requested: { type: "integer", minimum: 0 }, processed: { type: "integer", minimum: 0 },
+      affected: { type: "integer", minimum: 0 }, skipped: { type: "integer", minimum: 0 },
+      reasonCounts: {
+        type: "array",
+        items: {
+          type: "object", properties: { reason: { type: "string" }, count: { type: "integer", minimum: 0 } },
+          required: ["reason", "count"], additionalProperties: false,
+        },
+      },
+      requestId: { type: "string" }, createdAt: dateTime(), startedAt: nullable("string", { format: "date-time" }), updatedAt: dateTime(),
+      finishedAt: nullable("string", { format: "date-time" }),
+    },
+    required: ["taskId", "kind", "resourceType", "status", "action", "requested", "processed", "affected", "skipped",
+      "reasonCounts", "attempts", "maxAttempts", "createdAt", "updatedAt"],
+    additionalProperties: false,
+  },
   MailServerListResponse: {
     type: "object",
     properties: {
@@ -1051,6 +1245,7 @@ const spec = {
   tags: [
     { name: "Core", description: "高频集成接口，覆盖 API Key 状态、项目查询、统一下单、订单查询和邮件取件。" },
     { name: "Resources", description: "自有微软邮箱、域名邮箱、邮件服务器和资源检测接口。" },
+    { name: "Proto", description: "当前 API Key 所属用户的 Proto 资源、两段格式导入、验证和批量任务。商品与订单仍使用 Core 统一入口。" },
     { name: "Wallet", description: "钱包余额、账单、充值记录和兑换码充值接口。" },
   ],
   components: {
@@ -1111,7 +1306,7 @@ const spec = {
           { name: "scope", in: "query", schema: stringEnum(["visible", "mine"]) },
           { name: "status", in: "query", schema: stringEnum(["reviewing", "listed", "delisted"]) },
           { name: "accessType", in: "query", schema: stringEnum(["public", "private"]) },
-          { name: "productType", in: "query", schema: stringEnum(["microsoft", "domain", "gmail", "gmail_variant", "icloud"]) },
+          { name: "productType", in: "query", schema: stringEnum(["microsoft", "domain", "gmail", "gmail_variant", "icloud", "proto"]) },
           { name: "search", in: "query", schema: { type: "string" } },
         ],
         responses: {
@@ -1420,6 +1615,160 @@ const spec = {
           "202": accepted(ref("ResourceValidationsResponse")),
           ...errorResponses,
         },
+      },
+    },
+    "/v1/open/proto/resources": {
+      get: {
+        tags: ["Proto"],
+        operationId: "openListProtoResources",
+        summary: "查询自有 Proto 邮箱",
+        description: "仅返回当前 API Key 所属用户未删除的资源，列表及统计都不包含已删除资源。afterId 使用上一页 nextAfterId；includeTotal=false 时响应省略 total，includeFacets=false 可跳过筛选统计计算。",
+        security: apiKeySecurity,
+        parameters: [
+          ...protoPaginationParams,
+          { name: "afterId", in: "query", schema: id({ minimum: 1 }) },
+          { name: "search", in: "query", schema: { type: "string", maxLength: 320 } },
+          { name: "status", in: "query", schema: ref("ProtoResourceStatus") },
+          { name: "suffix", in: "query", schema: { type: "string", maxLength: 255 } },
+          { name: "forSale", in: "query", schema: { type: "boolean" } },
+          { name: "longLived", in: "query", schema: { type: "boolean" } },
+          { name: "createdFrom", in: "query", schema: dateTime() },
+          { name: "createdTo", in: "query", schema: dateTime() },
+          { name: "includeTotal", in: "query", schema: { type: "boolean", default: true } },
+          { name: "includeFacets", in: "query", schema: { type: "boolean", default: true } },
+        ],
+        responses: { "200": ok(ref("ProtoResourceListResponse")), ...errorResponses },
+      },
+    },
+    "/v1/open/proto/resources/{resourceId}": {
+      get: {
+        tags: ["Proto"],
+        operationId: "openGetProtoResource",
+        summary: "查询自有 Proto 邮箱详情",
+        security: apiKeySecurity,
+        parameters: [protoResourcePath],
+        responses: { "200": ok(ref("ProtoResource")), ...errorResponses },
+      },
+      delete: {
+        tags: ["Proto"],
+        operationId: "openDeleteProtoResource",
+        summary: "删除自有私有 Proto 邮箱",
+        description: "传入最近查询返回的 version。公开资源或仍有活动分配的资源不能通过自助入口删除。",
+        security: apiKeySecurity,
+        parameters: [protoResourcePath, idempotencyHeader],
+        requestBody: jsonBody(ref("ProtoResourceCommandRequest")),
+        responses: { "200": ok(ref("ProtoResourceMutationResponse")), ...errorResponses },
+      },
+    },
+    "/v1/open/proto/resources/imports": {
+      post: {
+        tags: ["Proto"],
+        operationId: "openPostProtoResourceImport",
+        summary: "导入 Proto 邮箱 TXT",
+        description: "每行格式为 邮箱----密码，导入为当前用户的私有资源。密码仅用于后端接入，不通过查询或订单接口回显。异步任务受理不表示验证成功。",
+        security: apiKeySecurity,
+        parameters: [idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                properties: {
+                  file: { type: "string", format: "binary" },
+                  errorStrategy: { ...stringEnum(["skip", "abort"]), default: "skip" },
+                  longLived: { type: "boolean", default: false },
+                },
+                required: ["file"],
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: { "202": accepted(ref("ProtoImportResponse")), ...errorResponses, "413": { $ref: "#/components/responses/PayloadTooLarge" } },
+      },
+    },
+    "/v1/open/proto/resources/imports/{importId}": {
+      get: {
+        tags: ["Proto"],
+        operationId: "openGetProtoResourceImport",
+        summary: "查询自有 Proto 导入任务",
+        security: apiKeySecurity,
+        parameters: [protoImportPath],
+        responses: { "200": ok(ref("ProtoImportResponse")), ...errorResponses },
+      },
+    },
+    "/v1/open/proto/resources/imports/{importId}/items": {
+      get: {
+        tags: ["Proto"],
+        operationId: "openGetProtoResourceImportItems",
+        summary: "分页查询 Proto 导入行结果",
+        description: "返回行号、处理结果、安全原因和统一资源 ID，不返回原始密码行。",
+        security: apiKeySecurity,
+        parameters: [protoImportPath, ...protoPaginationParams],
+        responses: { "200": ok(ref("ProtoImportItemsResponse")), ...errorResponses },
+      },
+    },
+    "/v1/open/proto/resources/imports/{importId}/failures": {
+      get: {
+        tags: ["Proto"],
+        operationId: "openGetProtoResourceImportFailures",
+        summary: "下载 Proto 导入失败明细",
+        description: "仅可下载当前用户导入任务的安全 CSV 明细，不包含原始凭据。",
+        security: apiKeySecurity,
+        parameters: [protoImportPath],
+        responses: {
+          "200": { description: "安全失败明细。", content: { "text/csv": { schema: { type: "string" } } } },
+          ...errorResponses,
+        },
+      },
+    },
+    "/v1/open/proto/resources/{resourceId}/validate": {
+      post: {
+        tags: ["Proto"],
+        operationId: "openPostProtoResourceValidate",
+        summary: "提交自有 Proto 邮箱验证",
+        description: "传入 version 和幂等键。当前真实验证为 TODO；受理和排队不会把资源标记为可用。",
+        security: apiKeySecurity,
+        parameters: [protoResourcePath, idempotencyHeader],
+        requestBody: jsonBody(ref("ProtoResourceCommandRequest")),
+        responses: { "202": accepted(ref("ProtoResourceMutationResponse")), ...errorResponses },
+      },
+    },
+    "/v1/open/proto/resources/validations": {
+      post: {
+        tags: ["Proto"],
+        operationId: "openPostProtoResourceValidations",
+        summary: "批量提交自有 Proto 邮箱验证",
+        security: apiKeySecurity,
+        parameters: [idempotencyHeader],
+        requestBody: jsonBody(ref("ProtoBatchRequest")),
+        responses: { "202": accepted(ref("ProtoBulkTask")), ...errorResponses },
+      },
+    },
+    "/v1/open/proto/resources/bulk/{command}": {
+      post: {
+        tags: ["Proto"],
+        operationId: "openPostProtoResourceBulk",
+        summary: "按选中 ID 或筛选条件批量处理自有 Proto 邮箱",
+        description: "公开 API 仅支持 validate/delete；筛选全量始终限制为当前用户的资源。",
+        security: apiKeySecurity,
+        parameters: [
+          { name: "command", in: "path", required: true, schema: stringEnum(["validate", "delete"]) },
+          idempotencyHeader,
+        ],
+        requestBody: jsonBody(ref("ProtoBulkRequest")),
+        responses: { "202": accepted(ref("ProtoBulkTask")), ...errorResponses },
+      },
+    },
+    "/v1/open/proto/resources/bulk-tasks/{taskId}": {
+      get: {
+        tags: ["Proto"],
+        operationId: "openGetProtoResourceBulkTask",
+        summary: "查询自有 Proto 批量任务",
+        security: apiKeySecurity,
+        parameters: [{ name: "taskId", in: "path", required: true, schema: { type: "string", pattern: "^proto_bulk:[1-9][0-9]*$" } }],
+        responses: { "200": ok(ref("ProtoBulkTask")), ...errorResponses },
       },
     },
     "/v1/open/servers": {

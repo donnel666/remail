@@ -142,19 +142,20 @@ type FetchedMessage struct {
 	Recipient       string
 	Recipients      []string
 	// ToRecipients contains one address only when the provider reported exactly one original To entry.
-	ToRecipients      []string
-	Sender            string
-	Subject           string
-	Body              string
-	RawSource         string
-	ProviderPayload   string
-	BodyPreview       string
-	VerificationCode  string
-	MessageIDHeader   string
-	ProviderMessageID string
-	Protocol          string
-	Folder            string
-	ReceivedAt        time.Time
+	ToRecipients       []string
+	Sender             string
+	Subject            string
+	Body               string
+	RawSource          string
+	ProviderPayload    string
+	BodyPreview        string
+	VerificationCode   string
+	MessageIDHeader    string
+	ProviderMessageID  string
+	CredentialRevision uint64
+	Protocol           string
+	Folder             string
+	ReceivedAt         time.Time
 }
 
 type FetchMessagesRequest struct {
@@ -345,6 +346,8 @@ type UseCase struct {
 	credentials    coreapp.MicrosoftCredentialPort
 	gmailFetch     GmailMailFetchPort
 	iCloudFetch    ICloudMailFetchPort
+	protoFetch     ProtoMailFetchPort
+	protoFailures  PermanentProtoFetchFailurePort
 	pickupFetch    PickupFetchStatePort
 	pickupMessages PickupMessageCachePort
 	now            func() time.Time
@@ -450,6 +453,9 @@ func (uc *UseCase) listOrderMailWithPickupCache(ctx context.Context, scope Order
 	}
 	cache := uc.applyPickupMessageCache(ctx, scope.EmailResourceID, []OrderScope{scope})
 	if !cache.applied {
+		if !cache.satisfied && scope.AllocationType == domain.ResourceTypeProto && uc.protoFetch == nil {
+			return nil, nil, false, false, domain.ErrMailServiceUnavailable
+		}
 		return items, state, hasDelivery, cache.satisfied, nil
 	}
 	items, state, hasDelivery, err = uc.listOrderMailByScope(ctx, scope)
@@ -609,6 +615,10 @@ func (uc *UseCase) listPickupMailBatchBulk(
 		}
 		results[i] = PickupMailResult{Items: items, Fetch: state}
 		if scopeFetchable(*read.Scope, uc.now) && !cacheSatisfied[read.Scope.EmailResourceID] && shouldScheduleReadFetch(*read.Scope, hasDelivery) {
+			if read.Scope.AllocationType == domain.ResourceTypeProto && uc.protoFetch == nil {
+				results[i].Err = domain.ErrMailServiceUnavailable
+				continue
+			}
 			fetchScopes = append(fetchScopes, *read.Scope)
 		}
 	}
@@ -621,7 +631,7 @@ func (uc *UseCase) applyPickupMessageCaches(ctx context.Context, reads []PickupB
 	applied := false
 	scopesByResource := make(map[uint][]OrderScope)
 	for _, read := range reads {
-		if read.Err != nil || read.Scope == nil || read.Scope.AllocationType != domain.ResourceTypeMicrosoft {
+		if read.Err != nil || read.Scope == nil || (read.Scope.AllocationType != domain.ResourceTypeMicrosoft && read.Scope.AllocationType != domain.ResourceTypeProto) {
 			continue
 		}
 		hasDelivery := read.Delivery != nil
@@ -702,6 +712,9 @@ func (uc *UseCase) RefreshCodeDiagnosis(ctx context.Context, orderNo, _ string, 
 		}
 		return CodeDiagnosisRefreshResult{}, uc.gmailFetch.FetchLocalOrderMailWithFence(ctx, scope.OrderNo, nil)
 	}
+	if scope.AllocationType == domain.ResourceTypeProto && uc.protoFetch == nil {
+		return CodeDiagnosisRefreshResult{}, domain.ErrMailServiceUnavailable
+	}
 	if !scopeFetchable(*scope, uc.now) {
 		return CodeDiagnosisRefreshResult{}, nil
 	}
@@ -722,8 +735,14 @@ func (uc *UseCase) applyLoadedPickupMessageCache(ctx context.Context, emailResou
 	if len(messages) == 0 {
 		return pickupMessageCacheMatch{satisfied: allMatched}
 	}
+	var fence func(context.Context) error
+	if messages[0].ResourceType == domain.ResourceTypeProto {
+		fence = func(txCtx context.Context) error {
+			return uc.assertProtoCredentialRevision(txCtx, emailResourceID, messages[0].CredentialRevision)
+		}
+	}
 	if _, _, _, err := uc.ingestFetchedMessagesForResourcesWithFence(
-		ctx, messages, domain.ResourceTypeMicrosoft, []uint{emailResourceID}, nil,
+		ctx, messages, messages[0].ResourceType, []uint{emailResourceID}, fence,
 	); err != nil {
 		slog.Warn("pickup cached message matching failed", "resource_id", emailResourceID, "error", err)
 		return pickupMessageCacheMatch{}
@@ -739,12 +758,15 @@ func cachedMessagesMatchingScopes(messages []FetchedMessage, emailResourceID uin
 	matched := make([]FetchedMessage, 0, len(messages))
 	matchedScopes := make([]bool, len(scopes))
 	for _, message := range messages {
-		if message.EmailResourceID != emailResourceID || message.ResourceType != domain.ResourceTypeMicrosoft {
+		if message.EmailResourceID != emailResourceID || (message.ResourceType != domain.ResourceTypeMicrosoft && message.ResourceType != domain.ResourceTypeProto) {
 			continue
 		}
 		messageMatched := false
 		for index, scope := range scopes {
-			if scope.EmailResourceID != emailResourceID || scope.AllocationType != domain.ResourceTypeMicrosoft {
+			if scope.EmailResourceID != emailResourceID || scope.AllocationType != message.ResourceType {
+				continue
+			}
+			if scope.AllocationType == domain.ResourceTypeProto && message.CredentialRevision != scope.CredentialRevision {
 				continue
 			}
 			if !matchesScopeFiltersAnyRecipient(message, scope) {
@@ -1148,6 +1170,15 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 			cachedMessages = pickupMessagesForResource(messages, task.EmailResourceID, scope.AllocationType)
 		}
 	}
+	if scope.AllocationType == domain.ResourceTypeProto {
+		valid := cachedMessages[:0]
+		for _, message := range cachedMessages {
+			if message.CredentialRevision == scope.CredentialRevision {
+				valid = append(valid, message)
+			}
+		}
+		cachedMessages = valid
+	}
 	job := domain.FetchJob{SinceAt: &task.SinceAt, UntilAt: &task.UntilAt}
 	fetched, fetchErr := uc.fetchMessages(ctx, *scope, job, pickupMessageIdentityKeys(cachedMessages))
 	if fetchErr != nil {
@@ -1218,6 +1249,9 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 		}
 		if !current {
 			return domain.ErrFetchJobConflict
+		}
+		if scope.AllocationType == domain.ResourceTypeProto {
+			return uc.assertProtoCredentialRevision(txCtx, scope.EmailResourceID, scope.CredentialRevision)
 		}
 		return nil
 	}
@@ -1478,7 +1512,7 @@ func (uc *UseCase) ingestFetchedMessagesWithScopeAndFence(
 			return nil
 		}
 		var appendErr error
-		if (replayResourceType == domain.ResourceTypeGmail || replayResourceType == domain.ResourceTypeICloud) && fence != nil && len(messages) == 1 {
+		if fence != nil && (replayResourceType == domain.ResourceTypeProto || ((replayResourceType == domain.ResourceTypeGmail || replayResourceType == domain.ResourceTypeICloud) && len(messages) == 1)) {
 			// IMAP administrator fetches ingest one message at a time. Keep the
 			// generation lock held through the append so a replacement job cannot
 			// become current between the fence check and durable fact insertion.
@@ -1628,7 +1662,7 @@ func listUnprojectedMessages(
 	resourceType domain.ResourceType,
 	resourceIDs []uint,
 ) ([]domain.Message, error) {
-	if resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeGmail && resourceType != domain.ResourceTypeICloud {
+	if resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeGmail && resourceType != domain.ResourceTypeICloud && resourceType != domain.ResourceTypeProto {
 		return nil, nil
 	}
 	resourceIDs = mergeResourceIDs(resourceIDs)
@@ -1751,6 +1785,11 @@ func (uc *UseCase) fetchMessages(ctx context.Context, scope OrderScope, job doma
 		untilAt = *job.UntilAt
 	}
 	switch scope.AllocationType {
+	case domain.ResourceTypeProto:
+		return uc.fetchProtoMessages(ctx, FetchMessagesRequest{
+			Scope: scope, SinceAt: sinceAt, UntilAt: untilAt, Realtime: true,
+			MaxMessages: OrderReadLimit(scope), KnownMessageIDs: knownMessageIDs,
+		})
 	case domain.ResourceTypeMicrosoft:
 		if uc.transport == nil {
 			return nil, domain.ErrMailServiceUnavailable
@@ -1803,7 +1842,8 @@ func scopeFetchable(scope OrderScope, now func() time.Time) bool {
 func pickupFetchSupported(scope OrderScope) bool {
 	return scope.AllocationType == domain.ResourceTypeMicrosoft ||
 		scope.AllocationType == domain.ResourceTypeGmail ||
-		scope.AllocationType == domain.ResourceTypeICloud
+		scope.AllocationType == domain.ResourceTypeICloud ||
+		scope.AllocationType == domain.ResourceTypeProto
 }
 
 func (uc *UseCase) fetchedMessageToDomain(ctx context.Context, item FetchedMessage) (domain.Message, *OrderScope, extractionPriority, error) {
@@ -2195,6 +2235,9 @@ func matchRecipientPatterns(patterns []string, message FetchedMessage, scope Ord
 			allowed[pattern] = true
 		}
 	}
+	if message.ResourceType == domain.ResourceTypeProto {
+		return allowed["exact"] && normalizeEmail(message.Recipient) != "" && normalizeEmail(message.Recipient) == normalizeEmail(scope.Recipient)
+	}
 	if message.ResourceType == domain.ResourceTypeDomain {
 		return allowed["exact"] && mailbox.Normalize(message.Recipient) != "" && mailbox.Normalize(message.Recipient) == mailbox.Normalize(scope.Recipient)
 	}
@@ -2495,7 +2538,7 @@ func messageDedupeKey(item FetchedMessage) string {
 	if item.ResourceType == domain.ResourceTypeDomain {
 		mailboxKey = mailbox.Normalize(item.Recipient)
 	}
-	if item.ResourceType == domain.ResourceTypeGmail || item.ResourceType == domain.ResourceTypeICloud {
+	if item.ResourceType == domain.ResourceTypeGmail || item.ResourceType == domain.ResourceTypeICloud || item.ResourceType == domain.ResourceTypeProto {
 		if providerMessageID := strings.ToLower(strings.TrimSpace(item.ProviderMessageID)); providerMessageID != "" {
 			return hashParts(
 				"provider",

@@ -66,6 +66,10 @@ export const PROJECT_PRICE_KEYS = [
   "default_project_icloud_code_supplier_price",
   "default_project_icloud_purchase_price",
   "default_project_icloud_purchase_supplier_price",
+  "default_project_proto_code_price",
+  "default_project_proto_code_supplier_price",
+  "default_project_proto_purchase_price",
+  "default_project_proto_purchase_supplier_price",
 ] as const;
 
 export const PROJECT_SERVICE_KEYS = [
@@ -79,6 +83,8 @@ export const PROJECT_SERVICE_KEYS = [
   "default_project_gmail_variant_purchase_enabled",
   "default_project_icloud_code_enabled",
   "default_project_icloud_purchase_enabled",
+  "default_project_proto_code_enabled",
+  "default_project_proto_purchase_enabled",
 ] as const;
 
 export const PRODUCT_PRICE_MULTIPLIER_KEYS = [
@@ -86,6 +92,7 @@ export const PRODUCT_PRICE_MULTIPLIER_KEYS = [
   "product_price_multiplier_gmail",
   "product_price_multiplier_icloud",
   "product_price_multiplier_domain",
+  "product_price_multiplier_proto",
 ] as const;
 
 export const PAYMENT_BILLING_KEYS = [

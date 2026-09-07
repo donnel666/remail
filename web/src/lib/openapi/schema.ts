@@ -5685,6 +5685,614 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/proto/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the authenticated user's Proto resources
+         * @description Deleted resources are excluded from the list and facets, including when status=deleted is requested.
+         */
+        get: operations["listProtoResources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/proto/resources/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Proto resources in email----password format */
+        post: operations["postProtoResourceImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/proto/resources/imports/{importId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Proto import progress */
+        get: operations["getProtoResourceImport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/proto/resources/imports/{importId}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List safe per-line Proto import outcomes */
+        get: operations["getProtoResourceImportItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/proto/resources/validations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue Proto validation for selected resources */
+        post: operations["postProtoResourceValidations"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/proto/resources/{resourceId}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue validation for one Proto resource */
+        post: operations["postProtoResourceValidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/proto/resources/{resourceId}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish one Proto resource */
+        post: operations["postProtoResourcePublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/proto/resources/{resourceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one Proto resource owned by the authenticated user */
+        get: operations["getProtoResource"];
+        put?: never;
+        post?: never;
+        /** Delete one Proto resource */
+        delete: operations["deleteProtoResource"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proto/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Proto resources for administrators
+         * @description Deleted resources are excluded by default. Use status=deleted to inspect and recover them.
+         */
+        get: operations["getAdminProtoResources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proto/resources/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Proto resources for a selected owner */
+        post: operations["postAdminProtoResourceImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proto/resources/imports/{importId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get an administrator Proto import */
+        get: operations["getAdminProtoResourceImport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proto/resources/imports/{importId}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List safe per-line Proto import outcomes for administrators */
+        get: operations["getAdminProtoResourceImportItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proto/resources/validations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue Proto validation for selected resources */
+        post: operations["postAdminProtoResourceValidations"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proto/resources/batch/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run a lifecycle command for selected Proto resources */
+        post: operations["postAdminProtoResourceBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proto/resources/{resourceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one safe Proto resource */
+        get: operations["getAdminProtoResource"];
+        put?: never;
+        post?: never;
+        /** Delete one Proto resource as an administrator */
+        delete: operations["deleteAdminProtoResource"];
+        options?: never;
+        head?: never;
+        /** Edit Proto resource identity or owner */
+        patch: operations["patchAdminProtoResource"];
+        trace?: never;
+    };
+    "/v1/admin/proto/resources/{resourceId}/maintenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Proto maintenance runs for one resource */
+        get: operations["getAdminProtoResourceMaintenance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proto/resources/{resourceId}/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace Proto password as a write-only value */
+        put: operations["putAdminProtoResourceCredentials"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proto/resources/{resourceId}/{command}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run a lifecycle command for one Proto resource */
+        post: operations["postAdminProtoResourceCommand"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proto/resources/{resourceId}/recover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recover a deleted Proto resource */
+        post: operations["postAdminProtoResourceRecover"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/proto/resources/bulk/{command}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue a Proto resource command for selected resources or a filter */
+        post: operations["postProtoResourceBulk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proto/resources/bulk/{command}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue a Proto administration command for selected resources or a filter */
+        post: operations["postAdminProtoResourceBulk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/proto/resources/bulk-tasks/{taskId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the current user's Proto bulk task */
+        get: operations["getProtoResourceBulkTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proto/resources/bulk-tasks/{taskId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a Proto administration bulk task */
+        get: operations["getAdminProtoResourceBulkTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/proto/resources/imports/{importId}/failures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download safe failure details for the current user's Proto import */
+        get: operations["getProtoResourceImportFailures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/proto/resources/imports/{importId}/failures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download safe Proto import failure details */
+        get: operations["getAdminProtoResourceImportFailures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/open/proto/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the authenticated user's Proto resources
+         * @description Deleted resources are excluded from the list and facets, including when status=deleted is requested.
+         */
+        get: operations["openListProtoResources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/open/proto/resources/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Proto resources in email----password format */
+        post: operations["openPostProtoResourceImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/open/proto/resources/imports/{importId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Proto import progress */
+        get: operations["openGetProtoResourceImport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/open/proto/resources/imports/{importId}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List safe per-line Proto import outcomes */
+        get: operations["openGetProtoResourceImportItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/open/proto/resources/validations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue Proto validation for selected resources */
+        post: operations["openPostProtoResourceValidations"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/open/proto/resources/{resourceId}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue validation for one Proto resource */
+        post: operations["openPostProtoResourceValidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/open/proto/resources/{resourceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one Proto resource owned by the authenticated user */
+        get: operations["openGetProtoResource"];
+        put?: never;
+        post?: never;
+        /** Delete one Proto resource */
+        delete: operations["openDeleteProtoResource"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/open/proto/resources/bulk/{command}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue a Proto resource command for selected resources or a filter */
+        post: operations["openPostProtoResourceBulk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/open/proto/resources/bulk-tasks/{taskId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the current user's Proto bulk task */
+        get: operations["openGetProtoResourceBulkTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/open/proto/resources/imports/{importId}/failures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download safe failure details for the current user's Proto import */
+        get: operations["openGetProtoResourceImportFailures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -6001,7 +6609,7 @@ export interface components {
              * @description Product type snapshot. `random` is returned only for historical orders created before that product was retired.
              * @enum {string}
              */
-            productType: "microsoft" | "domain" | "random" | "gmail" | "gmail_variant" | "icloud";
+            productType: "microsoft" | "domain" | "random" | "gmail" | "gmail_variant" | "icloud" | "proto";
             /** @enum {string} */
             serviceMode: "code" | "purchase";
             /** @enum {string} */
@@ -6013,7 +6621,7 @@ export interface components {
             payAmount: components["schemas"]["NonNegativeLedgerAmountResponse"];
             refundAmount: components["schemas"]["NonNegativeLedgerAmountResponse"];
             /** @enum {string} */
-            allocationType?: "microsoft" | "domain" | "gmail" | "icloud";
+            allocationType?: "microsoft" | "domain" | "gmail" | "icloud" | "proto";
             allocationId?: number;
             deliveryEmail: string;
             /** Format: date-time */
@@ -6103,6 +6711,8 @@ export interface components {
             gmailVariant: number;
             /** Format: int64 */
             icloud: number;
+            /** Format: int64 */
+            proto: number;
         };
         OrderProjectFacet: {
             projectId: number;
@@ -6579,6 +7189,16 @@ export interface components {
             icloudPurchaseActivations: number;
             icloudPurchaseActivationSuccessRate: number;
             icloudAveragePurchaseActivationSeconds: number;
+            /** @description Non-deleted Proto source accounts. */
+            protoTotalEmails: number;
+            /** @description Healthy public Proto source accounts owned by active supplier or administrator accounts. */
+            protoAvailableEmails: number;
+            protoCodeReceipts: number;
+            protoCodeSuccessRate: number;
+            protoAverageCodeReceiptSeconds: number;
+            protoPurchaseActivations: number;
+            protoPurchaseActivationSuccessRate: number;
+            protoAveragePurchaseActivationSeconds: number;
             domainTotalMailboxes: number;
             domainAvailableMailboxes: number;
             domainCodeReceipts: number;
@@ -6617,6 +7237,11 @@ export interface components {
             icloudReceivedCodes: number;
             icloudCodeSuccessRate: number;
             icloudAverageCodeReceiptSeconds: number;
+            protoTotalEmails: number;
+            protoAvailableEmails: number;
+            protoReceivedCodes: number;
+            protoCodeSuccessRate: number;
+            protoAverageCodeReceiptSeconds: number;
             domainTotalMailboxes: number;
             domainAvailableMailboxes: number;
             domainReceivedCodes: number;
@@ -7353,7 +7978,7 @@ export interface components {
         BotProjectProduct: {
             projectId: number;
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud";
+            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
@@ -7799,7 +8424,7 @@ export interface components {
             accessType?: "public" | "private";
             looseMatch?: boolean;
             /** @enum {string} */
-            productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud";
+            productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto";
             search?: string;
             targetPlatform?: string;
             /** Format: date-time */
@@ -7844,7 +8469,7 @@ export interface components {
         };
         ProjectProductRequest: {
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud";
+            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto";
             /**
              * @default enabled
              * @enum {string}
@@ -7907,6 +8532,7 @@ export interface components {
             gmail: number;
             gmailVariant: number;
             icloud: number;
+            proto: number;
         };
         ProjectItem: {
             id: number;
@@ -7937,7 +8563,7 @@ export interface components {
         };
         ProjectProductSummary: {
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud";
+            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
@@ -7984,7 +8610,7 @@ export interface components {
         ProjectProduct: {
             projectId: number;
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud";
+            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
@@ -8240,7 +8866,7 @@ export interface components {
         };
         AllocationItem: {
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "icloud";
+            type: "microsoft" | "domain" | "gmail" | "icloud" | "proto";
             id: number;
             orderNo: string;
             projectId: number;
@@ -8269,11 +8895,13 @@ export interface components {
             domain: components["schemas"]["DomainInventory"];
             gmail: components["schemas"]["GmailInventory"];
             icloud: components["schemas"]["ICloudInventory"];
+            proto: components["schemas"]["ProtoInventory"];
             totalAvailable: number;
             activeMicrosoftAllocations: number;
             activeDomainAllocations: number;
             activeGmailAllocations: number;
             activeICloudAllocations: number;
+            activeProtoAllocations?: number;
         };
         InventoryRefreshRequest: {
             projectId?: number;
@@ -8317,7 +8945,7 @@ export interface components {
         };
         ProjectProductInventoryTotal: {
             /** @enum {string} */
-            productType: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud";
+            productType: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto";
             totalAvailable: number;
             publicAvailable: number;
             /** Format: int64 */
@@ -8376,6 +9004,13 @@ export interface components {
             enabled: boolean;
             eligibleResources: number;
             aliasAvailable: number;
+            totalAvailable: number;
+        };
+        ProtoInventory: {
+            enabled: boolean;
+            eligibleResources: number;
+            mainAvailable: number;
+            publicAvailable: number;
             totalAvailable: number;
         };
         ProxyBindingListResponse: {
@@ -9329,11 +9964,11 @@ export interface components {
             removed: number;
         };
         /** @enum {string} */
-        AdminTaskKind: "import" | "validation" | "alias" | "token" | "refresh" | "fetch" | "history" | "bulk_validation" | "bulk_alias" | "bulk_history" | "bulk_token" | "bulk_publish" | "bulk_unpublish" | "bulk_delete";
+        AdminTaskKind: "import" | "validation" | "alias" | "token" | "refresh" | "fetch" | "history" | "bulk_validation" | "bulk_alias" | "bulk_history" | "bulk_token" | "bulk_publish" | "bulk_unpublish" | "bulk_delete" | "bulk_disable";
         /** @enum {string} */
         AdminTaskStatus: "queued" | "running" | "succeeded" | "failed" | "uncertain" | "canceled";
         /** @enum {string} */
-        AdminTaskBizType: "microsoft_resource" | "gmail_resource" | "icloud_resource" | "domain_resource" | "microsoft_resource_import" | "gmail_resource_import" | "microsoft_resource_bulk" | "icloud_resource_import";
+        AdminTaskBizType: "microsoft_resource" | "gmail_resource" | "icloud_resource" | "domain_resource" | "proto_resource" | "microsoft_resource_import" | "gmail_resource_import" | "microsoft_resource_bulk" | "icloud_resource_import" | "proto_resource_import" | "proto_resource_bulk";
         AdminTaskProgress: {
             /** Format: int64 */
             total: number;
@@ -9540,7 +10175,7 @@ export interface components {
         };
         AdminAllocationItem: {
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "icloud";
+            type: "microsoft" | "domain" | "gmail" | "icloud" | "proto";
             /** @description Allocation ID. */
             id: number;
             orderNo: string;
@@ -10194,6 +10829,281 @@ export interface components {
             limit: number;
             facets?: components["schemas"]["TicketFacets"];
         };
+        /** @enum {string} */
+        ProtoResourceStatus: "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
+        ProtoResource: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            version: number;
+            /** Format: int64 */
+            ownerUserId: number;
+            owner?: components["schemas"]["ProtoOwnerSummary"];
+            /** Format: email */
+            email: string;
+            suffix: string;
+            /** @description Supplier-provided lifecycle classification; not a protocol lifetime guarantee. */
+            longLived: boolean;
+            qualityScore: number;
+            status: components["schemas"]["ProtoResourceStatus"];
+            forSale: boolean;
+            passwordConfigured: boolean;
+            /** Format: int64 */
+            credentialRevision: number;
+            /** Format: date-time */
+            credentialUpdatedAt: string;
+            /** Format: int64 */
+            validationGeneration: number;
+            validationFailures: number;
+            lastSafeError?: string;
+            /** Format: date-time */
+            lastCheckedAt?: string | null;
+            /** Format: date-time */
+            lastAllocatedAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        ProtoResourceFacets: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            pending: number;
+            /** Format: int64 */
+            validating: number;
+            /** Format: int64 */
+            identifying: number;
+            /** Format: int64 */
+            normal: number;
+            /** Format: int64 */
+            abnormal: number;
+            /** Format: int64 */
+            disabled: number;
+            /** Format: int64 */
+            deleted: number;
+            status: {
+                /** Format: int64 */
+                all: number;
+                /** Format: int64 */
+                pending: number;
+                /** Format: int64 */
+                validating: number;
+                /** Format: int64 */
+                identifying: number;
+                /** Format: int64 */
+                normal: number;
+                /** Format: int64 */
+                abnormal: number;
+                /** Format: int64 */
+                disabled: number;
+                /** Format: int64 */
+                deleted: number;
+            };
+            forSale: components["schemas"]["ProtoBooleanFacets"];
+            longLived: components["schemas"]["ProtoBooleanFacets"];
+            suffixes: {
+                key: string;
+                /** Format: int64 */
+                count: number;
+            }[];
+        };
+        ProtoOwnerSummary: {
+            /** Format: int64 */
+            id: number;
+            email: string;
+            nickname: string;
+            groupName: string;
+            /** @enum {string} */
+            role: "user" | "supplier" | "admin" | "super_admin";
+            enabled: boolean;
+        };
+        ProtoBooleanFacets: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            yes: number;
+            /** Format: int64 */
+            no: number;
+        };
+        ProtoResourceListResponse: {
+            items: components["schemas"]["ProtoResource"][];
+            /**
+             * Format: int64
+             * @description Omitted when includeTotal is false.
+             */
+            total?: number;
+            offset: number;
+            limit: number;
+            facets: components["schemas"]["ProtoResourceFacets"];
+            /** Format: int64 */
+            nextAfterId?: number | null;
+            hasMore: boolean;
+        };
+        ProtoImportResponse: {
+            /** Format: int64 */
+            importId: number;
+            /** @enum {string} */
+            status: "processing" | "imported" | "failed";
+            accepted: number;
+            imported: number;
+            skipped: number;
+            failed: number;
+            /** @enum {string} */
+            dispatchStatus: "pending" | "queued" | "running" | "done" | "succeeded" | "failed";
+            dispatchAttempts: number;
+            failureAvailable: boolean;
+            lastSafeError?: string;
+            reused: boolean;
+            /** Format: date-time */
+            createdAt?: string | null;
+            /** Format: date-time */
+            updatedAt?: string | null;
+        };
+        ProtoImportItem: {
+            line: number;
+            /** Format: int64 */
+            resourceId?: number | null;
+            /** @enum {string} */
+            outcome: "imported" | "restored" | "skipped" | "failed";
+            category: string;
+            lastSafeError?: string;
+        };
+        ProtoImportItemsResponse: {
+            items: components["schemas"]["ProtoImportItem"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        ProtoValidationResponse: components["schemas"]["ProtoResourceMutationResponse"];
+        ProtoMaintenanceRun: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            resourceId: number;
+            /** Format: int64 */
+            validationGeneration: number;
+            /** @enum {string} */
+            kind: "validation" | "history";
+            /** @enum {string} */
+            status: "queued" | "running" | "succeeded" | "failed" | "uncertain" | "canceled";
+            attempts: number;
+            maxAttempts: number;
+            /** Format: int64 */
+            credentialRevision: number;
+            requestId?: string;
+            lastSafeError?: string;
+            /** Format: date-time */
+            queuedAt: string;
+            /** Format: date-time */
+            startedAt?: string | null;
+            /** Format: date-time */
+            finishedAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        ProtoMaintenanceListResponse: {
+            items: components["schemas"]["ProtoMaintenanceRun"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        ProtoBatchRequest: {
+            resourceIds: number[];
+        };
+        ProtoValidationBatchResponse: components["schemas"]["ProtoBulkTask"];
+        ProtoBatchResponse: components["schemas"]["ProtoBulkTask"];
+        ProtoResourceMutationResponse: {
+            /** Format: int64 */
+            resourceId: number;
+            /** Format: int64 */
+            version: number;
+            status: components["schemas"]["ProtoResourceStatus"];
+            forSale: boolean;
+            /** Format: int64 */
+            validationGeneration: number;
+            queued: boolean;
+            todo: boolean;
+            reused: boolean;
+        };
+        /** @description Supply email, ownerId, or both. Identity edits are blocked while an active Proto allocation exists. */
+        ProtoResourceEditRequest: {
+            /** Format: int64 */
+            version: number;
+            /** Format: email */
+            email?: string;
+            /** Format: int64 */
+            ownerId?: number;
+            password?: string;
+            qualityScore?: number;
+            longLived?: boolean;
+        };
+        ProtoCredentialsReplaceRequest: {
+            /** Format: int64 */
+            version: number;
+            password: string;
+        };
+        ProtoResourceCommandRequest: {
+            /** Format: int64 */
+            version: number;
+        };
+        ProtoResourceFilter: {
+            search?: string;
+            status?: components["schemas"]["ProtoResourceStatus"];
+            suffix?: string;
+            forSale?: boolean;
+            longLived?: boolean;
+            /** Format: int64 */
+            ownerId?: number;
+            /** Format: date-time */
+            createdFrom?: string;
+            /** Format: date-time */
+            createdTo?: string;
+        };
+        ProtoBulkRequest: {
+            selection: {
+                /** @enum {string} */
+                mode: "ids" | "filter";
+                resourceIds?: number[];
+                filter?: components["schemas"]["ProtoResourceFilter"];
+            };
+        };
+        ProtoBulkTask: {
+            taskId: string;
+            /** @enum {string} */
+            kind: "proto_resource_bulk";
+            /** @enum {string} */
+            resourceType: "proto";
+            /** @enum {string} */
+            status: "queued" | "running" | "succeeded" | "failed";
+            /** @enum {string} */
+            action: "validate" | "history" | "disable" | "publish" | "unpublish" | "delete";
+            /** Format: int64 */
+            operatorUserId?: number;
+            attempts?: number;
+            maxAttempts?: number;
+            requested: number;
+            processed: number;
+            affected: number;
+            skipped: number;
+            reasonCounts: {
+                reason: string;
+                count: number;
+            }[];
+            requestId?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** Format: date-time */
+            startedAt?: string | null;
+            /** Format: date-time */
+            finishedAt?: string | null;
+        };
     };
     responses: {
         /** @description Malformed JSON, path, query, pagination, enum, or multipart input */
@@ -10281,6 +11191,12 @@ export interface components {
         };
     };
     parameters: {
+        ProtoBulkTaskId: string;
+        ProtoSuffixQuery: string;
+        ProtoLongLivedQuery: boolean;
+        /** @description When false, the response omits total and returns only cursor pagination data. */
+        ProtoIncludeTotalQuery: boolean;
+        ProtoIncludeFacetsQuery: boolean;
         TicketNoPath: string;
         TicketTypeQuery: "order" | "general";
         TicketStatusQuery: "open" | "processing" | "closed";
@@ -13261,7 +14177,7 @@ export interface operations {
                 status?: "reviewing" | "listed" | "delisted";
                 accessType?: "public" | "private";
                 looseMatch?: boolean;
-                productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud";
+                productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto";
                 search?: string;
                 targetPlatform?: string;
                 createdFrom?: components["parameters"]["CreatedFromQuery"];
@@ -14572,7 +15488,7 @@ export interface operations {
                 status?: "reviewing" | "listed" | "delisted";
                 accessType?: "public" | "private";
                 looseMatch?: boolean;
-                productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud";
+                productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto";
                 search?: string;
                 targetPlatform?: string;
                 createdFrom?: string;
@@ -17028,7 +17944,7 @@ export interface operations {
     getAdminAllocations: {
         parameters: {
             query?: {
-                type?: "microsoft" | "domain" | "gmail" | "icloud";
+                type?: "microsoft" | "domain" | "gmail" | "icloud" | "proto";
                 orderNo?: string;
                 projectId?: number;
                 resourceId?: number;
@@ -17086,7 +18002,7 @@ export interface operations {
     getAdminAllocation: {
         parameters: {
             query: {
-                type: "microsoft" | "domain" | "gmail" | "icloud";
+                type: "microsoft" | "domain" | "gmail" | "icloud" | "proto";
             };
             header?: never;
             path: {
@@ -17664,7 +18580,7 @@ export interface operations {
                 scope?: "mine" | "all";
                 status?: "pending_payment" | "paid" | "active" | "completed" | "refunded" | "failed" | "closed";
                 serviceMode?: "purchase" | "code";
-                productType?: "microsoft" | "domain" | "random" | "gmail" | "gmail_variant" | "icloud";
+                productType?: "microsoft" | "domain" | "random" | "gmail" | "gmail_variant" | "icloud" | "proto";
                 /** @description Prefix search by order number or delivery email; token-prefix search by user email/nickname or project name/platform; exact user/project ID search. */
                 search?: string;
                 /** @description Exact project filter used by the order project tabs. */
@@ -22831,7 +23747,7 @@ export interface operations {
     postAdminMicrosoftResourceMessagesFetch: {
         parameters: {
             query?: {
-                type?: "microsoft" | "gmail" | "icloud";
+                type?: "microsoft" | "gmail" | "icloud" | "proto";
             };
             header: {
                 /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
@@ -24094,11 +25010,11 @@ export interface operations {
     getAdminTasks: {
         parameters: {
             query: {
-                bizType: "microsoft_resource" | "gmail_resource" | "icloud_resource" | "domain_resource" | "icloud_resource_import";
+                bizType: "microsoft_resource" | "gmail_resource" | "icloud_resource" | "domain_resource" | "icloud_resource_import" | "proto_resource" | "proto_resource_import";
                 /** @description Resource ID matching bizType. Omit only when listing iCloud imports globally. */
                 bizId?: number;
                 /** @description Optional normalized task source. Use `icloud_onboarding` to list recoverable Apple onboarding batches without unrelated iCloud imports consuming the page; `icloud_refresh` identifies resource-level Cookie refresh tasks. */
-                source?: "import" | "alias" | "alias_schedule" | "token" | "fetch" | "resource_history" | "bulk" | "gmail_validation" | "gmail_history" | "icloud_import" | "icloud_onboarding" | "icloud_refresh" | "icloud_validation";
+                source?: "import" | "alias" | "alias_schedule" | "token" | "fetch" | "resource_history" | "bulk" | "gmail_validation" | "gmail_history" | "icloud_import" | "icloud_onboarding" | "icloud_refresh" | "icloud_validation" | "proto_import" | "proto_validation" | "proto_history" | "proto_bulk";
                 kind?: components["schemas"]["AdminTaskKind"];
                 status?: components["schemas"]["AdminTaskStatus"];
                 offset?: number;
@@ -24158,7 +25074,7 @@ export interface operations {
         parameters: {
             query: {
                 /** @description Resource type; defaults to microsoft for backward compatibility. */
-                type?: "microsoft" | "gmail" | "icloud" | "domain";
+                type?: "microsoft" | "gmail" | "icloud" | "domain" | "proto";
                 resourceId: number;
                 search?: string;
                 offset?: number;
@@ -24198,7 +25114,7 @@ export interface operations {
             query: {
                 resourceId: number;
                 /** @description Resource type; defaults to microsoft for backward compatibility. */
-                type?: "microsoft" | "gmail" | "icloud" | "domain";
+                type?: "microsoft" | "gmail" | "icloud" | "domain" | "proto";
             };
             header?: never;
             path: {
@@ -26247,6 +27163,1205 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listProtoResources: {
+        parameters: {
+            query?: {
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: components["parameters"]["LimitQuery"];
+                /** @description Last ticket id from the previous page. */
+                afterId?: components["parameters"]["AfterIdQuery"];
+                createdFrom?: components["parameters"]["CreatedFromQuery"];
+                createdTo?: components["parameters"]["CreatedToQuery"];
+                suffix?: components["parameters"]["ProtoSuffixQuery"];
+                longLived?: components["parameters"]["ProtoLongLivedQuery"];
+                /** @description When false, the response omits total and returns only cursor pagination data. */
+                includeTotal?: components["parameters"]["ProtoIncludeTotalQuery"];
+                includeFacets?: components["parameters"]["ProtoIncludeFacetsQuery"];
+                search?: string;
+                status?: "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
+                forSale?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proto resources */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoResourceListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    postProtoResourceImport: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface. */
+                "X-Turnstile-Token"?: components["parameters"]["TurnstileToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                    /**
+                     * @default skip
+                     * @enum {string}
+                     */
+                    errorStrategy?: "skip" | "abort";
+                    /** @default false */
+                    longLived?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Import accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoImportResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getProtoResourceImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Import progress */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoImportResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getProtoResourceImportItems: {
+        parameters: {
+            query?: {
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Import line outcomes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoImportItemsResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postProtoResourceValidations: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtoBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Validation tasks accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoValidationBatchResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    postProtoResourceValidate: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtoResourceCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Validation task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoValidationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postProtoResourcePublish: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtoResourceCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Published */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoResourceMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getProtoResource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proto resource */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoResource"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteProtoResource: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtoResourceCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoResourceMutationResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getAdminProtoResources: {
+        parameters: {
+            query?: {
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: components["parameters"]["LimitQuery"];
+                /** @description Last ticket id from the previous page. */
+                afterId?: components["parameters"]["AfterIdQuery"];
+                createdFrom?: components["parameters"]["CreatedFromQuery"];
+                createdTo?: components["parameters"]["CreatedToQuery"];
+                suffix?: components["parameters"]["ProtoSuffixQuery"];
+                longLived?: components["parameters"]["ProtoLongLivedQuery"];
+                /** @description When false, the response omits total and returns only cursor pagination data. */
+                includeTotal?: components["parameters"]["ProtoIncludeTotalQuery"];
+                includeFacets?: components["parameters"]["ProtoIncludeFacetsQuery"];
+                ownerId?: number;
+                /** @description Resource ID, full mailbox email, exact local part, @suffix, or owner email/nickname. */
+                search?: string;
+                status?: "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
+                forSale?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proto resources */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoResourceListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    postAdminProtoResourceImport: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                    /** Format: int64 */
+                    ownerId: number;
+                    /**
+                     * @default skip
+                     * @enum {string}
+                     */
+                    errorStrategy?: "skip" | "abort";
+                    /** @default false */
+                    longLived?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Import accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoImportResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getAdminProtoResourceImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Import progress */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoImportResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getAdminProtoResourceImportItems: {
+        parameters: {
+            query?: {
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Import line outcomes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoImportItemsResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postAdminProtoResourceValidations: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtoBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Validation tasks accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoValidationBatchResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    postAdminProtoResourceBatch: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                action: "validation" | "history" | "disable" | "publish" | "unpublish" | "delete";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtoBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Bulk task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoBulkTask"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getAdminProtoResource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proto resource */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoResource"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteAdminProtoResource: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtoResourceCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoResourceMutationResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    patchAdminProtoResource: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtoResourceEditRequest"];
+            };
+        };
+        responses: {
+            /** @description Identity edit committed and resource returned to pending validation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoResourceMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getAdminProtoResourceMaintenance: {
+        parameters: {
+            query?: {
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: components["parameters"]["LimitQuery"];
+            };
+            header?: never;
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proto maintenance runs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoMaintenanceListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    putAdminProtoResourceCredentials: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtoCredentialsReplaceRequest"];
+            };
+        };
+        responses: {
+            /** @description Credentials replaced */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoResourceMutationResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postAdminProtoResourceCommand: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+                command: "validate" | "history" | "enable" | "disable" | "publish" | "unpublish" | "recover";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtoResourceCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Command result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoResourceMutationResponse"];
+                };
+            };
+            /** @description Command accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoValidationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postAdminProtoResourceRecover: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtoResourceCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Recovered */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoResourceMutationResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postProtoResourceBulk: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                command: "validate" | "publish" | "delete";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtoBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Bulk task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoBulkTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminProtoResourceBulk: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                command: "validate" | "history" | "disable" | "publish" | "unpublish" | "delete";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtoBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Bulk task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoBulkTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getProtoResourceBulkTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: components["parameters"]["ProtoBulkTaskId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bulk progress */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoBulkTask"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminProtoResourceBulkTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: components["parameters"]["ProtoBulkTaskId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bulk progress */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoBulkTask"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getProtoResourceImportFailures: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe CSV without credentials */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getAdminProtoResourceImportFailures: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe CSV without credentials */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    openListProtoResources: {
+        parameters: {
+            query?: {
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: components["parameters"]["LimitQuery"];
+                /** @description Last ticket id from the previous page. */
+                afterId?: components["parameters"]["AfterIdQuery"];
+                createdFrom?: components["parameters"]["CreatedFromQuery"];
+                createdTo?: components["parameters"]["CreatedToQuery"];
+                suffix?: components["parameters"]["ProtoSuffixQuery"];
+                longLived?: components["parameters"]["ProtoLongLivedQuery"];
+                /** @description When false, the response omits total and returns only cursor pagination data. */
+                includeTotal?: components["parameters"]["ProtoIncludeTotalQuery"];
+                includeFacets?: components["parameters"]["ProtoIncludeFacetsQuery"];
+                search?: string;
+                status?: "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
+                forSale?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proto resources */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoResourceListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    openPostProtoResourceImport: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                    /**
+                     * @default skip
+                     * @enum {string}
+                     */
+                    errorStrategy?: "skip" | "abort";
+                    /** @default false */
+                    longLived?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Import accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoImportResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    openGetProtoResourceImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Import progress */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoImportResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    openGetProtoResourceImportItems: {
+        parameters: {
+            query?: {
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Import line outcomes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoImportItemsResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    openPostProtoResourceValidations: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtoBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Validation tasks accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoValidationBatchResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    openPostProtoResourceValidate: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtoResourceCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Validation task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoValidationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    openGetProtoResource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proto resource */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoResource"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    openDeleteProtoResource: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtoResourceCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoResourceMutationResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    openPostProtoResourceBulk: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                command: "validate" | "delete";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProtoBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Bulk task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoBulkTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    openGetProtoResourceBulkTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: components["parameters"]["ProtoBulkTaskId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bulk progress */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtoBulkTask"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    openGetProtoResourceImportFailures: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe CSV without credentials */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
         };
     };

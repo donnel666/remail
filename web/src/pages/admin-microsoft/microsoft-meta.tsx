@@ -212,6 +212,8 @@ export function taskKindLabel(kind: AdminMicrosoftAsyncTaskKind) {
       return "Convert to private";
     case "bulk_delete":
       return "Delete";
+    case "bulk_disable":
+      return "Disable";
   }
 }
 

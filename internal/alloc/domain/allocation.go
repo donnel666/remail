@@ -9,6 +9,7 @@ const (
 	AllocationTypeDomain    AllocationType = "domain"
 	AllocationTypeGmail     AllocationType = "gmail"
 	AllocationTypeICloud    AllocationType = "icloud"
+	AllocationTypeProto     AllocationType = "proto"
 )
 
 type AllocationStatus string
@@ -40,6 +41,14 @@ type GmailServiceMode string
 const (
 	GmailServiceModeCode     GmailServiceMode = "code"
 	GmailServiceModePurchase GmailServiceMode = "purchase"
+)
+
+// ServiceMode preserves the existing allocation command type for new providers.
+type ServiceMode = GmailServiceMode
+
+const (
+	ServiceModeCode     = GmailServiceModeCode
+	ServiceModePurchase = GmailServiceModePurchase
 )
 
 type SupplyScope string
@@ -107,6 +116,26 @@ type ICloudAllocation struct {
 	ReleasedAt  *time.Time
 }
 
+// ProtoAllocation is the provider-specific allocation fact for Proto's
+// single primary mailbox. It deliberately has no alias/provider credentials;
+// those belong to the Proto bounded context.
+type ProtoAllocation struct {
+	ID                 uint
+	OrderNo            string
+	ProjectID          uint
+	ProductID          uint
+	ResourceID         uint
+	OwnerUserID        uint
+	SupplyScope        SupplyScope
+	Mailbox            string
+	ServiceMode        string
+	Email              string
+	Status             AllocationStatus
+	CostPointsSnapshot string
+	CreatedAt          time.Time
+	ReleasedAt         *time.Time
+}
+
 type GmailAllocation struct {
 	ID                 uint
 	OrderNo            string
@@ -141,7 +170,7 @@ type UnifiedAllocation struct {
 }
 
 func IsValidAllocationType(value AllocationType) bool {
-	return value == AllocationTypeMicrosoft || value == AllocationTypeDomain || value == AllocationTypeGmail || value == AllocationTypeICloud
+	return value == AllocationTypeMicrosoft || value == AllocationTypeDomain || value == AllocationTypeGmail || value == AllocationTypeICloud || value == AllocationTypeProto
 }
 
 func IsValidGmailMailbox(value GmailMailbox) bool {
@@ -151,6 +180,10 @@ func IsValidGmailMailbox(value GmailMailbox) bool {
 	default:
 		return false
 	}
+}
+
+func IsValidServiceMode(value ServiceMode) bool {
+	return value == ServiceModeCode || value == ServiceModePurchase
 }
 
 func IsValidGmailServiceMode(value GmailServiceMode) bool {

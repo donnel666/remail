@@ -80,6 +80,8 @@ func ProductPriceMultiplier(productType string) string {
 		key = ICloudPriceMultiplierKey
 	case "domain":
 		key = DomainPriceMultiplierKey
+	case "proto":
+		key = ProtoPriceMultiplierKey
 	default:
 		return "1"
 	}

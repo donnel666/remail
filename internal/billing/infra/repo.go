@@ -197,6 +197,7 @@ type BillingRepo struct {
 	operationLogs        operationLogWriter
 	hasGmailAllocations  bool
 	hasICloudAllocations bool
+	hasProtoAllocations  bool
 }
 
 func NewBillingRepo(db *gorm.DB) *BillingRepo {
@@ -207,6 +208,7 @@ func NewBillingRepo(db *gorm.DB) *BillingRepo {
 	if db != nil {
 		repo.hasGmailAllocations = db.Migrator().HasTable("gmail_allocations")
 		repo.hasICloudAllocations = db.Migrator().HasTable("icloud_allocations")
+		repo.hasProtoAllocations = db.Migrator().HasTable("proto_allocations")
 	}
 	return repo
 }
@@ -284,6 +286,11 @@ const supplierICloudAllocationsSQL = `SELECT ia.order_no
     JOIN email_resources er ON er.id = ia.resource_id AND er.type = 'icloud'
     WHERE er.owner_user_id = ? AND ia.supply_scope = 'public'`
 
+const supplierProtoAllocationsSQL = `SELECT pa.order_no
+    FROM proto_allocations pa
+    JOIN email_resources er ON er.id = pa.resource_id AND er.type = 'proto'
+    WHERE er.owner_user_id = ? AND pa.supply_scope = 'public'`
+
 const supplierFulfillmentMetricsSuffix = `) allocations
 JOIN orders o ON o.order_no = allocations.order_no
 WHERE o.debit_tx_id IS NOT NULL
@@ -302,6 +309,10 @@ func (r *BillingRepo) populateSupplierFulfillmentMetrics(ctx context.Context, db
 	}
 	if r.hasICloudAllocations {
 		allocationQueries = append(allocationQueries, supplierICloudAllocationsSQL)
+		args = append(args, userID)
+	}
+	if r.hasProtoAllocations {
+		allocationQueries = append(allocationQueries, supplierProtoAllocationsSQL)
 		args = append(args, userID)
 	}
 	query := supplierFulfillmentMetricsPrefix + strings.Join(allocationQueries, "\nUNION ALL\n") + supplierFulfillmentMetricsSuffix

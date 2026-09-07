@@ -19,9 +19,12 @@ const (
 	AdminTaskBizDomainResource          = "domain_resource"
 	AdminTaskBizGmailResource           = "gmail_resource"
 	AdminTaskBizICloudResource          = "icloud_resource"
+	AdminTaskBizProtoResource           = "proto_resource"
 	AdminTaskBizMicrosoftResourceImport = "microsoft_resource_import"
 	AdminTaskBizICloudResourceImport    = "icloud_resource_import"
+	AdminTaskBizProtoResourceImport     = "proto_resource_import"
 	AdminTaskBizMicrosoftResourceBulk   = "microsoft_resource_bulk"
+	AdminTaskBizProtoResourceBulk       = "proto_resource_bulk"
 
 	AdminTaskKindImport        = "import"
 	AdminTaskKindValidation    = "validation"
@@ -37,6 +40,7 @@ const (
 	AdminTaskKindBulkPublish   = "bulk_publish"
 	AdminTaskKindBulkUnpublish = "bulk_unpublish"
 	AdminTaskKindBulkDelete    = "bulk_delete"
+	AdminTaskKindBulkDisable   = "bulk_disable"
 
 	AdminTaskStatusQueued    = "queued"
 	AdminTaskStatusRunning   = "running"
@@ -58,6 +62,10 @@ const (
 	AdminTaskSourceICloudOnboarding = "icloud_onboarding"
 	AdminTaskSourceICloudRefresh    = "icloud_refresh"
 	AdminTaskSourceICloudValidate   = "icloud_validation"
+	AdminTaskSourceProtoImport      = "proto_import"
+	AdminTaskSourceProtoValidate    = "proto_validation"
+	AdminTaskSourceProtoHistory     = "proto_history"
+	AdminTaskSourceProtoBulk        = "proto_bulk"
 )
 
 func AdminTaskLimits() (int, int) {
@@ -118,6 +126,11 @@ func isAdminTaskSource(value string) bool {
 		AdminTaskSourceICloudOnboarding,
 		AdminTaskSourceICloudRefresh,
 		AdminTaskSourceICloudValidate:
+		return true
+	case AdminTaskSourceProtoImport,
+		AdminTaskSourceProtoValidate,
+		AdminTaskSourceProtoHistory,
+		AdminTaskSourceProtoBulk:
 		return true
 	default:
 		return false
@@ -192,6 +205,16 @@ type AdminTaskViewRepository interface {
 	FindByRef(ctx context.Context, ref AdminTaskRef) (*AdminTaskView, error)
 }
 
+// ProtoAdminTaskViewRepository is an optional extension of the existing task
+// repository contract. Keeping Proto methods out of AdminTaskViewRepository
+// means existing provider stubs and Microsoft consumers remain source
+// compatible while the concrete repository can expose Proto task facts.
+type ProtoAdminTaskViewRepository interface {
+	ProtoResourceExists(ctx context.Context, resourceID uint) (bool, error)
+	ListForProtoResource(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
+	ListForProtoImports(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
+}
+
 type AdminTaskQueryService struct {
 	repo AdminTaskViewRepository
 }
@@ -208,7 +231,11 @@ func (s *AdminTaskQueryService) List(ctx context.Context, filter AdminTaskListFi
 	if err != nil {
 		return nil, err
 	}
-	var exists = normalized.BizType == AdminTaskBizICloudResourceImport
+	var exists = normalized.BizType == AdminTaskBizICloudResourceImport || normalized.BizType == AdminTaskBizProtoResourceImport
+	protoRepo, hasProtoRepo := s.repo.(ProtoAdminTaskViewRepository)
+	if (normalized.BizType == AdminTaskBizProtoResource || normalized.BizType == AdminTaskBizProtoResourceImport) && !hasProtoRepo {
+		return nil, ErrAdminTaskUnavailable
+	}
 	var items []AdminTaskView
 	var total, succeeded int64
 	switch normalized.BizType {
@@ -220,6 +247,8 @@ func (s *AdminTaskQueryService) List(ctx context.Context, filter AdminTaskListFi
 		exists, err = s.repo.GmailResourceExists(ctx, normalized.BizID)
 	case AdminTaskBizICloudResource:
 		exists, err = s.repo.ICloudResourceExists(ctx, normalized.BizID)
+	case AdminTaskBizProtoResource:
+		exists, err = protoRepo.ProtoResourceExists(ctx, normalized.BizID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: check task resource", ErrAdminTaskUnavailable)
@@ -238,6 +267,10 @@ func (s *AdminTaskQueryService) List(ctx context.Context, filter AdminTaskListFi
 		items, total, succeeded, err = s.repo.ListForICloudResource(ctx, normalized)
 	case AdminTaskBizICloudResourceImport:
 		items, total, succeeded, err = s.repo.ListForICloudImports(ctx, normalized)
+	case AdminTaskBizProtoResource:
+		items, total, succeeded, err = protoRepo.ListForProtoResource(ctx, normalized)
+	case AdminTaskBizProtoResourceImport:
+		items, total, succeeded, err = protoRepo.ListForProtoImports(ctx, normalized)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: list normalized tasks", ErrAdminTaskUnavailable)
@@ -280,7 +313,7 @@ func normalizeAdminTaskListFilter(filter AdminTaskListFilter) (AdminTaskListFilt
 	filter.Source = strings.TrimSpace(filter.Source)
 	filter.Kind = strings.TrimSpace(filter.Kind)
 	filter.Status = strings.TrimSpace(filter.Status)
-	if (filter.BizType != AdminTaskBizMicrosoftResource && filter.BizType != AdminTaskBizDomainResource && filter.BizType != AdminTaskBizGmailResource && filter.BizType != AdminTaskBizICloudResource && filter.BizType != AdminTaskBizICloudResourceImport) || (filter.BizType != AdminTaskBizICloudResourceImport && filter.BizID == 0) || filter.Offset < 0 {
+	if (filter.BizType != AdminTaskBizMicrosoftResource && filter.BizType != AdminTaskBizDomainResource && filter.BizType != AdminTaskBizGmailResource && filter.BizType != AdminTaskBizICloudResource && filter.BizType != AdminTaskBizICloudResourceImport && filter.BizType != AdminTaskBizProtoResource && filter.BizType != AdminTaskBizProtoResourceImport) || ((filter.BizType != AdminTaskBizICloudResourceImport && filter.BizType != AdminTaskBizProtoResourceImport) && filter.BizID == 0) || filter.Offset < 0 {
 		return AdminTaskListFilter{}, ErrInvalidAdminTaskQuery
 	}
 	defaultLimit, maxLimit := AdminTaskLimits()
@@ -317,7 +350,8 @@ func isAdminTaskKind(value string) bool {
 		AdminTaskKindBulkToken,
 		AdminTaskKindBulkPublish,
 		AdminTaskKindBulkUnpublish,
-		AdminTaskKindBulkDelete:
+		AdminTaskKindBulkDelete,
+		AdminTaskKindBulkDisable:
 		return true
 	default:
 		return false

@@ -31,7 +31,7 @@ func TestRealtimeTierReservesDedicatedCapacityForCodePickup(t *testing.T) {
 		t.Fatal("realtime config must reserve capacity for payment reconciliation")
 	}
 	for name := range rt {
-		if name == QueueBackgroundValidation || name == QueueBackgroundGmailValidation || name == QueueBackgroundICloudValidation || name == QueueBackgroundDomainValidation || name == QueueBackgroundAlias || name == QueueBackgroundTokenRefresh || name == QueueBackgroundProjectHistory || name == QueueBackgroundGmailIdentification || name == QueueBackgroundInventory || name == QueueResource {
+		if name == QueueBackgroundValidation || name == QueueBackgroundGmailValidation || name == QueueBackgroundICloudValidation || name == QueueBackgroundDomainValidation || name == QueueBackgroundAlias || name == QueueBackgroundTokenRefresh || name == QueueBackgroundProjectHistory || name == QueueBackgroundGmailIdentification || name == QueueBackgroundProtoImport || name == QueueBackgroundProtoValidation || name == QueueBackgroundProtoHistory || name == QueueBackgroundInventory || name == QueueResource {
 			t.Fatalf("realtime tier must not serve background queue %s", name)
 		}
 	}
@@ -45,7 +45,7 @@ func TestBackgroundTierOnlyServesBackgroundQueues(t *testing.T) {
 			t.Fatalf("background tier must not serve realtime/foreground queue %s", foreground)
 		}
 	}
-	if bg[QueueBackgroundValidation] != 3 || bg[QueueBackgroundGmailValidation] != 1 || bg[QueueBackgroundICloudValidation] != 1 || bg[QueueBackgroundDomainValidation] != 1 || bg[QueueBackgroundAlias] != 1 || bg[QueueBackgroundTokenRefresh] != 1 || bg[QueueBackgroundProjectHistory] != 1 || bg[QueueBackgroundGmailIdentification] != 1 || bg[QueueBackgroundInventory] != 1 || bg[QueueResource] != 2 {
+	if bg[QueueBackgroundValidation] != 3 || bg[QueueBackgroundGmailValidation] != 1 || bg[QueueBackgroundICloudValidation] != 1 || bg[QueueBackgroundDomainValidation] != 1 || bg[QueueBackgroundAlias] != 1 || bg[QueueBackgroundTokenRefresh] != 1 || bg[QueueBackgroundProjectHistory] != 1 || bg[QueueBackgroundGmailIdentification] != 1 || bg[QueueBackgroundProtoImport] != 1 || bg[QueueBackgroundProtoValidation] != 1 || bg[QueueBackgroundProtoHistory] != 1 || bg[QueueBackgroundInventory] != 1 || bg[QueueResource] != 2 {
 		t.Fatalf("background queues must retain non-zero weighted fairness, got %#v", bg)
 	}
 }
@@ -70,6 +70,9 @@ func TestEveryQueueWeightUsesItsRuntimeSetting(t *testing.T) {
 		{"asynq_queue_resource_weight", QueueResource, backgroundQueueConfig},
 		{"asynq_queue_background_project_history_weight", QueueBackgroundProjectHistory, backgroundQueueConfig},
 		{"asynq_queue_background_gmail_identification_weight", QueueBackgroundGmailIdentification, backgroundQueueConfig},
+		{"asynq_queue_background_proto_import_weight", QueueBackgroundProtoImport, backgroundQueueConfig},
+		{"asynq_queue_background_proto_validation_weight", QueueBackgroundProtoValidation, backgroundQueueConfig},
+		{"asynq_queue_background_proto_history_weight", QueueBackgroundProtoHistory, backgroundQueueConfig},
 		{"asynq_queue_background_inventory_weight", QueueBackgroundInventory, backgroundQueueConfig},
 	}
 	if len(settings) != len(AllQueueNames) {

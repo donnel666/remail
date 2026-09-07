@@ -67,7 +67,7 @@ func (r *ResourceFetchRepo) operationKinds() []string {
 	if r.kind == domain.ResourceFetchJobHistory {
 		return []string{"resource_history"}
 	}
-	return []string{"resource_fetch", "gmail_resource_fetch", "icloud_resource_fetch"}
+	return []string{"resource_fetch", "gmail_resource_fetch", "icloud_resource_fetch", "proto_resource_fetch"}
 }
 
 func (r *ResourceFetchRepo) withTx(ctx context.Context, fn func(context.Context, *gorm.DB) error) error {
@@ -97,7 +97,7 @@ func (r *ResourceFetchRepo) CreateOrReuseResourceFetch(ctx context.Context, job 
 	if job.ResourceType == "" {
 		job.ResourceType = domain.ResourceTypeMicrosoft
 	}
-	if (job.ResourceType != domain.ResourceTypeMicrosoft && job.ResourceType != domain.ResourceTypeGmail && job.ResourceType != domain.ResourceTypeICloud) ||
+	if (job.ResourceType != domain.ResourceTypeMicrosoft && job.ResourceType != domain.ResourceTypeGmail && job.ResourceType != domain.ResourceTypeICloud && job.ResourceType != domain.ResourceTypeProto) ||
 		(job.ResourceType != domain.ResourceTypeMicrosoft && job.Kind != domain.ResourceFetchJobFetch) {
 		return false, domain.ErrInvalidRequest
 	}
@@ -491,6 +491,9 @@ func (r *ResourceFetchRepo) lockResourceFetchState(tx *gorm.DB, resourceID uint,
 }
 
 func (r *ResourceFetchRepo) lockResourceFetchScope(ctx context.Context, resourceID uint, resourceType domain.ResourceType) (*domain.ResourceFetchScope, error) {
+	if resourceType == domain.ResourceTypeProto {
+		return loadProtoResourceFetchScope(r.dbFor(ctx), resourceID)
+	}
 	if resourceType == domain.ResourceTypeGmail {
 		return r.lockGmailResourceFetchScope(ctx, resourceID)
 	}
@@ -588,7 +591,7 @@ func validateResourceFetchScope(row *domain.ResourceFetchScope, expectedCredenti
 		}
 		return nil
 	}
-	if row.ResourceType == domain.ResourceTypeGmail {
+	if row.ResourceType == domain.ResourceTypeGmail || row.ResourceType == domain.ResourceTypeProto {
 		if strings.TrimSpace(row.EmailAddress) == "" || !row.CredentialsConfigured {
 			return domain.ErrResourceFetchCredentialsMissing
 		}
@@ -610,6 +613,8 @@ func resourceFetchStateToDomain(state FetchStateModel) domain.ResourceFetchJob {
 		resourceType = domain.ResourceTypeGmail
 	case "icloud_resource_fetch":
 		resourceType = domain.ResourceTypeICloud
+	case "proto_resource_fetch":
+		resourceType = domain.ResourceTypeProto
 	}
 	operatorID := uint(0)
 	if state.OperatorUserID != nil {
@@ -634,6 +639,9 @@ func resourceFetchStateToDomain(state FetchStateModel) domain.ResourceFetchJob {
 }
 
 func resourceFetchOperationKind(kind domain.ResourceFetchJobKind, resourceType domain.ResourceType) string {
+	if resourceType == domain.ResourceTypeProto {
+		return "proto_resource_fetch"
+	}
 	if kind == domain.ResourceFetchJobHistory {
 		return "resource_history"
 	}
@@ -661,6 +669,9 @@ func resourceFetchTaskSource(kind domain.ResourceFetchJobKind) string {
 }
 
 func resourceFetchResourceLabel(resourceType domain.ResourceType) string {
+	if resourceType == domain.ResourceTypeProto {
+		return "Proto"
+	}
 	if resourceType == domain.ResourceTypeGmail {
 		return "Gmail"
 	}

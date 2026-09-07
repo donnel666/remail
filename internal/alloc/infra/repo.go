@@ -1199,6 +1199,7 @@ func (r *Repo) AssertNoActiveAllocations(ctx context.Context, resourceIDs []uint
 		{table: "domain_allocations", label: "domain", condition: "resource_id IN ? AND status = 'allocated'"},
 		{table: "gmail_allocations", label: "Gmail", condition: "resource_id IN ? AND source = 'local' AND status = 'allocated'"},
 		{table: "icloud_allocations", label: "iCloud", condition: "resource_id IN ? AND status = 'allocated'"},
+		{table: "proto_allocations", label: "Proto", condition: "resource_id IN ? AND guard_type = 'proto' AND status = 'allocated'"},
 	}
 	for _, query := range queries {
 		var row struct {
@@ -1855,6 +1856,22 @@ func (r *Repo) ReleaseByOrder(ctx context.Context, orderNo string, releasedAt ti
 		}
 		result := model.unified()
 		return &result, nil
+	case domain.AllocationTypeProto:
+		var model ProtoAllocationModel
+		if err := r.dbFor(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_no = ? AND guard_type = ?", orderNo, string(domain.AllocationTypeProto)).First(&model).Error; err != nil {
+			return nil, findAllocationError(err, "find Proto allocation for release")
+		}
+		if model.Status == string(domain.AllocationStatusAllocated) {
+			if err := r.dbFor(ctx).Model(&ProtoAllocationModel{}).
+				Where("id = ? AND status = ?", model.ID, string(domain.AllocationStatusAllocated)).
+				Updates(map[string]any{"status": string(domain.AllocationStatusReleased), "released_at": releasedAt}).Error; err != nil {
+				return nil, fmt.Errorf("release Proto allocation: %w", err)
+			}
+			model.Status = string(domain.AllocationStatusReleased)
+			model.ReleasedAt = &releasedAt
+		}
+		result := model.unified()
+		return &result, nil
 	default:
 		return nil, domain.ErrAllocationNotFound
 	}
@@ -1902,6 +1919,13 @@ func (r *Repo) FindAllocationDetail(ctx context.Context, allocationType domain.A
 		var model ICloudAllocationModel
 		if err := r.dbFor(ctx).Where("id = ?", allocationID).First(&model).Error; err != nil {
 			return nil, findAllocationError(err, "find iCloud allocation detail")
+		}
+		result := model.unified()
+		return &result, nil
+	case domain.AllocationTypeProto:
+		var model ProtoAllocationModel
+		if err := r.dbFor(ctx).Where("id = ? AND guard_type = ?", allocationID, string(domain.AllocationTypeProto)).First(&model).Error; err != nil {
+			return nil, findAllocationError(err, "find Proto allocation detail")
 		}
 		result := model.unified()
 		return &result, nil
@@ -1962,7 +1986,13 @@ func (r *Repo) ListActiveByRecipient(ctx context.Context, recipient string) ([]d
 		Find(&gs).Error; err != nil {
 		return nil, fmt.Errorf("list Gmail allocation by recipient: %w", err)
 	}
-	result := make([]domain.UnifiedAllocation, 0, len(ms)+len(ds)+len(gs)+len(is))
+	var ps []ProtoAllocationModel
+	if err := r.dbFor(ctx).
+		Where("email = ? AND guard_type = ? AND status = ?", recipient, string(domain.AllocationTypeProto), string(domain.AllocationStatusAllocated)).
+		Find(&ps).Error; err != nil {
+		return nil, fmt.Errorf("list Proto allocation by recipient: %w", err)
+	}
+	result := make([]domain.UnifiedAllocation, 0, len(ms)+len(ds)+len(gs)+len(is)+len(ps))
 	for _, item := range ms {
 		result = append(result, item.unified())
 	}
@@ -1973,6 +2003,9 @@ func (r *Repo) ListActiveByRecipient(ctx context.Context, recipient string) ([]d
 		result = append(result, item.unified())
 	}
 	for _, item := range is {
+		result = append(result, item.unified())
+	}
+	for _, item := range ps {
 		result = append(result, item.unified())
 	}
 	return result, nil
@@ -1996,7 +2029,7 @@ func (r *Repo) ListInventoryProjects(ctx context.Context) ([]allocapp.InventoryP
 		Table("projects AS p").
 		Select("p.id, p.name").
 		Where("p.status = 'listed'").
-		Where("EXISTS (SELECT 1 FROM project_products pp WHERE pp.project_id = p.id AND pp.status = 'enabled' AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud'))").
+		Where("EXISTS (SELECT 1 FROM project_products pp WHERE pp.project_id = p.id AND pp.status = 'enabled' AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud', 'proto'))").
 		Order("p.id ASC").
 		Scan(&projects).Error; err != nil {
 		return nil, fmt.Errorf("list inventory projects: %w", err)
@@ -2026,7 +2059,7 @@ JOIN project_products pp ON pp.project_id = p.id
 	WHERE p.id = ?
 	  AND p.status = 'listed'
 	  AND pp.status = 'enabled'
-	  AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud')`, projectID).Scan(&productRows).Error; err != nil {
+	  AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud', 'proto')`, projectID).Scan(&productRows).Error; err != nil {
 		return nil, fmt.Errorf("load inventory project products: %w", err)
 	}
 	if len(productRows) == 0 {
@@ -2055,6 +2088,8 @@ JOIN project_products pp ON pp.project_id = p.id
 			stats.Gmail.PlusEnabled = true
 		case coredomain.ProductTypeICloud:
 			stats.ICloud.Enabled = true
+		case coredomain.ProductTypeProto:
+			stats.Proto.Enabled = true
 		}
 	}
 	scan := func(target any, query string, args ...any) error {
@@ -2379,6 +2414,40 @@ WHERE ia.status = 'normal'
 		}
 		stats.ICloud.TotalAvailable = stats.ICloud.AliasAvailable
 	}
+	if stats.Proto.Enabled {
+		if err := scan(&stats.Proto.EligibleResources, `
+SELECT COUNT(*)
+FROM proto_resources pr
+JOIN email_resources er ON er.id = pr.id AND er.type = 'proto'
+JOIN users owner ON owner.id = er.owner_user_id
+WHERE pr.resource_type = 'proto'
+  AND pr.owner_user_id = er.owner_user_id
+  AND pr.status = 'normal'
+  AND pr.for_sale = TRUE
+  AND owner.status = 'active'
+  AND owner.role IN ('supplier', 'admin', 'super_admin')`); err != nil {
+			return nil, err
+		}
+		if err := scan(&stats.Proto.MainAvailable, `
+SELECT COUNT(*)
+FROM proto_resources pr
+JOIN email_resources er ON er.id = pr.id AND er.type = 'proto'
+JOIN users owner ON owner.id = er.owner_user_id
+WHERE pr.resource_type = 'proto'
+  AND pr.owner_user_id = er.owner_user_id
+  AND pr.status = 'normal'
+  AND pr.for_sale = TRUE
+  AND owner.status = 'active'
+  AND owner.role IN ('supplier', 'admin', 'super_admin')
+  AND NOT EXISTS (
+      SELECT 1 FROM proto_allocations history
+      WHERE history.resource_id = pr.id AND history.project_id = ?
+  )`, projectID); err != nil {
+			return nil, err
+		}
+		stats.Proto.PublicAvailable = stats.Proto.MainAvailable
+		stats.Proto.TotalAvailable = stats.Proto.MainAvailable
+	}
 	if err := scan(&stats.ActiveMicrosoftAllocations, `SELECT COUNT(*) FROM microsoft_allocations WHERE project_id = ? AND status = 'allocated'`, projectID); err != nil {
 		return nil, err
 	}
@@ -2391,7 +2460,10 @@ WHERE ia.status = 'normal'
 	if err := scan(&stats.ActiveICloudAllocations, `SELECT COUNT(*) FROM icloud_allocations WHERE project_id = ? AND status = 'allocated'`, projectID); err != nil {
 		return nil, err
 	}
-	stats.TotalAvailable = stats.Microsoft.TotalAvailable + stats.Domain.TotalAvailable + stats.Gmail.TotalAvailable + stats.ICloud.TotalAvailable
+	if err := scan(&stats.ActiveProtoAllocations, `SELECT COUNT(*) FROM proto_allocations WHERE project_id = ? AND guard_type = 'proto' AND status = 'allocated'`, projectID); err != nil {
+		return nil, err
+	}
+	stats.TotalAvailable = stats.Microsoft.TotalAvailable + stats.Domain.TotalAvailable + stats.Gmail.TotalAvailable + stats.ICloud.TotalAvailable + stats.Proto.TotalAvailable
 	return stats, nil
 }
 
@@ -2474,7 +2546,7 @@ JOIN project_products pp ON pp.project_id = p.id
 	WHERE p.id = ?
 	  AND p.status = 'listed'
 	  AND pp.status = 'enabled'
-	  AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud')
+	  AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud', 'proto')
 	ORDER BY pp.id ASC`, projectID).Scan(&productRows).Error; err != nil {
 		return nil, fmt.Errorf("load product inventory rows: %w", err)
 	}
@@ -2502,7 +2574,7 @@ JOIN project_products pp ON pp.project_id = p.id
 			item.Suffixes, err = r.microsoftProductInventorySuffixTotals(ctx, projectID, row)
 		case coredomain.ProductTypeDomain:
 			item.Suffixes, err = r.domainProductInventorySuffixTotals(ctx)
-		case coredomain.ProductTypeGmail, coredomain.ProductTypeGmailVariant, coredomain.ProductTypeICloud:
+		case coredomain.ProductTypeGmail, coredomain.ProductTypeGmailVariant, coredomain.ProductTypeICloud, coredomain.ProductTypeProto:
 			codeAvailable, codePublicAvailable := item.TotalAvailable, item.PublicAvailable
 			purchaseAvailable, purchasePublicAvailable := item.TotalAvailable, item.PublicAvailable
 			item.CodeAvailable, item.CodePublicAvailable = &codeAvailable, &codePublicAvailable
@@ -2543,6 +2615,8 @@ func productInventoryTotalFromStats(row productInventoryRow, stats *allocapp.Inv
 		return stats.Gmail.DotAvailable + stats.Gmail.PlusAvailable
 	case coredomain.ProductTypeICloud:
 		return stats.ICloud.TotalAvailable
+	case coredomain.ProductTypeProto:
+		return stats.Proto.TotalAvailable
 	default:
 		return 0
 	}
@@ -2557,6 +2631,8 @@ func productInventoryPublicTotalFromStats(row productInventoryRow, stats *alloca
 		return stats.Gmail.MainPublicAvailable
 	case coredomain.ProductTypeGmailVariant:
 		return stats.Gmail.DotPublicAvailable + stats.Gmail.PlusPublicAvailable
+	case coredomain.ProductTypeProto:
+		return stats.Proto.PublicAvailable
 	default:
 		return productInventoryTotalFromStats(row, stats)
 	}
@@ -3076,6 +3152,16 @@ func (r *Repo) findByGuard(ctx context.Context, guard OrderGuardModel) (*domain.
 		}
 		result := model.unified()
 		return &result, nil
+	case domain.AllocationTypeProto:
+		var model ProtoAllocationModel
+		if err := r.dbFor(ctx).Where("order_no = ? AND guard_type = ?", guard.OrderNo, string(domain.AllocationTypeProto)).First(&model).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("find Proto allocation by guard: %w", err)
+		}
+		result := model.unified()
+		return &result, nil
 	default:
 		return nil, domain.ErrAllocationNotFound
 	}
@@ -3132,6 +3218,13 @@ func (r *Repo) queryUnifiedAllocations(ctx context.Context, filter allocapp.Allo
 		if filter.Mailbox == "" || filter.Mailbox == "alias" {
 			conditions, condArgs := allocationConditions(filter)
 			addSelect("icloud_allocations", string(domain.AllocationTypeICloud), "'alias'", conditions, condArgs)
+		}
+	}
+	if filter.Type == "" || filter.Type == domain.AllocationTypeProto {
+		if filter.Mailbox == "" || filter.Mailbox == "main" {
+			conditions, condArgs := allocationConditions(filter)
+			conditions = append(conditions, "guard_type = 'proto'")
+			addSelect("proto_allocations", string(domain.AllocationTypeProto), "mailbox", conditions, condArgs)
 		}
 	}
 	if len(selects) == 0 {

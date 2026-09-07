@@ -32,6 +32,7 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
     items: [
       { path: "/console", labelKey: "Data Dashboard", icon: BarChart3 },
       { path: "/microsoft", labelKey: "Microsoft Emails", icon: Database },
+      { path: "/proto", labelKey: "Proto Emails", icon: Mail },
       { path: "/domains", labelKey: "Domain Emails", icon: Globe },
       { path: "/orders", labelKey: "Order Records", icon: ClipboardList },
       { path: "/tickets", labelKey: "After-sales Tickets", icon: Headphones },
@@ -70,6 +71,12 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
         path: "/admin/microsoft",
         labelKey: "Admin Microsoft Emails",
         icon: Database,
+        requiredPermission: permissionKey("core:resource", "read"),
+      },
+      {
+        path: "/admin/proto",
+        labelKey: "Admin Proto Emails",
+        icon: Mail,
         requiredPermission: permissionKey("core:resource", "read"),
       },
       {

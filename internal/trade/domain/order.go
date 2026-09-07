@@ -29,6 +29,7 @@ const (
 	ProductTypeGmail        ProductType = "gmail"
 	ProductTypeGmailVariant ProductType = "gmail_variant"
 	ProductTypeICloud       ProductType = "icloud"
+	ProductTypeProto        ProductType = "proto"
 
 	// ProductTypeLegacyRandom is read only. New checkout quotes reject it.
 	ProductTypeLegacyRandom ProductType = "random"
@@ -75,6 +76,7 @@ const (
 	AllocationTypeDomain    AllocationType = "domain"
 	AllocationTypeGmail     AllocationType = "gmail"
 	AllocationTypeICloud    AllocationType = "icloud"
+	AllocationTypeProto     AllocationType = "proto"
 )
 
 type OperatorType string
