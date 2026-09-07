@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ReMail 会话调试</title>
+    <title>ReMail 会话与推送调试</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <main>
       <header class="page-header">
-        <div><p class="eyebrow">ReMail</p><h1>会话调试</h1></div>
+        <div><p class="eyebrow">ReMail</p><h1>会话与推送调试</h1></div>
         <p id="recording" class="muted">正在连接 AstrBot……</p>
       </header>
       <form id="filter-form">
@@ -63,6 +63,18 @@
           <ol id="turns" class="turn-list"></ol>
         </section>
       </div>
+      <section class="push-pane" aria-labelledby="pushes-heading">
+        <div class="pane-header">
+          <div><h2 id="pushes-heading">主动推送调试</h2><p class="muted">记录每次实际投递到通知目标的内容和结果。</p></div>
+          <div class="push-actions"><span id="push-count" class="muted"></span><button id="push-refresh" type="button" disabled>刷新推送</button></div>
+        </div>
+        <ol id="pushes" class="push-list"></ol>
+        <nav class="pagination" aria-label="主动推送分页">
+          <button id="push-previous" type="button" disabled>上一页</button>
+          <span id="push-page-summary" class="muted">尚未加载</span>
+          <button id="push-next" type="button" disabled>下一页</button>
+        </nav>
+      </section>
       <p class="format-note muted">渲染只排版，复制与导出使用原文。</p>
       <p id="retention" class="muted">导出包含该会话当前保留的全部轮次。</p>
       <noscript>此页面需要启用 JavaScript，并从 AstrBot 插件详情页打开。</noscript>

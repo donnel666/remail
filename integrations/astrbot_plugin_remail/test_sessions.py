@@ -12,7 +12,6 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace as NS
 from typing import Any, Literal
 from unittest.mock import AsyncMock
-from urllib.parse import quote
 from uuid import uuid4
 
 import pytest
@@ -296,16 +295,26 @@ def test_native_owner_isolates_users_bots_groups_topics_and_private(native, diff
         a, b = (
             get_session_reference(event, scope=event.scope) for event in (first, second)
         )
-        assert (
-            a.cid != b.cid
-            and a.owner_umo != b.owner_umo
-            and a.session_ref != b.session_ref
+        same_qq_bot = (
+            different.get("platform", "qq-one") == "qq-one"
+            and different.get("adapter", "aiocqhttp") == "aiocqhttp"
+            and different.get("bot", "90001") == "90001"
+            and different.get("sender", "10001") == "10001"
         )
-        assert db.created == 2
+        if same_qq_bot:
+            assert a.cid == b.cid and a.owner_umo == b.owner_umo
+            assert a.session_ref == b.session_ref and db.created == 1
+        else:
+            assert (
+                a.cid != b.cid
+                and a.owner_umo != b.owner_umo
+                and a.session_ref != b.session_ref
+            )
+            assert db.created == 2
         second.set_extra(SESSION_REFERENCE_KEY, a)
         refused = await ensure_native_session(context, second, scope=second.scope)
         assert refused.status == "scope_mismatch" and not refused.history
-        assert db.created == 2
+        assert db.created == (1 if same_qq_bot else 2)
 
     asyncio.run(run())
 
@@ -685,7 +694,11 @@ def test_saved_qa_survives_stale_snapshots_and_model_history_stays_bounded(nativ
         following = Event()
         result = await read_existing_history(context, following, scope=following.scope)
         payload = json.loads(result.history.split("\n", 1)[1])
-        assert [item["question"] for item in payload["items"]] == ["问题2", "问题3", "问题4"]
+        assert [item["question"] for item in payload["items"]] == [
+            "来源:群聊 问题2",
+            "来源:群聊 问题3",
+            "来源:群聊 问题4",
+        ]
         assert len(result.history) <= MAX_HISTORY_CHARS and result.history_truncated
 
     asyncio.run(run())
@@ -787,10 +800,7 @@ def test_history_preparation_rechecks_scope_after_native_read_and_propagates_can
 
 
 def _reset_target_for(event, reference):
-    session_id = "/".join(
-        quote(part, safe="")
-        for part in ("remail", *event.scope, event.get_message_type().value)
-    )
+    session_id, _ = _owner_umo(event.scope, event.unified_msg_origin)
     return NativeSessionResetTarget(
         session_id, event.scope, event.unified_msg_origin,
         reference.cid, reference.session_ref,

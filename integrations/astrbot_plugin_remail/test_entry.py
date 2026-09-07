@@ -311,6 +311,13 @@ def lifecycle(monkeypatch):
     plugin._request = request
     plugin._private = lambda event: event.private
     plugin._format_projects = lambda payload: "项目列表"
+    async def send_private_text(event, text):
+        return await plugin.context.send_message(
+            plugin._private_target(event), Chain([Plain(text)])
+        )
+
+    plugin._private_member_allowed = AsyncMock(return_value=True)
+    plugin._send_private_text = send_private_text
     for name in ("_reply", "_private_target", "_result_text", "_binding_status_text"):
         setattr(plugin, name, namespace[name])
         setattr(Plugin, name, staticmethod(namespace[name]))

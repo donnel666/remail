@@ -5435,7 +5435,8 @@ def test_help_is_chinese_authorized_and_stops_builtin_help() -> None:
     assert "priority=sys.maxsize" in decorator
     source = ast.unparse(handler)
     assert "_private_target" in source
-    assert source.index("_authorize_event") < source.index("context.send_message")
+    assert "_send_private_text" in source
+    assert source.index("_authorize_event") < source.index("_send_private_text")
     assert "event.send" not in source
     assert "event.stop_event()" in source
     assert "exc.message" not in source
@@ -5478,6 +5479,10 @@ def test_help_is_chinese_authorized_and_stops_builtin_help() -> None:
 
         async def _authorize_event(self, _event):
             return None
+
+        async def _send_private_text(self, _event, text):
+            sent.append((self._private_target(_event), [text]))
+            return True
 
     stopped = []
     event = SimpleNamespace(
@@ -5623,9 +5628,9 @@ def test_event_key_uses_channel_key_and_binding_stops_after_direct_send() -> Non
     profile_source = ast.unparse(functions["personal_info"])
     assert "/v1/bot/profile" in profile_source
     assert "_private_target" in profile_source
-    assert "context.send_message" in profile_source
+    assert "_send_private_text" in profile_source
     assert "event.send" not in profile_source
-    assert profile_source.index("context.send_message") < profile_source.rindex(
+    assert profile_source.index("_send_private_text") < profile_source.rindex(
         "event.stop_event"
     )
 
@@ -6777,6 +6782,7 @@ def test_push_cursor_advances_only_for_successful_destination() -> None:
         "_safe_egress_text": lambda text, **_kwargs: text,
         "MessageChain": lambda items: items,
         "Plain": lambda value: value,
+        "logger": SimpleNamespace(info=lambda *_args: None, warning=lambda *_args: None),
     }
     exec(
         compile(ast.Module(body=[delivery], type_ignores=[]), "main.py", "exec"),

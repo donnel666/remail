@@ -73,6 +73,7 @@ const sessions = Array.from({ length: 31 }, (_, i) => ({
 const turns = Array.from({ length: 23 }, (_, i) => ({
   traceId: traceId(i + 1), sessionId: sessions[0].sessionId, question: '第 ' + (i + 1) + ' 轮原问题',
   answer: '最终答复\n  原文保留  ', time: new Date(Date.UTC(2026, 8, 5, 0, i)).toISOString(),
+  groupId: '54321', messageType: 'GroupMessage',
   updatedAt: '2026-09-05T12:00:00+00:00', outcome: 'sent', durationMs: 300,
   eventCount: 17, complete: true, captureComplete: true,
 })).reverse();
@@ -110,6 +111,10 @@ const config = () => ({ enabled: true, captureText: true, storageAvailable: true
   totalSessions: sessions.length, totalTurns: sessions.reduce((count, session) => count + session.turnCount, 0) });
 const page = (items, q) => ({ ...config(), items: items.slice(q.offset, q.offset + q.limit), total: items.length,
   offset: q.offset, limit: q.limit, truncated: q.offset + q.limit < items.length });
+const pushes = [
+  { id: 1, time: '2026-09-06T12:00:00Z', topic: 'leaderboard.settled', destination: 'qq:GroupMessage:529642597', outcome: 'sent', text: '排行榜奖励已结算', after: '2026-09-06T12:00:00Z', afterId: '9', error: '' },
+  { id: 2, time: '2026-09-06T11:00:00Z', topic: 'project.launched', destination: 'qq:GroupMessage:650384960', outcome: 'failed', text: '新项目上线', after: '2026-09-06T11:00:00Z', afterId: '8', error: 'ActionFailed' },
+];
 const findTurn = id => turns.find(turn => turn.traceId === id)
   || { ...turns[0], traceId: id, sessionId: sessions[1].sessionId, question: '另一个会话', answer: '' };
 window.AstrBotPluginPage = {
@@ -123,6 +128,7 @@ window.AstrBotPluginPage = {
       if (holdSessions) { holdSessions = false; return new Promise(resolve => { releaseSessions = () => resolve(result); }); }
       return result;
     }
+    if (q.view === 'pushes') return page(pushes, q);
     if (q.view === 'turns') return page(q.sessionId === sessions[0].sessionId ? turns : [findTurn(traceId(100))], q);
     if (q.view === 'trace') {
       const turn = findTurn(q.traceId), result = { ...config(), turn: { ...turn }, items: events(turn) };
@@ -145,11 +151,12 @@ window.AstrBotPluginPage = {
     if (body.action === 'reset') return { resetConversations: body.all ? 2 : 1 };
     const removed = sessions.filter(session => body.all === true || session.sessionId === body.sessionId);
     const deletedTurns = removed.reduce((count, session) => count + session.turnCount, 0);
+    const deletedPushes = body.all ? pushes.splice(0, pushes.length).length : 0;
     for (let index = sessions.length - 1; index >= 0; index--) {
       if (removed.includes(sessions[index])) sessions.splice(index, 1);
     }
     if (removed.some(session => session.sessionId === primarySessionId)) turns.splice(0, turns.length);
-    return { deletedSessions: removed.length, deletedTurns, deletedEvents: deletedTurns * 17 };
+    return { deletedSessions: removed.length, deletedTurns, deletedEvents: deletedTurns * 17, deletedPushes };
   },
 };
 id('clear-dialog').showModal = function () { this.open = true; };
@@ -407,13 +414,19 @@ const openNodes = async () => {
     await settle();
     assert.equal(doc.querySelectorAll('.session-button').length, 30);
     assert.equal(doc.querySelectorAll('.turn').length, 20);
+    assert.equal(doc.querySelectorAll('.push-item').length, 2);
+    assert(doc.querySelector('.push-item').textContent.includes('529642597'));
+    assert(doc.querySelector('.push-item').textContent.includes('目标群'));
+    assert(doc.querySelector('.push-item').textContent.includes('排行榜奖励已结算'));
+    assert(doc.querySelector('.push-item').textContent.includes('已发送'));
     assert.equal(doc.querySelector('.turn .question').textContent, '第 4 轮原问题');
+    assert(doc.querySelector('.turn').textContent.includes('群 54321'));
     assert.equal(latest().querySelector('summary .answer-text').textContent, '最终答复\n  原文保留  ');
     assert(!latest().open, 'Q+A is visible while process starts collapsed');
     assert.equal(calls.filter(call => call.view === 'trace').length, 0, 'collapsed turns never prefetch traces');
     const initialTurn = latest(), initialCalls = calls.length;
     await poll();
-    assert.deepEqual(calls.slice(initialCalls).map(call => call.view), ['sessions', 'turns'], 'completed conversations still refresh both lists');
+    assert.deepEqual(calls.slice(initialCalls).map(call => call.view), ['sessions', 'pushes', 'turns'], 'completed conversations refresh sessions, pushes, and turns');
     assert.equal(latest(), initialTurn, 'unchanged turns keep their DOM and reading state');
     await openNodes();
     assert.equal(latest().querySelectorAll('.action, .source-grid, .raw-records').length, 0, 'no action/source nesting');
@@ -466,7 +479,7 @@ const openNodes = async () => {
     const originalAgent = completionData.items.find(item => item.stage === 'agent' && item.outcome === 'completed');
     assert(Array.from(completionRaw.querySelectorAll('pre')).some(pre => pre.textContent === originalAgent.detailsRaw), 'raw mode keeps the complete original model response and final answer');
     await switchMode('rendered');
-    assert.equal(id('conversation-meta').textContent, 'QQ · 群 54321');
+    assert.equal(id('conversation-meta').textContent, 'QQ · 群聊与私聊共用此会话');
     assert(latest().querySelector('[data-stage="agent"]').open, 'view switch keeps expanded nodes');
     latest().querySelector('[data-stage="intent"]').open = false;
     await settle();
@@ -526,7 +539,7 @@ const openNodes = async () => {
     await setFollowing(false);
     releaseSessions();
     await settle();
-    assert.equal(calls.length, heldCalls, 'pausing during a list read prevents further automatic reads');
+    assert.equal(calls.length, heldCalls + 1, 'pausing during a list read prevents further automatic reads after the in-flight push refresh completes');
     assert.equal(pollTimers.size, 0);
     await click('refresh');
     assert(calls.length > heldCalls, 'manual refresh remains available while automatic refresh is paused');
@@ -569,7 +582,7 @@ const openNodes = async () => {
     await click('clear-session');
     assert(id('clear-dialog').open);
     assert(id('follow').checked && pollTimers.size === 0, 'confirmation temporarily pauses polling without changing the setting');
-    assert(id('clear-scope').textContent.includes('11111') && id('clear-scope').textContent.includes('54321'));
+    assert(id('clear-scope').textContent.includes('11111') && id('clear-scope').textContent.includes('群聊与私聊合并'));
     assert(id('clear-note').textContent.includes('先导出') && id('clear-note').textContent.includes('不改原生会话'));
     assert.equal(posts.length, 0, 'opening confirmation never deletes');
     await click('clear-cancel');

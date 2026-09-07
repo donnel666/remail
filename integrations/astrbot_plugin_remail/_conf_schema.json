@@ -38,6 +38,12 @@
     "hint": "可选。每项格式：群号|群主QQ号|管理员QQ号1,管理员QQ号2。匹配时优先于上方全局群主和管理员；适合多个白名单群使用不同管理成员。",
     "default": []
   },
+  "qq_private_member_group_ids": {
+    "type": "list",
+    "description": "允许私聊服务的QQ群号",
+    "hint": "可选的本地兜底名单。后端 Bot System Key 返回的授权群会自动优先使用；填写后，只有仍在这些群中的 QQ 才会获得私聊响应。",
+    "default": []
+  },
   "request_timeout_seconds": {
     "type": "int",
     "description": "ReMail 请求超时秒数",
@@ -70,18 +76,20 @@
   "diagnostics_enabled": {
     "type": "bool",
     "description": "会话调试记录",
-    "hint": "默认开启。按 QQ、会话和轮次记录各节点的完整输入、输出、模型调用、工具结果、门禁及发送状态；日志不脱敏、不截断，页面只整理展示格式。仅 AstrBot 后台可查看。保留最近 200 个已结束轮次，进行中的轮次完整保留。",
+    "hint": "默认开启。按 QQ、会话和轮次记录工作流，并记录每次主动推送的主题、目标群、正文、游标和成功／失败结果。仅 AstrBot 后台可查看。保留最近 200 个已结束轮次和 500 次推送记录。",
     "default": true
   },
   "transport_mode": {
     "type": "string",
     "description": "ReMail Bot 传输模式",
+    "hint": "排行榜奖励、项目上线和公告等群通知需要 websocket；http 模式只有查询功能，不会主动推送。",
     "options": ["http", "websocket"],
     "default": "websocket"
   },
   "launch_destinations": {
     "type": "list",
-    "description": "接收全部主动推送的 AstrBot unified_msg_origin 列表",
+    "description": "群通知目标（排行榜奖励、项目上线、公告等）",
+    "hint": "留空不会订阅或发送任何群通知。每项填写一个完整的 AstrBot unified_msg_origin，群聊格式为 平台ID:GroupMessage:群号，例如 mybot:GroupMessage:123456789。平台ID应与 AstrBot 中实际配置一致，不是机器人QQ号；不要只填群号或填按成员隔离的个人会话ID。保存后重载插件。",
     "default": []
   },
   "docs_url": {

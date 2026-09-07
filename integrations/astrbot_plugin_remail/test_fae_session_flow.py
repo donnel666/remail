@@ -347,10 +347,12 @@ def test_accepted_workflow_reuses_same_user_without_cross_bot_group_or_private_h
                     {"role": "assistant", "content": "购买服务和接码服务不同。"},
                 ]
             if index >= 2:
-                assert flow.payloads[-2]["untrustedRecentContext"] == ""
-                assert flow.payloads[-1]["untrustedRecentContext"] == ""
+                same_user_bot = index in {3, 4}
+                expected_recent = "" if not same_user_bot else flow.payloads[-2]["untrustedRecentContext"]
+                assert (bool(expected_recent)) is same_user_bot
+                assert (bool(flow.payloads[-1]["untrustedRecentContext"])) is same_user_bot
         assert refs[0].cid == refs[1].cid
-        assert len({ref.cid for ref in refs}) == 6 and flow.db.created == 6
+        assert len({ref.cid for ref in refs}) == 4 and flow.db.created == 4
         assert events[0].unified_msg_origin == events[2].unified_msg_origin, (
             "fixture must expose the native multi-bot UMO collision"
         )

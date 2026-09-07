@@ -1,8 +1,8 @@
-"""Resolve native conversations; expose only bounded, untrusted Q/A history.
+"""Resolve one ReMail conversation per platform bot user.
 
-Native conversation owners include platform instance/bot/group or topic/sender,
-without changing the event UMO used for AstrBot profiles and provider selection.
-SessionController is deliberately not used: every group turn still requires @.
+The native AstrBot UMO remains the event/profile routing key. ReMail's private
+conversation owner deliberately omits group and message type so a user's group
+and private turns share one history while every turn still records its source.
 """
 
 from __future__ import annotations
@@ -30,7 +30,9 @@ _LOCKS: WeakValueDictionary[tuple[int, str], asyncio.Lock] = WeakValueDictionary
 _GENERATIONS: WeakValueDictionary[tuple[int, str], _SessionGeneration] = (
     WeakValueDictionary()
 )
-_REMAIL_OWNER = re.compile(r"([^:]+):(GroupMessage|FriendMessage):remail-[a-f0-9]{64}")
+_REMAIL_OWNER = re.compile(
+    r"([^:]+):(GroupMessage|FriendMessage):remail-(?:[1-9][0-9]{0,19}(?:-[1-9][0-9]{0,19})?-[a-f0-9]{8}|[a-f0-9]{64})"
+)
 _SCOPE_METHODS = (
     "get_platform_id",
     "get_platform_name",
@@ -122,14 +124,27 @@ def _reset_target_owner(target) -> str | None:
         or len(target.native_origin) > 2048
     ):
         return None
+    owner, session_ref = _owner_umo(target.scope, target.native_origin)
+    if target.session_id == owner and target.session_ref == session_ref:
+        return owner
+    # Keep reset support for records created before group/private conversations
+    # were merged into the QQ owner.
     kind = target.native_origin.split(":", 2)[1]
-    session_id = "/".join(
+    legacy_digest = hashlib.sha256(
+        json.dumps(
+            (*target.scope, kind), ensure_ascii=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    legacy_owner = f"{target.scope[0]}:{kind}:remail-{legacy_digest}"
+    legacy_session_id = "/".join(
         quote(part, safe="") for part in ("remail", *target.scope, kind)
     )
-    owner, session_ref = _owner_umo(target.scope, target.native_origin)
-    if target.session_id != session_id or target.session_ref != session_ref:
-        return None
-    return owner
+    if (
+        target.session_id in {legacy_owner, legacy_session_id}
+        and target.session_ref == legacy_digest[:12]
+    ):
+        return legacy_owner
+    return None
 
 
 def reset_target_from_record(
@@ -149,11 +164,11 @@ def reset_target_from_record(
     if metadata.get("sessionId") != session_id or metadata.get("qq") != scope[4]:
         return None
     target = NativeSessionResetTarget(
-        session_id=session_id,
+        session_id=metadata.get("nativeSessionId", session_id),
         scope=scope,
         native_origin=metadata.get("nativeOrigin"),
         conversation_id=metadata.get("conversationId"),
-        session_ref=metadata.get("sessionRef"),
+        session_ref=metadata.get("nativeSessionRef", metadata.get("sessionRef")),
     )
     if _reset_target_owner(target) is None:
         return None
@@ -185,11 +200,19 @@ def _matches_event(event, scope: tuple[str, ...], umo: str) -> bool:
 
 
 def _owner_umo(scope: tuple[str, ...], native_umo: str) -> tuple[str, str]:
-    kind = native_umo.split(":", 2)[1]
+    if not isinstance(native_umo, str) or native_umo.count(":") < 2:
+        raise ValueError("invalid native UMO")
+    # QQ is an operational identifier here, not a secret. Keep it visible so
+    # AstrBot's session list can be searched and group/private turns merge.
     digest = hashlib.sha256(
-        json.dumps((*scope, kind), ensure_ascii=True, separators=(",", ":")).encode()
+        json.dumps(
+            (scope[0], scope[1], scope[2], scope[4]),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode()
     ).hexdigest()
-    return f"{scope[0]}:{kind}:remail-{digest}", digest[:12]
+    user_owner = f"{scope[0]}:FriendMessage:remail-{scope[4]}-{scope[2]}-{digest[:8]}"
+    return user_owner, digest[:12]
 
 
 def get_session_reference(event, *, scope: tuple[str, ...]):
@@ -406,6 +429,12 @@ def _qa_history(raw: str) -> list[dict]:
     return saved
 
 
+def _archive_question(scope: tuple[str, ...], question: str) -> str:
+    """Keep the merged conversation's group/private origin explicit to the model."""
+    scene = "群聊" if scope[3] else "私聊"
+    return f"来源：{scene}\n{question}"
+
+
 async def prepare_native_history(
     context, event, run_context, *, scope: tuple[str, ...], question: str, answer: str
 ) -> NativeSessionResult:
@@ -464,7 +493,10 @@ async def prepare_native_history(
                 {
                     "role": "user",
                     "content": json.dumps(
-                        {"untrustedQuestion": question}, ensure_ascii=False
+                        {
+                            "untrustedQuestion": _archive_question(scope, question)
+                        },
+                        ensure_ascii=False,
                     ),
                 },
                 {"role": "assistant", "content": answer},

@@ -2,6 +2,7 @@
 
 import ast
 import asyncio
+import hashlib
 import inspect
 import json
 import os
@@ -13,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
+from urllib.parse import quote
 
 import pytest
 
@@ -738,19 +740,101 @@ def test_sessions_are_stable_and_qq_search_does_not_merge_sources():
     for event in events:
         log.attach(event)
     sessions = log.snapshot(view="sessions", qq="123456789")
-    assert sessions["total"] == 3
-    assert sorted(row["turnCount"] for row in sessions["items"]) == [1, 1, 2]
+    assert sessions["total"] == 2
+    assert sorted(row["turnCount"] for row in sessions["items"]) == [1, 3]
     assert all(row["senderId"] == "123456789" for row in sessions["items"])
     shared = _trace(log, events[0])["turn"]["sessionId"]
     assert _trace(log, events[1])["turn"]["sessionId"] == shared
     page = log.snapshot(view="turns", session_id=shared, limit=1)
-    assert page["total"] == 2 and page["truncated"] is True
+    assert page["total"] == 3 and page["truncated"] is True
     assert (
-        log.snapshot(view="turns", session_id=shared, limit=1, offset=1)["truncated"]
+        log.snapshot(view="turns", session_id=shared, limit=1, offset=2)["truncated"]
         is False
     )
-    assert len(log.snapshot(view="export", session_id=shared)["turns"]) == 2
+    assert len(log.snapshot(view="export", session_id=shared)["turns"]) == 3
     log.close()
+
+
+def test_push_delivery_log_keeps_target_content_outcome_and_cursor(tmp_path):
+    log = DiagnosticLog(tmp_path)
+    log.record_push(
+        "leaderboard.settled",
+        "qq:GroupMessage:529642597",
+        "sent",
+        "2026-09-07 排行榜奖励已结算\n1. 用户 — 2 单，奖励 10 积分",
+        after="2026-09-07T00:00:00Z",
+        after_id="9223372036854775810",
+    )
+    log.record_push(
+        "project.launched",
+        "qq:GroupMessage:650384960",
+        "failed",
+        "新项目上线：#7 Demo",
+        after="2026-09-07T00:01:00Z",
+        after_id=11,
+        error="ActionFailed: target unavailable",
+    )
+    log.close()
+    log = DiagnosticLog(tmp_path)
+    page = log.snapshot(view="pushes", limit=10)
+    assert page["total"] == 2 and len(page["items"]) == 2
+    assert page["items"][0]["outcome"] == "failed"
+    assert page["items"][0]["destination"] == "qq:GroupMessage:650384960"
+    assert page["items"][0]["error"] == "ActionFailed: target unavailable"
+    assert page["items"][1]["text"].endswith("奖励 10 积分")
+    assert page["items"][1]["afterId"] == "9223372036854775810"
+    assert log.clear(all_sessions=True)["deletedPushes"] == 2
+    assert log.snapshot(view="pushes")["total"] == 0
+    log.close()
+
+
+def test_legacy_group_and_private_cards_merge_by_qq_after_restart(tmp_path):
+    log = DiagnosticLog(tmp_path)
+    events = [_tool_event(), _tool_event(group="")]
+    for event in events:
+        assert log.attach(event)
+        reference = event.get_extra(SESSION_REFERENCE_KEY)
+        trace_note(
+            event,
+            "session",
+            "ready",
+            conversationId=reference.cid,
+            sessionRef=reference.session_ref,
+        )
+    log.snapshot(view="sessions")  # drain the writer
+    for event in events:
+        trace_id = event.get_extra(TRACE_KEY)[1]
+        row = log._db.execute(
+            "SELECT metadata FROM runs WHERE trace_id=?", (trace_id,)
+        ).fetchone()
+        metadata = json.loads(row["metadata"])
+        scope = tuple(metadata["scope"])
+        kind = metadata["messageType"]
+        legacy_id = "/".join(
+            quote(part, safe="") for part in ("remail", *scope, kind)
+        )
+        legacy_ref = hashlib.sha256(
+            json.dumps(
+                (*scope, kind), ensure_ascii=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()[:12]
+        metadata["sessionId"] = legacy_id
+        metadata["sessionRef"] = legacy_ref
+        log._db.execute(
+            "UPDATE runs SET session_id=?,metadata=? WHERE trace_id=?",
+            (legacy_id, json.dumps(metadata), trace_id),
+        )
+    log._db.commit()
+    log.close()
+
+    restored = DiagnosticLog(tmp_path)
+    page = restored.snapshot(view="sessions", qq="123456789")
+    assert page["total"] == 1
+    assert page["items"][0]["turnCount"] == 2
+    targets = restored.reset_targets(session_id=page["items"][0]["sessionId"])
+    assert len(targets) == 2
+    assert all(target.session_id.startswith("remail/") for target in targets)
+    restored.close()
 
 
 def test_storage_failure_does_not_change_return_value_or_lose_original_exception(

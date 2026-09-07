@@ -109,9 +109,15 @@ func getBotContext(c *gin.Context, resolve mailmatchapi.BotUserIDResolver) {
 	if !ok || c.IsAborted() || c.Writer.Written() {
 		return
 	}
+	identity, _ := middleware.GetCurrentBotIdentity(c)
+	allowedGroupIDs := append([]string(nil), identity.AllowedGroupIDs...)
+	if allowedGroupIDs == nil {
+		allowedGroupIDs = []string{}
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"authorized": true, "bound": user.Bound,
 		"accountAvailable": user.Bound && user.Available && user.UserID > 0,
+		"allowedGroupIds":  allowedGroupIDs,
 	})
 }
 

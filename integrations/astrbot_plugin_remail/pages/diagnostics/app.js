@@ -58,6 +58,11 @@ const outcomeLabels = {
   interrupted: '已中断', capture_unavailable: '记录不完整',
   not_needed: '无需查询', not_applicable: '不适用', skipped: '已跳过', partial: '部分可用',
 };
+const pushTopicLabels = {
+  'project.launched': '项目上线', 'leaderboard.settled': '排行榜奖励结算',
+  'system.notice.updated': '系统通知', 'system.announcement.updated': '系统公告',
+  'email.discount.updated': '邮箱折扣', 'project.price.updated': '项目价格更新',
+};
 const failures = new Set(['failed', 'rejected', 'blocked', 'interrupted', 'capture_unavailable']);
 const modelStages = new Set(['intent', 'planner', 'react', 'writer', 'critic']);
 const sessionLimit = 30, turnLimit = 20, followDelay = 3000;
@@ -66,8 +71,9 @@ let sessions = null, turns = [], turnTotal = 0, sessionOffset = 0, queryQQ = '';
 let nextTurnOffset = 0, moreTurns = false;
 let selectionVersion = 0, listVersion = 0, followTimer = null, formatMode = 'rendered';
 let refreshRun = null, pageActive = true;
-let totalDebugSessions = 0, pendingClear = null, clearBusy = false;
+let totalDebugSessions = 0, totalPushes = 0, pendingClear = null, clearBusy = false;
 const traces = new Map(), traceLoading = new Map(), traceErrors = new Map(), expanded = new Map();
+let pushes = null, pushOffset = 0, pushBusy = false;
 
 function clearLocked() {
   return pendingClear !== null || clearBusy;
@@ -119,13 +125,14 @@ function controls() {
   const locked = clearLocked();
   const canClear = connected && typeof bridge?.apiPost === 'function';
   byId('filters').disabled = !connected || locked;
-  byId('refresh').disabled = !connected || locked || !!refreshRun || listBusy || turnBusy || traceLoading.size > 0;
+  byId('refresh').disabled = !connected || locked || !!refreshRun || listBusy || turnBusy || pushBusy || traceLoading.size > 0;
+  byId('push-refresh').disabled = !connected || locked || pushBusy;
   byId('previous').disabled = locked || listBusy || !sessions || sessions.offset === 0;
   byId('next').disabled = locked || listBusy || !sessions?.truncated;
   byId('earlier').disabled = locked || turnBusy || !selected || !moreTurns;
   byId('export-session').disabled = locked || !selected || !turns.length;
   byId('clear-session').disabled = !canClear || locked || !selected || turnTotal === 0;
-  byId('clear-all').disabled = !canClear || locked || totalDebugSessions === 0;
+  byId('clear-all').disabled = !canClear || locked || (totalDebugSessions === 0 && totalPushes === 0);
   byId('reset-session').disabled = !canClear || locked || !selected || turnTotal === 0;
   byId('reset-all').disabled = !canClear || locked;
   byId('clear-confirm').disabled = clearBusy;
@@ -134,6 +141,8 @@ function controls() {
     : pendingClear?.action === 'reset' ? '重置模型上下文' : '删除调试历史';
   for (const item of document.querySelectorAll('.session-button')) item.disabled = locked;
   byId('conversation').setAttribute('aria-busy', String(turnBusy));
+  byId('push-previous').disabled = locked || pushBusy || !pushes || pushes.offset === 0;
+  byId('push-next').disabled = locked || pushBusy || !pushes?.truncated;
 }
 
 function withTimeout(promise) {
@@ -148,7 +157,8 @@ function readConfig(data) {
   if (Number.isSafeInteger(data.totalSessions) && data.totalSessions >= 0) totalDebugSessions = data.totalSessions;
   byId('recording').textContent = data.enabled === false ? '会话调试记录已关闭' : '会话调试记录已开启';
   const retention = Number.isSafeInteger(data.retentionTurns) ? data.retentionTurns : 200;
-  byId('retention').textContent = '保留最近 ' + retention + ' 个已结束轮次，进行中的轮次完整保留；会话导出包含当前保留的全部轮次。';
+  const pushRetention = Number.isSafeInteger(data.retentionPushes) ? data.retentionPushes : 500;
+  byId('retention').textContent = '保留最近 ' + retention + ' 个已结束轮次和 ' + pushRetention + ' 次主动推送记录；进行中的轮次完整保留。';
   const unavailable = data.enabled !== false && (data.storageAvailable === false || data.recordingError);
   byId('storage-warning').hidden = !unavailable;
   byId('storage-warning').textContent = unavailable
@@ -736,7 +746,7 @@ function renderSessions() {
     select.dataset.sessionId = session.sessionId;
     select.setAttribute('aria-pressed', String(selected?.sessionId === session.sessionId));
     select.append(element('strong', 'QQ ' + (session.qq || session.senderId || '未记录')),
-      element('span', [session.platformId || session.platform, session.groupId ? '群 ' + session.groupId : ''].filter(Boolean).join(' · '), 'muted'),
+      element('span', [session.platformId || session.platform, '群聊与私聊已合并'].filter(Boolean).join(' · '), 'muted'),
       element('span', session.turnCount + ' 轮 · ' + timeText(session.lastTime), 'muted'));
     item.append(select);
     items.push(item);
@@ -746,6 +756,60 @@ function renderSessions() {
   list.scrollTop = scrollTop;
   byId('session-count').textContent = sessions ? String(sessions.total) : '';
   byId('page-summary').textContent = sessions ? (sessions.items.length ? (sessions.offset + 1) + '–' + (sessions.offset + sessions.items.length) : '0') + ' / ' + sessions.total : '尚未加载';
+}
+
+function renderPushes() {
+  const list = byId('pushes');
+  const items = [];
+  for (const push of pushes?.items || []) {
+    const item = element('li', '', 'push-item');
+    const heading = element('div', '', 'push-heading');
+    heading.append(
+      element('strong', timeText(push.time)),
+      badge(push.outcome, push.outcome === 'sent' ? '已发送'
+        : push.outcome === 'failed' ? '发送失败'
+          : push.outcome === 'partial' ? '已发送，游标未保存'
+            : push.outcome === 'skipped' ? '已发送过，跳过重放' : push.outcome),
+      element('span', pushTopicLabels[push.topic] || push.topic, 'muted'),
+    );
+    const target = element('div', '', 'push-target');
+    const marker = ':GroupMessage:', markerAt = push.destination.indexOf(marker);
+    const group = markerAt >= 0 ? push.destination.slice(markerAt + marker.length) : '';
+    target.append(element('strong', group ? '目标群：' : '目标：'), element('code', group || push.destination || '未记录'));
+    if (group) target.append(element('span', push.destination, 'muted'));
+    const cursor = push.after || push.afterId ? '游标：' + (push.after || '') + (push.afterId ? ' / ' + push.afterId : '') : '';
+    if (cursor) target.append(element('span', cursor, 'muted'));
+    item.append(heading, target, element('pre', push.text || '（没有记录推送正文）', 'push-text'));
+    if (push.error) item.append(element('pre', '错误：' + push.error, 'push-error'));
+    items.push(item);
+  }
+  if (!items.length) items.push(element('li', '暂时没有主动推送记录。', 'empty'));
+  updateList(list, items);
+  byId('push-count').textContent = pushes ? String(pushes.total) + ' 条' : '';
+  byId('push-page-summary').textContent = pushes
+    ? (pushes.items.length ? (pushes.offset + 1) + '–' + (pushes.offset + pushes.items.length) : '0') + ' / ' + pushes.total
+    : '尚未加载';
+}
+
+async function loadPushes(offset = 0) {
+  if (clearLocked() || pushBusy) return;
+  pushBusy = true;
+  controls();
+  try {
+    const data = await withTimeout(bridge.apiGet('diagnostics', { view: 'pushes', limit: 20, offset }));
+    if (!validPage(data) || data.items.some(item => typeof item.destination !== 'string' || typeof item.topic !== 'string')) throw new Error('Invalid pushes');
+    pushes = data;
+    totalPushes = data.total;
+    pushOffset = data.offset;
+    renderPushes();
+  } catch {
+    pushes = pushes || { items: [], total: 0, offset: 0, limit: 20, truncated: false };
+    renderPushes();
+    showStatus('主动推送记录加载失败，请刷新重试。', true);
+  } finally {
+    pushBusy = false;
+    controls();
+  }
 }
 
 function renderTurns() {
@@ -760,7 +824,7 @@ function renderTurns() {
   byId('conversation-meta').textContent = selected
     ? formatMode === 'raw' ? selected.sessionId
       : [selected.platform === 'aiocqhttp' ? 'QQ' : selected.platform || '消息平台',
-        selected.groupId ? '群 ' + selected.groupId : '私聊'].join(' · ')
+        '群聊与私聊共用此会话'].join(' · ')
     : '按 QQ 查看连续问答及每轮执行过程。';
   byId('turn-count').textContent = selected ? '已显示 ' + turns.length + ' / ' + turnTotal + ' 轮，按时间连续排列' : '';
   for (const turn of [...turns].reverse()) {
@@ -774,7 +838,10 @@ function renderTurns() {
     item.traceData = data;
     const heading = element('span', '', 'turn-heading');
     const line = element('span', '', 'summary-meta');
+    const scene = turn.messageType === 'GroupMessage' || turn.groupId
+      ? '群 ' + (turn.groupId || '未记录') : '私聊';
     line.append(element('strong', timeText(turn.time)), turnBadge(turn),
+      element('span', scene, 'badge'),
       element('span', durationText(turn.durationMs), 'muted'));
     heading.append(line, element('span', typeof turn.question === 'string' ? turn.question : '', 'question'));
     if (typeof turn.answer === 'string' && turn.answer !== '') {
@@ -980,14 +1047,14 @@ function scheduleFollowing() {
   const follow = byId('follow').checked;
   byId('follow-state').textContent = !follow ? '自动刷新已暂停，可手动刷新'
     : !connected ? '连接后每 3 秒自动刷新'
-      : refreshRun ? '正在刷新会话和执行过程' : '每 3 秒刷新会话和执行过程';
+      : refreshRun ? '正在刷新会话、执行过程和主动推送' : '每 3 秒刷新会话、执行过程和主动推送';
   if (follow && connected && pageActive && !refreshRun) {
     followTimer = window.setTimeout(() => { followTimer = null; refreshCurrent(true); }, followDelay);
   }
 }
 
 async function refreshCurrent(automatic = false) {
-  if (clearLocked() || !connected || refreshRun || listBusy || turnBusy || traceLoading.size
+  if (clearLocked() || !connected || refreshRun || listBusy || turnBusy || pushBusy || traceLoading.size
     || (automatic && (!pageActive || !byId('follow').checked))) {
     scheduleFollowing();
     return;
@@ -998,6 +1065,7 @@ async function refreshCurrent(automatic = false) {
   controls();
   try {
     await loadSessions(sessionOffset);
+    if (refreshRun === run && !clearLocked()) await loadPushes(0);
     if (refreshRun === run && version === selectionVersion && sessionId === selected?.sessionId && sessionId
       && (!automatic || (pageActive && byId('follow').checked)) && !clearLocked()) await loadTurns(0);
   } finally {
@@ -1007,7 +1075,7 @@ async function refreshCurrent(automatic = false) {
 
 function openClearDialog(all, reset = false) {
   if (clearLocked() || !connected || typeof bridge?.apiPost !== 'function'
-    || (all ? !reset && totalDebugSessions === 0 : !selected || turnTotal === 0)) return;
+    || (all ? !reset && totalDebugSessions === 0 && totalPushes === 0 : !selected || turnTotal === 0)) return;
   const action = reset ? 'reset' : 'clear';
   const body = all ? { action, all: true } : { action, sessionId: selected.sessionId };
   pendingClear = Object.freeze(body);
@@ -1019,7 +1087,7 @@ function openClearDialog(all, reset = false) {
     ? reset ? '全部 ReMail 模型会话：包括已清理调试记录的会话，不受当前筛选影响。'
       : '全部会话：所有平台、群聊及私聊的调试历史，不受当前 QQ 筛选影响。'
     : '当前会话：QQ ' + (selected.qq || selected.senderId || '未记录') + ' · '
-      + (selected.groupId ? '群 ' + selected.groupId : '私聊');
+      + '群聊与私聊合并';
   byId('clear-error').hidden = true;
   scheduleFollowing();
   controls();
@@ -1075,6 +1143,12 @@ async function confirmClear() {
     deleted = result;
     invalidateReads();
     totalDebugSessions = Math.max(0, totalDebugSessions - result.deletedSessions);
+    if (scope.all) {
+      totalPushes = 0;
+      pushes = { items: [], total: 0, offset: 0, limit: 20, truncated: false };
+      pushOffset = 0;
+      renderPushes();
+    }
     selected = null;
     sessions = null;
     turns = [];
@@ -1120,8 +1194,11 @@ byId('filter-form').addEventListener('submit', event => {
   loadSessions(0, true);
 });
 byId('refresh').addEventListener('click', () => refreshCurrent());
+byId('push-refresh').addEventListener('click', () => loadPushes(pushOffset));
 byId('previous').addEventListener('click', () => loadSessions(Math.max(0, sessionOffset - sessionLimit)));
 byId('next').addEventListener('click', () => loadSessions(sessionOffset + sessionLimit));
+byId('push-previous').addEventListener('click', () => loadPushes(Math.max(0, pushOffset - 20)));
+byId('push-next').addEventListener('click', () => loadPushes(pushOffset + 20));
 byId('earlier').addEventListener('click', () => loadTurns(nextTurnOffset));
 byId('export-session').addEventListener('click', event => { if (selected) exportData({ sessionId: selected.sessionId }, event.currentTarget); });
 byId('follow').addEventListener('change', scheduleFollowing);
@@ -1153,6 +1230,7 @@ async function initialize() {
     await withTimeout(bridge.ready());
     connected = true;
     await loadSessions();
+    await loadPushes();
   } catch { showStatus('未能连接 AstrBot，请关闭并重新打开插件页面。', true); }
   controls();
 }

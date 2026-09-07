@@ -20,11 +20,12 @@ from enum import Enum
 from functools import wraps
 from pathlib import Path
 from time import monotonic
-from urllib.parse import quote
 from uuid import uuid4
 
 from .sessions import (
     SESSION_REFERENCE_KEY,
+    _owner_umo,
+    _valid_native_origin,
     reset_target_from_record,
     session_request_matches,
 )
@@ -55,6 +56,7 @@ def llm_time_budget(event, stage):
 
 
 MAX_TURNS = 200
+MAX_PUSHES = 500
 STAGES = frozenset(
     "entry session intent background planner agent react tool api evidence privacy "
     "writer critic delivery end".split()
@@ -97,6 +99,18 @@ CREATE TABLE IF NOT EXISTS events (
     details TEXT NOT NULL,
     PRIMARY KEY(trace_id, seq)
 );
+CREATE TABLE IF NOT EXISTS push_deliveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    time TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    destination TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    text TEXT NOT NULL DEFAULT '',
+    cursor_after TEXT NOT NULL DEFAULT '',
+    cursor_after_id TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS push_deliveries_time ON push_deliveries(time DESC, id DESC);
 """
 
 
@@ -265,6 +279,7 @@ class DiagnosticLog:
             self._db.execute(
                 "UPDATE runs SET outcome='interrupted' WHERE complete=0 AND outcome='running'"
             )
+            self._migrate_session_ids()
             self._prune()
         if enabled and self.path:
             # Snapshot on the caller before mutation; serialize disk operations off
@@ -308,6 +323,99 @@ class DiagnosticLog:
             "WHERE complete=1 OR outcome='interrupted' ORDER BY updated_at DESC, rowid DESC LIMIT -1 OFFSET ?)",
             (MAX_TURNS,),
         )
+        self._db.execute(
+            "DELETE FROM push_deliveries WHERE id NOT IN ("
+            "SELECT id FROM push_deliveries ORDER BY time DESC, id DESC LIMIT ?)",
+            (MAX_PUSHES,),
+        )
+
+    def _migrate_session_ids(self):
+        """Group legacy diagnostic cards by QQ without changing their raw turns."""
+        rows = self._db.execute(
+            "SELECT trace_id,session_id,metadata FROM runs"
+        ).fetchall()
+        for row in rows:
+            try:
+                metadata = json.loads(row["metadata"])
+                scope = tuple(metadata["scope"])
+                origin = metadata["nativeOrigin"]
+                if not _valid_native_origin(scope, origin):
+                    continue
+                session_id, session_ref = _owner_umo(scope, origin)
+                if row["session_id"] == session_id:
+                    continue
+                metadata.setdefault("nativeSessionId", row["session_id"])
+                metadata.setdefault("nativeSessionRef", metadata.get("sessionRef", ""))
+                metadata["sessionId"] = session_id
+                metadata["sessionRef"] = session_ref
+                self._db.execute(
+                    "UPDATE runs SET session_id=?,metadata=? WHERE trace_id=?",
+                    (session_id, _json(metadata), row["trace_id"]),
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+
+    def record_push(
+        self,
+        topic: str,
+        destination: str,
+        outcome: str,
+        text: str,
+        *,
+        after: str = "",
+        after_id: int | str = "",
+        error: str = "",
+    ) -> None:
+        """Record one public push attempt without attaching it to a user turn."""
+        if not self.enabled or self.closed:
+            return
+        try:
+            values = (
+                datetime.now(timezone.utc).isoformat(),
+                str(topic)[:128],
+                str(destination)[:2048],
+                str(outcome)[:64],
+                str(text)[:8000],
+                str(after)[:128],
+                str(after_id)[:128],
+                str(error)[:2000],
+            )
+            with self._submission_lock:
+                if self.closed:
+                    return
+                if self._writer is not None:
+                    self._writer.submit(self._record_push_snapshot, values)
+                    return
+                self._record_push_snapshot(values)
+        except Exception as exc:
+            self.recording_error = f"Push recording failed: {type(exc).__name__}: {exc}"
+            self.storage_ok = False
+
+    def _record_push_snapshot(self, values):
+        try:
+            with self._lock:
+                try:
+                    self._append_push(values)
+                except Exception as exc:
+                    self._fallback(exc)
+                    self._append_push(values)
+        except Exception as exc:
+            self.recording_error = f"Push recording failed: {type(exc).__name__}: {exc}"
+            self.storage_ok = False
+
+    def _append_push(self, values):
+        with self._db:
+            self._db.execute(
+                "INSERT INTO push_deliveries("
+                "time,topic,destination,outcome,text,cursor_after,cursor_after_id,error) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                values,
+            )
+            self._db.execute(
+                "DELETE FROM push_deliveries WHERE id NOT IN ("
+                "SELECT id FROM push_deliveries ORDER BY time DESC, id DESC LIMIT ?)",
+                (MAX_PUSHES,),
+            )
 
     def attach(self, event) -> bool:
         if not self.enabled or self.closed or event.get_extra(TRACE_KEY, None):
@@ -336,9 +444,8 @@ class DiagnosticLog:
             message_type = message_type or (
                 "GroupMessage" if scope[3] else "FriendMessage"
             )
-            session_id = "/".join(
-                quote(part, safe="") for part in ("remail", *scope, message_type)
-            )
+            native_origin = str(getattr(event, "unified_msg_origin", "") or "")
+            session_id, session_ref = _owner_umo(scope, native_origin)
             message_obj = getattr(event, "message_obj", None)
             metadata = {
                 "sessionId": session_id,
@@ -350,7 +457,8 @@ class DiagnosticLog:
                 "groupId": scope[3],
                 "messageType": message_type,
                 "messageId": str(getattr(message_obj, "message_id", "") or ""),
-                "nativeOrigin": str(getattr(event, "unified_msg_origin", "") or ""),
+                "nativeOrigin": native_origin,
+                "sessionRef": session_ref,
                 "scope": list(scope),
             }
             trace_id = uuid4().hex
@@ -594,7 +702,7 @@ class DiagnosticLog:
         offset=0,
         outcome="",
     ):
-        if view not in {"sessions", "turns", "trace", "export", "events"}:
+        if view not in {"sessions", "turns", "trace", "export", "events", "pushes"}:
             raise ValueError("invalid view")
         if (
             type(limit) is not int
@@ -627,6 +735,7 @@ class DiagnosticLog:
             "recordingError": self.recording_error,
             "storageMode": "sqlite" if self.storage_ok else "memory",
             "retentionTurns": MAX_TURNS,
+            "retentionPushes": MAX_PUSHES,
         }
         clauses, parameters = [], []
         for column, value in (
@@ -642,6 +751,37 @@ class DiagnosticLog:
             parameters.append(outcome)
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         with self._lock:
+            if view == "pushes":
+                total = self._db.execute(
+                    "SELECT count(*) FROM push_deliveries"
+                ).fetchone()[0]
+                rows = self._db.execute(
+                    "SELECT id,time,topic,destination,outcome,text,cursor_after,cursor_after_id,error "
+                    "FROM push_deliveries ORDER BY time DESC,id DESC LIMIT ? OFFSET ?",
+                    (limit, offset),
+                )
+                items = [
+                    {
+                        "id": row["id"],
+                        "time": row["time"],
+                        "topic": row["topic"],
+                        "destination": row["destination"],
+                        "outcome": row["outcome"],
+                        "text": row["text"],
+                        "after": row["cursor_after"],
+                        "afterId": row["cursor_after_id"],
+                        "error": row["error"],
+                    }
+                    for row in rows
+                ]
+                return {
+                    **base,
+                    "items": items,
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                    "truncated": offset + len(items) < total,
+                }
             if view == "sessions":
                 totals = self._db.execute(
                     "SELECT COUNT(DISTINCT session_id),COUNT(*) FROM runs"
@@ -830,11 +970,20 @@ class DiagnosticLog:
                     parameters,
                 ).fetchone()[0]
                 self._db.execute("DELETE FROM runs" + where, parameters)
-            return {
+                push_count = 0
+                if all_sessions:
+                    push_count = self._db.execute(
+                        "SELECT count(*) FROM push_deliveries"
+                    ).fetchone()[0]
+                    self._db.execute("DELETE FROM push_deliveries")
+            result = {
                 "deletedSessions": sessions,
                 "deletedTurns": turns,
                 "deletedEvents": events,
             }
+            if push_count:
+                result["deletedPushes"] = push_count
+            return result
 
     def close(self):
         close_here = False

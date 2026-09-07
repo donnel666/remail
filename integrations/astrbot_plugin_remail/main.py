@@ -2026,8 +2026,9 @@ def _install_early_entry_guard(plugin: Any):
 
 
 def _intent_context_key(event: AstrMessageEvent) -> str:
+    scope = _event_scope(event)
     return json.dumps(
-        (*_event_scope(event), str(event.unified_msg_origin)), ensure_ascii=True
+        (scope[0], scope[1], scope[2], scope[4]), ensure_ascii=True
     )
 
 
@@ -4625,7 +4626,9 @@ def _render_push_text(topic: str, payload: Any) -> str:
             lines.append(description)
     elif topic == "leaderboard.settled":
         business_date = _safe_push_value(payload.get("businessDate"))
-        lines = [f"{business_date} 排行榜结算" if business_date else "排行榜结算"]
+        lines = [
+            f"{business_date} 排行榜奖励已结算" if business_date else "排行榜奖励已结算"
+        ]
         if settled_at := _safe_push_value(payload.get("settledAt")):
             lines.append(f"结算时间：{settled_at}")
         items = payload.get("items") if isinstance(payload.get("items"), list) else []
@@ -4636,7 +4639,9 @@ def _render_push_text(topic: str, payload: Any) -> str:
             name = _safe_push_value(item.get("name"))
             count = _safe_push_value(item.get("successCount"))
             reward = _safe_push_value(item.get("rewardAmount"))
-            lines.append(f"{rank}. {name} — {count} 单，奖励 {reward}".strip())
+            lines.append(f"{rank}. {name} — {count} 单，奖励 {reward} 积分".strip())
+        if not items:
+            lines.append("本期暂无获奖用户。")
     elif topic == "system.notice.updated":
         lines = ["系统通知更新", _safe_push_value(payload.get("notice"))]
     elif topic == "system.announcement.updated":
@@ -4789,10 +4794,22 @@ class Main(Star):
         if self._websocket_enabled():
             if destinations:
                 self.launch_worker = asyncio.create_task(self._project_launch_worker())
+                logger.info(
+                    "ReMail 已配置 %d 个通知目标，正在连接并订阅主动推送。",
+                    len(destinations),
+                )
+            else:
+                logger.warning(
+                    "ReMail 主动推送未启用：launch_destinations 为空，"
+                    "项目上线、排行榜奖励和公告均不会发送。"
+                    "请在插件配置中填写目标群的 unified_msg_origin。"
+                )
             self._start_websocket_connections(bool(destinations))
-        if bool(self.config.get("feedback_enabled", False)):
-            await self._load_feedback_groups()
-            self.feedback_task = asyncio.create_task(self._feedback_report_loop())
+        else:
+            logger.warning(
+                "ReMail 主动推送未启用：transport_mode 不是 websocket，"
+                "HTTP 模式只支持查询，请切换为 websocket。"
+            )
         _install_binding_log_redaction()
         self._remove_entry_guard = _install_early_entry_guard(self)
         # Optional diagnostics starts only after all mandatory initialization succeeded.
@@ -4834,6 +4851,9 @@ class Main(Star):
                     )
                 ]
             logger.warning("ReMail diagnostics page unavailable")
+        if bool(self.config.get("feedback_enabled", False)):
+            await self._load_feedback_groups()
+            self.feedback_task = asyncio.create_task(self._feedback_report_loop())
 
     def _websocket_enabled(self) -> bool:
         return (
@@ -4920,7 +4940,20 @@ class Main(Star):
                                     continue
                                 if (
                                     isinstance(scope, list)
-                                    and tuple(scope[:5]) in reset.reset_scopes
+                                    and (
+                                        tuple(scope[:5]) in reset.reset_scopes
+                                        or any(
+                                            len(scope) == 4
+                                            and tuple(scope)
+                                            == (
+                                                reset_scope[0],
+                                                reset_scope[1],
+                                                reset_scope[2],
+                                                reset_scope[4],
+                                            )
+                                            for reset_scope in reset.reset_scopes
+                                        )
+                                    )
                                 ):
                                     contexts.pop(key, None)
                     if reset.status != "ready":
@@ -5183,6 +5216,16 @@ class Main(Star):
         )
         set_extra = getattr(event, "set_extra", None)
         if callable(set_extra):
+            allowed_groups = payload.get("allowedGroupIds")
+            if isinstance(allowed_groups, list):
+                set_extra(
+                    "_remail_allowed_group_ids",
+                    [
+                        group
+                        for item in allowed_groups[:100]
+                        if (group := _positive_platform_id(item))
+                    ],
+                )
             set_extra(_REMAIL_AUTHORIZED_MARKER, True)
             set_extra("_remail_binding_state", binding_state)
         if require_binding and binding_state != "bound":
@@ -5365,6 +5408,13 @@ class Main(Star):
                     str(cursor.get("after") or ""),
                     int(cursor.get("afterId") or 0),
                 )
+            subscribed_topics = payload.get("topics") or [topic]
+            logger.info("ReMail 主动推送订阅成功：topics=%s", subscribed_topics)
+            if "leaderboard.settled" not in subscribed_topics:
+                logger.warning(
+                    "ReMail 后端未确认排行榜奖励订阅，"
+                    "请确认后端已升级并支持 leaderboard.settled。"
+                )
             return
         if frame_type == "error":
             error = ReMailError(
@@ -5532,8 +5582,8 @@ class Main(Star):
         await self._load_launch_cursors()
         cursors = [cursor for cursor in self.launch_cursors.values() if cursor[2]]
         if not cursors:
-            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-            return now, 0
+            # Let the subscription acknowledgement establish server time, not the host clock.
+            return "", 0
         _, after_id, after = min(cursors, key=lambda cursor: (cursor[0], cursor[1]))
         return after, after_id
 
@@ -5853,6 +5903,92 @@ class Main(Star):
             raise ValueError("missing platform id")
         return f"{platform_id}:{MessageType.FRIEND_MESSAGE.value}:{subject}"
 
+    @staticmethod
+    def _configured_private_group_ids(config: Any) -> list[str]:
+        values = config if hasattr(config, "get") else {}
+        groups: set[str] = set()
+        raw = values.get("qq_private_member_group_ids", []) or []
+        if isinstance(raw, (list, tuple, set)):
+            groups.update(
+                group for item in raw if (group := _positive_platform_id(item))
+            )
+        management = values.get("qq_group_management", []) or []
+        if isinstance(management, (list, tuple)):
+            for item in management:
+                if isinstance(item, str):
+                    group = _positive_platform_id(item.split("|", 1)[0])
+                    if group:
+                        groups.add(group)
+        for item in values.get("launch_destinations", []) or []:
+            marker = ":GroupMessage:"
+            text = str(item)
+            if marker in text:
+                group = _positive_platform_id(text.rsplit(marker, 1)[1])
+                if group:
+                    groups.add(group)
+        return sorted(groups)[:100]
+
+    async def _private_member_allowed(self, event: AstrMessageEvent) -> bool:
+        if not _event_is_private(event) or str(event.get_platform_name()) != "aiocqhttp":
+            return True
+        cached = event.get_extra("_remail_private_member_allowed", None)
+        if isinstance(cached, bool):
+            return cached
+        allowed_groups = event.get_extra("_remail_allowed_group_ids", None)
+        if not isinstance(allowed_groups, list):
+            allowed_groups = self._configured_private_group_ids(self.config)
+        user_id = _positive_platform_id(event.get_sender_id())
+        call_action = getattr(getattr(event, "bot", None), "call_action", None)
+        if not user_id or not callable(call_action) or not allowed_groups:
+            event.set_extra("_remail_private_member_allowed", False)
+            return False
+        member = False
+        for group_id in allowed_groups[:100]:
+            try:
+                result = await call_action(
+                    "get_group_member_info",
+                    group_id=group_id,
+                    user_id=user_id,
+                    no_cache=True,
+                    self_id=_positive_platform_id(event.get_self_id()) or None,
+                )
+                if isinstance(result, dict) and result:
+                    member = True
+                    break
+            except Exception:
+                continue
+        event.set_extra("_remail_private_member_allowed", member)
+        return member
+
+    async def _send_private_text(self, event: AstrMessageEvent, text: str) -> bool:
+        """Use QQ's group-scoped temporary session for non-friend members."""
+        if (
+            not _event_is_private(event)
+            and str(event.get_platform_name()) == "aiocqhttp"
+            and _positive_platform_id(event.get_group_id())
+            and _positive_platform_id(event.get_sender_id())
+            and callable(getattr(getattr(event, "bot", None), "call_action", None))
+        ):
+            kwargs: dict[str, Any] = {
+                "message_type": "private",
+                "user_id": _positive_platform_id(event.get_sender_id()),
+                "group_id": _positive_platform_id(event.get_group_id()),
+                "message": [{"type": "text", "data": {"text": text}}],
+            }
+            self_id = _positive_platform_id(event.get_self_id())
+            if self_id:
+                kwargs["self_id"] = self_id
+            await event.bot.call_action("send_msg", **kwargs)
+            return True
+        try:
+            return bool(
+                await self.context.send_message(
+                    self._private_target(event), MessageChain([Plain(text)])
+                )
+            )
+        except Exception:
+            return False
+
     @filter.on_llm_request(priority=-sys.maxsize)
     async def authorize_llm(
         self, event: AstrMessageEvent, request: ProviderRequest
@@ -6135,8 +6271,18 @@ class Main(Star):
                 re.I,
             )
         )
-        if private and bootstrap:
-            return
+        if private:
+            try:
+                await self._authorize_event(event, require_binding=False)
+            except ReMailError:
+                event.stop_event()
+                return
+            if not await self._private_member_allowed(event):
+                trace_note(event, "entry", "blocked", reason="private_not_group_member")
+                event.stop_event()
+                return
+            if bootstrap:
+                return
         if not _service_entry_requested(self, event):
             return
         diagnostic_log = getattr(self, "diagnostics", None)
@@ -6215,10 +6361,8 @@ class Main(Star):
                         event,
                         "delivery",
                         "binding_guidance_private",
-                        {"target": self._private_target(event), "text": text},
-                        self.context.send_message(
-                            self._private_target(event), MessageChain([Plain(text)])
-                        ),
+                        {"target": "temporary_private_member", "text": text},
+                        self._send_private_text(event, text),
                     )
                     if not sent:
                         logger.warning(
@@ -6862,7 +7006,7 @@ class Main(Star):
     async def remail_help(self, event: AstrMessageEvent):
         """私聊发送 ReMail 支持的中文指令。"""
         try:
-            target = self._private_target(event)
+            self._private_target(event)
         except ValueError:
             event.stop_event()
             return
@@ -6873,7 +7017,7 @@ class Main(Star):
             text = _safe_user_error(exc)
         text = _safe_egress_text(text, is_group=False)
         try:
-            sent = await self.context.send_message(target, MessageChain([Plain(text)]))
+            sent = await self._send_private_text(event, text)
             if not sent:
                 logger.warning("ReMail help private delivery failed")
         except Exception as exc:
@@ -6887,7 +7031,7 @@ class Main(Star):
     async def personal_info(self, event: AstrMessageEvent):
         """私聊发送当前绑定用户的账户摘要。"""
         try:
-            target = self._private_target(event)
+            self._private_target(event)
         except ValueError:
             event.stop_event()
             return
@@ -6898,7 +7042,7 @@ class Main(Star):
             text = _safe_user_error(exc)
         text = _safe_egress_text(text, is_group=False)
         try:
-            sent = await self.context.send_message(target, MessageChain([Plain(text)]))
+            sent = await self._send_private_text(event, text)
             if not sent:
                 logger.warning("ReMail profile private delivery failed")
         except Exception as exc:
@@ -8004,7 +8148,7 @@ class Main(Star):
         lines = [f"{payload.get('businessDate')} 排行榜奖励"]
         for item in payload.get("items", []) or []:
             lines.append(
-                f"{item.get('rank')}. {item.get('name')} — {item.get('successCount')} 单，奖励 {item.get('rewardAmount')}"
+                f"{item.get('rank')}. {item.get('name')} — {item.get('successCount')} 单，奖励 {item.get('rewardAmount')} 积分"
             )
         return "\n".join(lines)
 
@@ -8113,26 +8257,72 @@ class Main(Star):
         if not text:
             raise ReMailError(503, "ReMail 主动推送内容错误。")
         failures = 0
+        record_push = getattr(getattr(self, "diagnostics", None), "record_push", None)
         for raw_destination in self.config.get("launch_destinations", []) or []:
             destination = str(raw_destination)
-            current = self.launch_cursors.get(destination)
-            if current and (parsed, after_id) <= (current[0], current[1]):
-                continue
+            safe_text = ""
+            delivered = False
             try:
                 safe_text = _safe_egress_text(
                     text, is_group=":FriendMessage:" not in destination
                 )
+                current = self.launch_cursors.get(destination)
+                if current and (parsed, after_id) <= (current[0], current[1]):
+                    if callable(record_push):
+                        with contextlib.suppress(Exception):
+                            record_push(
+                                topic,
+                                destination,
+                                "skipped",
+                                safe_text,
+                                after=canonical,
+                                after_id=after_id,
+                            )
+                    continue
                 message = MessageChain([Plain(safe_text)])
                 sent = await self.context.send_message(destination, message)
                 if not sent:
-                    raise ReMailError(503, "AstrBot 未找到项目通知目标。")
+                    raise ReMailError(503, "AstrBot 未找到主动推送目标。")
+                delivered = True
                 await self.put_kv_data(
                     self._launch_cursor_key(destination),
                     {"after": canonical, "afterId": after_id},
                 )
                 self.launch_cursors[destination] = (parsed, after_id, canonical)
-            except Exception:
+                logger.info(
+                    "ReMail 主动推送成功：topic=%s destination=%s", topic, destination
+                )
+                if callable(record_push):
+                    with contextlib.suppress(Exception):
+                        record_push(
+                            topic,
+                            destination,
+                            "sent",
+                            safe_text,
+                            after=canonical,
+                            after_id=after_id,
+                        )
+            except Exception as exc:
                 failures += 1
+                if callable(record_push):
+                    with contextlib.suppress(Exception):
+                        record_push(
+                            topic,
+                            destination,
+                            "partial" if delivered else "failed",
+                            safe_text or text,
+                            after=canonical,
+                            after_id=after_id,
+                            error=f"{type(exc).__name__}: {exc}",
+                        )
+                logger.warning(
+                    "ReMail 主动推送失败：topic=%s destination=%s error=%s；"
+                    "未推进游标，将在重连后重试。"
+                    "请检查目标 UMO、平台在线状态和群发送权限。",
+                    topic,
+                    destination,
+                    type(exc).__name__,
+                )
         if failures:
             raise ReMailError(503, f"{failures} 个主动推送目标发送失败。")
 

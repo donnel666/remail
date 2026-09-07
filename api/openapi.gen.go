@@ -8784,6 +8784,9 @@ type BotContextResponse struct {
 	// AccountAvailable True only for an active bound account. No user ID, email or account profile is returned.
 	AccountAvailable bool `json:"accountAvailable"`
 
+	// AllowedGroupIds Authorized group IDs for this Bot System Key, used only by the adapter to verify private-message membership.
+	AllowedGroupIds []string `json:"allowedGroupIds"`
+
 	// Authorized Always true. Unauthorized contexts receive 401 instead of a response body with scope details.
 	Authorized BotContextResponseAuthorized `json:"authorized"`
 

@@ -91,11 +91,14 @@ func TestBotContextBindingProjection(t *testing.T) {
 		response := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(response)
 		getBotContext(c, func(*gin.Context) (mailmatchapi.BotUserResolution, bool) { return user, true })
-		var payload map[string]bool
-		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil || len(payload) != 3 || response.Code != http.StatusOK {
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil || len(payload) != 4 || response.Code != http.StatusOK {
 			t.Fatalf("unexpected context: %s", response.Body.String())
 		}
-		if !payload["authorized"] || payload["bound"] != user.Bound || payload["accountAvailable"] != (user.Bound && user.Available && user.UserID > 0) {
+		authorized, authorizedOK := payload["authorized"].(bool)
+		bound, boundOK := payload["bound"].(bool)
+		accountAvailable, accountAvailableOK := payload["accountAvailable"].(bool)
+		if !authorizedOK || !boundOK || !accountAvailableOK || !authorized || bound != user.Bound || accountAvailable != (user.Bound && user.Available && user.UserID > 0) {
 			t.Fatalf("wrong access flags: %s", response.Body.String())
 		}
 	}

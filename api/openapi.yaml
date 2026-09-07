@@ -19057,7 +19057,7 @@ components:
 
     BotContextResponse:
       type: object
-      required: [authorized, bound, accountAvailable]
+      required: [authorized, bound, accountAvailable, allowedGroupIds]
       properties:
         authorized:
           type: boolean
@@ -19069,6 +19069,11 @@ components:
         accountAvailable:
           type: boolean
           description: True only for an active bound account. No user ID, email or account profile is returned.
+        allowedGroupIds:
+          type: array
+          items:
+            type: string
+          description: Authorized group IDs for this Bot System Key, used only by the adapter to verify private-message membership.
       additionalProperties: false
 
     BotProfileResponse:

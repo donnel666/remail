@@ -7222,6 +7222,8 @@ export interface components {
             bound: boolean;
             /** @description True only for an active bound account. No user ID, email or account profile is returned. */
             accountAvailable: boolean;
+            /** @description Authorized group IDs for this Bot System Key, used only by the adapter to verify private-message membership. */
+            allowedGroupIds: string[];
         };
         BotProfileResponse: {
             /** @description Whether the trusted platform sender has a ReMail binding record. */
