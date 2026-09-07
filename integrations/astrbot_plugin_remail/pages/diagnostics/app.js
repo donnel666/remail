@@ -769,13 +769,14 @@ function renderPushes() {
       badge(push.outcome, push.outcome === 'sent' ? '已发送'
         : push.outcome === 'failed' ? '发送失败'
           : push.outcome === 'partial' ? '已发送，游标未保存'
-            : push.outcome === 'skipped' ? '已发送过，跳过重放' : push.outcome),
+            : push.outcome === 'skipped' ? '已发送过，跳过重放'
+              : push.outcome === 'blocked' ? '已接收，未配置发送目标' : push.outcome),
       element('span', pushTopicLabels[push.topic] || push.topic, 'muted'),
     );
     const target = element('div', '', 'push-target');
     const marker = ':GroupMessage:', markerAt = push.destination.indexOf(marker);
     const group = markerAt >= 0 ? push.destination.slice(markerAt + marker.length) : '';
-    target.append(element('strong', group ? '目标群：' : '目标：'), element('code', group || push.destination || '未记录'));
+    target.append(element('strong', group ? '目标群：' : '目标：'), element('code', group || push.destination || (push.outcome === 'blocked' ? '未配置' : '未记录')));
     if (group) target.append(element('span', push.destination, 'muted'));
     const cursor = push.after || push.afterId ? '游标：' + (push.after || '') + (push.afterId ? ' / ' + push.afterId : '') : '';
     if (cursor) target.append(element('span', cursor, 'muted'));

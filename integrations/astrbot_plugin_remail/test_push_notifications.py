@@ -5,6 +5,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +16,52 @@ import pytest
 from .diagnostics import DiagnosticLog
 from .test_entry import _load
 from .test_security import _load_push_renderer
+
+
+def test_startup_subscribes_without_group_targets(monkeypatch):
+    methods = {"initialize", "_websocket_enabled", "_start_websocket_connections"}
+    namespace = {
+        "asyncio": asyncio,
+        "logger": logging.getLogger(__name__),
+        "DiagnosticLog": lambda *args, **kwargs: SimpleNamespace(),
+        "_install_binding_log_redaction": lambda: None,
+        "_install_early_entry_guard": lambda _plugin: None,
+    }
+    _load(Path(__file__).with_name("main.py"), methods, namespace)
+    plugin_type = type("StartupPlugin", (), {name: namespace[name] for name in methods})
+    monkeypatch.setitem(
+        sys.modules,
+        "astrbot.api.star",
+        SimpleNamespace(
+            StarTools=SimpleNamespace(get_data_dir=lambda _name: Path("."))
+        ),
+    )
+
+    async def run():
+        plugin = plugin_type()
+        plugin.config = {"launch_destinations": []}
+        plugin.context = SimpleNamespace(register_web_api=lambda *args: None)
+        plugin.diagnostics_page = lambda: None
+        plugin._channel_system_keys = lambda: {"qq": "qq-key", "telegram": "tg-key"}
+        plugin._service_key = lambda: "qq-key"
+        plugin._run_websocket = AsyncMock()
+        plugin._project_launch_worker = AsyncMock()
+        plugin.websocket_ready = {}
+        plugin.websocket_send_locks = {}
+        plugin.websocket_tasks = []
+        plugin.launch_worker = None
+
+        await plugin.initialize()
+        await asyncio.gather(*plugin.websocket_tasks)
+        assert plugin.launch_worker is not None
+        await plugin.launch_worker
+        assert [call.args for call in plugin._run_websocket.await_args_list] == [
+            ("qq", "qq-key", True),
+            ("telegram", "tg-key", False),
+        ]
+        plugin._project_launch_worker.assert_awaited_once()
+
+    asyncio.run(run())
 
 
 def test_settlement_push_uses_server_cursor_and_replays_only_failed_group(caplog):
@@ -171,6 +218,19 @@ def test_settlement_push_uses_server_cursor_and_replays_only_failed_group(caplog
         assert latest["destination"] == "qq:GroupMessage:20003"
         assert latest["outcome"] == "partial"
         assert latest["error"] == "RuntimeError: disk unavailable"
+
+        receiving = plugin()
+        receiving.config = {"launch_destinations": []}
+        receiving.context.send_message = AsyncMock()
+        await receiving._deliver_push_event(frame)
+        latest = diagnostics.snapshot(view="pushes")["items"][0]
+        assert latest["outcome"] == "blocked" and latest["destination"] == ""
+        assert latest["topic"] == "leaderboard.settled"
+        assert "排行榜奖励已结算" in latest["text"]
+        assert "已收到 ReMail 事件" in latest["error"]
+        assert latest["afterId"] == str(after_id)
+        receiving.context.send_message.assert_not_awaited()
+        receiving.put_kv_data.assert_not_awaited()
         diagnostics.close()
 
     asyncio.run(run())

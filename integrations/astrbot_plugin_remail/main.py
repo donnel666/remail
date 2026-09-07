@@ -4816,19 +4816,19 @@ class Main(Star):
         self._channel_system_keys()
         destinations = self.config.get("launch_destinations", []) or []
         if self._websocket_enabled():
+            self.launch_worker = asyncio.create_task(self._project_launch_worker())
             if destinations:
-                self.launch_worker = asyncio.create_task(self._project_launch_worker())
                 logger.info(
                     "ReMail 已配置 %d 个通知目标，正在连接并订阅主动推送。",
                     len(destinations),
                 )
             else:
                 logger.warning(
-                    "ReMail 主动推送未启用：launch_destinations 为空，"
-                    "项目上线、排行榜奖励和公告均不会发送。"
-                    "请在插件配置中填写目标群的 unified_msg_origin。"
+                    "ReMail 将订阅并接收主动事件，但 launch_destinations 为空，"
+                    "收到的事件只记入推送调试，不向群发送。"
+                    "群通知需要配置目标群的 unified_msg_origin。"
                 )
-            self._start_websocket_connections(bool(destinations))
+            self._start_websocket_connections()
         else:
             logger.warning(
                 "ReMail 主动推送未启用：transport_mode 不是 websocket，"
@@ -5283,16 +5283,14 @@ class Main(Star):
         event.set_extra("_remail_public_api_capabilities", summary)
         return summary
 
-    def _start_websocket_connections(self, subscribe_launches: bool) -> None:
+    def _start_websocket_connections(self) -> None:
         service_key = self._service_key()
         for channel, key in self._channel_system_keys().items():
             self.websocket_ready.setdefault(key, asyncio.Event())
             self.websocket_send_locks.setdefault(key, asyncio.Lock())
             self.websocket_tasks.append(
                 asyncio.create_task(
-                    self._run_websocket(
-                        channel, key, subscribe_launches and key == service_key
-                    ),
+                    self._run_websocket(channel, key, key == service_key),
                 )
             )
 
@@ -5336,6 +5334,11 @@ class Main(Star):
                         if after:
                             subscription.update({"after": after, "afterId": after_id})
                         await self._send_websocket(key, subscription)
+                        logger.info(
+                            "ReMail 已发起主动推送订阅：channel=%s topics=%s",
+                            channel,
+                            subscription["topics"],
+                        )
                     done, pending = await asyncio.wait(
                         {reader, heartbeat},
                         return_when=asyncio.FIRST_COMPLETED,
@@ -8406,7 +8409,23 @@ class Main(Star):
             raise ReMailError(503, "ReMail 主动推送内容错误。")
         failures = 0
         record_push = getattr(getattr(self, "diagnostics", None), "record_push", None)
-        for raw_destination in self.config.get("launch_destinations", []) or []:
+        destinations = self.config.get("launch_destinations", []) or []
+        if not destinations:
+            reason = "已收到 ReMail 事件，launch_destinations 为空，未向群发送。"
+            logger.warning("ReMail 主动事件已接收：topic=%s；%s", topic, reason)
+            if callable(record_push):
+                with contextlib.suppress(Exception):
+                    record_push(
+                        topic,
+                        "",
+                        "blocked",
+                        _safe_egress_text(text, is_group=True),
+                        after=canonical,
+                        after_id=after_id,
+                        error=reason,
+                    )
+            return
+        for raw_destination in destinations:
             destination = str(raw_destination)
             safe_text = ""
             delivered = False
