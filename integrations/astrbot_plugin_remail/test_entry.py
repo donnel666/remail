@@ -276,11 +276,13 @@ def lifecycle(monkeypatch):
             "bind",
             "binding_status",
             "unbind",
+            "remail_help",
             "projects",
             "_private_target",
             "_result_text",
             "_binding_status_text",
             "_UNBOUND_TEXT",
+            "_REMAIL_HELP_TEXT",
             "_CHINESE_TEXT",
             "_install_binding_log_redaction",
             "_remove_binding_log_redaction",
@@ -334,6 +336,7 @@ def lifecycle(monkeypatch):
         "bind",
         "binding_status",
         "unbind",
+        "remail_help",
         "projects",
     ):
         setattr(plugin, name, types.MethodType(namespace[name], plugin))
@@ -409,6 +412,7 @@ def lifecycle(monkeypatch):
     for name in ("moderate_qq_group_message", "require_bound_service_user"):
         register(name)
     register("bind", "绑定")
+    register("remail_help", "help")
     register("prepare_remail_llm_response")
     for name, command in (
         ("binding_status", "绑定状态"),
@@ -453,13 +457,33 @@ def lifecycle(monkeypatch):
     namespace["_remove_binding_log_redaction"]()
 
 
+def test_help_is_sent_before_native_command_routing(lifecycle):
+    case = lifecycle
+    case.plugin._private_member_allowed.return_value = False
+    for private in (True, False):
+        case.plugin.context.send_message.reset_mock()
+        event = asyncio.run(case.run(Event("/help", private=private)))
+        assert event.is_stopped()
+        assert not case.namespace["_event_is_owned"](event)
+        assert not hasattr(event, "_remail_send_guard_installed")
+        target, chain = case.plugin.context.send_message.await_args.args
+        assert target == "qq:FriendMessage:10001"
+        assert normalize_security_text(case.namespace["_REMAIL_HELP_TEXT"]) == "".join(
+            getattr(item, "text", "") for item in chain.chain
+        )
+    case.plugin._private_member_allowed.assert_not_awaited()
+
+
 def test_real_waking_entry_and_bootstrap(lifecycle):
     case = lifecycle
+    case.plugin._private_member_allowed.return_value = False
     for text in ("/绑定", "/bind", "/绑定状态", "/解绑"):
         event = asyncio.run(case.run(Event(text, private=True)))
         assert event.message_str == text[1:]
         assert event.sent and event.is_stopped()
-    assert not any(path == "/v1/bot/context" for _, path, _ in case.plugin.calls)
+        assert not case.namespace["_event_is_owned"](event)
+        assert not hasattr(event, "_remail_send_guard_installed")
+    case.plugin._private_member_allowed.assert_not_awaited()
     event = Event("/绑定 user@example.test sentinel-password", private=True)
     assert "sentinel-password" not in event.get_message_outline()
     event = asyncio.run(case.run(event))
@@ -478,8 +502,6 @@ def test_real_waking_entry_and_bootstrap(lifecycle):
         for text, mention in (
             ("/项目", None),
             ("多少钱", "90001"),
-            ("/set", "90001"),
-            ("/provider", "90001"),
             ("/绑定 user@example.test sentinel-password", None),
         ):
             case.plugin.calls.clear()
@@ -490,22 +512,33 @@ def test_real_waking_entry_and_bootstrap(lifecycle):
                 case.plugin.context.send_message.await_args.args[0]
                 == "qq:FriendMessage:10001"
             )
+        for text in ("/set", "/provider"):
+            case.plugin.calls.clear()
+            event = asyncio.run(case.run(Event(text, mention="90001")))
+            assert event.sent and event.is_stopped()
+            assert not case.plugin.calls
+            assert not case.namespace["_event_is_owned"](event)
+            assert not hasattr(event, "_remail_send_guard_installed")
 
 
-def test_bound_filter_errors_are_safe_and_ownership_is_restored(lifecycle):
+def test_explicit_commands_bypass_remail_workflow_and_ownership_is_restored(lifecycle):
     case = lifecycle
     case.plugin.bound = case.plugin.available = True
     for text in ("/set", "/provider"):
+        case.plugin.calls.clear()
         event = asyncio.run(case.run(Event(text, mention="90001")))
-        assert event.sent == [
-            normalize_security_text(case.namespace["_REMAIL_SAFE_ERROR_TEXT"])
-        ]
-        assert event.is_stopped()
+        assert event.sent and event.is_stopped()
+        assert not case.plugin.calls
+        assert not case.namespace["_event_is_owned"](event)
+        assert not hasattr(event, "_remail_send_guard_installed")
+    case.plugin.context.llm_generate.assert_not_awaited()
     event = asyncio.run(case.run(Event("咨询问题", private=True), dispatch=False))
     assert not case.namespace["_event_is_owned"](event)
     assert event.message_str == "咨询问题"
     event = asyncio.run(case.run(Event("/项目")))
     assert event.sent == ["项目列表"]
+    assert not case.namespace["_event_is_owned"](event)
+    assert not hasattr(event, "_remail_send_guard_installed")
 
 
 def test_entry_scope_and_uninstall(lifecycle):

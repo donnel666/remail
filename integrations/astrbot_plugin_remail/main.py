@@ -241,7 +241,7 @@ _REMAIL_TOOLSET_UNAVAILABLE_TEXT = "当前无法建立安全的 ReMail 工具环
 _REMAIL_SAFE_ERROR_TEXT = "ReMail 暂时无法完成这次请求，请稍后重试。"
 _REMAIL_BINDING_GUIDANCE = (
     "使用 ReMail 机器人服务前，需要先绑定你的 ReMail 账号。\n"
-    "请在本私聊发送 /绑定 查看格式并完成绑定，随后重新发送刚才的问题。"
+    "请在本私聊发送 /绑定 <ReMail邮箱> <密码> 完成绑定，随后重新发送刚才的问题。\n"
     "账号信息不要发到群里。"
 )
 _REMAIL_CREDENTIAL_INPUT_TEXT = (
@@ -1517,6 +1517,22 @@ def _is_remail_command(value: Any) -> bool:
     return isinstance(value, str) and bool(_REMAIL_COMMAND_PREFIX.match(value.strip()))
 
 
+def _event_is_command(event: Any) -> bool:
+    question = str(getattr(event, "message_str", "") or "").strip()
+    get_extra = getattr(event, "get_extra", None)
+    waking_command = (
+        get_extra("_remail_waking_command", None) if callable(get_extra) else None
+    )
+    return (
+        question.startswith(("/", "!", "！"))
+        or (
+            callable(get_extra)
+            and get_extra("_remail_explicit_command", False) is True
+        )
+        or _is_remail_command(waking_command or question)
+    )
+
+
 async def _prepare_fae_workflow(
     plugin: Any, event: Any, question: str, recent: str = "", request: Any = None
 ) -> FactPlan:
@@ -1644,11 +1660,14 @@ async def _prepare_fae_workflow(
 def _service_entry_requested(plugin: Any, event: AstrMessageEvent) -> bool:
     if str(event.get_sender_id()) == str(event.get_self_id()):
         return False
-    if _event_is_private(event):
-        return True
     question = str(getattr(event, "message_str", "") or "").strip()
     waking_command = event.get_extra("_remail_waking_command", None)
-    if _is_remail_command(waking_command or question) and (
+    remail_command = _is_remail_command(waking_command or question)
+    if _event_is_command(event) and not remail_command:
+        return False
+    if _event_is_private(event):
+        return True
+    if remail_command and (
         waking_command is not None
         or question.startswith(("/", "!", "！"))
         or bool(getattr(event, "is_at_or_wake_command", False))
@@ -1966,6 +1985,8 @@ def _install_early_entry_guard(plugin: Any):
         ):
             return await original(stage, event)
         question = str(getattr(event, "message_str", "") or "").strip()
+        if question.startswith(("/", "!", "！")):
+            event.set_extra("_remail_explicit_command", True)
         for prefix in stage.ctx.astrbot_config.get("wake_prefix", []):
             if question.startswith(prefix):
                 event.set_extra(
@@ -2001,6 +2022,9 @@ def _install_early_entry_guard(plugin: Any):
         await plugin.require_bound_service_user(event)
         if event.is_stopped():
             trace_finish(event, "blocked", reason="entry_stopped")
+            return
+        if _event_is_command(event):
+            await original(stage, event)
             return
         was_owned = _event_is_owned(event)
         _mark_event_owned(event)
@@ -3619,6 +3643,8 @@ async def _generate_persona_answer(
 
 
 def _request_is_remail(event: Any, request: Any) -> bool:
+    if _event_is_command(event):
+        return False
     if _event_is_owned(event):
         return True
     get_extra = getattr(event, "get_extra", None)
@@ -3627,8 +3653,6 @@ def _request_is_remail(event: Any, request: Any) -> bool:
         or str(get_extra("_remail_admin_handoff_role", "")).strip()
         in {"群主", "管理员"}
     ):
-        return True
-    if _is_remail_command(str(getattr(event, "message_str", "") or "")):
         return True
     if not _event_is_private(event):
         return False
@@ -5921,11 +5945,11 @@ class Main(Star):
                         groups.add(group)
         for item in values.get("launch_destinations", []) or []:
             marker = ":GroupMessage:"
-            text = str(item)
+            text = str(item).strip()
             if marker in text:
-                group = _positive_platform_id(text.rsplit(marker, 1)[1])
-                if group:
-                    groups.add(group)
+                text = text.rsplit(marker, 1)[1]
+            if group := _positive_platform_id(text):
+                groups.add(group)
         return sorted(groups)[:100]
 
     async def _private_member_allowed(self, event: AstrMessageEvent) -> bool:
@@ -5935,28 +5959,73 @@ class Main(Star):
         if isinstance(cached, bool):
             return cached
         allowed_groups = event.get_extra("_remail_allowed_group_ids", None)
-        if not isinstance(allowed_groups, list):
+        source = "backend"
+        if not isinstance(allowed_groups, list) or not allowed_groups:
             allowed_groups = self._configured_private_group_ids(self.config)
+            source = "plugin_config" if allowed_groups else "missing"
         user_id = _positive_platform_id(event.get_sender_id())
         call_action = getattr(getattr(event, "bot", None), "call_action", None)
         if not user_id or not callable(call_action) or not allowed_groups:
+            event.set_extra(
+                "_remail_private_member_check",
+                {
+                    "source": source,
+                    "groupIds": allowed_groups,
+                    "reason": "invalid_user_id"
+                    if not user_id
+                    else "adapter_unavailable"
+                    if not callable(call_action)
+                    else "authorized_groups_missing",
+                },
+            )
             event.set_extra("_remail_private_member_allowed", False)
             return False
         member = False
+        failures = 0
+        matched_group = ""
         for group_id in allowed_groups[:100]:
             try:
+                kwargs: dict[str, Any] = {
+                    "group_id": int(group_id),
+                    "user_id": int(user_id),
+                    "no_cache": True,
+                }
+                self_id = _positive_platform_id(event.get_self_id())
+                if self_id:
+                    kwargs["self_id"] = int(self_id)
                 result = await call_action(
                     "get_group_member_info",
-                    group_id=group_id,
-                    user_id=user_id,
-                    no_cache=True,
-                    self_id=_positive_platform_id(event.get_self_id()) or None,
+                    **kwargs,
                 )
                 if isinstance(result, dict) and result:
                     member = True
+                    matched_group = group_id
                     break
-            except Exception:
+            except Exception as exc:
+                failures += 1
+                trace_note(
+                    event,
+                    "entry",
+                    "failed",
+                    name="get_group_member_info",
+                    groupId=group_id,
+                    errorType=type(exc).__name__,
+                    error=str(exc),
+                )
                 continue
+        event.set_extra(
+            "_remail_private_member_check",
+            {
+                "source": source,
+                "groupIds": allowed_groups,
+                "matchedGroupId": matched_group,
+                "reason": "member"
+                if member
+                else "membership_lookup_failed"
+                if failures == len(allowed_groups)
+                else "not_group_member",
+            },
+        )
         event.set_extra("_remail_private_member_allowed", member)
         return member
 
@@ -5971,13 +6040,13 @@ class Main(Star):
         ):
             kwargs: dict[str, Any] = {
                 "message_type": "private",
-                "user_id": _positive_platform_id(event.get_sender_id()),
-                "group_id": _positive_platform_id(event.get_group_id()),
+                "user_id": int(_positive_platform_id(event.get_sender_id())),
+                "group_id": int(_positive_platform_id(event.get_group_id())),
                 "message": [{"type": "text", "data": {"text": text}}],
             }
             self_id = _positive_platform_id(event.get_self_id())
             if self_id:
-                kwargs["self_id"] = self_id
+                kwargs["self_id"] = int(self_id)
             await event.bot.call_action("send_msg", **kwargs)
             return True
         try:
@@ -6200,7 +6269,7 @@ class Main(Star):
     async def prepare_remail_llm_response(self, event: AstrMessageEvent) -> None:
         """Plan private FAE text and remove attachments before main Agent build."""
         question = str(getattr(event, "message_str", "") or "")
-        if _is_remail_command(question):
+        if _event_is_command(event):
             return
         private_input = _event_is_private(event)
         if not private_input and not _capture_group_request(self, event):
@@ -6264,25 +6333,20 @@ class Main(Star):
             or ""
         ).strip()
         private = _event_is_private(event)
-        bootstrap = bool(
+        binding_bootstrap = bool(
             re.match(
                 r"^[!/！]?(?:绑定|bind|绑定状态|解绑)(?:@[a-z0-9_]+)?(?:\s|$)",
                 question,
                 re.I,
             )
         )
-        if private:
-            try:
-                await self._authorize_event(event, require_binding=False)
-            except ReMailError:
-                event.stop_event()
-                return
-            if not await self._private_member_allowed(event):
-                trace_note(event, "entry", "blocked", reason="private_not_group_member")
-                event.stop_event()
-                return
-            if bootstrap:
-                return
+        help_command = bool(
+            re.match(
+                r"^[!/！]?(?:help|帮助|remail帮助)(?:@[a-z0-9_]+)?(?:\s|$)",
+                question,
+                re.I,
+            )
+        )
         if not _service_entry_requested(self, event):
             return
         diagnostic_log = getattr(self, "diagnostics", None)
@@ -6306,9 +6370,20 @@ class Main(Star):
                 },
                 trigger="private" if private else _group_fae_trigger(self, event),
             )
-        try:
-            if bootstrap:
-                # Group binding commands only get private instructions, never process credentials.
+        if private:
+            if help_command or binding_bootstrap:
+                if first_entry:
+                    trace_note(
+                        event,
+                        "entry",
+                        "accepted",
+                        actionId=event.get_extra("_remail_entry_action_id"),
+                        route="command",
+                    )
+                if help_command:
+                    await self.remail_help(event)
+                return
+            try:
                 await logged_operation(
                     event,
                     "entry",
@@ -6316,6 +6391,65 @@ class Main(Star):
                     {"require_binding": False},
                     self._authorize_event(event, require_binding=False),
                 )
+            except ReMailError as exc:
+                trace_note(
+                    event,
+                    "entry",
+                    "blocked",
+                    actionId=event.get_extra("_remail_entry_action_id"),
+                    statusCode=exc.status,
+                    reason="authorization_failed",
+                    error=str(exc),
+                )
+                trace_finish(event, "blocked", reason="authorization_failed")
+                event.stop_event()
+                return
+            member_allowed = await logged_operation(
+                event,
+                "entry",
+                "verify_private_group_membership",
+                {},
+                self._private_member_allowed(event),
+            )
+            if not member_allowed:
+                member_check = event.get_extra("_remail_private_member_check", {})
+                trace_note(
+                    event,
+                    "entry",
+                    "blocked",
+                    actionId=event.get_extra("_remail_entry_action_id"),
+                    reason="private_not_group_member",
+                    membership=member_check,
+                )
+                trace_finish(
+                    event,
+                    "blocked",
+                    reason="private_not_group_member",
+                    membership=member_check,
+                )
+                event.stop_event()
+                return
+        if help_command:
+            if first_entry:
+                trace_note(
+                    event,
+                    "entry",
+                    "accepted",
+                    actionId=event.get_extra("_remail_entry_action_id"),
+                    route="command",
+                )
+            await self.remail_help(event)
+            return
+        try:
+            if binding_bootstrap:
+                await logged_operation(
+                    event,
+                    "entry",
+                    "check_service_access",
+                    {"require_binding": False},
+                    self._authorize_event(event, require_binding=False),
+                )
+                # Group binding commands only get private instructions, never process credentials.
                 raise ReMailError(428, "private binding required")
             await logged_operation(
                 event,
@@ -6853,7 +6987,7 @@ class Main(Star):
         """Let ReMail FAE answer when members mention configured QQ management."""
         if not _capture_group_request(self, event):
             return
-        if _is_remail_command(str(getattr(event, "message_str", "") or "")):
+        if _event_is_command(event):
             return
         mentioned = _mentioned_qq_ids(event)
         if not mentioned:
@@ -6919,7 +7053,7 @@ class Main(Star):
             or _qq_moderation_text(event).strip()
             or str(event.message_str or "").strip()
         )
-        if _is_remail_command(text):
+        if _event_is_command(event):
             return
         if not handoff_role and not mentions_bot:
             return
@@ -7006,18 +7140,26 @@ class Main(Star):
     async def remail_help(self, event: AstrMessageEvent):
         """私聊发送 ReMail 支持的中文指令。"""
         try:
-            self._private_target(event)
+            target = self._private_target(event)
         except ValueError:
+            trace_finish(event, "blocked", reason="invalid_private_target")
             event.stop_event()
             return
         try:
-            await self._authorize_event(event)
+            await self._authorize_event(event, require_binding=False)
             text = _REMAIL_HELP_TEXT
         except ReMailError as exc:
             text = _safe_user_error(exc)
         text = _safe_egress_text(text, is_group=False)
+        sent = False
         try:
-            sent = await self._send_private_text(event, text)
+            sent = await logged_operation(
+                event,
+                "delivery",
+                "help_private",
+                {"target": target, "text": text},
+                self._send_private_text(event, text),
+            )
             if not sent:
                 logger.warning("ReMail help private delivery failed")
         except Exception as exc:
@@ -7025,6 +7167,12 @@ class Main(Star):
                 "ReMail help private delivery failed: %s", type(exc).__name__
             )
         finally:
+            trace_finish(
+                event,
+                "sent" if sent else "failed",
+                reason="help_command",
+                answer=text if sent else "",
+            )
             event.stop_event()
 
     @filter.command("个人信息")

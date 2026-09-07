@@ -523,6 +523,7 @@ def _load_welcome_functions():
             "_render_orders_evidence",
             "_safe_llm_context_text",
             "_service_entry_requested",
+            "_event_is_command",
             "_group_fae_trigger",
             "_event_scope",
             "_event_reply_target",
@@ -5436,6 +5437,7 @@ def test_help_is_chinese_authorized_and_stops_builtin_help() -> None:
     source = ast.unparse(handler)
     assert "_private_target" in source
     assert "_send_private_text" in source
+    assert "require_binding=False" in source
     assert source.index("_authorize_event") < source.index("_send_private_text")
     assert "event.send" not in source
     assert "event.stop_event()" in source
@@ -5445,12 +5447,18 @@ def test_help_is_chinese_authorized_and_stops_builtin_help() -> None:
     )
 
     handler.decorator_list = []
+
+    async def logged_operation(_event, _stage, _name, _inputs, awaitable):
+        return await awaitable
+
     namespace = {
         "AstrMessageEvent": object,
         "MessageChain": lambda items: items,
         "Plain": lambda text: text,
         "ReMailError": RuntimeError,
         "_safe_egress_text": lambda text, **_kwargs: text,
+        "logged_operation": logged_operation,
+        "trace_finish": lambda *_args, **_kwargs: None,
         "logger": SimpleNamespace(warning=lambda *_args: None),
     }
     exec(
@@ -5470,6 +5478,8 @@ def test_help_is_chinese_authorized_and_stops_builtin_help() -> None:
             sent.append((target, message))
             return True
 
+    authorization_modes = []
+
     class Plugin:
         context = Context()
 
@@ -5477,8 +5487,8 @@ def test_help_is_chinese_authorized_and_stops_builtin_help() -> None:
         def _private_target(_event):
             return "qq-main:FriendMessage:123456789"
 
-        async def _authorize_event(self, _event):
-            return None
+        async def _authorize_event(self, _event, *, require_binding=True):
+            authorization_modes.append(require_binding)
 
         async def _send_private_text(self, _event, text):
             sent.append((self._private_target(_event), [text]))
@@ -5490,6 +5500,7 @@ def test_help_is_chinese_authorized_and_stops_builtin_help() -> None:
     )
     asyncio.run(namespace["remail_help"](Plugin(), event))
     assert sent == [("qq-main:FriendMessage:123456789", [help_text])]
+    assert authorization_modes == [False]
     assert stopped == [True]
 
 

@@ -451,16 +451,15 @@ def test_unbound_mentions_only_receive_private_guidance_before_any_model(monkeyp
     plugin = SimpleNamespace(
         config={},
         _authorize_event=AsyncMock(side_effect=denied),
-        _private_target=lambda current: "qq:FriendMessage:" + current.get_sender_id(),
+        _send_private_text=AsyncMock(return_value=True),
         _reply=AsyncMock(),
-        context=SimpleNamespace(
-            send_message=AsyncMock(return_value=True), llm_generate=AsyncMock()
-        ),
+        context=SimpleNamespace(llm_generate=AsyncMock()),
     )
     asyncio.run(functions["require_bound_service_user"](plugin, event))
-    target, chain = plugin.context.send_message.await_args.args
-    assert target == "qq:FriendMessage:123456789"
-    assert "/绑定" in str(chain)
+    target_event, text = plugin._send_private_text.await_args.args
+    assert target_event is event
+    assert "/绑定 <ReMail邮箱> <密码>" in text
+    assert "账号信息不要发到群里" in text
     assert stopped
     plugin._reply.assert_not_awaited()
     plugin.context.llm_generate.assert_not_awaited()
@@ -468,11 +467,90 @@ def test_unbound_mentions_only_receive_private_guidance_before_any_model(monkeyp
     ordinary = event_for(private=False, question="普通群聊")
     asyncio.run(functions["require_bound_service_user"](plugin, ordinary))
     plugin._authorize_event.assert_not_awaited()
-    for command in ("/绑定", "/绑定状态", "/解绑"):
-        asyncio.run(
-            functions["require_bound_service_user"](plugin, event_for(question=command))
+
+
+def test_help_is_dispatched_by_the_entry_guard_in_private_and_group_messages():
+    functions, _ = _load_welcome_functions()
+    authorize = AsyncMock()
+    diagnostics = functions["DiagnosticLog"](None)
+
+    async def send_help(event):
+        await authorize(event, require_binding=False)
+        event.stop_event()
+
+    help_handler = AsyncMock(side_effect=send_help)
+    plugin = SimpleNamespace(
+        config={},
+        diagnostics=diagnostics,
+        _authorize_event=authorize,
+        _private_member_allowed=AsyncMock(return_value=False),
+        remail_help=help_handler,
+    )
+    events = []
+    try:
+        for private in (True, False):
+            stopped = []
+            event = event_for(private=private, question="/help")
+            event.stop_event = lambda: stopped.append(True)
+            events.append(event)
+            asyncio.run(functions["require_bound_service_user"](plugin, event))
+            assert stopped == [True]
+        assert [call.args[0] for call in help_handler.await_args_list] == events
+        assert [call.kwargs for call in authorize.await_args_list] == [
+            {"require_binding": False},
+            {"require_binding": False},
+        ]
+        plugin._private_member_allowed.assert_not_awaited()
+        sessions = diagnostics.snapshot(view="sessions", qq="123456789")
+        assert sessions["total"] == 1
+        assert sessions["items"][0]["turnCount"] == 2
+        turns = diagnostics.snapshot(view="turns", qq="123456789")["items"]
+        for turn in turns:
+            trace = diagnostics.snapshot(view="trace", trace_id=turn["traceId"])
+            assert any(
+                item["stage"] == "entry"
+                and item["outcome"] == "accepted"
+                and item["details"].get("route") == "command"
+                for item in trace["items"]
+            )
+    finally:
+        diagnostics.close()
+
+
+def test_private_membership_rejection_is_visible_in_diagnostics():
+    functions, _ = _load_welcome_functions()
+    diagnostics = functions["DiagnosticLog"](None)
+    plugin = SimpleNamespace(
+        config={},
+        diagnostics=diagnostics,
+        _authorize_event=AsyncMock(),
+        _private_member_allowed=AsyncMock(return_value=False),
+    )
+    event = event_for(question="怎么充值")
+    stopped = []
+    event.stop_event = lambda: stopped.append(True)
+    try:
+        asyncio.run(functions["require_bound_service_user"](plugin, event))
+        turns = diagnostics.snapshot(view="turns", qq="123456789")
+        assert turns["total"] == 1
+        assert turns["items"][0]["outcome"] == "blocked"
+        trace = diagnostics.snapshot(
+            view="trace", trace_id=turns["items"][0]["traceId"]
         )
-    plugin._authorize_event.assert_not_awaited()
+        assert any(
+            item["details"].get("reason") == "private_not_group_member"
+            for item in trace["items"]
+        )
+        entry_action = event.get_extra("_remail_entry_action_id")
+        assert [
+            item["outcome"]
+            for item in trace["items"]
+            if item["stage"] == "entry"
+            and item["details"].get("actionId") == entry_action
+        ] == ["started", "blocked"]
+        assert stopped == [True]
+    finally:
+        diagnostics.close()
 
 
 def test_binding_access_flags_fail_closed_and_personality_is_not_business_context():
