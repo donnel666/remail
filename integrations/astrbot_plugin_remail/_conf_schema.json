@@ -89,7 +89,7 @@
   "launch_destinations": {
     "type": "list",
     "description": "群通知目标（排行榜奖励、项目上线、公告等）",
-    "hint": "WebSocket 模式始终订阅主动事件；此项只控制发送目标。留空时仍接收事件并记入推送调试，但不向群发送。每项填写完整的 AstrBot unified_msg_origin，群聊格式为 平台ID:GroupMessage:群号，例如 mybot:GroupMessage:123456789。平台ID应与 AstrBot 中实际配置一致，不是机器人QQ号。保存后重载插件。",
+    "hint": "QQ群直接填群号，例如 529642597；插件会读取当前QQ机器人平台ID并自动补齐发送格式。多个QQ机器人或Telegram可填写完整格式 平台ID:GroupMessage:群号。WebSocket 模式始终订阅事件；留空时只记录接收结果，不向群发送。保存后重载插件。",
     "default": []
   },
   "docs_url": {

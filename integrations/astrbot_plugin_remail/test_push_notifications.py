@@ -70,6 +70,7 @@ def test_settlement_push_uses_server_cursor_and_replays_only_failed_group(caplog
         "_handle_websocket_message",
         "_deliver_push_event",
         "_deliver_push_to_destinations",
+        "_resolve_push_destination",
         "_launch_cursor_key",
         "_load_launch_cursors",
         "_oldest_launch_cursor",
@@ -90,7 +91,7 @@ def test_settlement_push_uses_server_cursor_and_replays_only_failed_group(caplog
     }
     _load(
         Path(__file__).with_name("main.py"),
-        methods | {"ReMailError", "_PUSH_TOPICS"},
+        methods | {"ReMailError", "_PUSH_TOPICS", "_positive_platform_id"},
         namespace,
     )
     plugin_type = type("PushPlugin", (), {name: namespace[name] for name in methods})
@@ -231,6 +232,66 @@ def test_settlement_push_uses_server_cursor_and_replays_only_failed_group(caplog
         assert latest["afterId"] == str(after_id)
         receiving.context.send_message.assert_not_awaited()
         receiving.put_kv_data.assert_not_awaited()
+
+        # Keep the failed bare-number cursor while resolving the actual adapter ID.
+        bare = plugin()
+        group = "529642597"
+        resolved = f"qq-production:GroupMessage:{group}"
+        bare.config = {"launch_destinations": [group]}
+        qq = SimpleNamespace(
+            meta=lambda: SimpleNamespace(name="aiocqhttp", id="qq-production")
+        )
+        telegram = SimpleNamespace(
+            meta=lambda: SimpleNamespace(name="telegram", id="tg-production")
+        )
+        manager = SimpleNamespace(platform_insts=[telegram, qq])
+        bare.context = SimpleNamespace(
+            platform_manager=manager, send_message=AsyncMock(return_value=False)
+        )
+        saved[bare._launch_cursor_key(group)] = {"after": server_after, "afterId": 0}
+        assert await bare._oldest_launch_cursor() == (server_after, 0)
+        for value in (group, int(group), f" {group} "):
+            assert bare._resolve_push_destination(value) == resolved
+        assert bare._resolve_push_destination(resolved) == resolved
+        assert bare._resolve_push_destination("tg:GroupMessage:-10001") == (
+            "tg:GroupMessage:-10001"
+        )
+        for value in (True, None, "", "0", "-1", "1.5", "１２３", "not-a-group"):
+            with pytest.raises(ValueError):
+                bare._resolve_push_destination(value)
+        manager.platform_insts = [telegram]
+        with pytest.raises(ValueError, match="尚未找到QQ"):
+            bare._resolve_push_destination(group)
+        manager.platform_insts = [
+            qq,
+            SimpleNamespace(
+                meta=lambda: SimpleNamespace(name="aiocqhttp", id="second-qq")
+            ),
+        ]
+        with pytest.raises(ValueError, match="多个QQ"):
+            bare._resolve_push_destination(group)
+        manager.platform_insts = [telegram, qq]
+
+        with pytest.raises(namespace["ReMailError"]):
+            await bare._deliver_push_event(frame)
+        assert await bare._oldest_launch_cursor() == (server_after, 0)
+        assert (
+            diagnostics.snapshot(view="pushes")["items"][0]["destination"] == resolved
+        )
+        bare.context.send_message.return_value = True
+        await bare._deliver_push_event(frame)
+        await bare._deliver_push_event(frame)
+        assert bare.context.send_message.await_count == 2
+        assert all(
+            call.args[0] == resolved
+            for call in bare.context.send_message.await_args_list
+        )
+        assert await bare._oldest_launch_cursor() == (after, after_id)
+        assert saved[bare._launch_cursor_key(group)] == {
+            "after": after,
+            "afterId": after_id,
+        }
+        assert bare._launch_cursor_key(resolved) not in saved
         diagnostics.close()
 
     asyncio.run(run())

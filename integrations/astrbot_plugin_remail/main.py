@@ -5718,6 +5718,26 @@ class Main(Star):
             )
         return payload
 
+    def _resolve_push_destination(self, raw_destination: Any) -> str:
+        destination = str(raw_destination).strip()
+        if ":" in destination:
+            return destination
+        group_id = _positive_platform_id(destination)
+        if not group_id or not group_id.isascii():
+            raise ValueError("群通知目标应填写QQ群号或完整会话标识。")
+        platform_ids = {
+            meta.id
+            for platform in self.context.platform_manager.platform_insts
+            if (meta := platform.meta()).name == "aiocqhttp" and meta.id
+        }
+        if not platform_ids:
+            raise ValueError("尚未找到QQ机器人平台，平台加载后会自动重试。")
+        if len(platform_ids) != 1:
+            raise ValueError(
+                "存在多个QQ机器人平台，请用 平台ID:GroupMessage:群号 指定发送机器人。"
+            )
+        return f"{next(iter(platform_ids))}:GroupMessage:{group_id}"
+
     @staticmethod
     def _launch_cursor_key(destination: str) -> str:
         digest = hashlib.sha256(destination.encode("utf-8")).hexdigest()[:20]
@@ -8682,14 +8702,16 @@ class Main(Star):
                     )
             return
         for raw_destination in destinations:
-            destination = str(raw_destination)
+            # Preserve stored cursors for bare group numbers that failed before this fix.
+            cursor_destination = str(raw_destination)
+            destination = cursor_destination
             safe_text = ""
             delivered = False
             try:
                 safe_text = _safe_egress_text(
                     text, is_group=":FriendMessage:" not in destination
                 )
-                current = self.launch_cursors.get(destination)
+                current = self.launch_cursors.get(cursor_destination)
                 if current and (parsed, after_id) <= (current[0], current[1]):
                     if callable(record_push):
                         with contextlib.suppress(Exception):
@@ -8702,16 +8724,17 @@ class Main(Star):
                                 after_id=after_id,
                             )
                     continue
+                destination = self._resolve_push_destination(cursor_destination)
                 message = MessageChain([Plain(safe_text)])
                 sent = await self.context.send_message(destination, message)
                 if not sent:
                     raise ReMailError(503, "AstrBot 未找到主动推送目标。")
                 delivered = True
                 await self.put_kv_data(
-                    self._launch_cursor_key(destination),
+                    self._launch_cursor_key(cursor_destination),
                     {"after": canonical, "afterId": after_id},
                 )
-                self.launch_cursors[destination] = (parsed, after_id, canonical)
+                self.launch_cursors[cursor_destination] = (parsed, after_id, canonical)
                 logger.info(
                     "ReMail 主动推送成功：topic=%s destination=%s", topic, destination
                 )

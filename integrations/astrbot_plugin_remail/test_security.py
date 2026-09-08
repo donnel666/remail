@@ -6962,6 +6962,7 @@ def test_push_cursor_advances_only_for_successful_destination() -> None:
         config = {"launch_destinations": ["sent", "failed"]}
         context = Context()
         launch_cursors = {}
+        _resolve_push_destination = staticmethod(lambda destination: destination)
 
         def __init__(self):
             self.saved = []
