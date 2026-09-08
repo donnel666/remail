@@ -13,6 +13,7 @@ import (
 	"github.com/donnel666/remail/internal/platform"
 	protoapp "github.com/donnel666/remail/internal/proto/app"
 	"github.com/donnel666/remail/internal/proto/domain"
+	"github.com/donnel666/remail/internal/proto/infra/proton"
 	"github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -81,7 +82,7 @@ type Service struct {
 }
 
 func NewService(db *gorm.DB, files ...governanceapp.FilePort) *Service {
-	s := &Service{DB: db, Now: func() time.Time { return time.Now().UTC() }}
+	s := &Service{DB: db, Protocol: proton.NewPKLClient(), Now: func() time.Time { return time.Now().UTC() }}
 	if len(files) > 0 {
 		s.Files = files[0]
 	}

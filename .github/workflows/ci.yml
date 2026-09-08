@@ -78,7 +78,7 @@ jobs:
           - shard: mailtransport
             packages: ./internal/mailtransport/...
           - shard: app-entrypoints
-            packages: ./api/... ./cmd/aliasworker/... ./cmd/benchseed/... ./cmd/kitesim/... ./cmd/msrecovery/... ./internal/aftersale/... ./internal/gmail/... ./internal/governance/... ./internal/icloud/... ./internal/kitesim/... ./internal/openapi/... ./internal/platform/... ./internal/proto/...
+            packages: ./api/... ./cmd/aliasworker/... ./cmd/benchseed/... ./cmd/kitesim/... ./cmd/msrecovery/... ./cmd/proto/... ./internal/aftersale/... ./internal/gmail/... ./internal/governance/... ./internal/icloud/... ./internal/kitesim/... ./internal/openapi/... ./internal/platform/... ./internal/proto/...
           - shard: allocation-billing
             packages: ./internal/alloc/... ./internal/billing/...
           - shard: mailmatch
@@ -137,6 +137,21 @@ jobs:
             integrations/astrbot_plugin_remail/feedback.py
           pytest -q integrations/astrbot_plugin_remail
 
+  proto-client:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: internal/proto/infra/proton/requirements-pkl.txt
+      - name: Install Proto protocol dependencies
+        run: python -m pip install --no-deps -r internal/proto/infra/proton/requirements-pkl.txt
+      - name: Check isolated Proto PKL protocol
+        run: python -B -m unittest discover -s internal/proto/infra/proton -p pkl_bridge_test.py
+
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -189,7 +204,7 @@ jobs:
 
   smoke:
     if: github.event_name != 'pull_request'
-    needs: [backend-static, backend-test, remail-plugin, frontend]
+    needs: [backend-static, backend-test, remail-plugin, proto-client, frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -317,7 +332,7 @@ jobs:
 
   docker:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    needs: [backend-static, backend-test, frontend]
+    needs: [backend-static, backend-test, proto-client, frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

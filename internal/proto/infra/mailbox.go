@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -82,7 +83,7 @@ func (s *Service) FetchMailbox(ctx context.Context, resourceID uint, revision ui
 	}
 	request.Recipient = row.EmailAddress
 	requestID, _ := ctx.Value(platform.RequestIDKey).(string)
-	var observedRefreshToken string
+	var observedTokenIdentity string
 	session, err := s.ReadSession(ctx, resourceID, revision)
 	if err == nil {
 		var proxy *proxyapp.ProxyConfig
@@ -96,7 +97,7 @@ func (s *Service) FetchMailbox(ctx context.Context, resourceID uint, revision ui
 				return s.refreshMailboxSession(refreshCtx, resourceID, revision, observed, refresh)
 			}
 			result, err = s.Protocol.Fetch(ctx, session, request)
-			observedRefreshToken = session.RefreshToken
+			observedTokenIdentity = proton.SessionTokenIdentity(*session)
 			s.reportProtocolProxy(ctx, proxy.ID, err)
 		}
 	}
@@ -114,18 +115,21 @@ func (s *Service) FetchMailbox(ctx context.Context, resourceID uint, revision ui
 	}
 	if err != nil {
 		var failure *proton.Failure
-		revoked := errors.As(err, &failure) && failure.Category == "session_revoked"
-		if (errors.Is(err, ErrSessionUnavailable) || revoked) && (row.Status == domain.StatusNormal || row.Status == domain.StatusIdentifying) {
+		typed := errors.As(err, &failure)
+		revoked := typed && failure.Category == "session_revoked"
+		invalidPKL := typed && session != nil && session.Version == 2 && failure.Stage == "session" && (failure.Category == "protocol" || failure.Category == "identity_mismatch")
+		if (errors.Is(err, ErrSessionUnavailable) || revoked || invalidPKL) && (row.Status == domain.StatusNormal || row.Status == domain.StatusIdentifying) {
 			cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer stop()
-			if repairErr := s.RequeueSessionValidation(cleanup, resourceID, revision, row.ValidationGeneration, observedRefreshToken, "Proto session is unavailable; mailbox validation was requested."); repairErr != nil {
+			if repairErr := s.RequeueSessionValidation(cleanup, resourceID, revision, row.ValidationGeneration, observedTokenIdentity, "Proto session is unavailable; mailbox validation was requested."); repairErr != nil {
 				err = errors.Join(err, repairErr)
 			} else if s.Queue != nil {
 				_ = protoapp.EnqueueValidationDispatcher(cleanup, s.Queue)
 			}
 		}
-		if revoked {
-			err = &proton.Failure{Category: "session_unavailable", SafeMessage: "Proto session is unavailable; retry after mailbox validation.", Retryable: true, Cause: err}
+		if revoked || invalidPKL {
+			err = &proton.Failure{Stage: failure.Stage, HTTPStatus: failure.HTTPStatus, APICode: failure.APICode,
+				Category: "session_unavailable", SafeMessage: "Proto session is unavailable; retry after mailbox validation.", Retryable: true, Cause: err}
 		}
 		// Partial or stale reads must not become successful empty/history results.
 		return proton.FetchResult{}, err
@@ -142,7 +146,7 @@ func (s *Service) refreshMailboxSession(ctx context.Context, resourceID uint, re
 		if !sameSessionMailbox(current, observed) {
 			return domain.ErrInvalidClaim
 		}
-		rotated := current.AccessToken != observed.AccessToken || current.RefreshToken != observed.RefreshToken
+		rotated := current.AccessToken != observed.AccessToken || proton.SessionTokenIdentity(*current) != proton.SessionTokenIdentity(*observed)
 		if rotated && (current.ExpiresAt.IsZero() || current.ExpiresAt.After(s.Now().UTC())) {
 			next = *current
 			return nil
@@ -150,6 +154,9 @@ func (s *Service) refreshMailboxSession(ctx context.Context, resourceID uint, re
 		updated := *current
 		if err := refresh(callCtx, &updated); err != nil {
 			return err
+		}
+		if !sameSessionMailbox(current, &updated) {
+			return domain.ErrInvalidClaim
 		}
 		if err := persist(updated); err != nil {
 			return err
@@ -164,8 +171,21 @@ func (s *Service) refreshMailboxSession(ctx context.Context, resourceID uint, re
 }
 
 func sameSessionMailbox(left, right *proton.Session) bool {
-	return left != nil && right != nil && left.UID == right.UID &&
-		reflect.DeepEqual(left.Addresses, right.Addresses) && reflect.DeepEqual(left.UserKeys, right.UserKeys)
+	if left == nil || right == nil || left.Version != right.Version || left.UID != right.UID {
+		return false
+	}
+	if left.Version == 2 {
+		addresses := func(session *proton.Session) []string {
+			values := make([]string, len(session.Addresses))
+			for i, address := range session.Addresses {
+				values[i] = address.ID + "\x00" + strings.ToLower(address.Email)
+			}
+			sort.Strings(values)
+			return values
+		}
+		return left.KeyFingerprint != "" && left.KeyFingerprint == right.KeyFingerprint && reflect.DeepEqual(addresses(left), addresses(right))
+	}
+	return reflect.DeepEqual(left.Addresses, right.Addresses) && reflect.DeepEqual(left.UserKeys, right.UserKeys)
 }
 
 func (s *Service) acquireProtocolProxy(ctx context.Context, resourceID uint, requestID string, purpose proxydomain.ProxyPurpose) (*proxyapp.ProxyConfig, error) {

@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/donnel666/remail/internal/platform"
@@ -70,6 +69,7 @@ func (s *Service) encryptSession(id uint, revision uint64, session proton.Sessio
 	if err != nil {
 		return nil, ErrSessionUnavailable
 	}
+	defer clear(plain)
 	return append([]byte{1}, aead.Seal(nil, nil, plain, sessionAAD(id, revision))...), nil
 }
 
@@ -85,6 +85,7 @@ func (s *Service) decryptSession(row *sessionRecord) (*proton.Session, error) {
 	if err != nil {
 		return nil, ErrSessionUnavailable
 	}
+	defer clear(plain)
 	var session proton.Session
 	if json.Unmarshal(plain, &session) != nil {
 		return nil, ErrSessionUnavailable
@@ -93,26 +94,14 @@ func (s *Service) decryptSession(row *sessionRecord) (*proton.Session, error) {
 }
 
 func validSession(session proton.Session, email string) bool {
-	if session.Version != 1 || session.UID == "" || session.AccessToken == "" || session.RefreshToken == "" {
-		return false
-	}
-	for _, address := range session.Addresses {
-		if address.ID != "" && strings.EqualFold(address.Email, email) && len(address.PrivateKeys) > 0 {
-			for _, key := range address.PrivateKeys {
-				if strings.TrimSpace(key) != "" {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	return session.ValidFor(email)
 }
 
 func deleteSessionTx(tx *gorm.DB, id uint) error {
 	return tx.Where("resource_id = ?", id).Delete(&sessionRecord{}).Error
 }
 
-func (s *Service) RequeueSessionValidation(ctx context.Context, id uint, revision, expectedGeneration uint64, expectedRefreshToken, reason string) error {
+func (s *Service) RequeueSessionValidation(ctx context.Context, id uint, revision, expectedGeneration uint64, expectedTokenIdentity, reason string) error {
 	return s.mutateResource(ctx, id, nil, func(_ context.Context, tx *gorm.DB, row *Resource) error {
 		if row.CredentialRevision != revision || row.ValidationGeneration != expectedGeneration || (row.Status != domain.StatusNormal && row.Status != domain.StatusIdentifying) {
 			return nil
@@ -129,11 +118,11 @@ func (s *Service) RequeueSessionValidation(ctx context.Context, id uint, revisio
 			}
 		}
 		usable := current != nil && validSession(*current, row.EmailAddress)
-		if expectedRefreshToken == "" {
+		if expectedTokenIdentity == "" {
 			if usable {
 				return nil
 			}
-		} else if !usable || current.RefreshToken != expectedRefreshToken {
+		} else if !usable || proton.SessionTokenIdentity(*current) != expectedTokenIdentity {
 			return nil
 		}
 		if err := deleteSessionTx(tx, id); err != nil {

@@ -252,7 +252,8 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		protoMod.SetAuditLogs(governanceinfra.NewOperationLogRepo(p.DB), governanceinfra.NewSystemLogRepo(p.DB))
 		protoMod.SetRedis(p.Redis)
 		protoMod.SetBackgroundExecutionGate(p.BackgroundLoad)
-		protoMod.Service.Protocol = proton.NewClient()
+		protoClient := proton.NewPKLClient()
+		protoMod.Service.Protocol = protoClient
 		protoMod.Service.Proxies = proxyMod.ProxyUseCase
 		protoMod.Service.SessionSecret = p.ProtoSessionSecret
 		protoMod.ValidateOwner = func(ctx context.Context, ownerID uint) (bool, error) {
@@ -373,7 +374,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		mailmatchMod.SetICloudMailFetchPort(iCloudMailFetchAdapter{service: icloudMod.Service})
 		mailmatchMod.SetProtoMailFetchPort(protoMailFetchAdapter{resources: protoMod.Service})
 		mailmatchMod.SetPermanentProtoFetchFailurePort(protoFetchFailureAdapter{resources: protoMod.Service, orders: tradeMod.UseCase})
-		allocMod.UseCase.SetProtoProtocolReady(p.ProtoSessionSecret != "")
+		allocMod.UseCase.SetProtoProtocolReady(p.ProtoSessionSecret != "" && protoClient.RuntimeAvailable())
 		mailmatchMod.SetBotDiagnosisRefresh(mailmatchMod.UseCase)
 		gmailMod.Service.SetMailIngest(gmailMailIngestAdapter{mailmatch: mailmatchMod.UseCase})
 		mailmatchMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)

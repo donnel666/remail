@@ -62,7 +62,17 @@ func (c *Client) transport(proxy string) (*transport, error) {
 	return &transport{client: client, baseURL: c.baseURL, proxy: proxy != ""}, nil
 }
 
-func (t *transport) request(ctx context.Context, session *Session, method, path string, body, out any) error {
+func (t *transport) request(ctx context.Context, session *Session, method, path string, body, out any) (requestErr error) {
+	var status, code int
+	defer func() {
+		var failure *Failure
+		if errors.As(requestErr, &failure) {
+			if failure.Stage == "" {
+				failure.Stage = requestStage(path)
+			}
+			failure.HTTPStatus, failure.APICode = status, code
+		}
+	}()
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -98,6 +108,7 @@ func (t *transport) request(ctx context.Context, session *Session, method, path 
 		return &Failure{Category: "request", SafeMessage: "Proto service could not be reached.", Retryable: true, ProxyFailure: t.proxy, Cause: err}
 	}
 	defer resp.Body.Close()
+	status = resp.StatusCode
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxMessageBytes+1))
 	if err != nil {
 		return &Failure{Category: "request", SafeMessage: "Proto response could not be read.", Retryable: true, ProxyFailure: t.proxy, Cause: err}
@@ -109,6 +120,7 @@ func (t *transport) request(ctx context.Context, session *Session, method, path 
 	if json.Unmarshal(data, &envelope) != nil || envelope.Code == nil || *envelope.Code <= 0 {
 		return &Failure{Category: "protocol", SafeMessage: "Proto returned an invalid API response.", Retryable: true}
 	}
+	code = *envelope.Code
 	if resp.StatusCode >= 300 || (*envelope.Code != 1000 && *envelope.Code != 1001) {
 		return responseFailure(resp.StatusCode, *envelope.Code, path)
 	}
@@ -120,8 +132,15 @@ func (t *transport) request(ctx context.Context, session *Session, method, path 
 	return nil
 }
 
-func responseFailure(status, code int, path string) *Failure {
+func responseFailure(status, code int, path string) (failure *Failure) {
+	defer func() {
+		failure.Stage, failure.HTTPStatus, failure.APICode = requestStage(path), status, code
+	}()
 	switch {
+	case status == 429:
+		return &Failure{Category: "rate_limited", SafeMessage: "Proto temporarily limited account requests.", Retryable: true}
+	case status >= 500 || status == 408:
+		return &Failure{Category: "request", SafeMessage: "Proto service is temporarily unavailable.", Retryable: true}
 	case code == 9001 || code == 12087 || code == 10004:
 		return &Failure{Category: "action_required", SafeMessage: "Proto requires an additional account verification or account action."}
 	// Mail and refresh requests never carry a password, so their errors cannot
@@ -137,6 +156,29 @@ func responseFailure(status, code int, path string) *Failure {
 		return &Failure{Category: "protocol", SafeMessage: "Proto requires a supported client version."}
 	default:
 		return &Failure{Category: "request", SafeMessage: "Proto temporarily rejected the request.", Retryable: true}
+	}
+}
+
+func requestStage(path string) string {
+	path, _, _ = strings.Cut(path, "?")
+	switch path {
+	case "/auth/v4/info":
+		return "auth_info"
+	case "/auth/v4":
+		return "auth"
+	case "/auth/v4/refresh":
+		return "refresh"
+	case "/core/v4/users", "/core/v4/keys/salts":
+		return "keys"
+	case "/core/v4/addresses":
+		return "addresses"
+	case "/mail/v4/messages":
+		return "list"
+	default:
+		if strings.HasPrefix(path, "/mail/v4/messages/") {
+			return "read"
+		}
+		return "transport"
 	}
 }
 
