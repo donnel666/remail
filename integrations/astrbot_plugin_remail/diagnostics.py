@@ -927,23 +927,38 @@ class DiagnosticLog:
                     seen.add(key)
             return tuple(targets)
 
-    def clear(self, *, session_id: str | None = None, all_sessions: bool = False):
+    def clear(
+        self,
+        *,
+        session_id: str | None = None,
+        all_sessions: bool = False,
+        pushes_only: bool = False,
+    ):
         return self._on_writer(
-            self._clear, session_id=session_id, all_sessions=all_sessions
+            self._clear,
+            session_id=session_id,
+            all_sessions=all_sessions,
+            pushes_only=pushes_only,
         )
 
-    def _clear(self, *, session_id: str | None = None, all_sessions: bool = False):
+    def _clear(
+        self,
+        *,
+        session_id: str | None = None,
+        all_sessions: bool = False,
+        pushes_only: bool = False,
+    ):
         """Delete only the explicitly selected diagnostic records, including active turns."""
-        if type(all_sessions) is not bool:
-            raise ValueError("all_sessions must be a boolean")
+        if type(all_sessions) is not bool or type(pushes_only) is not bool:
+            raise ValueError("cleanup scope flags must be booleans")
         if session_id is not None and (
             not isinstance(session_id, str)
             or not session_id.strip()
             or len(session_id) > 2048
         ):
             raise ValueError("a non-empty session_id is required")
-        if (session_id is not None) == all_sessions:
-            raise ValueError("select exactly one session or all sessions")
+        if sum((session_id is not None, all_sessions, pushes_only)) != 1:
+            raise ValueError("select exactly one cleanup scope")
         with self._lock:
             if not self.enabled:
                 raise RuntimeError(
@@ -960,6 +975,12 @@ class DiagnosticLog:
             # Count and delete from the same database transaction; failures must reach the API.
             with self._db:
                 self._db.execute("BEGIN IMMEDIATE")
+                if pushes_only:
+                    push_count = self._db.execute(
+                        "SELECT COUNT(*) FROM push_deliveries"
+                    ).fetchone()[0]
+                    self._db.execute("DELETE FROM push_deliveries")
+                    return {"deletedPushes": push_count}
                 sessions, turns = self._db.execute(
                     "SELECT COUNT(DISTINCT session_id),COUNT(*) FROM runs" + where,
                     parameters,

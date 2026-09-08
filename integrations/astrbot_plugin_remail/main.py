@@ -5098,6 +5098,12 @@ class Main(Star):
                     selection = {"session_id": body["sessionId"]}
                 elif set(body) == {"action", "all"} and body["all"] is True:
                     selection = {"all_sessions": True}
+                elif (
+                    set(body) == {"action", "pushes"}
+                    and body["action"] == "clear"
+                    and body["pushes"] is True
+                ):
+                    selection = {"pushes_only": True}
                 else:
                     raise ValueError("an explicit cleanup scope is required")
                 if body["action"] == "reset":
@@ -5155,7 +5161,7 @@ class Main(Star):
                     )
             except (TypeError, ValueError):
                 return error_response(
-                    "请选择要清理的会话或明确清理全部。", status_code=400
+                    "请选择要清理的会话、全部记录或推送记录。", status_code=400
                 )
             except RuntimeError as exc:
                 return error_response(str(exc), status_code=409)

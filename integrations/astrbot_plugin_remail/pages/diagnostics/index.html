@@ -9,9 +9,25 @@
   <body>
     <main>
       <header class="page-header">
-        <div><p class="eyebrow">ReMail</p><h1>会话与推送调试</h1></div>
+        <div><p class="eyebrow">ReMail</p><h1>调试中心</h1></div>
         <p id="recording" class="muted">正在连接 AstrBot……</p>
       </header>
+      <div class="layout-bar">
+        <nav class="page-nav" aria-label="调试页面导航">
+          <button id="nav-sessions" type="button" aria-controls="sessions-view" aria-current="page">会话调试</button>
+          <button id="nav-pushes" type="button" aria-controls="pushes-view" aria-current="false">推送记录</button>
+        </nav>
+        <div class="layout-controls">
+          <button id="refresh" type="button" disabled>刷新当前页</button>
+          <label class="follow-label"><input id="follow" type="checkbox" checked disabled />每 3 秒自动刷新</label>
+        </div>
+      </div>
+      <div class="status-line">
+        <p id="status" role="status" aria-live="polite">正在连接 AstrBot……</p>
+        <p id="follow-state" class="muted">连接后每 3 秒自动刷新</p>
+      </div>
+      <p id="storage-warning" class="warning notice" role="alert" hidden></p>
+      <section id="sessions-view" aria-labelledby="nav-sessions">
       <form id="filter-form">
         <fieldset id="filters" disabled>
           <legend class="sr-only">查找会话与显示设置</legend>
@@ -20,24 +36,17 @@
             <input id="qq" name="qq" type="text" inputmode="numeric" maxlength="64" placeholder="输入 QQ，留空查看全部会话" autocomplete="off" />
           </div>
           <button type="submit" class="primary">查找会话</button>
-          <button id="refresh" type="button">刷新</button>
           <div class="field">
             <label for="display-mode">数据流视图</label>
             <select id="display-mode"><option value="rendered">渲染</option><option value="raw">原文</option></select>
           </div>
-          <label class="follow-label"><input id="follow" type="checkbox" checked />每 3 秒自动刷新</label>
         </fieldset>
       </form>
-      <div class="status-line">
-        <p id="status" role="status" aria-live="polite">正在连接 AstrBot……</p>
-        <p id="follow-state" class="muted">连接后每 3 秒自动刷新</p>
-      </div>
-      <p id="storage-warning" class="warning notice" role="alert" hidden></p>
       <div class="workspace">
         <aside class="session-pane" aria-labelledby="sessions-heading">
           <div class="pane-header">
             <h2 id="sessions-heading">会话</h2><span id="session-count" class="muted"></span>
-            <button id="clear-all" type="button" class="danger-text" title="删除所有调试历史，不受当前筛选影响" disabled>清理全部</button>
+            <button id="clear-all" type="button" class="danger-text" title="删除所有会话和推送调试记录，不受当前筛选影响" disabled>清理全部调试记录</button>
             <button id="reset-all" type="button" title="重置所有 ReMail 模型会话，保留调试记录" disabled>重置全部上下文</button>
           </div>
           <ol id="sessions" class="session-list"></ol>
@@ -63,19 +72,26 @@
           <ol id="turns" class="turn-list"></ol>
         </section>
       </div>
-      <section class="push-pane" aria-labelledby="pushes-heading">
+      <p class="format-note muted">渲染只排版，复制与导出使用原文。</p>
+      </section>
+      <section id="pushes-view" class="push-pane" aria-labelledby="nav-pushes" hidden>
         <div class="pane-header">
-          <div><h2 id="pushes-heading">主动推送调试</h2><p class="muted">记录主动事件的接收和投递结果；未配置目标时也保留接收记录。</p></div>
-          <div class="push-actions"><span id="push-count" class="muted"></span><button id="push-refresh" type="button" disabled>刷新推送</button></div>
+          <div><h2 id="pushes-heading">推送记录</h2><p class="muted">查看主动事件的接收、发送结果及错误详情。</p></div>
+          <div class="push-actions"><span id="push-count" class="muted"></span><button id="push-refresh" type="button" disabled>刷新推送</button><button id="clear-pushes" type="button" class="danger-text" disabled>清空推送记录</button></div>
         </div>
-        <ol id="pushes" class="push-list"></ol>
+        <div class="push-table-scroll" role="region" aria-label="推送记录表格，可横向滚动" tabindex="0">
+          <table class="push-table">
+            <caption class="sr-only">主动推送记录，展开内容可查看正文、错误和游标。</caption>
+            <thead><tr><th scope="col">时间</th><th scope="col">事件</th><th scope="col">目标群 / 会话</th><th scope="col">状态</th><th scope="col">内容与错误详情</th></tr></thead>
+            <tbody id="pushes"></tbody>
+          </table>
+        </div>
         <nav class="pagination" aria-label="主动推送分页">
           <button id="push-previous" type="button" disabled>上一页</button>
           <span id="push-page-summary" class="muted">尚未加载</span>
           <button id="push-next" type="button" disabled>下一页</button>
         </nav>
       </section>
-      <p class="format-note muted">渲染只排版，复制与导出使用原文。</p>
       <p id="retention" class="muted">导出包含该会话当前保留的全部轮次。</p>
       <noscript>此页面需要启用 JavaScript，并从 AstrBot 插件详情页打开。</noscript>
     </main>

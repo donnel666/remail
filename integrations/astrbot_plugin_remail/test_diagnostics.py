@@ -792,6 +792,45 @@ def test_push_delivery_log_keeps_target_content_outcome_and_cursor(tmp_path):
     log.close()
 
 
+def test_clear_pushes_is_independent_and_transactional(tmp_path):
+    log = DiagnosticLog(tmp_path)
+    event = _event()
+    log.attach(event)
+    for index in range(25):
+        log.record_push(
+            "project.launched", "qq:GroupMessage:529642597", "failed", str(index)
+        )
+    before = log.snapshot(view="events")
+    for selector in (
+        {"pushes_only": 1},
+        {"pushes_only": True, "all_sessions": True},
+        {"pushes_only": True, "session_id": "one"},
+    ):
+        with pytest.raises(ValueError):
+            log.clear(**selector)
+    log._on_writer(
+        lambda: log._db.execute(
+            "CREATE TEMP TRIGGER reject_push_cleanup AFTER DELETE ON push_deliveries "
+            "BEGIN SELECT RAISE(ABORT, 'push cleanup failed'); END"
+        )
+    )
+    with pytest.raises(sqlite3.DatabaseError, match="push cleanup failed"):
+        log.clear(pushes_only=True)
+    assert log.snapshot(view="pushes")["total"] == 25
+    log._on_writer(lambda: log._db.execute("DROP TRIGGER reject_push_cleanup"))
+    assert log.clear(pushes_only=True) == {"deletedPushes": 25}
+    assert log.snapshot(view="events") == before
+    assert log.snapshot(view="pushes")["total"] == 0
+    assert log.clear(pushes_only=True) == {"deletedPushes": 0}
+    trace_note(event, "agent", "completed", output="conversation continues")
+    log.record_push("project.launched", "qq:GroupMessage:529642597", "sent", "new")
+    log.close()
+    restored = DiagnosticLog(tmp_path)
+    assert restored.snapshot(view="events")["total"] == before["total"] + 1
+    assert restored.snapshot(view="pushes")["total"] == 1
+    restored.close()
+
+
 def test_legacy_group_and_private_cards_merge_by_qq_after_restart(tmp_path):
     log = DiagnosticLog(tmp_path)
     events = [_tool_event(), _tool_event(group="")]
@@ -1225,9 +1264,21 @@ def test_page_handler_requires_dashboard_identity_and_bounded_read_only_query(
         {"action": "other", "all": True},
         {"action": "clear", "all": 1},
         {"action": "clear", "sessionId": session_id, "all": True},
+        {"action": "clear", "pushes": 1},
+        {"action": "clear", "pushes": False},
+        {"action": "clear", "pushes": True, "all": True},
+        {"action": "reset", "pushes": True},
     ):
         request.json.return_value = body
         assert call().status_code == 400
+    plugin.diagnostics.record_push("project.launched", "qq:GroupMessage:12345", "failed", "old")
+    request.json.return_value = {"action": "clear", "pushes": True}
+    cleared_pushes = call()
+    assert cleared_pushes.status_code == 200
+    assert cleared_pushes.payload == {"deletedPushes": 1}
+    assert plugin.diagnostics.snapshot(view="pushes")["total"] == 0
+    assert plugin.diagnostics.snapshot(view="turns")["total"] == 2
+    resetter.assert_not_awaited()
     request.json.return_value = {"action": "clear", "sessionId": session_id}
     cleared = call()
     assert cleared.status_code == 200

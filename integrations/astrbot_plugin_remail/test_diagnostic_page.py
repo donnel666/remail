@@ -107,6 +107,7 @@ const calls = [], copies = [], blobs = [], posts = [];
 const primarySessionId = sessions[0].sessionId;
 let releaseReady, mode = 'normal', rejectClear = false, holdClear = false, releaseClear;
 let holdTraceId = null, releaseTrace, holdSessions = false, releaseSessions, extraTraceId = null;
+let holdPushes = false, releasePushes;
 const config = () => ({ enabled: true, captureText: true, storageAvailable: true, recordingError: '', retentionTurns: 200,
   totalSessions: sessions.length, totalTurns: sessions.reduce((count, session) => count + session.turnCount, 0) });
 const page = (items, q) => ({ ...config(), items: items.slice(q.offset, q.offset + q.limit), total: items.length,
@@ -128,7 +129,11 @@ window.AstrBotPluginPage = {
       if (holdSessions) { holdSessions = false; return new Promise(resolve => { releaseSessions = () => resolve(result); }); }
       return result;
     }
-    if (q.view === 'pushes') return page(pushes, q);
+    if (q.view === 'pushes') {
+      const result = page(pushes, q);
+      if (holdPushes) { holdPushes = false; return new Promise(resolve => { releasePushes = () => resolve(result); }); }
+      return result;
+    }
     if (q.view === 'turns') return page(q.sessionId === sessions[0].sessionId ? turns : [findTurn(traceId(100))], q);
     if (q.view === 'trace') {
       const turn = findTurn(q.traceId), result = { ...config(), turn: { ...turn }, items: events(turn) };
@@ -149,6 +154,7 @@ window.AstrBotPluginPage = {
     if (rejectClear) throw new Error('database-write-failed');
     if (holdClear) await new Promise(resolve => { releaseClear = resolve; });
     if (body.action === 'reset') return { resetConversations: body.all ? 2 : 1 };
+    if (body.pushes === true) return { deletedPushes: pushes.splice(0, pushes.length).length };
     const removed = sessions.filter(session => body.all === true || session.sessionId === body.sessionId);
     const deletedTurns = removed.reduce((count, session) => count + session.turnCount, 0);
     const deletedPushes = body.all ? pushes.splice(0, pushes.length).length : 0;
@@ -414,11 +420,24 @@ const openNodes = async () => {
     await settle();
     assert.equal(doc.querySelectorAll('.session-button').length, 30);
     assert.equal(doc.querySelectorAll('.turn').length, 20);
+    assert(!id('sessions-view').hidden && id('pushes-view').hidden);
+    const beforeNavigation = latest();
+    await click('nav-pushes');
+    assert(id('sessions-view').hidden && !id('pushes-view').hidden);
+    assert.equal(id('nav-pushes').getAttribute('aria-current'), 'page');
+    assert.equal(id('pushes').tagName, 'TBODY');
+    assert.equal(doc.querySelectorAll('.push-table th[scope="col"]').length, 5);
     assert.equal(doc.querySelectorAll('.push-item').length, 2);
     assert(doc.querySelector('.push-item').textContent.includes('529642597'));
-    assert(doc.querySelector('.push-item').textContent.includes('目标群'));
+    assert(doc.querySelector('.push-table thead').textContent.includes('目标群'));
     assert(doc.querySelector('.push-item').textContent.includes('排行榜奖励已结算'));
     assert(doc.querySelector('.push-item').textContent.includes('已发送'));
+    const pushCalls = calls.length;
+    await poll();
+    assert.deepEqual(calls.slice(pushCalls).map(call => call.view), ['pushes']);
+    await click('nav-sessions');
+    assert(!id('sessions-view').hidden && id('pushes-view').hidden);
+    assert.equal(latest(), beforeNavigation, 'navigation keeps the selected conversation and DOM');
     assert.equal(doc.querySelector('.turn .question').textContent, '第 4 轮原问题');
     assert(doc.querySelector('.turn').textContent.includes('群 54321'));
     assert.equal(latest().querySelector('summary .answer-text').textContent, '最终答复\n  原文保留  ');
@@ -426,7 +445,7 @@ const openNodes = async () => {
     assert.equal(calls.filter(call => call.view === 'trace').length, 0, 'collapsed turns never prefetch traces');
     const initialTurn = latest(), initialCalls = calls.length;
     await poll();
-    assert.deepEqual(calls.slice(initialCalls).map(call => call.view), ['sessions', 'pushes', 'turns'], 'completed conversations refresh sessions, pushes, and turns');
+    assert.deepEqual(calls.slice(initialCalls).map(call => call.view), ['sessions', 'turns'], 'only the visible conversation page refreshes');
     assert.equal(latest(), initialTurn, 'unchanged turns keep their DOM and reading state');
     await openNodes();
     assert.equal(latest().querySelectorAll('.action, .source-grid, .raw-records').length, 0, 'no action/source nesting');
@@ -599,6 +618,43 @@ const openNodes = async () => {
     assert.equal(id('turns').textContent, recordsBeforeReset, 'reset preserves the diagnostic evidence');
     assert(id('status').textContent.includes('已重置 1 个模型会话'));
     assert(!id('clear-dialog').open && pollTimers.size === 1);
+
+    await click('nav-pushes');
+    const keptConversation = id('turns').textContent, keptSelection = id('conversation-title').textContent;
+    const beforePushClear = posts.length;
+    await click('clear-pushes');
+    assert.equal(id('clear-title').textContent, '清空推送记录');
+    assert(id('clear-note').textContent.includes('投递进度'));
+    assert.equal(id('clear-confirm').textContent, '清空推送记录');
+    await click('clear-cancel');
+    assert.equal(posts.length, beforePushClear, 'cancelling push cleanup sends no request');
+    rejectClear = true;
+    await click('clear-pushes');
+    id('clear-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    assert(id('clear-dialog').open && !id('clear-error').hidden);
+    assert.equal(doc.querySelectorAll('.push-item').length, 2);
+    await click('clear-cancel');
+    rejectClear = false;
+    holdPushes = true;
+    id('push-refresh').click();
+    await settle();
+    await click('clear-pushes');
+    assert(id('nav-sessions').disabled && id('nav-pushes').disabled);
+    id('clear-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    assert.deepEqual(posts.at(-1), { action: 'clear', pushes: true });
+    assert.equal(doc.querySelectorAll('.push-item').length, 0);
+    assert.equal(id('push-page-summary').textContent, '0 / 0');
+    assert(id('clear-pushes').disabled && !id('clear-dialog').open);
+    releasePushes();
+    await settle();
+    assert.equal(doc.querySelectorAll('.push-item').length, 0, 'old responses cannot restore cleared pushes');
+    assert.equal(id('turns').textContent, keptConversation);
+    assert.equal(id('conversation-title').textContent, keptSelection);
+    await click('nav-sessions');
+    assert.equal(id('conversation-title').textContent, keptSelection);
+
     rejectClear = true;
     const beforeFailure = id('turns').textContent;
     await click('clear-session');

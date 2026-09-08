@@ -73,10 +73,28 @@ let selectionVersion = 0, listVersion = 0, followTimer = null, formatMode = 'ren
 let refreshRun = null, pageActive = true;
 let totalDebugSessions = 0, totalPushes = 0, pendingClear = null, clearBusy = false;
 const traces = new Map(), traceLoading = new Map(), traceErrors = new Map(), expanded = new Map();
-let pushes = null, pushOffset = 0, pushBusy = false;
+let pushes = null, pushOffset = 0, pushBusy = false, pushVersion = 0;
+let activeView = 'sessions';
 
 function clearLocked() {
   return pendingClear !== null || clearBusy;
+}
+
+function viewBusy() {
+  return activeView === 'pushes' ? pushBusy : listBusy || turnBusy || traceLoading.size > 0;
+}
+
+function selectView(view) {
+  if (clearLocked() || !['sessions', 'pushes'].includes(view) || activeView === view) return;
+  activeView = view;
+  invalidateReads();
+  for (const name of ['sessions', 'pushes']) {
+    byId(name + '-view').hidden = name !== view;
+    byId('nav-' + name).setAttribute('aria-current', name === view ? 'page' : 'false');
+  }
+  controls();
+  if (connected) refreshCurrent();
+  else scheduleFollowing();
 }
 
 function stageTitle(stage) {
@@ -125,8 +143,12 @@ function controls() {
   const locked = clearLocked();
   const canClear = connected && typeof bridge?.apiPost === 'function';
   byId('filters').disabled = !connected || locked;
-  byId('refresh').disabled = !connected || locked || !!refreshRun || listBusy || turnBusy || pushBusy || traceLoading.size > 0;
+  byId('refresh').disabled = !connected || locked || !!refreshRun || viewBusy();
+  byId('follow').disabled = !connected || locked;
+  byId('nav-sessions').disabled = locked;
+  byId('nav-pushes').disabled = locked;
   byId('push-refresh').disabled = !connected || locked || pushBusy;
+  byId('clear-pushes').disabled = !canClear || locked || totalPushes === 0;
   byId('previous').disabled = locked || listBusy || !sessions || sessions.offset === 0;
   byId('next').disabled = locked || listBusy || !sessions?.truncated;
   byId('earlier').disabled = locked || turnBusy || !selected || !moreTurns;
@@ -138,7 +160,8 @@ function controls() {
   byId('clear-confirm').disabled = clearBusy;
   byId('clear-cancel').disabled = clearBusy;
   byId('clear-confirm').textContent = clearBusy ? '正在处理…'
-    : pendingClear?.action === 'reset' ? '重置模型上下文' : '删除调试历史';
+    : pendingClear?.pushes ? '清空推送记录'
+      : pendingClear?.action === 'reset' ? '重置模型上下文' : '删除调试历史';
   for (const item of document.querySelectorAll('.session-button')) item.disabled = locked;
   byId('conversation').setAttribute('aria-busy', String(turnBusy));
   byId('push-previous').disabled = locked || pushBusy || !pushes || pushes.offset === 0;
@@ -762,29 +785,40 @@ function renderPushes() {
   const list = byId('pushes');
   const items = [];
   for (const push of pushes?.items || []) {
-    const item = element('li', '', 'push-item');
-    const heading = element('div', '', 'push-heading');
-    heading.append(
-      element('strong', timeText(push.time)),
-      badge(push.outcome, push.outcome === 'sent' ? '已发送'
+    const item = element('tr', '', 'push-item');
+    const time = element('td'), timestamp = element('time', timeText(push.time));
+    timestamp.dateTime = push.time;
+    time.append(timestamp);
+    const topic = element('td', pushTopicLabels[push.topic] || push.topic);
+    const state = element('td');
+    state.append(badge(push.outcome, push.outcome === 'sent' ? '已发送'
         : push.outcome === 'failed' ? '发送失败'
           : push.outcome === 'partial' ? '已发送，游标未保存'
             : push.outcome === 'skipped' ? '已发送过，跳过重放'
-              : push.outcome === 'blocked' ? '已接收，未配置发送目标' : push.outcome),
-      element('span', pushTopicLabels[push.topic] || push.topic, 'muted'),
-    );
-    const target = element('div', '', 'push-target');
+              : push.outcome === 'blocked' ? '已接收，未配置发送目标' : push.outcome));
+    const target = element('td', '', 'push-target');
     const marker = ':GroupMessage:', markerAt = push.destination.indexOf(marker);
     const group = markerAt >= 0 ? push.destination.slice(markerAt + marker.length) : '';
-    target.append(element('strong', group ? '目标群：' : '目标：'), element('code', group || push.destination || (push.outcome === 'blocked' ? '未配置' : '未记录')));
-    if (group) target.append(element('span', push.destination, 'muted'));
+    target.append(element('code', group || push.destination || (push.outcome === 'blocked' ? '未配置' : '未记录')));
+    if (group) target.append(element('code', push.destination, 'muted'));
+    const content = element('td'), text = String(push.text || ''), error = String(push.error || '');
+    const detail = disclosure('push:' + push.id,
+      element('span', text.split(/\r?\n/)[0].slice(0, 120) || '查看详情'), false, 'push-details');
+    detail.append(element('pre', text || '（没有记录推送正文）', 'push-text'));
+    if (error) detail.append(element('pre', '错误：' + error, 'push-error'));
     const cursor = push.after || push.afterId ? '游标：' + (push.after || '') + (push.afterId ? ' / ' + push.afterId : '') : '';
-    if (cursor) target.append(element('span', cursor, 'muted'));
-    item.append(heading, target, element('pre', push.text || '（没有记录推送正文）', 'push-text'));
-    if (push.error) item.append(element('pre', '错误：' + push.error, 'push-error'));
+    if (cursor) detail.append(element('p', cursor, 'muted'));
+    content.append(detail);
+    if (error) content.append(element('p', error.slice(0, 160) + (error.length > 160 ? '…' : ''), 'push-error-preview'));
+    item.append(time, topic, target, state, content);
     items.push(item);
   }
-  if (!items.length) items.push(element('li', '暂时没有主动推送记录。', 'empty'));
+  if (!items.length) {
+    const row = element('tr'), cell = element('td', '暂时没有主动推送记录。', 'empty');
+    cell.colSpan = 5;
+    row.append(cell);
+    items.push(row);
+  }
   updateList(list, items);
   byId('push-count').textContent = pushes ? String(pushes.total) + ' 条' : '';
   byId('push-page-summary').textContent = pushes
@@ -794,22 +828,26 @@ function renderPushes() {
 
 async function loadPushes(offset = 0) {
   if (clearLocked() || pushBusy) return;
+  const version = ++pushVersion;
   pushBusy = true;
   controls();
   try {
     const data = await withTimeout(bridge.apiGet('diagnostics', { view: 'pushes', limit: 20, offset }));
+    if (version !== pushVersion) return;
     if (!validPage(data) || data.items.some(item => typeof item.destination !== 'string' || typeof item.topic !== 'string')) throw new Error('Invalid pushes');
+    readConfig(data);
     pushes = data;
     totalPushes = data.total;
     pushOffset = data.offset;
     renderPushes();
+    if (activeView === 'pushes') showStatus('共 ' + data.total + ' 条推送记录，展开内容可查看详情。');
   } catch {
+    if (version !== pushVersion) return;
     pushes = pushes || { items: [], total: 0, offset: 0, limit: 20, truncated: false };
     renderPushes();
     showStatus('主动推送记录加载失败，请刷新重试。', true);
   } finally {
-    pushBusy = false;
-    controls();
+    if (version === pushVersion) { pushBusy = false; controls(); }
   }
 }
 
@@ -1048,25 +1086,28 @@ function scheduleFollowing() {
   const follow = byId('follow').checked;
   byId('follow-state').textContent = !follow ? '自动刷新已暂停，可手动刷新'
     : !connected ? '连接后每 3 秒自动刷新'
-      : refreshRun ? '正在刷新会话、执行过程和主动推送' : '每 3 秒刷新会话、执行过程和主动推送';
+      : refreshRun ? '正在刷新当前页' : '每 3 秒刷新当前页';
   if (follow && connected && pageActive && !refreshRun) {
     followTimer = window.setTimeout(() => { followTimer = null; refreshCurrent(true); }, followDelay);
   }
 }
 
 async function refreshCurrent(automatic = false) {
-  if (clearLocked() || !connected || refreshRun || listBusy || turnBusy || pushBusy || traceLoading.size
+  if (clearLocked() || !connected || refreshRun || viewBusy()
     || (automatic && (!pageActive || !byId('follow').checked))) {
     scheduleFollowing();
     return;
   }
-  const run = {}, version = selectionVersion, sessionId = selected?.sessionId;
+  const run = {}, view = activeView, version = selectionVersion, sessionId = selected?.sessionId;
   refreshRun = run;
   scheduleFollowing();
   controls();
   try {
+    if (view === 'pushes') {
+      await loadPushes(pushOffset);
+      return;
+    }
     await loadSessions(sessionOffset);
-    if (refreshRun === run && !clearLocked()) await loadPushes(0);
     if (refreshRun === run && version === selectionVersion && sessionId === selected?.sessionId && sessionId
       && (!automatic || (pageActive && byId('follow').checked)) && !clearLocked()) await loadTurns(0);
   } finally {
@@ -1074,19 +1115,25 @@ async function refreshCurrent(automatic = false) {
   }
 }
 
-function openClearDialog(all, reset = false) {
+function openClearDialog(all, reset = false, pushesOnly = false) {
   if (clearLocked() || !connected || typeof bridge?.apiPost !== 'function'
-    || (all ? !reset && totalDebugSessions === 0 && totalPushes === 0 : !selected || turnTotal === 0)) return;
+    || (pushesOnly ? totalPushes === 0
+      : all ? !reset && totalDebugSessions === 0 && totalPushes === 0 : !selected || turnTotal === 0)) return;
   const action = reset ? 'reset' : 'clear';
-  const body = all ? { action, all: true } : { action, sessionId: selected.sessionId };
+  const body = pushesOnly ? { action: 'clear', pushes: true }
+    : all ? { action, all: true } : { action, sessionId: selected.sessionId };
   pendingClear = Object.freeze(body);
-  byId('clear-title').textContent = reset ? '重置模型会话上下文' : '删除调试历史';
-  byId('clear-note').textContent = reset
+  byId('clear-title').textContent = pushesOnly ? '清空推送记录' : reset ? '重置模型会话上下文' : '删除调试历史';
+  byId('clear-note').textContent = pushesOnly
+    ? '只删除推送日志，保留会话记录和投递进度。清空后，新发生的推送仍会继续记录。'
+    : reset
     ? '清空所选 ReMail 原生会话的问答与临时上下文，下一条提问从空白开始。保留调试记录、账号绑定和业务数据；有消息正在处理时会拒绝重置。'
     : '只删除调试历史，不改原生会话上下文、账号绑定或业务数据。需要保留请先导出。';
-  byId('clear-scope').textContent = all
+  byId('clear-scope').textContent = pushesOnly
+    ? '全部推送记录（当前 ' + totalPushes + ' 条），不受分页限制。'
+    : all
     ? reset ? '全部 ReMail 模型会话：包括已清理调试记录的会话，不受当前筛选影响。'
-      : '全部会话：所有平台、群聊及私聊的调试历史，不受当前 QQ 筛选影响。'
+      : '全部会话及推送记录：所有平台、群聊及私聊的调试历史，不受当前 QQ 筛选影响。'
     : '当前会话：QQ ' + (selected.qq || selected.senderId || '未记录') + ' · '
       + '群聊与私聊合并';
   byId('clear-error').hidden = true;
@@ -1113,9 +1160,11 @@ function cancelClear() {
 function invalidateReads() {
   selectionVersion++;
   listVersion++;
+  pushVersion++;
   refreshRun = null;
   listBusy = false;
   turnBusy = false;
+  pushBusy = false;
   traceLoading.clear();
   stopFollowing();
 }
@@ -1135,6 +1184,18 @@ async function confirmClear() {
         throw new Error('重置结果无法确认，请检查后重试。');
       }
       deleted = { ...result, reset: true };
+      return;
+    }
+    if (scope.pushes) {
+      if (!result || !Number.isSafeInteger(result.deletedPushes) || result.deletedPushes < 0) {
+        throw new Error('推送清理结果无法确认，请刷新检查。');
+      }
+      deleted = result;
+      totalPushes = 0;
+      pushes = { items: [], total: 0, offset: 0, limit: 20, truncated: false };
+      pushOffset = 0;
+      for (const key of expanded.keys()) if (key.startsWith('push:')) expanded.delete(key);
+      renderPushes();
       return;
     }
     if (!result || !['deletedSessions', 'deletedTurns', 'deletedEvents']
@@ -1177,6 +1238,8 @@ async function confirmClear() {
       byId('clear-dialog').close();
       if (deleted.reset) {
         showStatus('已重置 ' + deleted.resetConversations + ' 个模型会话；下一条提问从空白上下文开始，调试记录已保留。');
+      } else if (scope.pushes) {
+        showStatus('已清空 ' + deleted.deletedPushes + ' 条推送记录，会话记录和投递进度已保留。');
       } else {
         showStatus('已删除 ' + deleted.deletedSessions + ' 个调试会话、'
           + deleted.deletedTurns + ' 轮、' + deleted.deletedEvents + ' 条事件。'
@@ -1195,7 +1258,10 @@ byId('filter-form').addEventListener('submit', event => {
   loadSessions(0, true);
 });
 byId('refresh').addEventListener('click', () => refreshCurrent());
+byId('nav-sessions').addEventListener('click', () => selectView('sessions'));
+byId('nav-pushes').addEventListener('click', () => selectView('pushes'));
 byId('push-refresh').addEventListener('click', () => loadPushes(pushOffset));
+byId('clear-pushes').addEventListener('click', () => openClearDialog(false, false, true));
 byId('previous').addEventListener('click', () => loadSessions(Math.max(0, sessionOffset - sessionLimit)));
 byId('next').addEventListener('click', () => loadSessions(sessionOffset + sessionLimit));
 byId('push-previous').addEventListener('click', () => loadPushes(Math.max(0, pushOffset - 20)));
@@ -1224,14 +1290,13 @@ window.addEventListener('pageshow', () => { pageActive = true; scheduleFollowing
 async function initialize() {
   if (!bridge || typeof bridge.ready !== 'function' || typeof bridge.apiGet !== 'function') {
     byId('recording').textContent = '尚未连接 AstrBot';
-    showStatus('请从 AstrBot WebUI 的 ReMail 插件详情页打开“会话调试”。', true);
+    showStatus('请从 AstrBot WebUI 的 ReMail 插件详情页打开“会话与推送调试”。', true);
     return;
   }
   try {
     await withTimeout(bridge.ready());
     connected = true;
-    await loadSessions();
-    await loadPushes();
+    await refreshCurrent();
   } catch { showStatus('未能连接 AstrBot，请关闭并重新打开插件页面。', true); }
   controls();
 }
