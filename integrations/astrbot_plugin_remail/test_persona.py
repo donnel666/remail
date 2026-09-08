@@ -184,9 +184,12 @@ def test_internal_knowledge_is_not_part_of_output_model_prompts() -> None:
 
 def test_writer_only_rephrases_locked_content_and_fact_repair_stays_in_react() -> None:
     assert (
-        "authoritativeAnswer 是经过隐私门禁后锁定的完整最终答案"
+        "authoritativeAnswer 是 ReAct 已核对并锁定的完整最终答案"
         in PERSONA_SYSTEM_PROMPT
     )
+    assert "输入只有 question、authoritativeAnswer、personalityStyle、requiredEvidence、immutableSeals" in PERSONA_SYSTEM_PROMPT
+    assert "隐私门禁" not in PERSONA_SYSTEM_PROMPT
+    assert "不要把后置审核当成拦截条件" not in PERSONA_SYSTEM_PROMPT
     assert "禁止重新选事实、判断相关性、纠错" in PERSONA_SYSTEM_PROMPT
     assert "并列可能" in PERSONA_SYSTEM_PROMPT and "不确定性" in PERSONA_SYSTEM_PROMPT
     assert "原样复制 requiredEvidence" in PERSONA_SYSTEM_PROMPT
@@ -845,7 +848,9 @@ def test_payload_is_bounded_redacted_and_json_serializable() -> None:
         "requiredEvidence",
         "immutableSeals",
         "personalityStyle",
+        "replyChannel",
     }
+    assert decoded["replyChannel"] == ""
     assert "hunter2" not in encoded
     assert "user@example.com" not in encoded
     assert "real-token" not in encoded

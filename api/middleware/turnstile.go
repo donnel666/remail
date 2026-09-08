@@ -47,7 +47,7 @@ var turnstileActions = map[string]string{
 	// before a multipart upload starts, so a "challenge now required" retry
 	// would mean re-uploading the file. Revisit if suppliers complain.
 	"/v1/resources/imports":       "resource_import",
-	"/v1/proto/resources/imports": "resource_import",
+	"/v1/proto/resources/imports": "proto_resource_import",
 	"/v1/domains":                 "domain_import",
 }
 

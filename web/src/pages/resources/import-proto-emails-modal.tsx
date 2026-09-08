@@ -156,7 +156,7 @@ export function ImportProtoEmailsModal({
 
       // Challenged only after preprocessing passes, so a file that fails
       // validation never costs the user a verification.
-      const turnstileToken = admin ? "" : await requireTurnstile("resource_import");
+      const turnstileToken = admin ? "" : await requireTurnstile("proto_resource_import");
       if (!admin && !turnstileToken) return;
       const controller = new AbortController();
       importPollAbortRef.current = controller;

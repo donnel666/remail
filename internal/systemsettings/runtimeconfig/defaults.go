@@ -175,7 +175,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "product_price_multiplier_gmail", Value: "1"},
 	{Key: "product_price_multiplier_icloud", Value: "1"},
 	{Key: "product_price_multiplier_domain", Value: "1"},
-	{Key: ProtoPriceMultiplierKey, Value: "1"},
+	{Key: "product_price_multiplier_proto", Value: "1"},
 
 	{Key: "microsoft_domain_whitelist", Value: "outlook.com,hotmail.com,outlook.sa,outlook.com.ar,outlook.com.au,outlook.at,outlook.be,outlook.com.br,outlook.cl,outlook.cz,outlook.fr,outlook.de,outlook.com.gr,outlook.co.il,outlook.in,outlook.co.id,outlook.ie,outlook.it,outlook.hu,outlook.jp,outlook.kr,outlook.lv,outlook.my,outlook.co.nz,outlook.ph,outlook.pt,outlook.sg,outlook.sk,outlook.es,outlook.co.th,outlook.com.tr,outlook.com.vn"},
 	{Key: "gmail_variant_cooldown_minutes", Value: "5"},

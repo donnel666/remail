@@ -46,6 +46,8 @@ func turnstileRouter(verifier TurnstileVerifier) *gin.Engine {
 	v1.POST("/orders", func(c *gin.Context) { c.Status(http.StatusCreated) })
 	v1.POST("/open/cards/redeem", func(c *gin.Context) { c.Status(http.StatusOK) })
 	v1.POST("/projects/:projectId/resubmit", func(c *gin.Context) { c.Status(http.StatusOK) })
+	v1.POST("/resources/imports", func(c *gin.Context) { c.Status(http.StatusAccepted) })
+	v1.POST("/proto/resources/imports", func(c *gin.Context) { c.Status(http.StatusAccepted) })
 	v1.POST("/domains", func(c *gin.Context) { c.Status(http.StatusCreated) })
 	v1.POST("/lotteries/:token/entries", func(c *gin.Context) { c.Status(http.StatusCreated) })
 	v1.POST("/admin/lotteries", func(c *gin.Context) { c.Status(http.StatusCreated) })
@@ -122,6 +124,11 @@ func TestTurnstileGuardVerifiesRouteAction(t *testing.T) {
 	// A parameterised route resolves to its own action, not the literal path.
 	require.Equal(t, http.StatusOK, doTurnstile(router, http.MethodPost, "/v1/projects/7/resubmit", "tok").Code)
 	require.Equal(t, "project_resubmit", verifier.action)
+
+	require.Equal(t, http.StatusAccepted, doTurnstile(router, http.MethodPost, "/v1/resources/imports", "tok").Code)
+	require.Equal(t, "resource_import", verifier.action)
+	require.Equal(t, http.StatusAccepted, doTurnstile(router, http.MethodPost, "/v1/proto/resources/imports", "tok").Code)
+	require.Equal(t, "proto_resource_import", verifier.action)
 }
 
 func TestTurnstileGuardRejectsBadTokenAndUnavailableService(t *testing.T) {

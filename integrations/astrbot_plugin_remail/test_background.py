@@ -62,13 +62,24 @@ def test_social_keeps_prefetched_orders_out_of_model_and_output_evidence():
     event = event_for(question="你好")
     plan = _fact_plan(intents=("social",))
     event.set_extra("_remail_initial_intent", plan)
+    event.set_extra("_remail_authorized", True)
+    event.set_extra("_remail_binding_state", "bound")
     plugin = SimpleNamespace(
         config={},
         _request=AsyncMock(return_value={"available": True, "items": [], "total": 0}),
         _public_request=AsyncMock(),
         _public_api_capability_context=AsyncMock(),
     )
-    background = asyncio.run(functions["_prepare_fae_context"](plugin, event))
+    async def prepare():
+        prefetch = functions["_start_order_prefetch"](plugin, event)
+        assert prefetch is not None
+        try:
+            await prefetch
+            return await functions["_prepare_fae_context"](plugin, event)
+        finally:
+            await functions["_finish_order_prefetch"](event)
+
+    background = asyncio.run(prepare())
     assert plugin._request.await_count == 1
     assert plugin._request.await_args.args[1] == "/v1/bot/orders"
     plugin._public_request.assert_not_awaited()

@@ -4386,11 +4386,17 @@ func TestCoreHandler_AdminProjectPriceDefaults(t *testing.T) {
 	require.Equal(t, "5", response.Defaults["default_project_icloud_code_supplier_price"])
 	require.Equal(t, "10", response.Defaults["default_project_icloud_purchase_price"])
 	require.Equal(t, "7", response.Defaults["default_project_icloud_purchase_supplier_price"])
-	require.Len(t, response.Defaults, 20)
+	require.Equal(t, "8", response.Defaults["default_project_proto_code_price"])
+	require.Equal(t, "5", response.Defaults["default_project_proto_code_supplier_price"])
+	require.Equal(t, "10", response.Defaults["default_project_proto_purchase_price"])
+	require.Equal(t, "7", response.Defaults["default_project_proto_purchase_supplier_price"])
+	require.Len(t, response.Defaults, 24)
 	require.True(t, response.ServiceDefaults[serviceKey])
 	require.True(t, response.ServiceDefaults["default_project_microsoft_code_enabled"])
 	require.False(t, response.ServiceDefaults["default_project_domain_purchase_enabled"])
-	require.Len(t, response.ServiceDefaults, 10)
+	require.True(t, response.ServiceDefaults["default_project_proto_code_enabled"])
+	require.True(t, response.ServiceDefaults["default_project_proto_purchase_enabled"])
+	require.Len(t, response.ServiceDefaults, 12)
 }
 
 func TestCoreHandler_AdminProjectsProductsLimitsRequestBody(t *testing.T) {

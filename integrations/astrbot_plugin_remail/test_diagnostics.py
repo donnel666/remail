@@ -48,7 +48,7 @@ def _event(
         get_message_type=lambda: SimpleNamespace(
             value="GroupMessage" if group else "FriendMessage"
         ),
-        unified_msg_origin=f"{platform}:GroupMessage:{group}",
+        unified_msg_origin=f"{platform}:{'GroupMessage' if group else 'FriendMessage'}:{group or qq}",
         message_str=question,
         message_obj=SimpleNamespace(
             message_id="900719925474099312345",
@@ -528,24 +528,26 @@ def test_clear_one_scope_keeps_other_scopes_and_late_callbacks_cannot_recreate_i
     tmp_path,
 ):
     log = DiagnosticLog(tmp_path)
-    running, finished, other = (
-        _event(group="111"),
+    running, finished, other_user, other_platform = (
         _event(group="111"),
         _event(group="222"),
+        _event(qq="other-user", group="222"),
+        _event(platform="qq-two", group="222"),
     )
-    for event in (running, finished, other):
+    for event in (running, finished, other_user, other_platform):
         log.attach(event)
     trace_note(running, "tool", "started", input={"original": "keep elsewhere"})
     trace_finish(finished, "completed")
     original_entry = _trace(log, running)["items"][0]
     session_id = _trace(log, running)["turn"]["sessionId"]
-    other_before = _trace(log, other)
+    others_before = [_trace(log, event) for event in (other_user, other_platform)]
+    assert _trace(log, finished)["turn"]["sessionId"] == session_id
     assert log.clear(session_id=session_id) == {
         "deletedSessions": 1,
         "deletedTurns": 2,
         "deletedEvents": 4,
     }
-    assert _trace(log, other) == other_before
+    assert [_trace(log, event) for event in (other_user, other_platform)] == others_before
     for event in (running, finished):
         trace_note(event, "tool", "completed", output="late callback")
         trace_finish(event, "completed")
@@ -561,7 +563,7 @@ def test_clear_one_scope_keeps_other_scopes_and_late_callbacks_cannot_recreate_i
     assert fresh.get_extra(TRACE_KEY)[1] != running.get_extra(TRACE_KEY)[1]
     assert _trace(log, fresh)["turn"]["sessionId"] == session_id
     page = log.snapshot(view="sessions", qq="does-not-match")
-    assert page["total"] == 0 and page["totalSessions"] == 2 and page["totalTurns"] == 2
+    assert page["total"] == 0 and page["totalSessions"] == 3 and page["totalTurns"] == 3
     log.close()
 
 
@@ -723,7 +725,9 @@ def test_concurrent_tools_and_implicit_api_events_keep_per_request_parentage():
             ]
             == f"raw:{event.message_str}"
         )
-    assert log.snapshot(view="sessions", qq="123456789")["total"] == 2
+    assert log.snapshot(view="sessions", qq="123456789")["total"] == 1
+    assert _trace(log, first)["turn"]["sessionId"] == _trace(log, second)["turn"]["sessionId"]
+    assert first.get_extra(TRACE_KEY)[1] != second.get_extra(TRACE_KEY)[1]
     assert diagnostics._CURRENT_ACTION.get() is None
     log.close()
 
@@ -1237,9 +1241,12 @@ def test_page_handler_requires_dashboard_identity_and_bounded_read_only_query(
     assert _trace(plugin.diagnostics, first)["turn"] is None
     assert _trace(plugin.diagnostics, second)["turn"] is not None
     plugin.context = SimpleNamespace()
-    scope = ("platform", "aiocqhttp", "bot", "", "222")
-    context_key = json.dumps([*scope, "platform:FriendMessage:222"])
-    other_key = json.dumps(["platform", "aiocqhttp", "bot", "", "333", "platform:FriendMessage:333"])
+    scope = (
+        second.get_platform_id(), second.get_platform_name(), second.get_self_id(),
+        second.get_group_id(), second.get_sender_id(),
+    )
+    context_key = json.dumps([scope[0], scope[1], scope[2], scope[4]])
+    other_key = json.dumps([scope[0], scope[1], scope[2], "333"])
     plugin.remail_intent_contexts = {context_key: "old", other_key: "keep"}
     request.json.return_value = {"action": "reset", "sessionId": _trace(plugin.diagnostics, second)["turn"]["sessionId"]}
     resetter.return_value = SimpleNamespace(status="busy", reset_conversations=0, reset_scopes=())

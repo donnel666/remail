@@ -149,7 +149,7 @@ def test_untriggered_native_active_reply_is_filtered_without_changing_other_hand
     assert not event.is_at_or_wake_command and not event.is_stopped()
 
 
-def test_group_snapshot_and_context_are_member_bot_platform_group_topic_scoped():
+def test_group_snapshot_keeps_target_scope_and_personal_context_spans_groups():
     f = helpers()
     plugin = NS(config={}, remail_intent_contexts={})
     original = Event("怎么充值", mention="90001")
@@ -157,16 +157,27 @@ def test_group_snapshot_and_context_are_member_bot_platform_group_topic_scoped()
     key = f["_intent_context_key"](original)
     plugin.remail_intent_contexts[key] = (monotonic(), "上次询问充值")
     assert f["_recent_intent_context"](plugin, original) == "上次询问充值"
-    variants = [
+    isolated = [
         Event("gmal 可以注册 dola 吗", sender="10002"),
         Event("gmal 可以注册 dola 吗", platform_id="second-qq"),
         Event("gmal 可以注册 dola 吗", bot_id="90002"),
-        Event("gmal 可以注册 dola 吗", group_id="20002"),
         tg_event(topic="7"),
-        tg_event(topic="8"),
     ]
-    assert len({key, *(f["_intent_context_key"](event) for event in variants)}) == 7
-    assert all(f["_recent_intent_context"](plugin, event) == "" for event in variants)
+    assert len({key, *(f["_intent_context_key"](event) for event in isolated)}) == 5
+    assert all(f["_recent_intent_context"](plugin, event) == "" for event in isolated)
+    for same_user in (
+        Event("gmal 可以注册 dola 吗", group_id="20002"),
+        Event("gmal 可以注册 dola 吗", private=True),
+    ):
+        assert f["_intent_context_key"](same_user) == key
+        assert f["_recent_intent_context"](plugin, same_user) == "上次询问充值"
+        assert f["_event_reply_target"](same_user) != f["_event_reply_target"](original)
+    first_topic, second_topic = tg_event(topic="7"), tg_event(topic="8")
+    topic_key = f["_intent_context_key"](first_topic)
+    plugin.remail_intent_contexts[topic_key] = (monotonic(), "Telegram 用户的安全上下文")
+    assert f["_intent_context_key"](second_topic) == topic_key
+    assert f["_recent_intent_context"](plugin, second_topic) == "Telegram 用户的安全上下文"
+    assert f["_event_reply_target"](first_topic) != f["_event_reply_target"](second_topic)
     # Sanitization may clear components; it must not erase the original trigger/target.
     original.message_obj.message.clear()
     assert f["_capture_group_request"](plugin, original)

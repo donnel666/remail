@@ -71,13 +71,16 @@ from .sessions import (
 )
 from .persona import (
     CRITIC_SYSTEM_PROMPT,
+    FACT_REPAIR_SYSTEM_PROMPT,
     PERSONA_SYSTEM_PROMPT,
     build_critic_payload,
     build_persona_payload,
+    has_unsupported_concrete_facts,
     parse_critic_response,
     parse_critic_feedback,
     sanitize_model_text,
     restore_seals,
+    unsupported_sensitive_states,
     validate_persona_response,
 )
 from .security import (
@@ -564,9 +567,21 @@ _PLANNER_PRIVATE_DETAIL = re.compile(
     r"\s*(?:是|为|叫|来自|[:=：])?\s*)(?!字段|schema|[<\[{$])[^\n，。；]{1,300}|"
     r"((?:另一个|其他)项目\s*(?:是|为|叫|[:=：])?\s*)"
     r"(?![<\[{$])[^\n，。；]{1,160}|"
-    r"(\b(?:subject|sender|from|body|message)\s*[:=]\s*)"
+    # Only complete symbolic calls after '=' are code, not literal mail values.
+    # Keep this narrow exception in sync with persona._MAIL_DETAIL_VALUE.
+    r"(\b(?:subject|sender|from|body|message)\s*(?::\s*|=\s*"
+    r"(?!(?:await[ \t]+)?[A-Za-z_][A-Za-z0-9_]*"
+    r"(?:\.[A-Za-z_][A-Za-z0-9_]*)+\([ \t]*"
+    r"(?:[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*"
+    r"(?:[ \t]*,[ \t]*[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)*)?"
+    r"[ \t]*\)(?=[ \t]*(?:;?[ \t]*(?:\r?\n|$)|`)))))"
     r"(?![<\[{$]|string\b|integer\b|number\b|boolean\b|object\b|array\b)"
-    r"[^\s,;}{\]\n]{2,300}"
+    # Consume quoted mail values fully; literal-bearing calls through line end.
+    r"(?:\"(?:\\.|[^\"\\\r\n])*(?:\"|(?=\r?\n|$))|"
+    r"'(?:\\.|[^'\\\r\n])*(?:'|(?=\r?\n|$))|"
+    r"(?:await[ \t]+)?[A-Za-z_][A-Za-z0-9_]*"
+    r"(?:\.[A-Za-z_][A-Za-z0-9_]*)+\([^\r\n]*|"
+    r"[^\s,;}{\]\n]{2,300})"
 )
 _HARD_INTERNAL_EXPOSURE = re.compile(
     r"内部(?:实现|机制|架构|流程|规则|状态|字段|错误|接口|别名|路由)|"
@@ -3428,6 +3443,150 @@ def _persona_evidence_packet(event: Any, plan: FactPlan) -> dict[str, str]:
             continue
         packet[key] = evidence_block(claim, text, **metadata)
     return packet
+
+
+async def _complete_react_answer(
+    context: Any,
+    event: AstrMessageEvent,
+    *,
+    question: str,
+    agent_draft: str,
+    evidence: dict[str, str],
+    fact_plan: dict[str, Any],
+) -> tuple[str, tuple[str, ...]]:
+    """Review the complete draft, repairing at most once before locking it."""
+    if context is None or not callable(getattr(context, "llm_generate", None)):
+        trace_note(event, "react", "failed", reason="invalid_context")
+        return "", ()
+    if event.get_extra("_remail_llm_timeout_stage", None):
+        return "", ()
+    llm_pending = False
+    try:
+        provider_id = str(
+            event.get_extra("_remail_aux_provider_id", "") or ""
+        ) or await context.get_current_chat_provider_id(event.unified_msg_origin)
+        candidate = agent_draft
+        for attempt in range(2):
+            # The plan is provisional: the review selects sources relevant to the
+            # current answer, not every fact requested by an earlier topic.
+            review_payload = build_critic_payload(
+                question=question,
+                candidate_answer=candidate,
+                evidence=evidence,
+                fact_plan=fact_plan,
+                reply_channel=event.get_extra("_remail_reply_channel", ""),
+                review_mode="facts",
+            )
+            llm_pending = True
+            response = await logged_llm_call(
+                context,
+                event,
+                "react",
+                operation_name="facts",
+                chat_provider_id=provider_id,
+                prompt=review_payload.to_json(),
+                system_prompt=CRITIC_SYSTEM_PROMPT,
+                tools=None,
+                contexts=None,
+            )
+            llm_pending = False
+            raw, output_source = structured_response_text(
+                response,
+                required_keys=("decision", "supportedEvidence", "violations"),
+                optional_keys=("issues",),
+                max_chars=8000,
+            )
+            if getattr(response, "role", "assistant") != "assistant":
+                trace_note(event, "react", "rejected", reason="invalid_role")
+                return "", ()
+            review = parse_critic_feedback(raw, review_payload)
+            if review is None:
+                trace_note(
+                    event, "react", "rejected", reason="invalid_critic",
+                    outputSource=output_source,
+                )
+                return "", ()
+            if review["decision"] == "approve":
+                trace_note(
+                    event,
+                    "react",
+                    "accepted",
+                    validatedOutput=review_payload.candidate_answer,
+                    outputSource=output_source,
+                )
+                return (
+                    review_payload.candidate_answer,
+                    tuple(review["supportedEvidence"]),
+                )
+            trace_note(
+                event,
+                "react",
+                "rejected",
+                reason="critic_rejected",
+                reviewFeedback=review,
+                outputSource=output_source,
+            )
+            if attempt:
+                return "", ()
+
+            repair_payload = build_persona_payload(
+                question=question,
+                agent_draft=agent_draft,
+                authoritative_answer=agent_draft,
+                evidence=evidence,
+                reply_channel=event.get_extra("_remail_reply_channel", ""),
+            )
+            repair_input = repair_payload.as_dict()
+            repair_input["reviewFeedback"] = {
+                **review,
+                # A hint for semantic review, never a hard numeric/URL gate.
+                "literalCheck": has_unsupported_concrete_facts(
+                    review_payload.candidate_answer,
+                    [question, *dict(review_payload.evidence).values()],
+                ),
+            }
+            llm_pending = True
+            repaired_response = await logged_llm_call(
+                context,
+                event,
+                "react",
+                operation_name="fact_repair",
+                chat_provider_id=provider_id,
+                prompt=json.dumps(repair_input, ensure_ascii=False),
+                system_prompt=FACT_REPAIR_SYSTEM_PROMPT,
+                tools=None,
+                contexts=None,
+            )
+            llm_pending = False
+            repaired_raw, repaired_source = structured_response_text(
+                repaired_response,
+                required_keys=("answer", "usedEvidence", "seals"),
+                max_chars=30000,
+            )
+            if getattr(repaired_response, "role", "assistant") != "assistant":
+                trace_note(event, "react", "rejected", reason="invalid_role")
+                return "", ()
+            candidate = validate_persona_response(
+                repaired_raw, repair_payload, enforce_semantic_heuristics=False
+            )
+            if not candidate:
+                trace_note(
+                    event, "react", "rejected", reason="invalid_repair",
+                    outputSource=repaired_source,
+                )
+                return "", ()
+        return "", ()
+    except asyncio.CancelledError:
+        if not llm_pending:
+            trace_note(event, "react", "cancelled")
+        raise
+    except Exception as exc:
+        if not llm_pending:
+            trace_note(
+                event, "react", "failed", errorType=type(exc).__name__, error=str(exc)
+            )
+        logger.warning("ReMail final fact review failed: %s", type(exc).__name__)
+        return "", ()
 
 
 async def _generate_persona_answer(
@@ -6521,7 +6680,7 @@ class Main(Star):
     async def enforce_redemption_channel_priority(
         self, event: AstrMessageEvent, response: LLMResponse
     ) -> None:
-        """Send the ReAct draft through the persona writer and preserve its text."""
+        """Lock a reviewed ReAct answer before expression-only editing."""
         if not _event_is_owned(event):
             return
         if event.get_extra("_remail_llm_timeout_stage", None):
@@ -6564,6 +6723,59 @@ class Main(Star):
         plan = _intent_plan(event, scope_question)
         diagnosis = get_extra("_remail_code_diagnosis_fact", None)
         diagnosis = diagnosis if isinstance(diagnosis, DiagnosisFact) else None
+        has_order_email = bool(
+            get_extra(_REMAIL_ORDER_EMAIL_KEY, "")
+            or _GROUP_EMAIL.search(normalize_security_text(question))
+        )
+        mailbox_lookup = has_order_email and re.fullmatch(
+            r"(?:(?:请|帮我|麻烦)\s*)?(?:查一下|查下|看一下|看看|查看|检查|排查|诊断)"
+            r"\s*[:：]?\s*\[邮箱已隐藏\][。？！?!\s]*",
+            sanitize_model_text(scope_question),
+        )
+        diagnosis_problem = _needs_order_diagnosis(scope_question)
+        personal_diagnosis = diagnosis_problem and (
+            re.search(
+                r"(?:这[笔个次]|那[笔个次]|该|我的|本人(?:的)?).{0,12}(?:订单|邮箱)|"
+                r"(?:我|本人).{0,12}(?:接不到|收不到|没收到|未收到|买错|选错|错购)|"
+                r"\bmy\s+(?:order|mailbox)\b",
+                scope_question,
+                re.IGNORECASE,
+            )
+            and not re.match(r"\s*(?:请问[，,:：]?\s*)?(?:如果|假如|假设|若)", scope_question)
+        )
+        public_rules = bool(
+            {"service", "faq"}.intersection(plan.intents)
+            and plan.answer_mode in {"normal", "clarify"}
+            and not has_order_email
+            and not personal_diagnosis
+        )
+        protect_diagnosis = (
+            not public_rules
+            and plan.answer_mode not in {"public_api", "client_guidance"}
+        )
+        # Public project data and model approval cannot establish the receipt or
+        # ownership of an individual email. Only the verified diagnosis can.
+        if diagnosis is None and (
+            "code_diagnosis" in plan.required
+            or plan.answer_mode == "diagnosis"
+            or (
+                protect_diagnosis
+                and (
+                    diagnosis_problem
+                    or mailbox_lookup
+                    or _DIAGNOSIS_ASSERTION.search(
+                        normalize_security_text(agent_draft)
+                    )
+                    or unsupported_sensitive_states(agent_draft, ())
+                    & {"mail:yes", "project:mismatch"}
+                )
+            )
+        ):
+            trace_note(event, "agent", "blocked", reason="diagnosis_without_evidence")
+            _replace_response_text(
+                response, normalize_security_text(_DIAGNOSIS_NOT_VERIFIED_RESPONSE)
+            )
+            return
         if not agent_draft.strip() and diagnosis is None:
             trace_note(
                 event,
@@ -6573,7 +6785,9 @@ class Main(Star):
                 actionId=get_extra("_remail_agent_action_id", ""),
                 output=snapshot_response(response),
             )
-            _replace_response_text(response, _REMAIL_SAFE_ERROR_TEXT)
+            _replace_response_text(
+                response, normalize_security_text(_REMAIL_SAFE_ERROR_TEXT)
+            )
             return
         persona_context = getattr(self, "context", None)
         persona_question = (
@@ -6588,8 +6802,37 @@ class Main(Star):
             )
         )
         evidence = _persona_evidence_packet(event, plan)
+        required_ids = tuple(
+            fact.id for fact in plan.facts if fact.required and fact.id in evidence
+        )
         if diagnosis is not None:
             agent_draft = render_diagnosis_fact(diagnosis)
+        else:
+            agent_draft, required_ids = await _complete_react_answer(
+                persona_context,
+                event,
+                question=persona_question,
+                agent_draft=agent_draft,
+                evidence=evidence,
+                fact_plan=plan.to_dict(),
+            )
+            if not agent_draft:
+                trace_note(
+                    event,
+                    "agent",
+                    "failed",
+                    reason="unapproved_final_answer",
+                    actionId=get_extra("_remail_agent_action_id", ""),
+                )
+                _replace_response_text(
+                    response,
+                    normalize_security_text(
+                        LLM_TIMEOUT_TEXT
+                        if event.get_extra("_remail_llm_timeout_stage", None)
+                        else _REMAIL_SAFE_ERROR_TEXT
+                    ),
+                )
+                return
         started = event.get_extra("_remail_agent_started_at", None)
         duration = (
             int((monotonic() - started) * 1000)
@@ -6606,13 +6849,16 @@ class Main(Star):
             output={"completion_text": agent_draft},
             modelResponse=snapshot_response(response),
         )
-        required_ids = tuple(
-            fact.id for fact in plan.facts if fact.required and fact.id in evidence
-        )
         safe_agent_draft = (
             "订单诊断事实已由受信服务确认，具体结论由不可变事实段提供。"
             if diagnosis
             else agent_draft
+        )
+        trace_note(
+            event,
+            "privacy",
+            "started",
+            name="before_persona",
         )
         trace_note(
             event,
@@ -6655,9 +6901,10 @@ class Main(Star):
                 trace_note(event, "writer", "fallback", reason="sealed_diagnosis")
                 text = seal.text
         else:
-            factual = safe_agent_draft or _REMAIL_SAFE_ERROR_TEXT
-            text = factual
-            writer_evidence = evidence
+            factual = safe_agent_draft
+            writer_evidence = {
+                key: value for key, value in evidence.items() if key in required_ids
+            }
             writer_required_ids = required_ids
             text = await _generate_persona_answer(
                 persona_context,
@@ -6668,7 +6915,6 @@ class Main(Star):
                 evidence=writer_evidence,
                 required_evidence_ids=writer_required_ids,
                 fact_plan=plan.to_dict(),
-                review_output=False,
             )
             if (
                 not text
@@ -6687,7 +6933,6 @@ class Main(Star):
                     evidence=writer_evidence,
                     required_evidence_ids=writer_required_ids,
                     fact_plan=plan.to_dict(),
-                    review_output=False,
                     _style_retry=True,
                 )
             if not text:
@@ -6695,10 +6940,18 @@ class Main(Star):
                     event,
                     "writer",
                     "fallback",
-                    reason="react_answer",
+                    reason="approved_answer",
                     output=factual,
                 )
                 text = factual
+
+        if diagnosis is None and protect_diagnosis and (
+            _DIAGNOSIS_ASSERTION.search(normalize_security_text(text))
+            or unsupported_sensitive_states(text, ())
+            & {"mail:yes", "project:mismatch"}
+        ):
+            trace_note(event, "critic", "blocked", reason="diagnosis_without_evidence")
+            text = normalize_security_text(_DIAGNOSIS_NOT_VERIFIED_RESPONSE)
 
         trace_note(
             event,
@@ -8043,7 +8296,7 @@ class Main(Star):
                     ]
             return referenced, bool(pending) or unresolved
 
-        normalized = normalize_security_text(str(query or "")).casefold()
+        normalized = normalize_security_text(str(query or "")).strip().casefold()
         terms = set(re.findall(r"[a-z0-9_./{}-]{2,}", normalized))
         for run in re.findall(r"[\u4e00-\u9fff]+", normalized):
             if len(run) == 1:
@@ -8121,7 +8374,10 @@ class Main(Star):
                 if score > 0:
                     ranked.append((score, str(path), method.upper(), operation))
 
-        ranked.sort(key=lambda item: (-item[0], item[1], item[2]))
+        ranked.sort(key=lambda item: (
+            str(item[3].get("operationId") or "").casefold() != normalized,
+            -item[0], item[1], item[2],
+        ))
         info = spec.get("info") if isinstance(spec.get("info"), dict) else {}
         safe_info = {
             key: info.get(key) for key in ("title", "version") if info.get(key)

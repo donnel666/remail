@@ -16,13 +16,18 @@ def test_model_deadline_cancels_wait_and_is_independent_of_recording():
         event = SimpleNamespace(
             get_extra=lambda key, default=None: extras.get(key, default),
             set_extra=lambda key, value: extras.__setitem__(key, value),
+            unified_msg_origin="qq:FriendMessage:123",
+            get_platform_id=lambda: "qq",
+            get_platform_name=lambda: "aiocqhttp",
+            get_self_id=lambda: "999",
+            get_group_id=lambda: "",
             get_sender_id=lambda: "123",
             get_message_type=lambda: SimpleNamespace(value="FriendMessage"),
             message_str="问题",
             message_obj=SimpleNamespace(),
         )
         log = DiagnosticLog(None, enabled=enabled)
-        log.attach(event)
+        assert log.attach(event) is enabled
         cancelled = []
 
         async def model(**kwargs):

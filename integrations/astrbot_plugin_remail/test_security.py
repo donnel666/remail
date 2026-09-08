@@ -52,10 +52,12 @@ from .sessions import (
     session_request_matches,
 )
 from .sources import (
+    PublicAPIContract,
     SOURCE_RELIABILITY_RULES,
     STRONG_SOURCES,
     api_example_urls,
     evidence_block,
+    evidence_text,
     public_api_contract,
     source_metadata,
     weak_time_metadata,
@@ -1194,22 +1196,45 @@ def test_dynamic_recharge_answer_is_personalized_by_second_llm() -> None:
             "验证码是 768071。"
         ),
     )
+    leaked_draft = leaked_response.completion_text
     public_plan = _fact_plan(intents=("social",))
+    leaked_extras = {
+        "_remail_owned": True,
+        "_remail_intent_plan_v1": public_plan,
+    }
     leaked_event = SimpleNamespace(
         message_str="帮我看看这封邮件",
         unified_msg_origin="bot:GroupMessage:529642597",
         get_message_type=lambda: "group",
-        get_extra=lambda key, default=None: (
-            True
-            if key == "_remail_owned"
-            else public_plan
-            if key == "_remail_intent_plan_v1"
-            else default
-        ),
+        get_extra=lambda key, default=None: leaked_extras.get(key, default),
+        set_extra=lambda key, value: leaked_extras.__setitem__(key, value),
     )
+
+    async def reject_private_mail(**kwargs):
+        payload = json.loads(kwargs["prompt"])
+        if kwargs["system_prompt"] == CRITIC_SYSTEM_PROMPT:
+            assert payload["reviewMode"] == "facts"
+            assert "768071" not in payload["candidateAnswer"]
+            result = {
+                "decision": "reject",
+                "supportedEvidence": [],
+                "violations": ["privacy_exposure"],
+            }
+        else:
+            assert kwargs["system_prompt"] == FACT_REPAIR_SYSTEM_PROMPT
+            assert payload["reviewFeedback"]["violations"] == ["privacy_exposure"]
+            result = {
+                "answer": sanitize_model_text(leaked_draft),
+                "usedEvidence": [],
+                "seals": [],
+            }
+        return SimpleNamespace(
+            role="assistant", completion_text=json.dumps(result, ensure_ascii=False)
+        )
+
     blocked_context = SimpleNamespace(
-        get_current_chat_provider_id=AsyncMock(),
-        llm_generate=AsyncMock(),
+        get_current_chat_provider_id=AsyncMock(return_value="provider"),
+        llm_generate=AsyncMock(side_effect=reject_private_mail),
     )
     asyncio.run(
         functions["enforce_redemption_channel_priority"](
@@ -1217,10 +1242,15 @@ def test_dynamic_recharge_answer_is_personalized_by_second_llm() -> None:
         )
     )
     assert leaked_response.completion_text == normalize_security_text(
-        functions["_GROUP_PRIVATE_MAIL_RESPONSE"]
+        functions["_REMAIL_SAFE_ERROR_TEXT"]
     )
-    blocked_context.get_current_chat_provider_id.assert_not_awaited()
-    blocked_context.llm_generate.assert_not_awaited()
+    assert [
+        call.kwargs["system_prompt"]
+        for call in blocked_context.llm_generate.await_args_list
+    ] == [CRITIC_SYSTEM_PROMPT, FACT_REPAIR_SYSTEM_PROMPT, CRITIC_SYSTEM_PROMPT]
+    for private_value in ("Genspark", "Microsoft", "768071"):
+        assert private_value not in leaked_response.completion_text
+    assert leaked_response.result_chain == [("plain", leaked_response.completion_text)]
 
     unverified_response = SimpleNamespace(
         role="assistant", completion_text="这是 iCloud 项目，换 Outlook 邮箱即可。"
@@ -1652,10 +1682,17 @@ def test_agent_draft_is_primary_and_semantic_critic_fails_closed() -> None:
     assert "送达" not in rejected.completion_text
     reject_context.llm_generate.assert_not_awaited()
 
+    social_event.message_str = "ReMail 怎么使用？"
+
     async def redact_gate(**kwargs):
         payload = json.loads(kwargs["prompt"])
         if kwargs["system_prompt"] == CRITIC_SYSTEM_PROMPT:
-            assert "Welcome aboard" not in payload["candidateAnswer"]
+            if payload["reviewMode"] == "facts":
+                assert payload["candidateAnswer"] == "普通草稿。"
+            else:
+                assert payload["reviewMode"] == "delivery"
+                assert "Welcome aboard" in payload["candidateAnswer"]
+                assert payload["approvedAnswer"] == "普通草稿。"
             return SimpleNamespace(
                 role="assistant",
                 completion_text=json.dumps(
@@ -1704,15 +1741,22 @@ def test_agent_draft_is_primary_and_semantic_critic_fails_closed() -> None:
     async def malicious_approval(**kwargs):
         if kwargs["system_prompt"] == CRITIC_SYSTEM_PROMPT:
             payload = json.loads(kwargs["prompt"])
-            assert payload["reviewMode"] == "facts"
-            assert payload["candidateAnswer"] == "普通草稿。"
+            facts_review = payload["reviewMode"] == "facts"
+            if facts_review:
+                assert payload["candidateAnswer"] == "普通草稿。"
+            else:
+                assert payload["reviewMode"] == "delivery"
+                assert payload["candidateAnswer"] == normalize_security_text(
+                    leaked_values
+                )
+                assert payload["approvedAnswer"] == "普通草稿。"
             return SimpleNamespace(
                 role="assistant",
                 completion_text=json.dumps(
                     {
-                        "decision": "approve",
+                        "decision": "approve" if facts_review else "reject",
                         "supportedEvidence": [],
-                        "violations": [],
+                        "violations": [] if facts_review else ["unsupported_claim"],
                     }
                 ),
             )
@@ -1745,7 +1789,7 @@ def test_agent_draft_is_primary_and_semantic_critic_fails_closed() -> None:
         "768071",
     ):
         assert private_value not in malicious.completion_text
-    assert malicious_context.llm_generate.await_count == 3
+    assert malicious_context.llm_generate.await_count == 5
 
 
 @pytest.mark.parametrize(
@@ -1920,22 +1964,41 @@ def test_unquoted_chinese_project_mismatches_require_semantic_rejection(
         "password=sentinel-password",
     ],
 )
-def test_numeric_writer_cannot_pass_unknown_urls_tokens_or_projects_to_critic(
+def test_numeric_writer_rejects_unknown_urls_tokens_projects_and_credentials(
     candidate,
 ) -> None:
     functions, _ = _load_welcome_functions()
     extras = {}
-    context = SimpleNamespace(
-        get_current_chat_provider_id=AsyncMock(return_value="provider"),
-        llm_generate=AsyncMock(
-            return_value=SimpleNamespace(
+
+    async def reject_unproved_answer(**kwargs):
+        payload = json.loads(kwargs["prompt"])
+        if kwargs["system_prompt"] == CRITIC_SYSTEM_PROMPT:
+            assert not contains_credentials(candidate)
+            assert payload["reviewMode"] == "delivery"
+            assert payload["candidateAnswer"] == normalize_security_text(candidate)
+            assert payload["approvedAnswer"] == "ChatGPT 接码当前为 20 积分。"
+            return SimpleNamespace(
                 role="assistant",
                 completion_text=json.dumps(
-                    {"answer": candidate, "usedEvidence": [], "seals": []},
-                    ensure_ascii=False,
+                    {
+                        "decision": "reject",
+                        "supportedEvidence": [],
+                        "violations": ["unsupported_claim"],
+                    }
                 ),
             )
-        ),
+        assert kwargs["system_prompt"] == PERSONA_SYSTEM_PROMPT
+        return SimpleNamespace(
+            role="assistant",
+            completion_text=json.dumps(
+                {"answer": candidate, "usedEvidence": [], "seals": []},
+                ensure_ascii=False,
+            ),
+        )
+
+    context = SimpleNamespace(
+        get_current_chat_provider_id=AsyncMock(return_value="provider"),
+        llm_generate=AsyncMock(side_effect=reject_unproved_answer),
     )
     actual = asyncio.run(
         functions["_generate_persona_answer"](
@@ -1957,7 +2020,9 @@ def test_numeric_writer_cannot_pass_unknown_urls_tokens_or_projects_to_critic(
         )
     )
     assert actual == ""
-    context.llm_generate.assert_awaited_once()
+    assert context.llm_generate.await_count == (
+        1 if contains_credentials(candidate) else 2
+    )
 
 
 @pytest.mark.parametrize(
@@ -2298,9 +2363,7 @@ def test_diagnosis_seal_excludes_other_planned_business_facts(
         )
     )
     context.llm_generate.assert_awaited_once()
-    assert response.completion_text == normalize_security_text(
-        render_diagnosis_fact(diagnosis)
-    )
+    assert response.completion_text == render_diagnosis_fact(diagnosis)
     for other_project_value in ("Genspark", "#9", "999"):
         assert other_project_value not in response.completion_text
 
@@ -2624,6 +2687,21 @@ def test_conflicting_fact_sources_fall_back_only_to_strong_facts() -> None:
         nonlocal fact_checks
         payload = json.loads(kwargs["prompt"])
         if kwargs["system_prompt"] == CRITIC_SYSTEM_PROMPT:
+            if payload["reviewMode"] == "delivery":
+                assert payload["candidateAnswer"] == normalize_security_text(
+                    approved + "实际现价为 99 积分。"
+                )
+                assert payload["approvedAnswer"] == normalize_security_text(approved)
+                return SimpleNamespace(
+                    role="assistant",
+                    completion_text=json.dumps(
+                        {
+                            "decision": "reject",
+                            "supportedEvidence": [],
+                            "violations": ["provenance_error"],
+                        }
+                    ),
+                )
             assert payload["reviewMode"] == "facts"
             fact_checks += 1
             return SimpleNamespace(
@@ -2670,7 +2748,7 @@ def test_conflicting_fact_sources_fall_back_only_to_strong_facts() -> None:
         )
     )
     assert fact_checks == 2
-    assert context.llm_generate.await_count == 5
+    assert context.llm_generate.await_count == 7
     assert response.completion_text == normalize_security_text(approved)
     assert "99" not in response.completion_text
 
@@ -3134,19 +3212,69 @@ def test_truncated_api_fact_requires_and_exposes_react_supplement() -> None:
     )
     assert functions["_missing_evidence_response"](event, question) == ""
     packet = functions["_persona_evidence_packet"](event, plan)
-    assert "POST /v1/open/orders" in packet["api"]
-    assert "结果仍不完整" in packet["api"]
+    assert isinstance(packet["api"], PublicAPIContract)
+    initial_contract = json.loads(evidence_text(packet["api"]))
+    assert initial_contract["operations"] == [
+        {"method": "POST", "path": "/v1/open/orders"}
+    ]
+    assert initial_contract["truncated"] is True
     supplements = [
         value
         for key, value in packet.items()
-        if key.startswith("react.api_documentation.")
+        if key.startswith("tool.api_documentation.")
     ]
     assert len(supplements) == 1
-    assert "GET /v1/open/orders/{orderNo}" in supplements[0]
+    assert isinstance(supplements[0], PublicAPIContract)
+    supplement = json.loads(evidence_text(supplements[0]))
+    assert supplement["operations"] == [
+        {"method": "GET", "path": "/v1/open/orders/{orderNo}"}
+    ]
+    assert supplement["truncated"] is False
 
 
 def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
     functions, _ = _load_welcome_functions()
+
+    def reject_draft(event, response, violation):
+        draft = response.completion_text
+        stages = []
+
+        async def review(**kwargs):
+            assert kwargs["tools"] is None and kwargs["contexts"] is None
+            payload = json.loads(kwargs["prompt"])
+            if kwargs["system_prompt"] == CRITIC_SYSTEM_PROMPT:
+                assert payload["reviewMode"] == "facts"
+                stages.append("facts")
+                result = {
+                    "decision": "reject",
+                    "supportedEvidence": [],
+                    "violations": [violation],
+                }
+            else:
+                assert kwargs["system_prompt"] == FACT_REPAIR_SYSTEM_PROMPT
+                assert payload["reviewFeedback"]["violations"] == [violation]
+                stages.append("fact_repair")
+                result = {"answer": draft, "usedEvidence": [], "seals": []}
+            return SimpleNamespace(
+                role="assistant",
+                completion_text=json.dumps(result, ensure_ascii=False),
+            )
+
+        context = SimpleNamespace(
+            get_current_chat_provider_id=AsyncMock(return_value="provider"),
+            llm_generate=AsyncMock(side_effect=review),
+        )
+        asyncio.run(
+            functions["enforce_redemption_channel_priority"](
+                SimpleNamespace(context=context), event, response
+            )
+        )
+        assert stages == ["facts", "fact_repair", "facts"]
+        assert context.llm_generate.await_count == 3
+        assert response.completion_text == normalize_security_text(
+            functions["_REMAIL_SAFE_ERROR_TEXT"]
+        )
+
     api_question = "API 怎么控制宇宙飞船？"
     api_plan = _fact_plan(
         intents=("api",),
@@ -3178,9 +3306,9 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
         {"query": event.message_str},
     )
     assert functions["_missing_evidence_response"](event, event.message_str) == ""
-    assert "没有检索到匹配操作" in functions["_grounded_dynamic_answer"](
+    assert json.loads(functions["_grounded_dynamic_answer"](
         event, event.message_str
-    )
+    )) == {"sourceValid": True, "matched": False, "operations": []}
     functions["_record_evidence"](
         event,
         "api_documentation",
@@ -3192,7 +3320,9 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
         {"query": "wallet"},
     )
     scoped_api = functions["_grounded_dynamic_answer"](event, event.message_str)
-    assert "没有检索到匹配操作" in scoped_api
+    assert json.loads(scoped_api) == {
+        "sourceValid": True, "matched": False, "operations": []
+    }
     assert "/v1/open/wallet" not in scoped_api
     assert not functions["_evidence_is_valid"](
         "project_inventory",
@@ -3218,6 +3348,7 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
     }
     recharge_event = SimpleNamespace(
         message_str=recharge_question,
+        unified_msg_origin="bot:FriendMessage:123456789",
         get_message_type=lambda: "friend",
         get_extra=lambda key, default=None: recharge_extras.get(key, default),
         set_extra=lambda key, value: recharge_extras.__setitem__(key, value),
@@ -3249,11 +3380,7 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
     response = SimpleNamespace(
         role="assistant", completion_text="访问 www.evil.test/cards 购买。"
     )
-    asyncio.run(
-        functions["enforce_redemption_channel_priority"](
-            SimpleNamespace(), recharge_event, response
-        )
-    )
+    reject_draft(recharge_event, response, "provenance_error")
     assert "https://current.example/cards" in functions["_grounded_dynamic_answer"](
         recharge_event, recharge_event.message_str
     )
@@ -3262,7 +3389,12 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
     )
     assert "evil.test" not in response.completion_text
 
+    # The unified egress gate is disabled. Keep its normalization contract
+    # separate from the dedicated helpers and the active semantic review below.
     safe = functions["_safe_egress_text"]
+    privacy = functions["_enforce_group_privacy"]
+    black_box = functions["_enforce_black_box"]
+    requests_credentials = functions["_requests_credentials"]
     tutorial = "调用公开 API 时，请在 Bearer 请求头提供 API Key。"
     assert safe(tutorial, is_group=False) == normalize_security_text(tutorial)
     client_storage = "客户端可以将业务数据保存在 PostgreSQL。"
@@ -3280,19 +3412,18 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
         "充值方式以当前配置为准。", is_group=False, question="你怎么处理充值？"
     ) == normalize_security_text("充值方式以当前配置为准。")
     assert (
-        safe(
+        black_box(
             "实现方式是先执行 SQL JOIN orders 与 messages。",
-            is_group=False,
             question="你们后台如何匹配邮件？",
         )
         == functions["_BLACK_BOX_RESPONSE"]
     )
     assert (
-        safe("邮件标题「Secret launch」来自客服。", is_group=True)
+        privacy("邮件标题「Secret launch」来自客服。")
         == functions["_GROUP_PRIVATE_MAIL_RESPONSE"]
     )
     assert (
-        safe("这封邮件来自 Microsoft，里面写着 768071。", is_group=True)
+        privacy("这封邮件来自 Microsoft，里面写着 768071。")
         == functions["_GROUP_PRIVATE_MAIL_RESPONSE"]
     )
     for mail_detail in (
@@ -3315,7 +3446,7 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
         "Microsoft -> ABC123",
     ):
         assert (
-            safe(mail_detail, is_group=True, question="这封邮件是什么？")
+            privacy(mail_detail, question="这封邮件是什么？")
             == functions["_GROUP_PRIVATE_MAIL_RESPONSE"]
         )
     for question, answer in (
@@ -3325,16 +3456,16 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
         ("內文寫了什麼？", "Verify your account"),
     ):
         assert (
-            safe(answer, is_group=True, question=question)
+            privacy(answer, question=question)
             == functions["_GROUP_PRIVATE_MAIL_RESPONSE"]
         )
-    assert safe("联系电话 13800138000", is_group=True) == ("联系电话 [手机号已隐藏]")
-    assert safe("身份证 110101199001011234", is_group=False) == (
+    assert redact_personal_data("联系电话 13800138000") == "联系电话 [手机号已隐藏]"
+    assert redact_personal_data("身份证 110101199001011234") == (
         "身份证 [身份证号已隐藏]"
     )
     for internal in ("意图识别", "ReAct", "输出门禁"):
         assert (
-            safe(f"内部采用{internal}处理。", is_group=False)
+            black_box(f"内部采用{internal}处理。")
             == functions["_BLACK_BOX_RESPONSE"]
         )
     for internal in (
@@ -3356,7 +3487,7 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
         "邮件资源由 ACME Ltd. 提供。",
         "我先调用查询功能，再根据返回内容回答。",
     ):
-        assert safe(internal, is_group=False) == functions["_BLACK_BOX_RESPONSE"]
+        assert black_box(internal) == functions["_BLACK_BOX_RESPONSE"]
 
     for question, answer in (
         ("发件人是谁？", "Microsoft"),
@@ -3392,17 +3523,14 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
         }
         group_event = SimpleNamespace(
             message_str=question,
+            unified_msg_origin="bot:GroupMessage:123456789",
             get_message_type=lambda: "group",
             get_extra=lambda key, default=None: group_extras.get(key, default),
             set_extra=lambda key, value: group_extras.__setitem__(key, value),
         )
         response = SimpleNamespace(role="assistant", completion_text=answer)
-        asyncio.run(
-            functions["enforce_redemption_channel_priority"](
-                SimpleNamespace(), group_event, response
-            )
-        )
-        assert response.completion_text == functions["_GROUP_PRIVATE_MAIL_RESPONSE"]
+        reject_draft(group_event, response, "privacy_exposure")
+        assert answer not in response.completion_text
 
     for question, answer in (
         ("公开 API 的邮件正文 body 字段是什么？", "body: string"),
@@ -3415,9 +3543,7 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
         ("公开 API 返回的 subject 是这条邮件的哪个字段？", "subject: string"),
         ("公开 API 如何读取我的邮箱资源？", "mailboxId: string"),
     ):
-        assert safe(
-            answer, is_group=True, question=question
-        ) == normalize_security_text(answer)
+        assert privacy(answer, question=question) == normalize_security_text(answer)
 
     for question, answer in (
         ("后端用什么数据库？", "PostgreSQL"),
@@ -3450,20 +3576,14 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
         }
         private_event = SimpleNamespace(
             message_str=question,
+            unified_msg_origin="bot:FriendMessage:123456789",
             get_message_type=lambda: "friend",
             get_extra=lambda key, default=None: private_extras.get(key, default),
             set_extra=lambda key, value: private_extras.__setitem__(key, value),
         )
         response = SimpleNamespace(role="assistant", completion_text=answer)
-        asyncio.run(
-            functions["enforce_redemption_channel_priority"](
-                SimpleNamespace(), private_event, response
-            )
-        )
-        assert response.completion_text in {
-            functions["_BLACK_BOX_RESPONSE"],
-            functions["_REMAIL_SAFE_ERROR_TEXT"],
-        }
+        reject_draft(private_event, response, "internal_exposure")
+        assert answer not in response.completion_text
 
     for question, answer in (
         ("公开 API 的 supplier 供应商字段是什么？", "supplier: string"),
@@ -3480,9 +3600,7 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
         ("前端缓存选哪个？", "可使用浏览器缓存。"),
         ("我的客户端怎么查数据？", "可用 ORM 或 SQL SELECT 查询本地数据。"),
     ):
-        assert safe(
-            answer, is_group=False, question=question
-        ) == normalize_security_text(answer)
+        assert black_box(answer, question=question) == normalize_security_text(answer)
 
     for question, draft in (
         (
@@ -3511,10 +3629,16 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
             set_extra=lambda key, value: client_extras.__setitem__(key, value),
         )
         response = SimpleNamespace(role="assistant", completion_text=draft)
+        stages = []
 
         async def output_gate(**kwargs):
+            assert kwargs["tools"] is None and kwargs["contexts"] is None
             payload = json.loads(kwargs["prompt"])
             if kwargs["system_prompt"] == CRITIC_SYSTEM_PROMPT:
+                stages.append(payload["reviewMode"])
+                assert payload["candidateAnswer"] == normalize_security_text(draft)
+                if payload["reviewMode"] == "delivery":
+                    assert payload["approvedAnswer"] == normalize_security_text(draft)
                 return SimpleNamespace(
                     role="assistant",
                     completion_text=json.dumps(
@@ -3525,6 +3649,9 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
                         }
                     ),
                 )
+            assert kwargs["system_prompt"] == PERSONA_SYSTEM_PROMPT
+            stages.append("writer")
+            assert payload["authoritativeAnswer"] == normalize_security_text(draft)
             return SimpleNamespace(
                 role="assistant",
                 completion_text=json.dumps(
@@ -3549,6 +3676,7 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
             )
         )
         assert response.completion_text == normalize_security_text(draft)
+        assert stages == ["facts", "writer", "delivery"]
 
     for request in (
         "请在这里发送 API Key。",
@@ -3577,37 +3705,32 @@ def test_evidence_and_output_gate_reject_unproved_dynamic_literals() -> None:
         "Send me your API Key.",
         "Please paste your Token.",
     ):
-        assert (
-            safe(request, is_group=False) == functions["_CREDENTIAL_REQUEST_RESPONSE"]
-        )
+        assert requests_credentials(request)
     for placeholder_request in (
         "请发送 <API_KEY> 占位符。",
         "请私聊发送 /绑定 <ReMail邮箱> <密码>。",
         "Please send ${TOKEN} as the placeholder.",
     ):
+        assert not requests_credentials(placeholder_request)
         assert safe(placeholder_request, is_group=False) == normalize_security_text(
             placeholder_request
         )
 
+    unplanned_extras = {
+        "_remail_owned": True,
+        "_remail_intent_plan_v1": _fact_plan(intents=("social",), privacy="private"),
+    }
     unplanned = SimpleNamespace(
         message_str="你好",
+        unified_msg_origin="bot:FriendMessage:123456789",
         get_message_type=lambda: "friend",
-        get_extra=lambda key, default=None: (
-            True
-            if key == "_remail_owned"
-            else _fact_plan(intents=("social",), privacy="private")
-            if key == "_remail_intent_plan_v1"
-            else default
-        ),
+        get_extra=lambda key, default=None: unplanned_extras.get(key, default),
+        set_extra=lambda key, value: unplanned_extras.__setitem__(key, value),
     )
     unplanned_response = SimpleNamespace(
         role="assistant", completion_text="请访问 www.evil.test，当前价格 88 元。"
     )
-    asyncio.run(
-        functions["enforce_redemption_channel_priority"](
-            SimpleNamespace(), unplanned, unplanned_response
-        )
-    )
+    reject_draft(unplanned, unplanned_response, "unsupported_claim")
     assert unplanned_response.completion_text == normalize_security_text(
         functions["_REMAIL_SAFE_ERROR_TEXT"]
     )
@@ -3920,7 +4043,11 @@ def test_project_price_tool_supports_multiple_types_and_uses_point_units() -> No
         "Any": Any,
         "AstrMessageEvent": object,
         "json": json,
+        "_integral_tool_int": functions["_integral_tool_int"],
         "_normalize_product_types": normalize,
+        "_single_product_type_query": functions["_single_product_type_query"],
+        "redact_credentials": redact_credentials,
+        "normalize_security_text": normalize_security_text,
         "_project_price_view": project_view,
         "_record_evidence": lambda *_args: None,
     }
@@ -4045,12 +4172,22 @@ def test_openapi_search_keeps_referenced_fields_and_public_boundary() -> None:
     assert order["operations"][0]["operationId"] == "createOrder"
     flow = excerpt(spec, "完整下单到取件流程")
     operation_ids = {item["operationId"] for item in flow["operations"]}
-    assert {
+    required_operations = {
         "createOrder",
         "getOrder",
         "pickupMessages",
         "getPickupMessage",
-    } <= operation_ids
+    }
+    assert {"createOrder", "pickupMessages"} <= operation_ids
+    # Preserve complete referenced schemas within the excerpt budget; fetch
+    # omitted operations by ID instead of requiring the whole flow in 11k.
+    missing_operations = required_operations - operation_ids
+    if missing_operations:
+        assert flow["truncated"] is True
+    for operation_id in sorted(required_operations):
+        supplement = excerpt(spec, f" {operation_id.upper()} ")
+        assert supplement["sourceValid"] is True
+        assert supplement["operations"][0]["operationId"] == operation_id
     pickup = excerpt(spec, "验证码如何取件")
     assert pickup["operations"][0]["operationId"] == "pickupMessages"
     assert excerpt(spec, "")["matched"] is False
@@ -4063,8 +4200,12 @@ def test_openapi_search_keeps_referenced_fields_and_public_boundary() -> None:
     )
     contract = excerpt(spec, "统一下单完整流程")
     tutorial = functions["_render_api_evidence"](contract)
-    assert json.loads(tutorial) == contract
-    assert "敏感信息已隐藏" not in tutorial
+    sanitized_contract = deepcopy(contract)
+    properties = sanitized_contract["components"]["schemas"]["Order"]["properties"]
+    for field in ("serviceToken", "verificationCode"):
+        assert str(properties[field]["example"]) not in tutorial
+        properties[field]["example"] = "[敏感信息已隐藏]"
+    assert json.loads(tutorial) == sanitized_contract
 
 
 def test_recharge_config_view_is_dynamic_and_allowlisted() -> None:
@@ -4400,10 +4541,18 @@ def test_api_intent_planner_injects_plan_without_prefetch() -> None:
     authorize_payload = json.loads(context.llm_generate.await_args.kwargs["prompt"])
     assert authorize_payload["publicApiCapabilities"] == capability_context
     plugin.remail_api_documentation.assert_not_awaited()
-    assert len(request.extra_user_content_parts) == 2
-    assert "projectCatalog" in request.extra_user_content_parts[0].text
-    assert "Planner LLM" in request.extra_user_content_parts[-1].text
-    assert "validated_remail_fact_plan" in request.extra_user_content_parts[-1].text
+    assert len(request.extra_user_content_parts) == 3
+    background = json.loads(
+        request.extra_user_content_parts[0].text.split("\n", 1)[1]
+    )
+    assert background["publicApiCapabilities"] == capability_context
+    assert "ownOrders" not in background
+    assert "本轮答复渠道：QQ" in request.extra_user_content_parts[1].text
+    plan_context = request.extra_user_content_parts[-1].text
+    assert "独立规划模型" in plan_context
+    plan_payload = json.loads(plan_context.split("\n", 1)[1])
+    assert plan_payload["kind"] == "validated_remail_fact_plan"
+    assert plan_payload["plan"] == api_plan.to_dict()
 
 
 def test_authorize_injects_plan_and_leaves_tool_execution_to_main_agent() -> None:
@@ -4879,6 +5028,7 @@ def test_llm_request_requires_remail_event_authorization() -> None:
         "_recent_intent_context": runtime["_recent_intent_context"],
         "PUBLIC_BUSINESS_RULES": PUBLIC_BUSINESS_RULES,
         "SOURCE_RELIABILITY_RULES": SOURCE_RELIABILITY_RULES,
+        "API_SUPPORT_GUIDANCE": API_SUPPORT_GUIDANCE,
         "_generate_fact_plan": runtime["_generate_fact_plan"],
         "FactPlan": FactPlan,
         "_enforce_black_box": runtime["_enforce_black_box"],
@@ -5023,8 +5173,10 @@ def test_llm_request_requires_remail_event_authorization() -> None:
         handoff_request.system_prompt
     )
     assert "不得用注册风控、需求大小、资源稀缺" in handoff_request.system_prompt
-    assert "当前价格、单价、多少钱" in handoff_request.system_prompt
-    assert "remail_project_prices" in handoff_request.system_prompt
+    assert "当前积分价格：remail_project_prices" in handoff_request.system_prompt
+    assert "库存明细：取得项目编号后调用 remail_project_inventory" in (
+        handoff_request.system_prompt
+    )
 
     ordinary_extras = {
         "_remail_intent_plan_v1": _fact_plan(intents=("social",), privacy="private"),
@@ -6515,9 +6667,7 @@ def test_only_explicit_mentions_reach_group_intent_classification() -> None:
     follow_up_payload = json.loads(
         plugin.context.llm_generate.await_args.kwargs["prompt"]
     )
-    assert follow_up_payload.pop("dynamicBackground")["ownOrders"] == {
-        "privateOnly": True
-    }
+    assert "ownOrders" not in follow_up_payload.pop("dynamicBackground")
     assert follow_up_payload == {
         "workflowPhase": "planner",
         "initialIntent": _fact_plan(intents=("social",)).to_dict(),
@@ -6595,8 +6745,10 @@ def test_only_explicit_mentions_reach_group_intent_classification() -> None:
     event, sent, stopped = make_event("/weather", mention_bot=True)
     plugin = make_plugin("IGNORE")
     asyncio.run(handler(plugin, event))
-    plugin.context.llm_generate.assert_awaited_once()
-    assert sent == [[("plain", functions["_REMAIL_ONLY_TEXT"])]]
+    plugin._authorize_event.assert_not_awaited()
+    plugin.context.llm_generate.assert_not_awaited()
+    assert not sent and not stopped
+    assert plugin.context.conversation_manager.conversations == {}
 
     event, sent, stopped = make_event("接码怎么使用？", mention_bot=True)
     plugin = make_plugin()

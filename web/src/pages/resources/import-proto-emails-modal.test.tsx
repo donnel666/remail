@@ -41,6 +41,7 @@ describe("Proto import feedback", () => {
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@example.com----secret" } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     await waitFor(() => expect(mocks.error).toHaveBeenCalledWith("Invalid proto import format."));
+    expect(mocks.turnstile.mock.calls).toEqual([["proto_resource_import"]]);
     expect(onSuccess).not.toHaveBeenCalled();
     expect(mocks.success.mock.calls).toEqual([["Resource import accepted."]]);
   });

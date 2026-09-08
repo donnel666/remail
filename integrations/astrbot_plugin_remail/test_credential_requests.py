@@ -1,4 +1,33 @@
+from .security import normalize_security_text, redact_credentials
 from .test_security import _load_welcome_functions
+
+
+def test_client_usage_guidance_is_not_a_credential_value():
+    for owner in ("你", "您", "你自己", "您自己", "自己"):
+        guidance = f"API Key 只在{owner}的客户端使用。"
+        assert redact_credentials(guidance) == normalize_security_text(guidance)
+
+    for guidance in (
+        "幂等键。相同 API Key 下，相同幂等键不会重复创建业务事实。",
+        "填入 rk- 开头的 API Key 即可，Swagger UI 会自动加上 Bearer 前缀。",
+    ):
+        assert redact_credentials(guidance) == normalize_security_text(guidance)
+        statement = guidance.rstrip("。")
+        for value in (
+            statement + " synthetic-test-secret",
+            statement + "synthetic-test-secret",
+            statement.replace("API Key ", 'API Key "') + ' synthetic-test-secret"',
+            statement.replace("API Key ", "API Key: ") + " synthetic-test-secret",
+            guidance + " token=synthetic-test-secret",
+        ):
+            assert "synthetic-test-secret" not in redact_credentials(value)
+
+    for value in (
+        "API Key 只在自己的客户端使用 synthetic-test-secret",
+        "API Key: synthetic-test-secret",
+        'API Key "只在自己的客户端使用 synthetic-test-secret"',
+    ):
+        assert "synthetic-test-secret" not in redact_credentials(value)
 
 
 def test_credential_requests_follow_the_requested_object():
