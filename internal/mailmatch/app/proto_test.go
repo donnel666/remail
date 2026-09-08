@@ -11,6 +11,12 @@ import (
 
 type protoFetchFunc func(context.Context, FetchMessagesRequest) (*FetchMessagesResult, error)
 
+type protoPermanentFailureFunc func(context.Context, PermanentProtoFetchFailure) error
+
+func (f protoPermanentFailureFunc) HandlePermanentProtoFetchFailure(ctx context.Context, failure PermanentProtoFetchFailure) error {
+	return f(ctx, failure)
+}
+
 func (f protoFetchFunc) FetchProtoMessages(ctx context.Context, req FetchMessagesRequest) (*FetchMessagesResult, error) {
 	return f(ctx, req)
 }
@@ -83,4 +89,30 @@ func TestProtoAdminFetchWithoutTransportDoesNotCreateTask(t *testing.T) {
 	})
 	require.ErrorIs(t, err, domain.ErrMailServiceUnavailable)
 	require.Zero(t, repo.job.ResourceID)
+}
+
+func TestProtoOnlyPermanentCredentialsTriggerOrderCompensation(t *testing.T) {
+	for _, tc := range []struct {
+		category string
+		want     int
+	}{
+		{"session_revoked", 0}, {"invalid_credentials", 1}, {"identity_mismatch", 1},
+		{"action_required", 0}, {"decryption", 0}, {"protocol", 0}, {"session_persistence", 0},
+	} {
+		t.Run(tc.category, func(t *testing.T) {
+			uc := NewUseCase(nil, nil, nil, nil)
+			failure := &MailFetchFailure{Category: tc.category, SafeMessage: "Safe Proto failure."}
+			uc.SetProtoMailFetchPort(protoFetchFunc(func(context.Context, FetchMessagesRequest) (*FetchMessagesResult, error) { return nil, failure }))
+			calls := 0
+			uc.SetPermanentProtoFetchFailurePort(protoPermanentFailureFunc(func(_ context.Context, failure PermanentProtoFetchFailure) error {
+				calls++
+				require.Equal(t, uint(91), failure.ResourceID)
+				require.Equal(t, uint64(7), failure.CredentialRevision)
+				return nil
+			}))
+			_, err := uc.fetchProtoMessages(context.Background(), FetchMessagesRequest{Scope: OrderScope{AllocationType: domain.ResourceTypeProto, EmailResourceID: 91, CredentialRevision: 7}})
+			require.ErrorIs(t, err, failure)
+			require.Equal(t, tc.want, calls)
+		})
+	}
 }

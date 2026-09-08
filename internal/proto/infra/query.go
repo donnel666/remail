@@ -391,6 +391,11 @@ func (s *Service) mutateResource(ctx context.Context, id uint, owner *uint, appl
 		if before == *row {
 			return nil
 		}
+		if row.CredentialRevision != before.CredentialRevision || row.Status == domain.StatusDeleted {
+			if err := deleteSessionTx(tx, id); err != nil {
+				return err
+			}
+		}
 		now := s.Now().UTC()
 		if row.ValidationGeneration != generation {
 			if err := cancelMaintenanceRunsTx(tx, id, "Superseded by a resource command.", now); err != nil {

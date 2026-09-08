@@ -74,58 +74,6 @@ func (s *Service) DispatchPendingHistory(ctx context.Context, q protoapp.Queue, 
 	}
 	return queued, result
 }
-func (s *Service) ProcessValidationTODO(ctx context.Context, task protoapp.ValidationTaskPayload) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *gorm.DB) error {
-		row, err := lockResource(tx, task.ResourceID, &task.OwnerUserID)
-		if err != nil {
-			return err
-		}
-		if row.ValidationGeneration != task.ValidationGeneration || row.CredentialRevision != task.CredentialRevision || (row.Status != domain.StatusPending && row.Status != domain.StatusValidating) {
-			return domain.ErrInvalidClaim
-		}
-		run, err := ensureMaintenanceRunTx(ctx, tx, row.ID, row.ValidationGeneration, row.CredentialRevision, maintenanceKindValidation, task.RequestID, s.Now().UTC())
-		if err != nil {
-			return err
-		}
-		if run.Status != maintenanceQueued && run.Status != maintenanceRunning {
-			return domain.ErrInvalidClaim
-		}
-		if err := tx.Model(&Resource{}).Where("id = ?", row.ID).Update("status", domain.StatusValidating).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&MaintenanceRun{}).Where("id = ?", run.ID).Updates(map[string]any{"status": maintenanceRunning, "attempts": gorm.Expr("attempts + 1"), "started_at": s.Now().UTC()}).Error; err != nil {
-			return err
-		}
-		// TODO: invoke the Proto credential validator. Unimplemented is a terminal
-		// observation for this generation, never a successful credential check.
-		return s.validationResult(ctx, row.ID, row.ValidationGeneration, row.CredentialRevision, domain.StatusPending, "proto_validation_todo")
-	})
-}
-func (s *Service) ProcessHistoryTODO(ctx context.Context, task protoapp.HistoryTaskPayload) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *gorm.DB) error {
-		row, err := lockResource(tx, task.ResourceID, &task.OwnerUserID)
-		if err != nil {
-			return err
-		}
-		if row.Status != domain.StatusIdentifying || row.ValidationGeneration != task.ValidationGeneration || row.CredentialRevision != task.CredentialRevision {
-			return domain.ErrInvalidClaim
-		}
-		run, err := ensureMaintenanceRunTx(ctx, tx, row.ID, row.ValidationGeneration, row.CredentialRevision, maintenanceKindHistory, task.RequestID, s.Now().UTC())
-		if err != nil {
-			return err
-		}
-		if run.Status != maintenanceQueued && run.Status != maintenanceRunning {
-			return domain.ErrInvalidClaim
-		}
-		if err := tx.Model(&MaintenanceRun{}).Where("id = ?", run.ID).Updates(map[string]any{"status": maintenanceRunning, "attempts": gorm.Expr("attempts + 1"), "started_at": s.Now().UTC()}).Error; err != nil {
-			return err
-		}
-		// TODO: fetch and identify Proto history, then atomically commit history
-		// through the shared Trade/Alloc contract before calling CompleteHistorySuccess.
-		return s.historyResult(ctx, row.ID, row.ValidationGeneration, false)
-	})
-}
-
 func (s *Service) ReleaseMaintenanceAssignment(ctx context.Context, id uint, generation, revision uint64, kind string) error {
 	return s.transaction(ctx, func(_ context.Context, tx *gorm.DB) error {
 		row, err := lockResource(tx, id, nil)

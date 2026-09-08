@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"testing"
+	"time"
 
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	protoapp "github.com/donnel666/remail/internal/proto/app"
 	"github.com/donnel666/remail/internal/proto/domain"
+	"github.com/donnel666/remail/internal/proto/infra/proton"
 	"github.com/glebarez/sqlite"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
@@ -64,8 +66,28 @@ func newProtoAsyncTestService(t *testing.T) (*Service, *protoMemoryFiles) {
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
 	files := &protoMemoryFiles{objects: map[string][]byte{}}
-	require.NoError(t, db.AutoMigrate(&resourceRoot{}, &Resource{}, &importRecord{}, &importItem{}, &protoTestAllocation{}, &MaintenanceRun{}, &commandReceipt{}))
-	return NewService(db, files), files
+	require.NoError(t, db.AutoMigrate(&resourceRoot{}, &Resource{}, &importRecord{}, &importItem{}, &protoTestAllocation{}, &MaintenanceRun{}, &commandReceipt{}, &sessionRecord{}))
+	service := NewService(db, files)
+	service.SessionSecret = "test-proto-session-secret"
+	service.Protocol = protoValidationClientStub{}
+	return service, files
+}
+
+type protoValidationClientStub struct {
+	login func(context.Context, proton.LoginRequest) (proton.Session, error)
+}
+
+func (client protoValidationClientStub) Login(ctx context.Context, request proton.LoginRequest) (proton.Session, error) {
+	if client.login != nil {
+		return client.login(ctx, request)
+	}
+	return testProtoSession(request.Email), nil
+}
+func (protoValidationClientStub) Fetch(context.Context, *proton.Session, proton.FetchRequest) (proton.FetchResult, error) {
+	return proton.FetchResult{Complete: true}, nil
+}
+func testProtoSession(email string) proton.Session {
+	return proton.Session{Version: 1, UID: "test-uid", AccessToken: "secret-access", RefreshToken: "secret-refresh", ExpiresAt: time.Now().Add(time.Hour), UserKeys: []string{"secret-user-key"}, Addresses: []proton.AddressKeys{{ID: "test-address", Email: email, PrivateKeys: []string{"secret-address-key"}}}}
 }
 
 func TestProtoImportTaskReadsPrivateArtifactAndQueuesOnlyImportedRows(t *testing.T) {
@@ -92,8 +114,9 @@ func TestProtoImportTaskReadsPrivateArtifactAndQueuesOnlyImportedRows(t *testing
 	require.Equal(t, "pw", resource.Password)
 }
 
-func TestProtoValidationTODONeverPromotesResource(t *testing.T) {
+func TestProtoValidationRequiresUnlockedMailboxKeys(t *testing.T) {
 	s, _ := newProtoAsyncTestService(t)
+	s.Protocol = protoValidationClientStub{login: func(context.Context, proton.LoginRequest) (proton.Session, error) { return proton.Session{}, nil }}
 	ctx := context.Background()
 	id, _, err := s.ImportLine(ctx, 7, domain.ImportLine{Email: "todo@proto.test", Password: "pw"})
 	require.NoError(t, err)
@@ -101,11 +124,11 @@ func TestProtoValidationTODONeverPromotesResource(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.DispatchPendingValidations(ctx, &protoQueueStub{}, 10)
 	require.NoError(t, err)
-	require.NoError(t, s.MarkValidationTODO(ctx, id, generation))
+	require.NoError(t, s.ProcessValidation(ctx, protoapp.ValidationTaskPayload{ResourceID: id, OwnerUserID: 7, ValidationGeneration: generation, CredentialRevision: 1}))
 	item, err := s.GetResource(ctx, id, nil)
 	require.NoError(t, err)
 	require.Equal(t, domain.StatusPending, item.Status)
-	require.Equal(t, "proto_validation_todo", item.LastSafeError)
+	require.Contains(t, item.LastSafeError, "invalid_session")
 	require.NotEqual(t, domain.StatusNormal, item.Status)
 }
 
@@ -170,7 +193,7 @@ func TestProtoRealAdapterFenceStopsAtHistoryBeforeInventory(t *testing.T) {
 	require.NoError(t, err)
 	item, err := s.GetResource(ctx, id, nil)
 	require.NoError(t, err)
-	require.NoError(t, s.MarkValidationSuccess(ctx, id, generation, item.CredentialRevision, "req-real"))
+	require.NoError(t, s.ProcessValidation(ctx, protoapp.ValidationTaskPayload{ResourceID: id, OwnerUserID: 7, ValidationGeneration: generation, CredentialRevision: item.CredentialRevision, RequestID: "req-real"}))
 	item, err = s.GetResource(ctx, id, nil)
 	require.NoError(t, err)
 	require.Equal(t, domain.StatusIdentifying, item.Status)
@@ -196,7 +219,7 @@ func TestProtoMaintenanceRunUsesPortableStateTransitions(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "queued", run.Status)
 	require.NoError(t, s.StartMaintenanceRun(ctx, run.ID, id, generation, "validation"))
-	require.NoError(t, s.FinishMaintenanceRun(ctx, run.ID, "uncertain", "proto_validation_todo"))
+	require.NoError(t, s.FinishMaintenanceRun(ctx, run.ID, "uncertain", "verification_uncertain"))
 	var stored MaintenanceRun
 	require.NoError(t, s.DB.First(&stored, run.ID).Error)
 	require.Equal(t, 1, stored.Attempts)

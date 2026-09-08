@@ -803,6 +803,23 @@ func (uc *ProjectUseCase) AdminBulkUpdateProducts(ctx context.Context, operatorU
 	if err != nil {
 		return nil, err
 	}
+	if affected > 0 && uc.protoHistoryScan != nil {
+		for _, product := range products {
+			if product.Type != domain.ProductTypeProto {
+				continue
+			}
+			// Use the same project filter as the upsert; requested IDs can include
+			// missing/deleted projects. Disabled Proto products also retain history.
+			projects, err := uc.projects.List(ctx, filter, 0, len(filter.IDs))
+			if err != nil {
+				return nil, err
+			}
+			for _, project := range projects {
+				uc.scheduleProtoHistoryScan(ctx, &domain.ProjectDetail{Project: project.Project, Products: products}, requestID)
+			}
+			break
+		}
+	}
 	return &ProjectBulkResult{Affected: affected}, nil
 }
 

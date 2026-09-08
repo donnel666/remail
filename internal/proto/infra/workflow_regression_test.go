@@ -45,10 +45,10 @@ func TestCommandRollbackVersionAndIdentityFence(t *testing.T) {
 	require.Empty(t, raw.Password)
 	require.True(t, raw.ForSale)
 	require.Greater(t, raw.CredentialRevision, task.CredentialRevision)
-	require.ErrorIs(t, s.ProcessValidationTODO(ctx, task), domain.ErrInvalidClaim)
+	require.ErrorIs(t, s.ProcessValidation(ctx, task), domain.ErrInvalidClaim)
 }
 
-func TestTODOTerminalGenerationIsNotRedispatched(t *testing.T) {
+func TestSuccessfulValidationAndHistoryAreNotRedispatched(t *testing.T) {
 	s, _ := newProtoAsyncTestService(t)
 	ctx := context.Background()
 	q := &protoQueueStub{}
@@ -60,13 +60,13 @@ func TestTODOTerminalGenerationIsNotRedispatched(t *testing.T) {
 	require.Equal(t, 1, count)
 	var task protoapp.ValidationTaskPayload
 	require.NoError(t, json.Unmarshal(q.tasks[0].Payload(), &task))
-	require.NoError(t, s.ProcessValidationTODO(ctx, task))
+	require.NoError(t, s.ProcessValidation(ctx, task))
 	count, err = s.DispatchPendingValidations(ctx, q, 10)
 	require.NoError(t, err)
 	require.Zero(t, count)
 	row, err := s.GetResource(ctx, id, nil)
 	require.NoError(t, err)
-	require.Equal(t, domain.StatusPending, row.Status)
+	require.Equal(t, domain.StatusIdentifying, row.Status)
 	require.True(t, row.ForSale)
 	_, err = s.ClaimForValidation(ctx, id, nil)
 	require.NoError(t, err)
@@ -75,19 +75,19 @@ func TestTODOTerminalGenerationIsNotRedispatched(t *testing.T) {
 	require.Equal(t, 1, count)
 	row, err = s.GetResource(ctx, id, nil)
 	require.NoError(t, err)
-	require.NoError(t, s.MarkValidationSuccess(ctx, id, row.ValidationGeneration, row.CredentialRevision, "history-test"))
+	require.NoError(t, s.ProcessValidation(ctx, protoapp.ValidationTaskPayload{ResourceID: id, OwnerUserID: 7, ValidationGeneration: row.ValidationGeneration, CredentialRevision: row.CredentialRevision, RequestID: "history-test"}))
 	count, err = s.DispatchPendingHistory(ctx, q, 10)
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
 	var history protoapp.HistoryTaskPayload
 	require.NoError(t, json.Unmarshal(q.tasks[len(q.tasks)-1].Payload(), &history))
-	require.NoError(t, s.ProcessHistoryTODO(ctx, history))
+	require.NoError(t, s.CompleteHistorySuccess(ctx, history.ResourceID, history.ValidationGeneration))
 	count, err = s.DispatchPendingHistory(ctx, q, 10)
 	require.NoError(t, err)
 	require.Zero(t, count)
 	row, err = s.GetResource(ctx, id, nil)
 	require.NoError(t, err)
-	require.Equal(t, domain.StatusIdentifying, row.Status)
+	require.Equal(t, domain.StatusNormal, row.Status)
 	require.True(t, row.ForSale)
 }
 
@@ -272,9 +272,9 @@ func (q immediateValidationQueue) EnqueueContext(ctx context.Context, task *asyn
 	if err != nil {
 		return nil, err
 	}
-	return nil, q.service.ProcessValidationTODO(ctx, payload)
+	return nil, q.service.ProcessValidation(ctx, payload)
 }
-func TestValidationWorkerFinishingBeforeActivationCannotResurrectTODO(t *testing.T) {
+func TestValidationWorkerFinishingBeforeActivationKeepsItsResult(t *testing.T) {
 	s, _ := newProtoAsyncTestService(t)
 	ctx := context.Background()
 	id, _, err := s.ImportLine(ctx, 7, domain.ImportLine{Email: "early@proto.test", Password: "secret"})
@@ -283,8 +283,8 @@ func TestValidationWorkerFinishingBeforeActivationCannotResurrectTODO(t *testing
 	require.NoError(t, err)
 	row, err := s.GetResource(ctx, id, nil)
 	require.NoError(t, err)
-	require.Equal(t, domain.StatusPending, row.Status)
-	require.Equal(t, "proto_validation_todo", row.LastSafeError)
+	require.Equal(t, domain.StatusIdentifying, row.Status)
+	require.Empty(t, row.LastSafeError)
 }
 
 type unavailableImportFiles struct{ *protoMemoryFiles }

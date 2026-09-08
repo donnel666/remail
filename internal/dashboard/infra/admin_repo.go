@@ -187,6 +187,7 @@ func (r *AdminViewRepo) InventorySnapshot(ctx context.Context) (dashboardapp.Inv
 		Joins("JOIN email_resources AS er ON er.id = pr.id AND er.type = 'proto'").
 		Joins("JOIN users AS owner ON owner.id = er.owner_user_id").
 		Where("pr.status = 'normal' AND pr.for_sale = TRUE AND pr.owner_user_id = er.owner_user_id").
+		Where("EXISTS (SELECT 1 FROM proto_sessions session WHERE session.resource_id = pr.id AND session.credential_revision = pr.credential_revision)").
 		Where("owner.status = 'active' AND owner.role IN ('supplier', 'admin', 'super_admin')").
 		Count(&protoAvailable).Error; err != nil {
 		return dashboardapp.InventorySnapshot{}, err

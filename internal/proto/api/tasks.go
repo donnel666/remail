@@ -77,10 +77,13 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) func(context.Cont
 		if err != nil {
 			return err
 		}
-		if err := service.ProcessValidationTODO(ctx, payload); err != nil {
+		if err := service.ProcessValidation(ctx, payload); err != nil {
 			return err
 		}
-		writeSystemLog(ctx, module, payload.RequestID, "validation", payload.ResourceID, "Proto validation adapter is TODO; this generation remains pending.")
+		writeSystemLog(ctx, module, payload.RequestID, "validation", payload.ResourceID, "Proto validation task completed; inspect the maintenance result for its outcome.")
+		if module.Queue != nil {
+			return app.EnqueueHistoryDispatcher(ctx, module.Queue)
+		}
 		return nil
 	})
 	register(app.TaskHistory, func(ctx context.Context, task *asynq.Task) error {
@@ -88,10 +91,10 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) func(context.Cont
 		if err != nil {
 			return err
 		}
-		if err := service.ProcessHistoryTODO(ctx, payload); err != nil {
+		if err := service.ProcessHistory(ctx, payload); err != nil {
 			return err
 		}
-		writeSystemLog(ctx, module, payload.RequestID, "history", payload.ResourceID, "Proto history identification is TODO; this generation remains identifying.")
+		writeSystemLog(ctx, module, payload.RequestID, "history", payload.ResourceID, "Proto history task completed; inspect the maintenance result for its outcome.")
 		return nil
 	})
 	register(app.TaskBulk, func(ctx context.Context, task *asynq.Task) error {
@@ -120,7 +123,7 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) func(context.Cont
 		if json.Unmarshal(task.Payload(), &payload) != nil || payload.ProjectID == 0 || payload.Generation == 0 {
 			return asynq.SkipRetry
 		}
-		return service.ProcessProjectHistoryTODO(ctx, payload)
+		return service.ProcessProjectHistory(ctx, payload)
 	})
 	register(app.TaskProjectHistoryDispatcher, func(ctx context.Context, _ *asynq.Task) error { return service.DispatchProjectHistory(ctx, 100) })
 	if module.Queue == nil {

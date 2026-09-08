@@ -14,6 +14,8 @@ type protoExistingAllocationRepo struct {
 	*allocationLockRepo
 	existing  domain.UnifiedAllocation
 	missFirst bool
+	unready   bool
+	readyErr  error
 }
 
 func (r *protoExistingAllocationRepo) FindExistingAllocation(context.Context, string) (*domain.UnifiedAllocation, error) {
@@ -23,6 +25,10 @@ func (r *protoExistingAllocationRepo) FindExistingAllocation(context.Context, st
 	}
 	result := r.existing
 	return &result, nil
+}
+
+func (r *protoExistingAllocationRepo) ProtoAllocationReady(context.Context, string, uint) (bool, error) {
+	return !r.unready && r.readyErr == nil, r.readyErr
 }
 
 type protoAllocationLockRepo struct {
@@ -138,6 +144,18 @@ func TestProtoProtocolGateCoversExistingAllocationPaths(t *testing.T) {
 				t.Fatalf("existing Proto allocation bypassed protocol gate: result=%#v err=%v", result, err)
 			}
 			uc.SetProtoProtocolReady(true)
+			repo.unready = true
+			result, err = uc.Allocate(context.Background(), cmd)
+			if !errors.Is(err, domain.ErrInsufficientInventory) || result != nil {
+				t.Fatalf("existing Proto allocation without a current session was reused: result=%#v err=%v", result, err)
+			}
+			repo.unready = false
+			repo.readyErr = errors.New("readiness database is unavailable")
+			result, err = uc.Allocate(context.Background(), cmd)
+			if !errors.Is(err, repo.readyErr) || result != nil {
+				t.Fatalf("Proto readiness error was swallowed: result=%#v err=%v", result, err)
+			}
+			repo.readyErr = nil
 			result, err = uc.Allocate(context.Background(), cmd)
 			if err != nil || result == nil || result.ID != 8 {
 				t.Fatalf("ready Proto allocation could not resume: result=%#v err=%v", result, err)

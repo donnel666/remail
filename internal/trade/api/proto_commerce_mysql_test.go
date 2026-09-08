@@ -69,6 +69,8 @@ func TestProtoRecoveryAndAllocationIsolationMySQL(t *testing.T) {
 		}
 		require.NoError(t, db.Table("email_resources").Create(&roots).Error)
 		require.NoError(t, db.Table("proto_resources").Create(&resources).Error)
+		require.NoError(t, db.Exec(`INSERT INTO proto_sessions(resource_id, credential_revision, version, payload)
+            SELECT id, credential_revision, 1, 'test-only-encrypted-session' FROM proto_resources WHERE id BETWEEN 2000 AND 2199`).Error)
 		require.NoError(t, db.Create(&guards).Error)
 		require.NoError(t, db.Create(&allocations).Error)
 		require.NoError(t, db.Create(&debits).Error)
@@ -113,12 +115,39 @@ func TestProtoRecoveryAndAllocationIsolationMySQL(t *testing.T) {
 		require.EqualValues(t, 200, paused)
 	})
 
+	t.Run("unready-paid-orders-remain-recoverable-for-compensation", func(t *testing.T) {
+		require.NoError(t, db.Exec(`DELETE FROM proto_sessions WHERE resource_id = 2000`).Error)
+		require.NoError(t, db.Exec(`UPDATE proto_resources SET credential_revision = credential_revision + 1 WHERE id = 2001`).Error)
+		for _, test := range []struct {
+			order string
+			ready bool
+		}{{"PROTO-PAUSED-000", false}, {"PROTO-PAUSED-001", false}, {"PROTO-PAUSED-002", true}} {
+			var id uint
+			require.NoError(t, db.Table("proto_allocations").Select("id").Where("order_no = ?", test.order).Scan(&id).Error)
+			for _, allocationID := range []uint{0, id} {
+				ready, err := allocRepo.ProtoAllocationReady(ctx, test.order, allocationID)
+				require.NoError(t, err)
+				require.Equal(t, test.ready, ready)
+			}
+		}
+		recoveries, err := tradeinfra.NewRepo(db).ListCheckoutAllocationRecoveries(ctx, time.Now().UTC().Add(-15*time.Minute), 200)
+		require.NoError(t, err)
+		orders := make([]string, 0, len(recoveries))
+		for _, recovery := range recoveries {
+			orders = append(orders, recovery.OrderNo)
+		}
+		require.Contains(t, orders, "PROTO-PAUSED-000")
+		require.Contains(t, orders, "PROTO-PAUSED-001")
+	})
+
 	t.Run("different-resources-do-not-lock-their-shared-supplier", func(t *testing.T) {
 		require.NoError(t, db.Exec(`INSERT INTO email_resources(id, type, owner_user_id)
 			VALUES (3000, 'proto', 1), (3001, 'proto', 1)`).Error)
 		require.NoError(t, db.Exec(`INSERT INTO proto_resources(id, resource_type, owner_user_id, email_address, password, status, for_sale)
 			VALUES (3000, 'proto', 1, 'lock-one@example.com', 'secret', 'normal', TRUE),
 			       (3001, 'proto', 1, 'lock-two@example.com', 'secret', 'normal', TRUE)`).Error)
+		require.NoError(t, db.Exec(`INSERT INTO proto_sessions(resource_id, credential_revision, version, payload)
+			VALUES (3000, 1, 1, 'test-only-encrypted-session'), (3001, 1, 1, 'test-only-encrypted-session')`).Error)
 		first := db.Begin()
 		require.NoError(t, first.Error)
 		defer first.Rollback()

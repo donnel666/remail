@@ -2695,8 +2695,17 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 
 		case domain.OrderStatusPaid:
 			allocation := currentAllocation
-			if !uc.protoFulfillmentReady(order, allocation) {
-				return &CheckoutResult{Order: order}, domain.ErrProjectUnavailable
+			ready, err := uc.protoFulfillmentReady(ctx, order, allocation)
+			if err != nil {
+				return nil, err
+			}
+			if !ready {
+				result, compensationErr := uc.compensateUnreadyProtoPaid(ctx, order)
+				if compensationErr != nil {
+					return result, compensationErr
+				}
+				order = result.Order
+				continue
 			}
 			if allocation == nil {
 				var err error
@@ -2719,8 +2728,17 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 					return &CheckoutResult{Order: *failed}, checkoutInventoryError(*failed, err)
 				}
 			}
-			if !uc.protoFulfillmentReady(order, allocation) {
-				return &CheckoutResult{Order: order}, domain.ErrProjectUnavailable
+			ready, err = uc.protoFulfillmentReady(ctx, order, allocation)
+			if err != nil {
+				return nil, err
+			}
+			if !ready {
+				result, compensationErr := uc.compensateUnreadyProtoPaid(ctx, order)
+				if compensationErr != nil {
+					return result, compensationErr
+				}
+				order = result.Order
+				continue
 			}
 			receiveStartedAt := uc.now()
 			receiveUntil := serviceReceiveUntil(receiveStartedAt, quote, order.ServiceMode)

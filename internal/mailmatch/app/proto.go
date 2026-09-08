@@ -48,7 +48,7 @@ func (uc *UseCase) fetchProtoMessages(ctx context.Context, request FetchMessages
 	result, err := uc.protoFetch.FetchProtoMessages(ctx, request)
 	if err != nil {
 		var failure *MailFetchFailure
-		if errors.As(err, &failure) && !failure.Retryable && uc.protoFailures != nil {
+		if errors.As(err, &failure) && permanentProtoCredentialFailure(failure) && uc.protoFailures != nil {
 			err = errors.Join(err, uc.protoFailures.HandlePermanentProtoFetchFailure(ctx, PermanentProtoFetchFailure{
 				ResourceID: request.Scope.EmailResourceID, CredentialRevision: request.Scope.CredentialRevision,
 				OrderNo: request.Scope.OrderNo, RequestID: request.RequestID,
@@ -67,6 +67,20 @@ func (uc *UseCase) fetchProtoMessages(ctx context.Context, request FetchMessages
 		result.Messages[i].CredentialRevision = request.Scope.CredentialRevision
 	}
 	return result, nil
+}
+
+func permanentProtoCredentialFailure(failure *MailFetchFailure) bool {
+	if failure == nil || failure.Retryable {
+		return false
+	}
+	// One unreadable historical message or an interactive challenge is not
+	// proof that every active order has lost its mailbox credentials.
+	switch failure.Category {
+	case "invalid_credentials", "identity_mismatch":
+		return true
+	default:
+		return false
+	}
 }
 
 func (uc *UseCase) assertProtoCredentialRevision(ctx context.Context, resourceID uint, revision uint64) error {

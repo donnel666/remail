@@ -2423,6 +2423,7 @@ JOIN users owner ON owner.id = er.owner_user_id
 WHERE pr.resource_type = 'proto'
   AND pr.owner_user_id = er.owner_user_id
   AND pr.status = 'normal'
+  AND EXISTS (SELECT 1 FROM proto_sessions session WHERE session.resource_id = pr.id AND session.credential_revision = pr.credential_revision)
   AND pr.for_sale = TRUE
   AND owner.status = 'active'
   AND owner.role IN ('supplier', 'admin', 'super_admin')`); err != nil {
@@ -2436,6 +2437,7 @@ JOIN users owner ON owner.id = er.owner_user_id
 WHERE pr.resource_type = 'proto'
   AND pr.owner_user_id = er.owner_user_id
   AND pr.status = 'normal'
+  AND EXISTS (SELECT 1 FROM proto_sessions session WHERE session.resource_id = pr.id AND session.credential_revision = pr.credential_revision)
   AND pr.for_sale = TRUE
   AND owner.status = 'active'
   AND owner.role IN ('supplier', 'admin', 'super_admin')

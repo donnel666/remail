@@ -32,6 +32,7 @@ import (
 	openapiapi "github.com/donnel666/remail/internal/openapi/api"
 	"github.com/donnel666/remail/internal/platform"
 	protoapi "github.com/donnel666/remail/internal/proto/api"
+	"github.com/donnel666/remail/internal/proto/infra/proton"
 	proxyapi "github.com/donnel666/remail/internal/proxy/api"
 	systemsettingsapi "github.com/donnel666/remail/internal/systemsettings/api"
 	settingsdomain "github.com/donnel666/remail/internal/systemsettings/domain"
@@ -251,6 +252,9 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		protoMod.SetAuditLogs(governanceinfra.NewOperationLogRepo(p.DB), governanceinfra.NewSystemLogRepo(p.DB))
 		protoMod.SetRedis(p.Redis)
 		protoMod.SetBackgroundExecutionGate(p.BackgroundLoad)
+		protoMod.Service.Protocol = proton.NewClient()
+		protoMod.Service.Proxies = proxyMod.ProxyUseCase
+		protoMod.Service.SessionSecret = p.ProtoSessionSecret
 		protoMod.ValidateOwner = func(ctx context.Context, ownerID uint) (bool, error) {
 			owner, err := iamMod.AdminResourceOwners.ValidateTargetOwner(ctx, ownerID)
 			return owner != nil && owner.ID != 0 && owner.Enabled, err
@@ -336,6 +340,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		cleanupFuncs = append(cleanupFuncs, kitesim.StartOperationDispatcher(kitesimService))
 		// Trade module (unified console/API Key checkout and order query).
 		tradeMod := tradeapi.NewModule(p.DB, coreMod.ProjectUseCase, billingMod.WalletUseCase, allocMod.UseCase, openapiMod.UseCase, p.Redis)
+		protoMod.Service.HistoricalUsage = importProtoHistory(tradeMod.UseCase)
 		tradeMod.UseCase.SetGmailPurchaseSupplyPort(gmailMod.Service)
 		gmailMod.Service.SetTrade(tradeMod.UseCase)
 		tradeMod.UseCase.SetOwnerLookupPort(orderOwnerDirectory{owners: iamMod.AdminResourceOwners})
@@ -366,7 +371,9 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		mailmatchMod.SetGmailMailFetchPort(gmailMod.Service)
 		mailmatchMod.SetGmailResourceFetchPort(gmailResourceFetchAdapter{service: gmailMod.Service})
 		mailmatchMod.SetICloudMailFetchPort(iCloudMailFetchAdapter{service: icloudMod.Service})
+		mailmatchMod.SetProtoMailFetchPort(protoMailFetchAdapter{resources: protoMod.Service})
 		mailmatchMod.SetPermanentProtoFetchFailurePort(protoFetchFailureAdapter{resources: protoMod.Service, orders: tradeMod.UseCase})
+		allocMod.UseCase.SetProtoProtocolReady(p.ProtoSessionSecret != "")
 		mailmatchMod.SetBotDiagnosisRefresh(mailmatchMod.UseCase)
 		gmailMod.Service.SetMailIngest(gmailMailIngestAdapter{mailmatch: mailmatchMod.UseCase})
 		mailmatchMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)

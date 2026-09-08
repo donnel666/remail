@@ -114,7 +114,7 @@ export function ProtoMaintenanceModal({
   }> = [
     {
       action: (id) => validateAdminProtoResource(id, target.version),
-      description: "Proto verification is pending integration; resources remain unavailable.",
+      description: "Sign in to Proto, securely save mailbox keys, then identify historical project usage.",
       disabled: target.status === "disabled" || target.status === "deleted",
       disabledReason: "Enable the resource before validation.",
       icon: ShieldCheck,
@@ -126,7 +126,7 @@ export function ProtoMaintenanceModal({
     },
     {
       action: (id) => scanAdminProtoProjects(id, target.version),
-      description: "Proto project identification is pending integration; no history is inferred.",
+      description: "Read the complete inbox and spam history with saved keys and record confirmed project usage.",
       disabled: target.status !== "normal" && target.status !== "identifying",
       disabledReason: "Project scanning requires a validated resource.",
       icon: ScanSearch,

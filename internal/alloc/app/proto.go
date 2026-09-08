@@ -28,10 +28,31 @@ func (uc *UseCase) ProtoProtocolReady() bool {
 
 func (uc *UseCase) findAllocationForFulfillment(ctx context.Context, orderNo string) (*domain.UnifiedAllocation, error) {
 	allocation, err := uc.repo.FindExistingAllocation(ctx, orderNo)
-	if err == nil && allocation != nil && allocation.Type == domain.AllocationTypeProto && !uc.ProtoProtocolReady() {
-		return nil, domain.ErrInsufficientInventory
+	if err == nil && allocation != nil && allocation.Type == domain.AllocationTypeProto {
+		ready, readyErr := uc.ProtoAllocationReady(ctx, orderNo, allocation.ID)
+		if readyErr != nil {
+			return nil, readyErr
+		}
+		if !ready {
+			return nil, domain.ErrInsufficientInventory
+		}
 	}
 	return allocation, err
+}
+
+// An unresolved paid order may still allocate. An existing allocation must have
+// a currently normal resource and the session for its current credentials.
+func (uc *UseCase) ProtoAllocationReady(ctx context.Context, orderNo string, allocationID uint) (bool, error) {
+	if !uc.ProtoProtocolReady() {
+		return false, nil
+	}
+	repo, ok := uc.repo.(interface {
+		ProtoAllocationReady(context.Context, string, uint) (bool, error)
+	})
+	if !ok {
+		return false, fmt.Errorf("proto allocation readiness repository is unavailable")
+	}
+	return repo.ProtoAllocationReady(ctx, orderNo, allocationID)
 }
 
 func (uc *UseCase) protoInventoryStats(stats *InventoryStats) *InventoryStats {

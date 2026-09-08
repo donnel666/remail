@@ -71,6 +71,10 @@ type Service struct {
 	OperationLogs         governanceapp.OperationLogPort
 	SystemLogs            governanceapp.SystemLogPort
 	BackgroundExecution   BackgroundExecutionGate
+	Protocol              ProtocolClient
+	Proxies               ProxyProvider
+	SessionSecret         string
+	HistoricalUsage       func(context.Context, []HistoricalUsage) error
 	ValidateOwner         func(context.Context, uint) (bool, error)
 	ValidateSupplierOwner func(context.Context, uint) (bool, error)
 	Now                   func() time.Time
@@ -149,6 +153,9 @@ func (s *Service) importLineTx(_ context.Context, tx *gorm.DB, owner uint, line 
 		if err := cancelMaintenanceRunsTx(tx, row.ID, "Superseded by a new import.", now); err != nil {
 			return err
 		}
+		if err := deleteSessionTx(tx, row.ID); err != nil {
+			return err
+		}
 		if err := tx.Model(&resourceRoot{}).Where("id = ? AND type = ?", row.ID, domain.ResourceType).Updates(map[string]any{"owner_user_id": owner, "version": gorm.Expr("version + 1"), "updated_at": now}).Error; err != nil {
 			return err
 		}
@@ -174,56 +181,7 @@ func (s *Service) importLineTx(_ context.Context, tx *gorm.DB, owner uint, line 
 	return nil
 }
 
-// Every asynchronous commit follows the same root -> provider lock order as allocation.
-func (s *Service) validationResult(ctx context.Context, id uint, generation, revision uint64, next, reason string) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *gorm.DB) error {
-		row, err := lockResource(tx, id, nil)
-		if err != nil {
-			return err
-		}
-		if row.Status != domain.StatusValidating || row.ValidationGeneration != generation || (revision > 0 && row.CredentialRevision != revision) {
-			return domain.ErrInvalidClaim
-		}
-		now := s.Now().UTC()
-		updates := map[string]any{"status": next, "last_safe_error": reason, "last_checked_at": now, "version": row.Version + 1, "updated_at": now}
-		runStatus := maintenanceUncertain
-		if next == domain.StatusIdentifying {
-			runStatus = maintenanceSucceeded
-			updates["validation_failures"] = 0
-			updates["quality_score"] = 100
-		}
-		if next == domain.StatusAbnormal {
-			runStatus = maintenanceFailed
-			updates["validation_failures"] = min(row.ValidationFailures+1, 3)
-			updates["quality_score"] = 0
-		}
-		if err := tx.Model(&Resource{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&MaintenanceRun{}).Where("resource_id = ? AND validation_generation = ? AND kind = ? AND status IN ?", id, generation, maintenanceKindValidation, []string{maintenanceQueued, maintenanceRunning}).Updates(map[string]any{"status": runStatus, "last_safe_error": reason, "finished_at": now, "updated_at": now}).Error; err != nil {
-			return err
-		}
-		if next == domain.StatusIdentifying {
-			if _, err := ensureMaintenanceRunTx(ctx, tx, id, generation, row.CredentialRevision, maintenanceKindHistory, row.ValidationRequestID, now); err != nil {
-				return err
-			}
-		}
-		return bumpRoot(tx, id, now)
-	})
-}
-func (s *Service) MarkValidationTODO(ctx context.Context, id uint, generation uint64) error {
-	return s.validationResult(ctx, id, generation, 0, domain.StatusPending, "proto_validation_todo")
-}
-func (s *Service) MarkValidationSuccess(ctx context.Context, id uint, generation, revision uint64, _ string) error {
-	return s.validationResult(ctx, id, generation, revision, domain.StatusIdentifying, "")
-}
-func (s *Service) MarkValidationAbnormal(ctx context.Context, id uint, generation, revision uint64, reason string) error {
-	if revision == 0 || strings.TrimSpace(reason) == "" {
-		return domain.ErrInvalidResource
-	}
-	return s.validationResult(ctx, id, generation, revision, domain.StatusAbnormal, strings.TrimSpace(reason))
-}
-func (s *Service) historyResult(ctx context.Context, id uint, generation uint64, completed bool) error {
+func (s *Service) CompleteHistorySuccess(ctx context.Context, id uint, generation uint64) error {
 	return s.transaction(ctx, func(_ context.Context, tx *gorm.DB) error {
 		row, err := lockResource(tx, id, nil)
 		if err != nil {
@@ -233,33 +191,15 @@ func (s *Service) historyResult(ctx context.Context, id uint, generation uint64,
 			return domain.ErrInvalidClaim
 		}
 		now := s.Now().UTC()
-		reason := "proto_history_todo"
-		runStatus := maintenanceUncertain
-		updates := map[string]any{"last_safe_error": reason, "last_checked_at": now, "version": row.Version + 1, "updated_at": now}
-		if completed {
-			reason = ""
-			runStatus = maintenanceSucceeded
-			updates["last_safe_error"] = ""
-			updates["status"] = domain.StatusNormal
-			updates["validation_failures"] = 0
-		}
+		updates := map[string]any{"status": domain.StatusNormal, "validation_failures": 0, "last_safe_error": "", "last_checked_at": now, "version": row.Version + 1, "updated_at": now}
 		if err := tx.Model(&Resource{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&MaintenanceRun{}).Where("resource_id = ? AND validation_generation = ? AND kind = ? AND status IN ?", id, generation, maintenanceKindHistory, []string{maintenanceQueued, maintenanceRunning}).Updates(map[string]any{"status": runStatus, "last_safe_error": reason, "finished_at": now, "updated_at": now}).Error; err != nil {
+		if err := tx.Model(&MaintenanceRun{}).Where("resource_id = ? AND validation_generation = ? AND kind = ? AND status IN ?", id, generation, maintenanceKindHistory, []string{maintenanceQueued, maintenanceRunning}).Updates(map[string]any{"status": maintenanceSucceeded, "last_safe_error": "", "finished_at": now, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		return bumpRoot(tx, id, now)
 	})
-}
-func (s *Service) CompleteHistoryTODO(ctx context.Context, id uint, generation uint64) error {
-	return s.historyResult(ctx, id, generation, false)
-}
-func (s *Service) MarkHistoryTODO(ctx context.Context, id uint, generation uint64) error {
-	return s.CompleteHistoryTODO(ctx, id, generation)
-}
-func (s *Service) CompleteHistorySuccess(ctx context.Context, id uint, generation uint64) error {
-	return s.historyResult(ctx, id, generation, true)
 }
 func (s *Service) BeginValidation(ctx context.Context, id uint) (uint64, error) {
 	return s.ClaimForValidation(ctx, id, nil)

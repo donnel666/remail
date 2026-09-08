@@ -52,3 +52,46 @@ func TestProjectRepoBulkUpsertProductsPreservesIDs(t *testing.T) {
 	_, err = NewProjectRepo(db).BulkUpsertProductsWithLog(context.Background(), coreapp.ProjectListFilter{Scope: coreapp.ProjectListScopeAll, IsAdmin: true, IDs: []uint{1, 2}}, []domain.Product{partialMicrosoft}, nil)
 	require.NoError(t, err)
 }
+
+func TestProtoBulkProductsHistoryUsesTheUpdatedProjectRange(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:proto-bulk-history-projects?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&ProjectModel{}, &ProjectProductModel{}, &ProjectMailRuleModel{}, &governanceinfra.OperationLogModel{}))
+	require.NoError(t, db.Exec("CREATE UNIQUE INDEX idx_test_proto_project_type ON project_products(project_id, type)").Error)
+	require.NoError(t, db.Create([]ProjectModel{
+		{ID: 5, Name: "existing", Status: "listed", AccessType: "public"},
+		{ID: 6, Name: "delisted", Status: "delisted", AccessType: "public"},
+		{ID: 7, Name: "deleted", Status: "listed", AccessType: "public"},
+		{ID: 8, Name: "outside-selection", Status: "listed", AccessType: "public"},
+	}).Error)
+	require.NoError(t, db.Delete(&ProjectModel{}, 7).Error)
+	repo := NewProjectRepo(db)
+	uc := coreapp.NewProjectUseCase(repo)
+	var scheduled []uint
+	uc.SetProtoHistoryScan(func(_ context.Context, id uint, _ string) error {
+		scheduled = append(scheduled, id)
+		return nil
+	})
+	for _, status := range []string{"enabled", "disabled"} {
+		scheduled = nil
+		result, err := uc.AdminBulkUpdateProducts(context.Background(), 1, []uint{5, 6, 7, 99, 5, 0}, []coreapp.ProjectProductRequest{{
+			Type: "proto", Status: status, CodeEnabled: true, PurchaseEnabled: true,
+			CodePrice: "1", PurchasePrice: "2", CodeSupplierPrice: "0.5", PurchaseSupplierPrice: "1",
+			CodeWindowMinutes: 10, ActivationWindowMinutes: 60, WarrantyMinutes: 60,
+		}}, "proto-bulk-range", "/v1/admin/projects/products")
+		require.NoError(t, err)
+		require.Equal(t, 2, result.Affected)
+		require.ElementsMatch(t, []uint{5, 6}, scheduled)
+		var ids []uint
+		require.NoError(t, db.Model(&ProjectProductModel{}).Where("type = 'proto'").Pluck("project_id", &ids).Error)
+		require.ElementsMatch(t, scheduled, ids)
+	}
+	scheduled = nil
+	result, err := uc.AdminBulkUpdateProducts(context.Background(), 1, []uint{7, 99}, []coreapp.ProjectProductRequest{{
+		Type: "proto", Status: "enabled", CodeEnabled: true, CodePrice: "1", CodeSupplierPrice: "0.5",
+		CodeWindowMinutes: 10, ActivationWindowMinutes: 60, WarrantyMinutes: 60,
+	}}, "proto-missing-range", "/v1/admin/projects/products")
+	require.NoError(t, err)
+	require.Zero(t, result.Affected)
+	require.Empty(t, scheduled)
+}

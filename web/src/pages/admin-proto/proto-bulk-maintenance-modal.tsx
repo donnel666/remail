@@ -52,7 +52,7 @@ export function ProtoBulkMaintenanceModal({
       success: "Resource validation batch submitted.",
     },
     {
-      description: "Proto project identification is pending integration; no history is inferred.",
+      description: "Read the complete inbox and spam history with saved keys and record confirmed project usage.",
       icon: ScanSearch,
       key: "history",
       label: "Scan projects",

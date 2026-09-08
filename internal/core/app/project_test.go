@@ -783,6 +783,90 @@ func TestProjectUseCaseAdminBulkUpdateProducts(t *testing.T) {
 	require.Equal(t, "core.project.bulk_update_products", repo.log.OperationType)
 }
 
+type protoBulkHistoryRepo struct {
+	*fakeProjectRepo
+	writeErr, listErr error
+	events            []string
+}
+
+func (r *protoBulkHistoryRepo) BulkUpsertProductsWithLog(ctx context.Context, filter ProjectListFilter, products []domain.Product, log *governancedomain.OperationLog) (int, error) {
+	r.events = append(r.events, "write")
+	if r.writeErr != nil {
+		return 0, r.writeErr
+	}
+	return r.fakeProjectRepo.BulkUpsertProductsWithLog(ctx, filter, products, log)
+}
+
+func (r *protoBulkHistoryRepo) List(ctx context.Context, filter ProjectListFilter, offset, limit int) ([]ProjectSummary, error) {
+	r.events = append(r.events, "list")
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	return r.fakeProjectRepo.List(ctx, filter, offset, limit)
+}
+
+func TestProjectUseCaseProtoBulkProductsScheduleIndependentHistory(t *testing.T) {
+	for _, status := range []string{"enabled", "disabled"} {
+		t.Run(status, func(t *testing.T) {
+			repo := &protoBulkHistoryRepo{fakeProjectRepo: &fakeProjectRepo{items: []ProjectSummary{
+				{Project: domain.Project{ID: 5}}, {Project: domain.Project{ID: 6}},
+			}}}
+			uc := NewProjectUseCase(repo)
+			var scheduled []uint
+			uc.SetProtoHistoryScan(func(_ context.Context, id uint, requestID string) error {
+				require.Equal(t, "proto-bulk", requestID)
+				repo.events = append(repo.events, "scan")
+				scheduled = append(scheduled, id)
+				return nil
+			})
+			uc.SetHistoryScan(func(context.Context, uint, string) error {
+				t.Fatal("Proto batch scheduled Microsoft history")
+				return nil
+			})
+			uc.SetGmailHistoryScan(func(context.Context, uint, string) error { t.Fatal("Proto batch scheduled Gmail history"); return nil })
+			result, err := uc.AdminBulkUpdateProducts(context.Background(), 9, []uint{5, 6, 5, 0}, []ProjectProductRequest{{
+				Type: "proto", Status: status, CodeEnabled: true, PurchaseEnabled: true,
+				CodePrice: "1", PurchasePrice: "2", CodeSupplierPrice: "0.5", PurchaseSupplierPrice: "1",
+				CodeWindowMinutes: 10, ActivationWindowMinutes: 60, WarrantyMinutes: 60,
+			}}, "proto-bulk", "/v1/admin/projects/products")
+			require.NoError(t, err)
+			require.Equal(t, 2, result.Affected)
+			require.ElementsMatch(t, []uint{5, 6}, scheduled)
+			require.Equal(t, []uint{5, 6}, repo.bulkFilter.IDs)
+			require.Equal(t, []string{"write", "list", "scan", "scan"}, repo.events)
+		})
+	}
+}
+
+func TestProjectUseCaseProtoBulkHistorySkipsOtherProductsAndFailures(t *testing.T) {
+	failure := errors.New("injected repository failure")
+	for _, tc := range []struct {
+		name, productType string
+		writeErr, listErr error
+		events            []string
+	}{
+		{name: "other-product", productType: "domain", listErr: failure, events: []string{"write"}},
+		{name: "write-failed", productType: "proto", writeErr: failure, events: []string{"write"}},
+		{name: "lookup-failed", productType: "proto", listErr: failure, events: []string{"write", "list"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &protoBulkHistoryRepo{fakeProjectRepo: &fakeProjectRepo{}, writeErr: tc.writeErr, listErr: tc.listErr}
+			uc := NewProjectUseCase(repo)
+			uc.SetProtoHistoryScan(func(context.Context, uint, string) error { t.Fatal("unexpected history scheduling"); return nil })
+			_, err := uc.AdminBulkUpdateProducts(context.Background(), 9, []uint{5}, []ProjectProductRequest{{
+				Type: tc.productType, Status: "enabled", CodeEnabled: true, CodePrice: "1", CodeSupplierPrice: "0.5",
+				CodeWindowMinutes: 10, ActivationWindowMinutes: 60, WarrantyMinutes: 60,
+			}}, "proto-bulk", "/v1/admin/projects/products")
+			if tc.productType == "proto" {
+				require.ErrorIs(t, err, failure)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, tc.events, repo.events)
+		})
+	}
+}
+
 func TestProjectUseCaseAdminBulkUpdateProductsRejectsTooManyIDs(t *testing.T) {
 	ids := make([]uint, ProjectBulkMaxExplicitIDs+1)
 	for i := range ids {

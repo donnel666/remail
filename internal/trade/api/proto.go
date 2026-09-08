@@ -12,6 +12,13 @@ func (a allocationAdapter) ProtoProtocolReady() bool {
 	return a.alloc != nil && a.alloc.ProtoProtocolReady()
 }
 
+func (a allocationAdapter) ProtoAllocationReady(ctx context.Context, orderNo string, allocationID uint) (bool, error) {
+	if a.alloc == nil {
+		return false, nil
+	}
+	return a.alloc.ProtoAllocationReady(ctx, orderNo, allocationID)
+}
+
 func (a allocationAdapter) ImportHistoricalProtoAllocation(ctx context.Context, cmd tradeapp.HistoricalProtoAllocationCommand) (*tradeapp.AllocationResult, error) {
 	if cmd.Mailbox != "main" {
 		return nil, domain.ErrInvalidOrderRequest

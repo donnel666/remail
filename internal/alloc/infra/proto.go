@@ -65,6 +65,30 @@ func (m ProtoAllocationModel) unified() domain.UnifiedAllocation {
 	}
 }
 
+func (r *Repo) ProtoAllocationReady(ctx context.Context, orderNo string, allocationID uint) (bool, error) {
+	if strings.TrimSpace(orderNo) == "" {
+		return false, domain.ErrInvalidAllocationRequest
+	}
+	var result struct {
+		ID    uint
+		Ready bool
+	}
+	query := r.dbFor(ctx).Table("proto_allocations AS pa").Select(`pa.id,
+        (pa.status = 'allocated' AND EXISTS (
+            SELECT 1 FROM proto_resources AS pr
+            JOIN email_resources AS er ON er.id = pr.id AND er.type = 'proto' AND er.owner_user_id = pr.owner_user_id
+            JOIN proto_sessions AS session ON session.resource_id = pr.id AND session.credential_revision = pr.credential_revision
+            WHERE pr.id = pa.resource_id AND pr.resource_type = 'proto' AND pr.status = 'normal' AND pr.email_address = pa.email
+        )) AS ready`).Where("pa.order_no = ? AND pa.guard_type = 'proto'", strings.TrimSpace(orderNo))
+	if allocationID != 0 {
+		query = query.Where("pa.id = ?", allocationID)
+	}
+	if err := query.Limit(1).Scan(&result).Error; err != nil {
+		return false, fmt.Errorf("check Proto allocation readiness: %w", err)
+	}
+	return (result.ID == 0 && allocationID == 0) || result.Ready, nil
+}
+
 func (r *Repo) ListProtoSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int) ([]allocapp.ProtoCandidate, error) {
 	if projectID == 0 || buyerUserID == 0 || limit <= 0 {
 		return nil, domain.ErrInvalidAllocationRequest
@@ -84,6 +108,7 @@ func (r *Repo) ListProtoSourceCandidates(ctx context.Context, projectID uint, bu
 func protoSourceCandidateQuery(db *gorm.DB, projectID uint, buyerUserID uint, scope domain.SupplyScope) *gorm.DB {
 	query := db.Table("proto_resources AS pr").
 		Where("pr.resource_type = ? AND pr.status = ?", string(domain.AllocationTypeProto), "normal").
+		Where("EXISTS (SELECT 1 FROM proto_sessions session WHERE session.resource_id = pr.id AND session.credential_revision = pr.credential_revision)").
 		Where("NOT EXISTS (SELECT 1 FROM proto_allocations history WHERE history.resource_id = pr.id AND history.project_id = ?)", projectID)
 	// Like Microsoft, keep owner checks outside the candidate's locking query.
 	owner := db.Table("email_resources AS er").Select("1").
@@ -187,6 +212,10 @@ WHERE pp.project_id = ?
   AND er.owner_user_id = ?
   AND pr.owner_user_id = er.owner_user_id
   AND pr.for_sale = FALSE
+  AND EXISTS (
+      SELECT 1 FROM proto_sessions session
+      WHERE session.resource_id = pr.id AND session.credential_revision = pr.credential_revision
+  )
   AND NOT EXISTS (
       SELECT 1 FROM proto_allocations history
       WHERE history.resource_id = pr.id AND history.project_id = pp.project_id
