@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/platform/testmysql"
@@ -35,9 +37,28 @@ func TestProtoMigrationsResumeMySQL(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, want, version)
 	}
+	assertRootCheck := func(t *testing.T, db *gorm.DB, enforced string, includesProto bool) {
+		t.Helper()
+		var check struct{ Enforced, CheckClause string }
+		require.NoError(t, db.Raw(`SELECT tc.enforced, cc.check_clause
+FROM information_schema.table_constraints AS tc
+JOIN information_schema.check_constraints AS cc
+  ON cc.constraint_schema = tc.constraint_schema AND cc.constraint_name = tc.constraint_name
+WHERE tc.constraint_schema = DATABASE() AND tc.table_name = 'email_resources'
+  AND tc.constraint_name = 'chk_email_resources_type'`).Scan(&check).Error)
+		require.Equal(t, enforced, check.Enforced)
+		// MySQL may expose escaped literal quotes in CHECK_CLAUSE.
+		clause := strings.ToLower(strings.ReplaceAll(check.CheckClause, "\\", ""))
+		if includesProto {
+			require.Contains(t, clause, "'proto'")
+		} else {
+			require.NotContains(t, clause, "'proto'")
+		}
+	}
 	assertUpgraded := func(t *testing.T, db *gorm.DB, sqlDB *sql.DB) {
 		t.Helper()
 		assertVersion(t, sqlDB, 137)
+		assertRootCheck(t, db, "NO", true)
 		for _, column := range []string{"email_domain", "long_lived", "quality_score", "alloc_bucket"} {
 			require.True(t, db.Migrator().HasColumn("proto_resources", column), column)
 		}
@@ -101,12 +122,51 @@ func TestProtoMigrationsResumeMySQL(t *testing.T) {
 	t.Run("upgrade-from-135", func(t *testing.T) {
 		db, sqlDB := newDB(t)
 		assertVersion(t, sqlDB, 135)
+		assertRootCheck(t, db, "NO", false)
+		require.NoError(t, db.Exec(`INSERT INTO users(id, email, password_hash, nickname, status, role)
+VALUES (1, 'existing-roots@example.com', 'hash', 'existing', 'active', 'super_admin')`).Error)
+		// The pre-existing NOT ENFORCED policy permits an unvalidated root. Keep
+		// this tiny sentinel to catch accidental whole-table CHECK validation.
+		require.NoError(t, db.Exec(`INSERT INTO email_resources(id, type, owner_user_id, version, created_at, updated_at) VALUES
+(101, 'microsoft', 1, 2, '2020-01-01', '2021-01-01'),
+(102, 'domain', 1, 3, '2020-01-02', '2021-01-02'),
+(103, 'gmail', 1, 5, '2020-01-03', '2021-01-03'),
+(104, 'icloud', 1, 8, '2020-01-04', '2021-01-04'),
+(105, 'legacy_unvalidated', 1, 13, '2020-01-05', '2021-01-05')`).Error)
+		type rootSnapshot struct {
+			ID                   uint
+			Type                 string
+			OwnerUserID, Version uint64
+			CreatedAt, UpdatedAt time.Time
+		}
+		var before []rootSnapshot
+		require.NoError(t, db.Table("email_resources").Order("id").Find(&before).Error)
+		require.Len(t, before, 5)
+		assertRootsUnchanged := func() {
+			t.Helper()
+			var after []rootSnapshot
+			require.NoError(t, db.Table("email_resources").Order("id").Find(&after).Error)
+			require.Equal(t, before, after)
+		}
+		require.NoError(t, goose.UpTo(sqlDB, target, 136))
+		assertVersion(t, sqlDB, 136)
+		assertRootCheck(t, db, "NO", true)
+		assertRootsUnchanged()
 		require.NoError(t, platform.RunMigrations(sqlDB, target))
 		assertUpgraded(t, db, sqlDB)
+		assertRootsUnchanged()
+		require.NoError(t, goose.DownTo(sqlDB, target, 135))
+		assertVersion(t, sqlDB, 135)
+		assertRootCheck(t, db, "NO", false)
+		assertRootsUnchanged()
 	})
 
-	t.Run("resume-136-after-ddl-before-version-record", func(t *testing.T) {
+	t.Run("resume-136-after-enforced-ddl-before-version-record", func(t *testing.T) {
 		db, sqlDB := legacyDB(t)
+		// Reproduce the previous 136 definition using only valid rows. This DB
+		// is separate from the unvalidated-root sentinel fixture above.
+		require.NoError(t, db.Exec("ALTER TABLE email_resources ALTER CHECK chk_email_resources_type ENFORCED").Error)
+		assertRootCheck(t, db, "YES", true)
 		require.NoError(t, db.Exec("DELETE FROM goose_db_version WHERE version_id = 136").Error)
 		assertVersion(t, sqlDB, 135)
 		require.NoError(t, platform.RunMigrations(sqlDB, target))

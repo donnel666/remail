@@ -25,10 +25,17 @@ BEGIN
         SELECT 1 FROM information_schema.check_constraints
         WHERE constraint_schema = DATABASE() AND constraint_name = 'chk_email_resources_type'
           AND LOWER(check_clause) LIKE '%proto%'
+    ) OR EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_schema = DATABASE() AND table_name = 'email_resources'
+          AND constraint_name = 'chk_email_resources_type' AND enforced = 'YES'
     ) THEN
+        -- Preserve the Gmail/iCloud policy (00072/00083): metadata only, without
+        -- validating every legacy root row when adding another resource type.
         ALTER TABLE email_resources
             DROP CHECK chk_email_resources_type,
-            ADD CONSTRAINT chk_email_resources_type CHECK (type IN ('microsoft', 'domain', 'gmail', 'icloud', 'proto'));
+            ADD CONSTRAINT chk_email_resources_type CHECK (type IN ('microsoft', 'domain', 'gmail', 'icloud', 'proto')) NOT ENFORCED,
+            ALGORITHM=INSTANT;
     END IF;
 
     IF NOT EXISTS (
@@ -296,7 +303,8 @@ DROP TABLE IF EXISTS proto_command_receipts;
 DROP TABLE IF EXISTS proto_resources;
 ALTER TABLE email_resources
     DROP CHECK chk_email_resources_type,
-    ADD CONSTRAINT chk_email_resources_type CHECK (type IN ('microsoft', 'domain', 'gmail', 'icloud'));
+    ADD CONSTRAINT chk_email_resources_type CHECK (type IN ('microsoft', 'domain', 'gmail', 'icloud')) NOT ENFORCED,
+    ALGORITHM=INSTANT;
 
 ALTER TABLE allocation_order_guards
     DROP CHECK chk_allocation_order_guards_type,
