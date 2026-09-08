@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -207,20 +208,56 @@ func TestAdminResourceFetchHandlerKeepsJSONDecodeError(t *testing.T) {
 	require.Contains(t, err.Error(), "unexpected end of JSON input")
 }
 
-func newAdminResourceFetchTestRouter(allowed bool) (*gin.Engine, *adminResourceFetchRepoStub, *adminResourceFetchPermissionChecker) {
+func TestProtoAdminResourceFetchRequiresAdministratorRoleAndPermission(t *testing.T) {
+	for _, role := range []domain.Role{domain.RoleUser, domain.RoleSupplier, domain.RoleAdmin, domain.RoleSuperAdmin} {
+		for _, allowed := range []bool{false, true} {
+			for _, resourceType := range []string{"proto", "PROTO", "%20proto%20", "microsoft", "gmail", "icloud"} {
+				t.Run(string(role)+"/"+strconv.FormatBool(allowed)+"/"+resourceType, func(t *testing.T) {
+					router, repo, checker := newAdminResourceFetchTestRouter(allowed, role)
+					request := httptest.NewRequest(http.MethodPost, "/v1/admin/resources/100/messages/fetch?type="+resourceType, nil)
+					request.AddCookie(&http.Cookie{Name: middleware.SessionCookieName, Value: "valid"})
+					request.AddCookie(&http.Cookie{Name: middleware.CSRFCookieName, Value: "csrf"})
+					request.Header.Set(middleware.CSRFHeaderName, "csrf")
+					request.Header.Set("Idempotency-Key", "proto-permission-test")
+					response := httptest.NewRecorder()
+					router.ServeHTTP(response, request)
+					require.Equal(t, "mailmatch:message", checker.resource)
+					require.Equal(t, "operate", checker.action)
+					proto := resourceType == "proto" || resourceType == "PROTO" || resourceType == "%20proto%20"
+					if !allowed || (proto && !role.HasAdminAccess()) {
+						require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+						require.Zero(t, repo.createCalls)
+						require.Nil(t, repo.operationLog)
+						return
+					}
+					require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+					require.Equal(t, 1, repo.createCalls)
+				})
+			}
+		}
+	}
+}
+
+func newAdminResourceFetchTestRouter(allowed bool, roles ...domain.Role) (*gin.Engine, *adminResourceFetchRepoStub, *adminResourceFetchPermissionChecker) {
 	repo := &adminResourceFetchRepoStub{}
 	queue := &adminResourceFetchQueueStub{}
-	adminFetch := mailmatchapp.NewAdminResourceFetchUseCase(repo, queue, nil, nil, adminResourceFetchSystemLogsStub{})
+	messages := mailmatchapp.NewUseCase(nil, nil, nil, nil)
+	messages.SetProtoMailFetchPort(adminResourceProtoFetchStub{})
+	adminFetch := mailmatchapp.NewAdminResourceFetchUseCase(repo, queue, nil, messages, adminResourceFetchSystemLogsStub{})
 	history := mailmatchapp.NewResourceHistoryUseCase(repo, queue, nil, adminResourceFetchSystemLogsStub{})
 	module := &Module{AdminResourceFetch: adminFetch, ResourceHistory: history}
 	checker := &adminResourceFetchPermissionChecker{allowed: allowed}
 	router := gin.New()
 	router.Use(middleware.RequestID())
+	role := domain.RoleAdmin
+	if len(roles) > 0 {
+		role = roles[0]
+	}
 	RegisterAdminRoutes(
 		router.Group("/v1"),
 		module,
 		middleware.SessionFetcherFunc(func(context.Context, string) (uint, domain.Role, string, bool) {
-			return 1, domain.RoleAdmin, "admin@test.local", true
+			return 1, role, "admin@test.local", true
 		}),
 		checker,
 	)
@@ -280,9 +317,11 @@ func (c *adminResourceFetchPermissionChecker) Check(_ context.Context, _ uint, _
 type adminResourceFetchRepoStub struct {
 	operationLog *governancedomain.OperationLog
 	markCalls    int
+	createCalls  int
 }
 
 func (r *adminResourceFetchRepoStub) CreateOrReuseResourceFetch(_ context.Context, job *mailmatchdomain.ResourceFetchJob, log *governancedomain.OperationLog) (bool, error) {
+	r.createCalls++
 	now := time.Date(2026, 7, 12, 8, 0, 0, 0, time.UTC)
 	job.ID = 42
 	job.Generation = 3
@@ -350,6 +389,12 @@ func (*adminResourceFetchRepoStub) MarkResourceFetchCanceled(context.Context, ui
 
 func (*adminResourceFetchRepoStub) MarkResourceFetchFailure(context.Context, uint, uint64, string, bool, time.Time, *governancedomain.SystemLog) (bool, error) {
 	return false, nil
+}
+
+type adminResourceProtoFetchStub struct{}
+
+func (adminResourceProtoFetchStub) FetchProtoMessages(context.Context, mailmatchapp.FetchMessagesRequest) (*mailmatchapp.FetchMessagesResult, error) {
+	return &mailmatchapp.FetchMessagesResult{}, nil
 }
 
 type adminResourceFetchQueueStub struct{}

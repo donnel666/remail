@@ -1108,6 +1108,7 @@ export default function AdminProtoEmails() {
 
         <AdminUserSelect
           showClear
+          size="small"
           value={ownerFilter}
           onChange={(value) => { setOwnerFilter(value); resetPageAndSelection(); }}
           options={owners.map((owner) => ({ value: owner.id, label: owner.email, data: owner }))}

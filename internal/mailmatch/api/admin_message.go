@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/api/middleware"
+	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	"github.com/gin-gonic/gin"
@@ -55,6 +56,9 @@ func (h *Handler) GetAdminMessages(c *gin.Context) {
 	resourceType, ok := adminMessageResourceType(c)
 	if !ok {
 		writeAdminMessageBadRequest(c)
+		return
+	}
+	if !requireProtoManagementRole(c, resourceType) {
 		return
 	}
 	offset, ok := nonNegativeIntQuery(c, "offset", 0)
@@ -119,6 +123,9 @@ func (h *Handler) GetAdminMessage(c *gin.Context) {
 		writeAdminMessageBadRequest(c)
 		return
 	}
+	if !requireProtoManagementRole(c, resourceType) {
+		return
+	}
 	messageID64, err := strconv.ParseUint(strings.TrimSpace(c.Param("messageId")), 10, 64)
 	if err != nil || messageID64 == 0 {
 		writeAdminMessageBadRequest(c)
@@ -150,6 +157,14 @@ func (h *Handler) GetAdminMessage(c *gin.Context) {
 		Body:                        detail.Body,
 		MatchDiagnostic:             detail.MatchDiagnostic,
 	})
+}
+
+func requireProtoManagementRole(c *gin.Context, resourceType domain.ResourceType) bool {
+	if resourceType != domain.ResourceTypeProto {
+		return true
+	}
+	middleware.RoleRequired(iamdomain.RoleAdmin, iamdomain.RoleSuperAdmin)(c)
+	return !c.IsAborted()
 }
 
 func adminMessageResourceType(c *gin.Context) (domain.ResourceType, bool) {

@@ -114,7 +114,7 @@ func TestProtoOpenRoutesRemainOwnedAndRejectPublish(t *testing.T) {
 	request.Header.Set("Idempotency-Key", "key")
 	recorder := httptest.NewRecorder()
 	r.ServeHTTP(recorder, request)
-	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Equal(t, http.StatusForbidden, recorder.Code)
 }
 
 type onlyProtoPermission string

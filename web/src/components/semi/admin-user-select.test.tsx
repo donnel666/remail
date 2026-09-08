@@ -24,6 +24,7 @@ vi.mock("@douyinfe/semi-ui", async () => {
     onSelect,
     optionList = [],
     renderSelectedItem,
+    size,
     value,
   }: any) => {
     const [hasSearch, setHasSearch] = ReactModule.useState(false);
@@ -36,7 +37,7 @@ vi.mock("@douyinfe/semi-ui", async () => {
       };
 
     return (
-      <div>
+      <div data-testid="owner-select" data-size={size}>
         <output data-testid="selected-label">
           {value === undefined
             ? ""
@@ -96,6 +97,20 @@ const siblingOption = {
 
 describe("AdminUserSelect", () => {
   afterEach(cleanup);
+
+  it("forwards an opt-in compact size without changing existing callers", () => {
+    const props = {
+      emptyContent: "No users",
+      loadOptions: vi.fn(async () => [initialOption]),
+      onChange: vi.fn(),
+      options: [initialOption],
+      placeholder: "Search users",
+    };
+    const { rerender } = render(<AdminUserSelect {...props} />);
+    expect(screen.getByTestId("owner-select")).not.toHaveAttribute("data-size");
+    rerender(<AdminUserSelect {...props} size="small" />);
+    expect(screen.getByTestId("owner-select")).toHaveAttribute("data-size", "small");
+  });
 
   it("keeps the selected label when the cleared search no longer returns that user", async () => {
     const loadOptions = vi.fn(async (keyword: string) =>

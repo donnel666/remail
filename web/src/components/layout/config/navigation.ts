@@ -32,7 +32,6 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
     items: [
       { path: "/console", labelKey: "Data Dashboard", icon: BarChart3 },
       { path: "/microsoft", labelKey: "Microsoft Emails", icon: Database },
-      { path: "/proto", labelKey: "Proto Emails", icon: Mail },
       { path: "/domains", labelKey: "Domain Emails", icon: Globe },
       { path: "/orders", labelKey: "Order Records", icon: ClipboardList },
       { path: "/tickets", labelKey: "After-sales Tickets", icon: Headphones },

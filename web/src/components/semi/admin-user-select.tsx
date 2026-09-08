@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import { Select } from "@douyinfe/semi-ui";
 
 import type { CurrentUser } from "@/context/auth-provider";
@@ -60,6 +60,7 @@ interface AdminUserSelectProps<T> {
   placeholder: ReactNode;
   selectedOption?: AdminUserSelectOption<T>;
   showClear?: boolean;
+  size?: ComponentProps<typeof Select>["size"];
   style?: CSSProperties;
   value?: number;
 }
@@ -88,6 +89,7 @@ export function AdminUserSelect<T>({
   placeholder,
   selectedOption,
   showClear,
+  size,
   style,
   value,
 }: AdminUserSelectProps<T>) {
@@ -191,6 +193,7 @@ export function AdminUserSelect<T>({
       }}
       searchPosition="dropdown"
       showClear={showClear}
+      size={size}
       style={style}
       value={value}
     />

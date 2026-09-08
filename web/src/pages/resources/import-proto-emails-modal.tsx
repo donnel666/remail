@@ -4,17 +4,13 @@ import type { TFunction } from "i18next";
 import { FileText, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { useAuth } from "@/context/auth-provider";
 import { AdminUserSelect } from "@/components/semi/admin-user-select";
-import { getAdminProtoResourceImport, importAdminProtoResources, listAdminProtoOwners, waitForAdminProtoResourceImport } from "@/lib/admin-proto-api";
+import { importAdminProtoResources, listAdminProtoOwners, waitForAdminProtoResourceImport } from "@/lib/admin-proto-api";
 import type { AdminProtoOwner } from "../admin-proto/admin-proto-types";
-import { ProtoImportResultPanel } from "./proto-import-result-panel";
 import { requireTurnstile } from "@/components/auth/TurnstileGate";
 import { getApiErrorBodyMessage, getIamErrorMessage } from "@/lib/iam-errors";
 import {
   importProtoResources,
-  getProtoResourceImport,
-  type ProtoImportResponse,
   type ImportErrorStrategy,
   waitForResourceImport,
 } from "@/lib/proto-api";
@@ -45,21 +41,7 @@ export function ImportProtoEmailsModal({
   onSuccess,
 }: ImportProtoEmailsModalProps) {
   const { t } = useTranslation();
-  const { currentUser } = useAuth();
-  const storageKey = `remail.proto.import.${admin ? "admin" : "owned"}.${currentUser?.id ?? 0}`;
   const [ownerId, setOwnerId] = useState<number | undefined>();
-  const [result, setResult] = useState<ProtoImportResponse | null>(null);
-  const [importId, setImportId] = useState<number | null>(null);
-  useEffect(() => { if (admin && open && ownerId === undefined) setOwnerId(owners.find((owner) => owner.enabled)?.id); }, [admin, open, ownerId, owners]);
-  useEffect(() => {
-    if (!open) return;
-    const saved = Number(sessionStorage.getItem(storageKey));
-    if (!Number.isInteger(saved) || saved <= 0) return;
-    const controller = new AbortController();
-    setImportId(saved);
-    void (admin ? getAdminProtoResourceImport(saved, controller.signal) : getProtoResourceImport(saved, controller.signal)).then((value) => { if (!controller.signal.aborted) setResult(value); }).catch(() => undefined);
-    return () => controller.abort();
-  }, [admin, open, storageKey]);
   const [mode, setMode] = useState<"paste" | "file">("paste");
   const [lifetimeType, setLifetimeType] = useState<"long_lived" | "short_lived">(
     "long_lived"
@@ -72,8 +54,21 @@ export function ImportProtoEmailsModal({
   const [polling, setPolling] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const importPollAbortRef = useRef<AbortController | null>(null);
+  const previousOpen = useRef(false);
 
   useEffect(() => () => importPollAbortRef.current?.abort(), []);
+  useEffect(() => {
+    const opened = open && !previousOpen.current;
+    previousOpen.current = open;
+    if (!admin || !opened) return;
+    setOwnerId(undefined);
+    setMode("paste");
+    setLifetimeType("long_lived");
+    setErrorStrategy("skip");
+    setText("");
+    setFile(null);
+  }, [admin, open]);
+  useEffect(() => { if (admin && open && ownerId === undefined) setOwnerId(owners.find((owner) => owner.enabled)?.id); }, [admin, open, ownerId, owners]);
 
   const lines = useMemo(
     () =>
@@ -122,11 +117,21 @@ export function ImportProtoEmailsModal({
     ].join(" ");
 
   const handleImport = async () => {
-    if (busy || (lines.length === 0 && !file)) return;
+    if (busy || importPollAbortRef.current) return;
     if (admin && !ownerId) { Toast.warning(t("Please select an owner.")); return; }
+    if (lines.length === 0 && !file) {
+      if (admin) Toast.warning(t("Please enter Proto resources."));
+      return;
+    }
+    const controller = new AbortController();
+    importPollAbortRef.current = controller;
+    // Closing or starting another import invalidates every continuation of this one.
+    const isCurrentImport = () =>
+      importPollAbortRef.current === controller && !controller.signal.aborted;
     setBusy(true);
     try {
       const sourceText = mode === "paste" ? text : file ? new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer()) : "";
+      if (!isCurrentImport()) return;
       const sourceName =
         mode === "paste" ? "proto-resources.txt" : file?.name;
       if (!sourceName) return;
@@ -156,24 +161,24 @@ export function ImportProtoEmailsModal({
 
       // Challenged only after preprocessing passes, so a file that fails
       // validation never costs the user a verification.
-      const turnstileToken = admin ? "" : await requireTurnstile("proto_resource_import");
+      const turnstileToken = admin ? "" : await requireTurnstile("proto_resource_import", controller.signal);
+      if (!isCurrentImport()) return;
       if (!admin && !turnstileToken) return;
-      const controller = new AbortController();
-      importPollAbortRef.current = controller;
       const accepted = admin
         ? await importAdminProtoResources({ content: sourceText, ownerId: ownerId!, longLived: lifetimeType === "long_lived", errorStrategy }, controller.signal)
         : await importProtoResources(uploadFile, lifetimeType === "long_lived", turnstileToken || "", errorStrategy, controller.signal);
-      setImportId(accepted.importId);
-      setResult(accepted);
-      sessionStorage.setItem(storageKey, String(accepted.importId));
+      if (!isCurrentImport()) return;
       Toast.success(t("Resource import accepted."));
       setPolling(true);
       const status = accepted.status === "processing"
-        ? await (admin ? waitForAdminProtoResourceImport : waitForResourceImport)(accepted.importId, { signal: controller.signal, onProgress: setResult })
+        ? await (admin ? waitForAdminProtoResourceImport : waitForResourceImport)(accepted.importId, { signal: controller.signal })
         : accepted;
-      setResult(status);
+      if (!isCurrentImport()) return;
       if (status.status === "failed") {
-        if (status.imported > 0) await onSuccess();
+        if (status.imported > 0) {
+          await onSuccess();
+          if (!isCurrentImport()) return;
+        }
         throw new Error(status.lastSafeError || "Resource import failed.");
       }
       if (status.lastSafeError) {
@@ -182,20 +187,34 @@ export function ImportProtoEmailsModal({
       setText("");
       setFile(null);
       await onSuccess();
+      if (!isCurrentImport()) return;
+      if (admin) {
+        reset();
+        onOpenChange(false);
+      }
     } catch (error) {
-      if (isAbortError(error)) return;
+      if (!isCurrentImport() || isAbortError(error)) return;
       Toast.error(getIamErrorMessage(t, error, "Resource import failed."));
     } finally {
-      importPollAbortRef.current = null;
-      setPolling(false);
-      setBusy(false);
+      if (isCurrentImport()) {
+        importPollAbortRef.current = null;
+        setPolling(false);
+        setBusy(false);
+      }
     }
   };
 
   return (
     <Modal
-      footer={
-        <Space>
+      centered={admin}
+      {...(admin ? {
+        cancelText: t("Cancel"),
+        cancelButtonProps: { disabled: busy && !polling },
+        confirmLoading: busy,
+        onOk: () => void handleImport(),
+        okText: t("Import"),
+      } : {
+        footer: <Space>
           <Button disabled={busy && !polling} onClick={close} theme="outline">
             {polling ? t("Continue in background") : t("Cancel")}
           </Button>
@@ -207,16 +226,16 @@ export function ImportProtoEmailsModal({
           >
             {busy ? t("Importing") : t("Import")}
           </Button>
-        </Space>
-      }
+        </Space>,
+      })}
       onCancel={close}
       title={t("Import Proto Emails")}
       visible={open}
       width="min(666px, calc(100vw - 32px))"
     >
-      <div className="space-y-4">
+      <div className={admin ? "space-y-4 py-1" : "space-y-4"}>
         {admin ? <label className="block">
-          <span className="mb-1.5 block text-sm font-medium">{t("Owner")} *</span>
+          <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">{t("Owner")} *</span>
           <AdminUserSelect
             value={ownerId}
             onChange={(value) => setOwnerId(value)}
@@ -227,7 +246,7 @@ export function ImportProtoEmailsModal({
             style={{ width: "100%" }}
           />
         </label> : null}
-        <div className="grid grid-cols-2 gap-2">
+        {!admin ? <div className="grid grid-cols-2 gap-2">
           <button
             className={switchButtonClass(mode === "paste")}
             onClick={() => {
@@ -250,7 +269,7 @@ export function ImportProtoEmailsModal({
             <Upload size={16} />
             {t("TXT file")}
           </button>
-        </div>
+        </div> : null}
 
         <div className="grid grid-cols-2 gap-2">
           <button
@@ -286,7 +305,24 @@ export function ImportProtoEmailsModal({
           </button>
         </div>
 
-        <div>
+        {admin ? (
+          <label className="block">
+            <span className="mb-1.5 flex items-center justify-between text-sm font-medium text-[var(--semi-color-text-0)]">
+              <span>{t("Proto resource entries")} *</span>
+              <Text size="small" type="tertiary">
+                {t("Parsed entries", { count: lines.length })}
+              </Text>
+            </span>
+            <TextArea
+              className="font-mono"
+              onChange={(value) => setText(value)}
+              placeholder="email----password"
+              rows={8}
+              style={{ height: ENTRY_AREA_HEIGHT, resize: "none" }}
+              value={text}
+            />
+          </label>
+        ) : <div>
           {mode === "paste" ? (
             <TextArea
               className="font-mono"
@@ -328,7 +364,7 @@ export function ImportProtoEmailsModal({
               </Text>
             ) : null}
           </div>
-        </div>
+        </div>}
 
         <div className="rounded-xl border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-3">
           <div className="mb-1 text-xs font-medium text-[var(--semi-color-text-0)]">
@@ -337,11 +373,13 @@ export function ImportProtoEmailsModal({
           <pre className="font-mono text-xs leading-relaxed text-[var(--semi-color-text-2)]">
             {PROTO_EMAIL_FORMAT_HINT}
           </pre>
-          <div className="mt-2 text-xs text-[var(--semi-color-text-2)]">
+          {!admin ? <div className="mt-2 text-xs text-[var(--semi-color-text-2)]">
             {t("Passwords are write-only. Lifetime is a resource classification.")}
-          </div>
+          </div> : null}
         </div>
-        {open && importId ? <ProtoImportResultPanel admin={admin} importId={importId} result={result} onProgress={setResult} poll={!polling} /> : null}
+        {admin ? <div className="rounded-lg border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] px-3 py-2 text-xs leading-5 text-[var(--semi-color-text-2)]">
+          {t("Credentials are accepted as write-only input. Passwords and tokens are never returned by this page.")}
+        </div> : null}
       </div>
     </Modal>
   );

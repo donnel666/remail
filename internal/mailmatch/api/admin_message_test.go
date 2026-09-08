@@ -24,6 +24,8 @@ func TestAdminMessageRoutesRequireSessionAndReadPermission(t *testing.T) {
 	for _, path := range []string{
 		"/v1/admin/messages?resourceId=100",
 		"/v1/admin/messages/7?resourceId=100",
+		"/v1/admin/messages?resourceId=100&type=proto",
+		"/v1/admin/messages/7?resourceId=100&type=proto",
 	} {
 		t.Run(path+"/session", func(t *testing.T) {
 			router, _, _ := newAdminMessageTestRouter(false)
@@ -154,17 +156,48 @@ func TestAdminMessageRoutesUseSafeNotFoundAndValidatePagination(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, response.Code)
 }
 
-func newAdminMessageTestRouter(allowed bool) (*gin.Engine, *adminMessageRepoStub, *adminMessagePermissionChecker) {
+func TestProtoAdminMessageRoutesRequireAdministratorRole(t *testing.T) {
+	for _, role := range []iamdomain.Role{iamdomain.RoleUser, iamdomain.RoleSupplier, iamdomain.RoleAdmin, iamdomain.RoleSuperAdmin} {
+		for _, resourceType := range []string{"proto", "%20proto%20", "microsoft", "domain", "gmail", "icloud"} {
+			for _, path := range []string{"/v1/admin/messages", "/v1/admin/messages/7"} {
+				t.Run(string(role)+"/"+resourceType+path, func(t *testing.T) {
+					router, repo, _ := newAdminMessageTestRouter(true, role)
+					response := performAdminMessageGET(router, path+"?resourceId=100&type="+resourceType)
+					proto := resourceType == "proto" || resourceType == "%20proto%20"
+					if proto && !role.HasAdminAccess() {
+						require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+						require.Zero(t, repo.existenceCalls)
+						require.Zero(t, repo.listQuery.ResourceID)
+						require.Nil(t, repo.readLog)
+						return
+					}
+					require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+					if strings.HasSuffix(path, "/7") {
+						require.NotNil(t, repo.readLog)
+					} else {
+						require.Positive(t, repo.existenceCalls)
+					}
+				})
+			}
+		}
+	}
+}
+
+func newAdminMessageTestRouter(allowed bool, roles ...iamdomain.Role) (*gin.Engine, *adminMessageRepoStub, *adminMessagePermissionChecker) {
 	repo := &adminMessageRepoStub{}
 	checker := &adminMessagePermissionChecker{allowed: allowed}
 	module := &Module{AdminMessages: mailmatchapp.NewAdminMessageUseCase(repo)}
 	router := gin.New()
 	router.Use(middleware.RequestID())
+	role := iamdomain.RoleAdmin
+	if len(roles) > 0 {
+		role = roles[0]
+	}
 	RegisterAdminRoutes(
 		router.Group("/v1"),
 		module,
 		middleware.SessionFetcherFunc(func(context.Context, string) (uint, iamdomain.Role, string, bool) {
-			return 1, iamdomain.RoleAdmin, "admin@test.local", true
+			return 1, role, "admin@test.local", true
 		}),
 		checker,
 	)
@@ -192,13 +225,15 @@ func (c *adminMessagePermissionChecker) Check(_ context.Context, _ uint, _ iamdo
 }
 
 type adminMessageRepoStub struct {
+	existenceCalls   int
 	listQuery        mailmatchapp.AdminMessageListQuery
 	listHasMore      bool
 	readLog          *governancedomain.OperationLog
 	readResourceType mailmatchdomain.ResourceType
 }
 
-func (*adminMessageRepoStub) AdminMessageResourceExists(_ context.Context, resourceID uint, _ mailmatchdomain.ResourceType) (bool, error) {
+func (r *adminMessageRepoStub) AdminMessageResourceExists(_ context.Context, resourceID uint, _ mailmatchdomain.ResourceType) (bool, error) {
+	r.existenceCalls++
 	return resourceID == 100, nil
 }
 

@@ -106,6 +106,9 @@ func (h *Handler) postAdminMicrosoftResourceFetch(c *gin.Context, kind domain.Re
 		})
 		return
 	}
+	if !requireProtoManagementRole(c, resourceType) {
+		return
+	}
 	if kind == domain.ResourceFetchJobHistory && resourceType != domain.ResourceTypeMicrosoft {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
 		return

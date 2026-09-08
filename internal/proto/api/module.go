@@ -5,6 +5,7 @@ import (
 
 	"github.com/donnel666/remail/api/middleware"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
+	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	"github.com/donnel666/remail/internal/proto/app"
 	"github.com/donnel666/remail/internal/proto/domain"
 	"github.com/donnel666/remail/internal/proto/infra"
@@ -92,26 +93,28 @@ func RegisterRoutes(
 	}
 	auth := rg.Group("")
 	auth.Use(middleware.LoadSession(fetcher), middleware.AuthRequired(), middleware.CSRFRequired())
+	auth.Use(middleware.RoleRequired(iamdomain.RoleAdmin, iamdomain.RoleSuperAdmin))
 	for _, guard := range guards {
 		if guard != nil {
 			auth.Use(guard)
 		}
 	}
-	auth.GET("/proto/resources", h.listOwned)
-	auth.POST("/proto/resources/imports", h.importOwned)
-	auth.GET("/proto/resources/imports/:importId", h.getImportOwned)
-	auth.GET("/proto/resources/imports/:importId/items", h.getImportItemsOwned)
-	auth.GET("/proto/resources/imports/:importId/failures", h.getImportFailuresOwned)
-	auth.POST("/proto/resources/validations", h.validateOwnedBatch)
-	auth.POST("/proto/resources/bulk/:command", h.bulkOwned)
-	auth.GET("/proto/resources/bulk-tasks/:taskId", h.getBulkOwned)
-	auth.GET("/proto/resources/:resourceId", h.getOwned)
-	auth.POST("/proto/resources/:resourceId/validate", h.validateOwned)
-	auth.POST("/proto/resources/:resourceId/publish", h.publishOwned)
-	auth.DELETE("/proto/resources/:resourceId", h.deleteOwned)
+	auth.GET("/proto/resources", permission(checker, "read"), h.listOwned)
+	auth.POST("/proto/resources/imports", permission(checker, "write"), h.importOwned)
+	auth.GET("/proto/resources/imports/:importId", permission(checker, "read"), h.getImportOwned)
+	auth.GET("/proto/resources/imports/:importId/items", permission(checker, "read"), h.getImportItemsOwned)
+	auth.GET("/proto/resources/imports/:importId/failures", permission(checker, "read"), h.getImportFailuresOwned)
+	auth.POST("/proto/resources/validations", permission(checker, "operate"), h.validateOwnedBatch)
+	auth.POST("/proto/resources/bulk/:command", permission(checker, "operate"), h.bulkOwned)
+	auth.GET("/proto/resources/bulk-tasks/:taskId", permission(checker, "read"), h.getBulkOwned)
+	auth.GET("/proto/resources/:resourceId", permission(checker, "read"), h.getOwned)
+	auth.POST("/proto/resources/:resourceId/validate", permission(checker, "operate"), h.validateOwned)
+	auth.POST("/proto/resources/:resourceId/publish", permission(checker, "operate"), h.publishOwned)
+	auth.DELETE("/proto/resources/:resourceId", permission(checker, "operate"), h.deleteOwned)
 
 	admin := rg.Group("/admin/proto/resources")
 	admin.Use(middleware.LoadSession(fetcher), middleware.AuthRequired(), middleware.CSRFRequired())
+	admin.Use(middleware.RoleRequired(iamdomain.RoleAdmin, iamdomain.RoleSuperAdmin))
 	admin.GET("", permission(checker, "read"), h.listAdmin)
 	admin.POST("/imports", permission(checker, "write"), h.importAdmin)
 	admin.GET("/imports/:importId", permission(checker, "read"), h.getImportAdmin)
@@ -144,28 +147,30 @@ func permission(checker middleware.PermissionChecker, action string) gin.Handler
 	return middleware.PermissionRequired(checker, "core:resource", action)
 }
 
-// RegisterOpenRoutes receives the existing API-key-authenticated group. Its
-// handlers always scope resources to that key's effective user, never admins.
+// RegisterOpenRoutes receives the existing API-key-authenticated group. Proto
+// management is administrator-only; API keys retain their unprivileged effective
+// role. Keep the guard on a child group so ordinary orders and wallet calls work.
 func RegisterOpenRoutes(open *gin.RouterGroup, module *Module, checker middleware.PermissionChecker) {
 	if open == nil || module == nil {
 		return
 	}
 	h := &handler{module: module, checker: checker}
-	open.GET("/proto/resources", h.listOwned)
-	open.GET("/proto/resources/:resourceId", h.getOwned)
-	open.POST("/proto/resources/imports", h.importOwned)
-	open.GET("/proto/resources/imports/:importId", h.getImportOwned)
-	open.GET("/proto/resources/imports/:importId/items", h.getImportItemsOwned)
-	open.GET("/proto/resources/imports/:importId/failures", h.getImportFailuresOwned)
-	open.POST("/proto/resources/:resourceId/validate", h.validateOwned)
-	open.POST("/proto/resources/validations", h.validateOwnedBatch)
-	open.POST("/proto/resources/bulk/:command", func(c *gin.Context) {
+	resources := open.Group("", middleware.RoleRequired(iamdomain.RoleAdmin, iamdomain.RoleSuperAdmin))
+	resources.GET("/proto/resources", permission(checker, "read"), h.listOwned)
+	resources.GET("/proto/resources/:resourceId", permission(checker, "read"), h.getOwned)
+	resources.POST("/proto/resources/imports", permission(checker, "write"), h.importOwned)
+	resources.GET("/proto/resources/imports/:importId", permission(checker, "read"), h.getImportOwned)
+	resources.GET("/proto/resources/imports/:importId/items", permission(checker, "read"), h.getImportItemsOwned)
+	resources.GET("/proto/resources/imports/:importId/failures", permission(checker, "read"), h.getImportFailuresOwned)
+	resources.POST("/proto/resources/:resourceId/validate", permission(checker, "operate"), h.validateOwned)
+	resources.POST("/proto/resources/validations", permission(checker, "operate"), h.validateOwnedBatch)
+	resources.POST("/proto/resources/bulk/:command", permission(checker, "operate"), func(c *gin.Context) {
 		if c.Param("command") != "validate" && c.Param("command") != "delete" {
 			writeProtoError(c, domain.ErrInvalidResource)
 			return
 		}
 		h.bulkOwned(c)
 	})
-	open.GET("/proto/resources/bulk-tasks/:taskId", h.getBulkOwned)
-	open.DELETE("/proto/resources/:resourceId", h.deleteOwned)
+	resources.GET("/proto/resources/bulk-tasks/:taskId", permission(checker, "read"), h.getBulkOwned)
+	resources.DELETE("/proto/resources/:resourceId", permission(checker, "operate"), h.deleteOwned)
 }
