@@ -8,10 +8,9 @@ import (
 )
 
 func TestRoutingCandidateTablesRemovedMySQL(t *testing.T) {
-	db := newAllocMySQLTestDB(t)
+	db, migrationsDir := newAllocHistoricalMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
-	migrationsDir := allocMigrationsDir(t)
 	require.NoError(t, goose.SetDialect("mysql"))
 
 	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 83))
@@ -42,7 +41,7 @@ WHERE table_schema = DATABASE()
 }
 
 func TestLegacyOrderAllocationIDMigrationResumesAfterManualDDLMySQL(t *testing.T) {
-	db := newAllocMySQLTestDB(t)
+	db, migrationsDir := newAllocHistoricalMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
@@ -51,7 +50,7 @@ func TestLegacyOrderAllocationIDMigrationResumesAfterManualDDLMySQL(t *testing.T
 	version, err := goose.GetDBVersion(sqlDB)
 	require.NoError(t, err)
 	require.EqualValues(t, 85, version)
-	require.NoError(t, goose.UpTo(sqlDB, allocMigrationsDir(t), 86))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 86))
 
 	version, err = goose.GetDBVersion(sqlDB)
 	require.NoError(t, err)
@@ -83,11 +82,10 @@ func TestLegacyOrderAllocationIDMigrationRejectsInconsistentLinkageMySQL(t *test
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db := newAllocMySQLTestDB(t)
+			db, migrationsDir := newAllocHistoricalMigrationTestDB(t)
 			sqlDB, err := db.DB()
 			require.NoError(t, err)
 			require.NoError(t, goose.SetDialect("mysql"))
-			migrationsDir := allocMigrationsDir(t)
 			require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 85))
 
 			mainWeight := 0
@@ -140,11 +138,10 @@ SELECT
 }
 
 func TestProjectScopedActiveMigrationRoundTripMySQL(t *testing.T) {
-	db := newAllocMySQLTestDB(t)
+	db, migrationsDir := newAllocHistoricalMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	migrationsDir := allocMigrationsDir(t)
 	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 120))
 
 	var nullableColumns int64
@@ -214,11 +211,10 @@ INSERT INTO gmail_allocations(
 }
 
 func TestProjectScopedActiveMigrationResumesAfterManualDDLMySQL(t *testing.T) {
-	db := newAllocMySQLTestDB(t)
+	db, migrationsDir := newAllocHistoricalMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	migrationsDir := allocMigrationsDir(t)
 	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 119))
 
 	require.NoError(t, db.Exec(`
@@ -270,11 +266,10 @@ ALTER TABLE microsoft_allocations
 }
 
 func TestMicrosoftLegacyActiveLookupCleanupMigrationMySQL(t *testing.T) {
-	db := newAllocMySQLTestDB(t)
+	db, migrationsDir := newAllocHistoricalMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	migrationsDir := allocMigrationsDir(t)
 	requireIndexMissing(t, db, "microsoft_allocations", "idx_ms_alloc_active_legacy_lookup")
 
 	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 121))
@@ -305,7 +300,7 @@ func TestProjectScopedActiveMigrationDownRejectsCrossProjectMicrosoftAndGmailMyS
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db := newAllocMySQLTestDB(t)
+			db, migrationsDir := newAllocHistoricalMigrationTestDB(t)
 			sqlDB, err := db.DB()
 			require.NoError(t, err)
 			require.NoError(t, goose.SetDialect("mysql"))
@@ -365,7 +360,7 @@ INSERT INTO microsoft_allocations(
 				}
 			}
 
-			err = goose.DownTo(sqlDB, allocMigrationsDir(t), 120)
+			err = goose.DownTo(sqlDB, migrationsDir, 120)
 			require.ErrorContains(t, err, "chk_project_scoped_active_down_guard")
 			version, versionErr := goose.GetDBVersion(sqlDB)
 			require.NoError(t, versionErr)
@@ -389,11 +384,10 @@ WHERE status = 'allocated' AND mailbox = ?`, tt.mailbox).Scan(&projects).Error)
 }
 
 func TestICloudProjectScopedActiveMigrationDownRejectsCrossProjectAliasMySQL(t *testing.T) {
-	db := newAllocMySQLTestDB(t)
+	db, migrationsDir := newAllocHistoricalMigrationTestDB(t)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	migrationsDir := allocMigrationsDir(t)
 	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 120))
 	seedAllocBase(t, db, "icloud", 1, 0, 0)
 	require.NoError(t, db.Exec(`

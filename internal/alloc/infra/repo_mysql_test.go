@@ -28,14 +28,16 @@ import (
 )
 
 var (
-	allocMySQLTestServer       = testmysql.New("remail_alloc_test")
-	allocLegacyMySQLTestServer = testmysql.New("remail_alloc_legacy_test")
+	allocMySQLTestServer           = testmysql.New("remail_alloc_test")
+	allocLegacyMySQLTestServer     = testmysql.New("remail_alloc_legacy_test")
+	allocHistoricalMySQLTestServer = testmysql.New("remail_alloc_historical_test")
 )
 
 func TestMain(m *testing.M) {
 	code := m.Run()
 	_ = allocMySQLTestServer.Close(context.Background())
 	_ = allocLegacyMySQLTestServer.Close(context.Background())
+	_ = allocHistoricalMySQLTestServer.Close(context.Background())
 	os.Exit(code)
 }
 
@@ -48,6 +50,28 @@ func newAllocLegacyMigrationTestDB(t *testing.T) (*gorm.DB, string) {
 	t.Helper()
 	migrationsDir := testmysql.MigrationsThrough(t, allocMigrationsDir(t), 65)
 	return allocLegacyMySQLTestServer.Database(t, migrationsDir), migrationsDir
+}
+
+func newAllocHistoricalMigrationTestDB(t *testing.T) (*gorm.DB, string) {
+	t.Helper()
+	// Historical DownTo tests must not cross migration 139's irreversible quota
+	// conversion. A separate Server keeps its cached template isolated from latest.
+	migrationsDir := testmysql.MigrationsThrough(t, allocMigrationsDir(t), 138)
+	return allocHistoricalMySQLTestServer.Database(t, migrationsDir), migrationsDir
+}
+
+func TestAllocMigrationTemplatesStayIsolatedMySQL(t *testing.T) {
+	latest := newAllocMySQLTestDB(t)
+	require.True(t, latest.Migrator().HasColumn("api_keys", "request_count"))
+	historical, migrationsDir := newAllocHistoricalMigrationTestDB(t)
+	sqlDB, err := historical.DB()
+	require.NoError(t, err)
+	version, err := goose.GetDBVersion(sqlDB)
+	require.NoError(t, err)
+	require.EqualValues(t, 138, version)
+	require.False(t, historical.Migrator().HasColumn("api_keys", "request_count"))
+	_, err = os.Stat(filepath.Join(migrationsDir, "00139_api_key_point_quota.sql"))
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func innodbMetricCount(t *testing.T, db *gorm.DB, name string) uint64 {
@@ -1989,7 +2013,7 @@ INSERT INTO generated_mailboxes(resource_id, owner_user_id, email, status, alloc
 }
 
 func TestAllocationMigrationIndexesAndExplainMySQL(t *testing.T) {
-	db := newAllocMySQLTestDB(t)
+	db, migrationsDir := newAllocHistoricalMigrationTestDB(t)
 	seedAllocBase(t, db, "domain", 0, 0, 0)
 	seedMicrosoftResources(t, db, 1, 1000, 16, true, "normal")
 	seedDomainResources(t, db, 1, 2000, 16)
@@ -2146,20 +2170,20 @@ VALUES (1000, 1, 'indexed@example.com', 'normal')`).Error)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, allocMigrationsDir(t), 92))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 92))
 	requireIndexMissing(t, db, "microsoft_resources", "idx_microsoft_suffix_bucket")
 	requireIndexMissing(t, db, "explicit_aliases", "idx_explicit_aliases_suffix_bucket")
 	require.False(t, db.Migrator().HasColumn("explicit_aliases", "email_domain"))
 	require.False(t, db.Migrator().HasColumn("explicit_aliases", "alloc_bucket"))
-	require.NoError(t, goose.UpTo(sqlDB, allocMigrationsDir(t), 93))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 93))
 	requireIndexExists(t, db, "microsoft_resources", "idx_microsoft_suffix_bucket")
 	requireIndexMissing(t, db, "explicit_aliases", "idx_explicit_aliases_suffix_bucket")
 	require.False(t, db.Migrator().HasColumn("explicit_aliases", "email_domain"))
-	require.NoError(t, goose.UpTo(sqlDB, allocMigrationsDir(t), 94))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 94))
 	require.True(t, db.Migrator().HasColumn("explicit_aliases", "email_domain"))
 	require.True(t, db.Migrator().HasColumn("explicit_aliases", "alloc_bucket"))
 	requireIndexMissing(t, db, "explicit_aliases", "idx_explicit_aliases_suffix_bucket")
-	require.NoError(t, goose.UpTo(sqlDB, allocMigrationsDir(t), 95))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 95))
 	requireIndexExists(t, db, "explicit_aliases", "idx_explicit_aliases_suffix_bucket")
 }
 
