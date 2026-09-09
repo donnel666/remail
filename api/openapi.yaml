@@ -15013,7 +15013,7 @@ paths:
           schema: {type: string, maxLength: 320}
         - name: status
           in: query
-          schema: {type: string, enum: [pending, validating, identifying, normal, abnormal, disabled, deleted], x-enum-varnames: [Pending, Validating, Identifying, Normal, Abnormal, Disabled, Deleted]}
+          schema: {type: string, enum: [pending, validating, validation_failed, identifying, normal, abnormal, disabled, deleted], x-enum-varnames: [Pending, Validating, ValidationFailed, Identifying, Normal, Abnormal, Disabled, Deleted]}
         - name: forSale
           in: query
           schema: {type: boolean}
@@ -15207,7 +15207,7 @@ paths:
           schema: {type: string, maxLength: 320}
         - name: status
           in: query
-          schema: {type: string, enum: [pending, validating, identifying, normal, abnormal, disabled, deleted], x-enum-varnames: [Pending, Validating, Identifying, Normal, Abnormal, Disabled, Deleted]}
+          schema: {type: string, enum: [pending, validating, validation_failed, identifying, normal, abnormal, disabled, deleted], x-enum-varnames: [Pending, Validating, ValidationFailed, Identifying, Normal, Abnormal, Disabled, Deleted]}
         - name: forSale
           in: query
           schema: {type: boolean}
@@ -15575,7 +15575,7 @@ paths:
           schema: {type: string, maxLength: 320}
         - name: status
           in: query
-          schema: {type: string, enum: [pending, validating, identifying, normal, abnormal, disabled, deleted], x-enum-varnames: [Pending, Validating, Identifying, Normal, Abnormal, Disabled, Deleted]}
+          schema: {type: string, enum: [pending, validating, validation_failed, identifying, normal, abnormal, disabled, deleted], x-enum-varnames: [Pending, Validating, ValidationFailed, Identifying, Normal, Abnormal, Disabled, Deleted]}
         - name: forSale
           in: query
           schema: {type: boolean}
@@ -27093,8 +27093,9 @@ components:
 
     ProtoResourceStatus:
       type: string
-      enum: [pending, validating, identifying, normal, abnormal, disabled, deleted]
-      x-enum-varnames: [Pending, Validating, Identifying, Normal, Abnormal, Disabled, Deleted]
+      description: validation_failed is a read-only projection of a stopped validation for the current credential revision and generation. It is not proof of permanently invalid credentials and never changes refund eligibility.
+      enum: [pending, validating, validation_failed, identifying, normal, abnormal, disabled, deleted]
+      x-enum-varnames: [Pending, Validating, ValidationFailed, Identifying, Normal, Abnormal, Disabled, Deleted]
 
     ProtoResource:
       type: object
@@ -27124,11 +27125,12 @@ components:
 
     ProtoResourceFacets:
       type: object
-      required: [all, pending, validating, identifying, normal, abnormal, disabled, deleted, status, forSale, longLived, suffixes]
+      required: [all, pending, validating, validation_failed, identifying, normal, abnormal, disabled, deleted, status, forSale, longLived, suffixes]
       properties:
         all: {type: integer, format: int64}
         pending: {type: integer, format: int64}
         validating: {type: integer, format: int64}
+        validation_failed: {type: integer, format: int64}
         identifying: {type: integer, format: int64}
         normal: {type: integer, format: int64}
         abnormal: {type: integer, format: int64}
@@ -27136,11 +27138,12 @@ components:
         deleted: {type: integer, format: int64}
         status:
           type: object
-          required: [all, pending, validating, identifying, normal, abnormal, disabled, deleted]
+          required: [all, pending, validating, validation_failed, identifying, normal, abnormal, disabled, deleted]
           properties:
             all: {type: integer, format: int64}
             pending: {type: integer, format: int64}
             validating: {type: integer, format: int64}
+            validation_failed: {type: integer, format: int64}
             identifying: {type: integer, format: int64}
             normal: {type: integer, format: int64}
             abnormal: {type: integer, format: int64}

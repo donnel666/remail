@@ -75,8 +75,49 @@ type pklEvent struct {
 	ProxyFailure   bool          `json:"proxy_failure"`
 }
 
-func bridgeProtocolFailure() *Failure {
-	return &Failure{Stage: "protocol", Category: "protocol", SafeMessage: "Proto session bridge returned an invalid or oversized result.", Retryable: true}
+type bridgeFailureReason string
+
+const (
+	bridgeInput         bridgeFailureReason = "bridge_input"
+	bridgeDecode        bridgeFailureReason = "bridge_decode"
+	bridgeEvents        bridgeFailureReason = "bridge_event_order"
+	bridgeMissingResult bridgeFailureReason = "bridge_missing_result"
+	bridgeWorkerExit    bridgeFailureReason = "bridge_worker_exit"
+	bridgeRead          bridgeFailureReason = "bridge_read"
+	bridgeLimit         bridgeFailureReason = "bridge_limit"
+	bridgeSession       bridgeFailureReason = "bridge_session_metadata"
+	bridgeMessage       bridgeFailureReason = "bridge_message_metadata"
+	bridgeErrorMetadata bridgeFailureReason = "bridge_error_metadata"
+)
+
+// Only fixed reasons cross this boundary; never attach parser/process errors or
+// any part of the secret-bearing request, response, or worker stderr.
+func bridgeProtocolFailure(reason bridgeFailureReason) *Failure {
+	message := ""
+	switch reason {
+	case bridgeInput:
+		message = "Proto session bridge request could not be encoded or has invalid parameters."
+	case bridgeDecode:
+		message = "Proto session bridge response is not valid JSON or contains unknown fields."
+	case bridgeMissingResult:
+		message = "Proto session bridge ended without a completion event."
+	case bridgeWorkerExit:
+		message = "Proto session bridge worker exited unsuccessfully."
+	case bridgeRead:
+		message = "Proto session bridge response could not be read."
+	case bridgeLimit:
+		message = "Proto session bridge exceeded a request, response, or message size limit."
+	case bridgeSession:
+		message = "Proto session bridge returned invalid or mismatched session metadata."
+	case bridgeMessage:
+		message = "Proto session bridge returned invalid or out-of-scope message metadata."
+	case bridgeErrorMetadata:
+		message = "Proto session bridge returned an unsupported or inconsistent error descriptor."
+	default:
+		reason = bridgeEvents
+		message = "Proto session bridge returned an invalid event sequence or completion marker."
+	}
+	return &Failure{Stage: string(reason), Category: "protocol", SafeMessage: message, Retryable: true}
 }
 
 func (c *PKLClient) Login(ctx context.Context, req LoginRequest) (Session, error) {
@@ -88,15 +129,18 @@ func (c *PKLClient) Login(ctx context.Context, req LoginRequest) (Session, error
 	if err != nil {
 		return Session{}, err
 	}
-	if !complete || !session.ValidFor(email) {
-		return Session{}, bridgeProtocolFailure()
+	if !complete {
+		return Session{}, bridgeProtocolFailure(bridgeEvents)
+	}
+	if !session.ValidFor(email) {
+		return Session{}, bridgeProtocolFailure(bridgeSession)
 	}
 	return session, nil
 }
 
 func (c *PKLClient) Fetch(ctx context.Context, session *Session, req FetchRequest) (FetchResult, error) {
 	if c == nil {
-		return FetchResult{}, bridgeProtocolFailure()
+		return FetchResult{}, bridgeProtocolFailure(bridgeInput)
 	}
 	if session != nil && session.Version == 1 {
 		legacy := c.legacy
@@ -119,14 +163,17 @@ func (c *PKLClient) Fetch(ctx context.Context, session *Session, req FetchReques
 	if req.FullHistory {
 		req.KnownMessageIDs = nil
 	}
-	if req.SinceAt.After(req.UntilAt) || len(req.KnownMessageIDs) > 100000 {
-		return FetchResult{}, bridgeProtocolFailure()
+	if req.SinceAt.After(req.UntilAt) {
+		return FetchResult{}, bridgeProtocolFailure(bridgeInput)
+	}
+	if len(req.KnownMessageIDs) > 100000 {
+		return FetchResult{}, bridgeProtocolFailure(bridgeLimit)
 	}
 	knownBytes := 0
 	for _, id := range req.KnownMessageIDs {
 		knownBytes += len(id)
 		if len(id) > 2048 || knownBytes > 4<<20 {
-			return FetchResult{}, bridgeProtocolFailure()
+			return FetchResult{}, bridgeProtocolFailure(bridgeLimit)
 		}
 	}
 	var address AddressKeys
@@ -142,11 +189,14 @@ func (c *PKLClient) Fetch(ctx context.Context, session *Session, req FetchReques
 	emit := func(messages []Message) error {
 		batch := make([]Message, 0, len(messages))
 		for _, message := range messages {
-			if message.ID == "" || len(message.ID) > 1024 || (message.Folder != "Inbox" && message.Folder != "Junk") ||
+			if len(message.ID) > 1024 {
+				return bridgeProtocolFailure(bridgeLimit)
+			}
+			if message.ID == "" || (message.Folder != "Inbox" && message.Folder != "Junk") ||
 				message.OriginalToCount != len(message.ToList) ||
 				message.ReceivedAt.IsZero() || message.ReceivedAt.Before(req.SinceAt) || message.ReceivedAt.After(req.UntilAt) ||
 				!messageForAddress(apiMessage{AddressID: message.AddressID, ToList: message.ToList, CCList: message.CCList, BCCList: message.BCCList}, address) {
-				return bridgeProtocolFailure()
+				return bridgeProtocolFailure(bridgeMessage)
 			}
 			// Proton IDs survive folder moves, including a move during token refresh.
 			key := message.ID
@@ -154,7 +204,7 @@ func (c *PKLClient) Fetch(ctx context.Context, session *Session, req FetchReques
 				continue
 			}
 			if len(seen) >= 100000 {
-				return bridgeProtocolFailure()
+				return bridgeProtocolFailure(bridgeLimit)
 			}
 			seen[key] = true
 			batch = append(batch, message)
@@ -168,11 +218,11 @@ func (c *PKLClient) Fetch(ctx context.Context, session *Session, req FetchReques
 		}
 		encoded, err := json.Marshal(batch)
 		if err != nil {
-			return bridgeProtocolFailure()
+			return bridgeProtocolFailure(bridgeMessage)
 		}
 		messageBytes += len(encoded)
 		if messageBytes > maxBridgeLineBytes {
-			return bridgeProtocolFailure()
+			return bridgeProtocolFailure(bridgeLimit)
 		}
 		result.Messages = append(result.Messages, batch...)
 		return nil
@@ -199,8 +249,11 @@ func (c *PKLClient) Fetch(ctx context.Context, session *Session, req FetchReques
 			if err != nil {
 				return err
 			}
-			if !complete || !next.ValidFor(req.Recipient) || next.UID != current.UID || next.KeyFingerprint != current.KeyFingerprint {
-				return bridgeProtocolFailure()
+			if !complete {
+				return bridgeProtocolFailure(bridgeEvents)
+			}
+			if !next.ValidFor(req.Recipient) || next.UID != current.UID || next.KeyFingerprint != current.KeyFingerprint {
+				return bridgeProtocolFailure(bridgeSession)
 			}
 			*current = next
 			return nil
@@ -222,7 +275,7 @@ func (c *PKLClient) Fetch(ctx context.Context, session *Session, req FetchReques
 			return FetchResult{}, err
 		}
 	}
-	return FetchResult{}, bridgeProtocolFailure()
+	return FetchResult{}, bridgeProtocolFailure(bridgeEvents)
 }
 
 func (c *PKLClient) run(ctx context.Context, request pklRequest, emit func([]Message) error) (Session, bool, error) {
@@ -233,8 +286,11 @@ func (c *PKLClient) run(ctx context.Context, request pklRequest, emit func([]Mes
 		return Session{}, false, &Failure{Stage: "dependency", Category: "dependency", SafeMessage: "Proto Python runtime is unavailable.", Retryable: true}
 	}
 	data, err := json.Marshal(request)
-	if err != nil || len(data) >= maxBridgeLineBytes {
-		return Session{}, false, bridgeProtocolFailure()
+	if err != nil {
+		return Session{}, false, bridgeProtocolFailure(bridgeInput)
+	}
+	if len(data) >= maxBridgeLineBytes {
+		return Session{}, false, bridgeProtocolFailure(bridgeLimit)
 	}
 	data = append(data, '\n')
 	defer clear(data)
@@ -264,21 +320,25 @@ func (c *PKLClient) run(ctx context.Context, request pklRequest, emit func([]Mes
 	var responseErr error
 	var sessionSeen, terminal, complete bool
 	for scanner.Scan() {
-		if terminal || limited.N <= 0 {
-			responseErr = bridgeProtocolFailure()
+		if terminal {
+			responseErr = bridgeProtocolFailure(bridgeEvents)
+			break
+		}
+		if limited.N <= 0 {
+			responseErr = bridgeProtocolFailure(bridgeLimit)
 			break
 		}
 		var event pklEvent
 		decoder := json.NewDecoder(bytes.NewReader(scanner.Bytes()))
 		decoder.DisallowUnknownFields()
 		if decoder.Decode(&event) != nil || decoder.Decode(new(any)) != io.EOF {
-			responseErr = bridgeProtocolFailure()
+			responseErr = bridgeProtocolFailure(bridgeDecode)
 			break
 		}
 		switch event.Event {
 		case "session":
 			if sessionSeen || request.Action == "fetch" {
-				responseErr = bridgeProtocolFailure()
+				responseErr = bridgeProtocolFailure(bridgeEvents)
 				break
 			}
 			sessionSeen = true
@@ -287,18 +347,22 @@ func (c *PKLClient) run(ctx context.Context, request pklRequest, emit func([]Mes
 			if identity == "" {
 				identity = request.Recipient
 			}
-			if !session.ValidFor(identity) {
-				responseErr = bridgeProtocolFailure()
+			if len(session.PKL) > MaxPKLBytes || len(session.Addresses) > 4096 {
+				responseErr = bridgeProtocolFailure(bridgeLimit)
+			} else if !session.ValidFor(identity) {
+				responseErr = bridgeProtocolFailure(bridgeSession)
 			}
 		case "messages":
-			if request.Action != "fetch" || emit == nil || len(event.Messages) == 0 || len(event.Messages) > 100 {
-				responseErr = bridgeProtocolFailure()
+			if request.Action != "fetch" || emit == nil || len(event.Messages) == 0 {
+				responseErr = bridgeProtocolFailure(bridgeEvents)
+			} else if len(event.Messages) > 100 {
+				responseErr = bridgeProtocolFailure(bridgeLimit)
 			} else {
 				responseErr = emit(event.Messages)
 			}
 		case "result":
 			if event.Complete == nil || (request.Action != "fetch" && !sessionSeen) {
-				responseErr = bridgeProtocolFailure()
+				responseErr = bridgeProtocolFailure(bridgeEvents)
 			} else {
 				terminal, complete = true, *event.Complete
 			}
@@ -306,7 +370,7 @@ func (c *PKLClient) run(ctx context.Context, request pklRequest, emit func([]Mes
 			terminal = true
 			responseErr = pklFailure(event, request.Action)
 		default:
-			responseErr = bridgeProtocolFailure()
+			responseErr = bridgeProtocolFailure(bridgeEvents)
 		}
 		if responseErr != nil {
 			break
@@ -322,8 +386,23 @@ func (c *PKLClient) run(ctx context.Context, request pklRequest, emit func([]Mes
 	if responseErr != nil {
 		return Session{}, false, responseErr
 	}
-	if scanner.Err() != nil || !terminal || limited.N <= 0 || waitErr != nil {
-		return Session{}, false, bridgeProtocolFailure()
+	if limited.N <= 0 || errors.Is(scanner.Err(), bufio.ErrTooLong) {
+		return Session{}, false, bridgeProtocolFailure(bridgeLimit)
+	}
+	if scanner.Err() != nil {
+		return Session{}, false, bridgeProtocolFailure(bridgeRead)
+	}
+	if !terminal {
+		var exitError *exec.ExitError
+		// EOF without a result caused cancel() above. A signal exit can be our
+		// cleanup, so retain the observed protocol failure instead of blaming the
+		// worker. A normal nonzero exit still has its own diagnostic below.
+		if waitErr == nil || errors.Is(waitErr, context.Canceled) || (errors.As(waitErr, &exitError) && exitError.ExitCode() < 0) {
+			return Session{}, false, bridgeProtocolFailure(bridgeMissingResult)
+		}
+	}
+	if waitErr != nil {
+		return Session{}, false, bridgeProtocolFailure(bridgeWorkerExit)
 	}
 	return session, complete, nil
 }
@@ -342,10 +421,10 @@ func pklFailure(event pklEvent, action string) *Failure {
 	switch event.Stage {
 	case "input", "session", "login", "auth_info", "auth", "cookies", "keys", "addresses", "refresh", "list", "read", "decrypt", "mime", "transport", "dependency", "protocol":
 	default:
-		return bridgeProtocolFailure()
+		return bridgeProtocolFailure(bridgeErrorMetadata)
 	}
 	if event.HTTPStatus < 0 || event.HTTPStatus > 599 || event.APICode < 0 || event.APICode > 1000000 {
-		return bridgeProtocolFailure()
+		return bridgeProtocolFailure(bridgeErrorMetadata)
 	}
 	if event.HTTPStatus == 429 || event.HTTPStatus >= 500 || event.HTTPStatus == 408 {
 		failure := responseFailure(event.HTTPStatus, event.APICode, "")
@@ -356,7 +435,7 @@ func pklFailure(event pklEvent, action string) *Failure {
 	switch event.Category {
 	case "invalid_credentials":
 		if action != "login" || (event.Stage != "auth" && event.Stage != "auth_info") || (event.APICode != 8002 && event.APICode != 6003) {
-			return bridgeProtocolFailure()
+			return bridgeProtocolFailure(bridgeErrorMetadata)
 		}
 		if event.Stage == "auth_info" && event.APICode == 8002 {
 			failure := responseFailure(event.HTTPStatus, event.APICode, "/auth/v4/info")
@@ -378,7 +457,7 @@ func pklFailure(event pklEvent, action string) *Failure {
 	case "protocol":
 		message = "Proto session bridge could not complete the requested operation."
 	default:
-		return bridgeProtocolFailure()
+		return bridgeProtocolFailure(bridgeErrorMetadata)
 	}
 	return &Failure{Stage: event.Stage, Category: event.Category, HTTPStatus: event.HTTPStatus, APICode: event.APICode,
 		SafeMessage: message, Retryable: event.Retryable, ProxyFailure: event.ProxyFailure}

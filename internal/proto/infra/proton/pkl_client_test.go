@@ -97,6 +97,39 @@ func TestPKLBridgeHelper(_ *testing.T) {
 		write(pklEvent{Event: "result", Complete: &complete})
 	case "missing-result":
 		writeSession("opaque-native-pickle-old")
+	case "early-eof":
+		writeSession("opaque-native-pickle-old")
+		_ = os.Stdout.Close()
+		time.Sleep(10 * time.Second)
+	case "malformed":
+		fmt.Fprintln(os.Stdout, `{"event":secret-output-canary`)
+	case "unknown-field":
+		write(map[string]any{"event": "error", "stage": "auth", "category": "action_required", "raw": "secret-output-canary"})
+	case "duplicate-session":
+		writeSession("opaque-native-pickle-old")
+		writeSession("opaque-native-pickle-old")
+	case "result-before-session":
+		write(pklEvent{Event: "result", Complete: &complete})
+	case "invalid-session":
+		write(pklEvent{Event: "session", PKL: []byte("secret-output-canary"), UID: "secret-uid-canary", KeyFingerprint: strings.Repeat("a", 64), Addresses: []AddressKeys{{ID: "address", Email: "other-secret@example.test"}}})
+	case "incomplete-login":
+		writeSession("opaque-native-pickle-old")
+		complete = false
+		write(pklEvent{Event: "result", Complete: &complete})
+	case "worker-exit":
+		writeSession("opaque-native-pickle-old")
+		write(pklEvent{Event: "result", Complete: &complete})
+		fmt.Fprintln(os.Stderr, "secret-output-canary")
+		os.Exit(7)
+	case "unknown-category":
+		write(pklEvent{Event: "error", Stage: "auth", Category: "secret-output-canary"})
+	case "unknown-stage":
+		write(pklEvent{Event: "error", Stage: "secret-output-canary", Category: "action_required"})
+	case "invalid-error-code":
+		write(pklEvent{Event: "error", Stage: "auth", Category: "action_required", HTTPStatus: 700})
+	case "action-required":
+		write(pklEvent{Event: "error", Stage: "auth", Category: "action_required", HTTPStatus: 422, APICode: 9001})
+		os.Exit(1)
 	case "trailing-output":
 		writeSession("opaque-native-pickle-old")
 		write(pklEvent{Event: "result", Complete: &complete})
@@ -196,11 +229,42 @@ func TestPKLRefreshReplayDeduplicatesMessagesMovedBetweenFolders(t *testing.T) {
 }
 
 func TestPKLBridgeRejectsIncompleteMalformedAndOversizedOutput(t *testing.T) {
-	for _, scenario := range []string{"missing-result", "trailing-output", "oversized", "stderr"} {
-		t.Run(scenario, func(t *testing.T) {
-			session, err := pklTestClient(scenario).Login(context.Background(), LoginRequest{Email: "owner@proton.me", Password: "secret-fixture-password"})
-			require.Error(t, err)
-			require.NotContains(t, err.Error(), "secret-output-canary")
+	for _, test := range []struct {
+		scenario string
+		reason   bridgeFailureReason
+	}{
+		{"missing-result", bridgeMissingResult},
+		{"early-eof", bridgeMissingResult},
+		{"malformed", bridgeDecode},
+		{"unknown-field", bridgeDecode},
+		{"duplicate-session", bridgeEvents},
+		{"result-before-session", bridgeEvents},
+		{"incomplete-login", bridgeEvents},
+		{"invalid-session", bridgeSession},
+		{"trailing-output", bridgeEvents},
+		{"oversized", bridgeLimit},
+		{"stderr", bridgeWorkerExit},
+		{"worker-exit", bridgeWorkerExit},
+		{"unknown-category", bridgeErrorMetadata},
+		{"unknown-stage", bridgeErrorMetadata},
+		{"invalid-error-code", bridgeErrorMetadata},
+	} {
+		t.Run(test.scenario, func(t *testing.T) {
+			started := time.Now()
+			session, err := pklTestClient(test.scenario).Login(context.Background(), LoginRequest{Email: "owner@proton.me", Password: "secret-fixture-password"})
+			if test.scenario == "early-eof" {
+				require.Less(t, time.Since(started), 3*time.Second, "missing completion must stop the live worker promptly")
+			}
+			var failure *Failure
+			require.ErrorAs(t, err, &failure)
+			require.Equal(t, "protocol", failure.Category)
+			require.Equal(t, string(test.reason), failure.Stage)
+			require.Equal(t, bridgeProtocolFailure(test.reason).SafeMessage, failure.SafeMessage)
+			require.True(t, failure.Retryable)
+			require.Nil(t, failure.Cause)
+			for _, secret := range []string{"secret-output-canary", "secret-uid-canary", "other-secret@example.test", "secret-fixture-password", "opaque-native-pickle-old", "owner@proton.me"} {
+				require.NotContains(t, err.Error(), secret)
+			}
 			require.Empty(t, session.PKL)
 		})
 	}
@@ -208,6 +272,33 @@ func TestPKLBridgeRejectsIncompleteMalformedAndOversizedOutput(t *testing.T) {
 	result, err := pklTestClient("partial").Fetch(context.Background(), &session, FetchRequest{Recipient: "owner@proton.me", FullHistory: true})
 	require.Error(t, err)
 	require.Empty(t, result.Messages)
+}
+
+func TestPKLBridgeFailureReasonsAreFixedAndDistinct(t *testing.T) {
+	messages := map[string]bool{}
+	for _, reason := range []bridgeFailureReason{bridgeInput, bridgeDecode, bridgeEvents, bridgeMissingResult, bridgeWorkerExit, bridgeRead, bridgeLimit, bridgeSession, bridgeMessage, bridgeErrorMetadata} {
+		failure := bridgeProtocolFailure(reason)
+		require.Equal(t, "protocol", failure.Category)
+		require.Equal(t, string(reason), failure.Stage)
+		require.True(t, failure.Retryable)
+		require.False(t, messages[failure.SafeMessage], "different reasons need distinguishable persisted messages")
+		messages[failure.SafeMessage] = true
+	}
+	unknown := bridgeProtocolFailure("secret-output-canary")
+	require.Equal(t, string(bridgeEvents), unknown.Stage)
+	require.NotContains(t, unknown.SafeMessage, "secret-output-canary")
+}
+
+func TestPKLBridgePreservesActionRequiredError(t *testing.T) {
+	session, err := pklTestClient("action-required").Login(context.Background(), LoginRequest{Email: "owner@proton.me", Password: "secret-fixture-password"})
+	var failure *Failure
+	require.ErrorAs(t, err, &failure)
+	require.Equal(t, "action_required", failure.Category)
+	require.Equal(t, "auth", failure.Stage)
+	require.Equal(t, 422, failure.HTTPStatus)
+	require.Equal(t, 9001, failure.APICode)
+	require.False(t, failure.Retryable)
+	require.Empty(t, session.PKL)
 }
 
 func TestPKLBridgeCancellationReapsWorkerAndPreservesCallbackErrors(t *testing.T) {

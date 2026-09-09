@@ -37,14 +37,15 @@ type ResourcePage struct {
 	HasMore     bool
 }
 type StatusFacets struct {
-	All         int64 `json:"all"`
-	Pending     int64 `json:"pending"`
-	Validating  int64 `json:"validating"`
-	Identifying int64 `json:"identifying"`
-	Normal      int64 `json:"normal"`
-	Abnormal    int64 `json:"abnormal"`
-	Disabled    int64 `json:"disabled"`
-	Deleted     int64 `json:"deleted"`
+	All              int64 `json:"all"`
+	Pending          int64 `json:"pending"`
+	ValidationFailed int64 `json:"validation_failed"`
+	Validating       int64 `json:"validating"`
+	Identifying      int64 `json:"identifying"`
+	Normal           int64 `json:"normal"`
+	Abnormal         int64 `json:"abnormal"`
+	Disabled         int64 `json:"disabled"`
+	Deleted          int64 `json:"deleted"`
 }
 type BooleanFacets struct {
 	All int64 `json:"all"`
@@ -78,7 +79,7 @@ func normalizeFilter(f ResourceFilter) (ResourceFilter, error) {
 	}
 	if f.Status != "" {
 		switch f.Status {
-		case domain.StatusPending, domain.StatusValidating, domain.StatusIdentifying, domain.StatusNormal, domain.StatusAbnormal, domain.StatusDisabled, domain.StatusDeleted:
+		case domain.StatusPending, domain.StatusValidationFailed, domain.StatusValidating, domain.StatusIdentifying, domain.StatusNormal, domain.StatusAbnormal, domain.StatusDisabled, domain.StatusDeleted:
 		default:
 			return f, domain.ErrInvalidResource
 		}
@@ -108,10 +109,17 @@ func resourceFilterQuery(db *gorm.DB, f ResourceFilter, ignore string) *gorm.DB 
 		q = q.Where("status <> ?", domain.StatusDeleted)
 	}
 	if ignore != "status" {
-		if f.Status != "" {
+		switch f.Status {
+		case domain.StatusValidationFailed:
+			q = q.Where("status = ?", domain.StatusPending).Where(terminalValidationFailureSQL)
+		case domain.StatusPending:
+			q = q.Where("status = ?", domain.StatusPending).Where("NOT " + terminalValidationFailureSQL)
+		case "":
+			if !f.ExcludeDeleted {
+				q = q.Where("status <> ?", domain.StatusDeleted)
+			}
+		default:
 			q = q.Where("status = ?", f.Status)
-		} else if !f.ExcludeDeleted {
-			q = q.Where("status <> ?", domain.StatusDeleted)
 		}
 	}
 	if f.Suffix != "" && ignore != "suffix" {
@@ -154,7 +162,21 @@ func adminResourceSearch(q *gorm.DB, f ResourceFilter) *gorm.DB {
 	return q.Where(condition, args...)
 }
 
-const safeResourceColumns = `id, resource_type, owner_user_id, email_address, email_domain, (password <> '') AS password_configured, for_sale, long_lived, quality_score, alloc_bucket, status, (SELECT root.version FROM email_resources AS root WHERE root.id = proto_resources.id) AS version, validation_generation, credential_revision, credential_updated_at, validation_request_id, validation_failures, last_safe_error, last_checked_at, last_allocated_at, created_at, updated_at`
+// Only the current validation fact can change the read model. A new generation,
+// new credentials, or an authoritative non-pending state always takes precedence.
+const terminalValidationFailureSQL = `EXISTS (
+    SELECT 1 FROM proto_maintenance_runs AS validation_run
+    WHERE validation_run.resource_id = proto_resources.id
+      AND validation_run.validation_generation = proto_resources.validation_generation
+      AND validation_run.credential_revision = proto_resources.credential_revision
+      AND validation_run.kind = 'validation'
+      AND validation_run.status IN ('failed', 'uncertain')
+)`
+
+const displayedResourceStatusSQL = `CASE WHEN proto_resources.status = 'pending' AND ` + terminalValidationFailureSQL + `
+    THEN 'validation_failed' ELSE proto_resources.status END`
+
+const safeResourceColumns = `id, resource_type, owner_user_id, email_address, email_domain, (password <> '') AS password_configured, for_sale, long_lived, quality_score, alloc_bucket, ` + displayedResourceStatusSQL + ` AS status, (SELECT root.version FROM email_resources AS root WHERE root.id = proto_resources.id) AS version, validation_generation, credential_revision, credential_updated_at, validation_request_id, validation_failures, last_safe_error, last_checked_at, last_allocated_at, created_at, updated_at`
 
 func (s *Service) ListResources(ctx context.Context, f ResourceFilter) (*ResourcePage, error) {
 	if s == nil || s.DB == nil {
@@ -197,10 +219,11 @@ func (s *Service) ListResources(ctx context.Context, f ResourceFilter) (*Resourc
 func (s *Service) resourceFacets(ctx context.Context, f ResourceFilter) (ResourceFacets, error) {
 	result := ResourceFacets{Suffixes: []SuffixFacet{}}
 	var statuses []struct {
-		Status string
+		Status string `gorm:"column:effective_status"`
 		Count  int64
 	}
-	if err := resourceFilterQuery(s.dbFor(ctx), f, "status").Select("status, COUNT(*) AS count").Group("status").Scan(&statuses).Error; err != nil {
+	// MySQL's ONLY_FULL_GROUP_BY rejects repeating this correlated CASE expression.
+	if err := resourceFilterQuery(s.dbFor(ctx), f, "status").Select(displayedResourceStatusSQL + " AS effective_status, COUNT(*) AS count").Group("effective_status").Scan(&statuses).Error; err != nil {
 		return result, err
 	}
 	for _, row := range statuses {
@@ -208,6 +231,8 @@ func (s *Service) resourceFacets(ctx context.Context, f ResourceFilter) (Resourc
 		switch row.Status {
 		case "pending":
 			result.Pending = row.Count
+		case domain.StatusValidationFailed:
+			result.ValidationFailed = row.Count
 		case "validating":
 			result.Validating = row.Count
 		case "identifying":

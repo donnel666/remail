@@ -299,6 +299,7 @@
   "Gmail delivery verified at": "Gmail delivery verified at",
   "Validation generation": "Validation generation",
   "Validation failures": "Validation failures",
+  "Validation failed": "Validation failed",
   "Failures": "Failures",
   "Cooldown until": "Cooldown until",
   "Only the listed projects are cooling down; other projects remain available.": "Only the listed projects are cooling down; other projects remain available.",

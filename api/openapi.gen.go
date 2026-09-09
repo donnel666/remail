@@ -3908,13 +3908,14 @@ func (e ProtoOwnerSummaryRole) Valid() bool {
 
 // Defines values for ProtoResourceStatus.
 const (
-	ProtoResourceStatusAbnormal    ProtoResourceStatus = "abnormal"
-	ProtoResourceStatusDeleted     ProtoResourceStatus = "deleted"
-	ProtoResourceStatusDisabled    ProtoResourceStatus = "disabled"
-	ProtoResourceStatusIdentifying ProtoResourceStatus = "identifying"
-	ProtoResourceStatusNormal      ProtoResourceStatus = "normal"
-	ProtoResourceStatusPending     ProtoResourceStatus = "pending"
-	ProtoResourceStatusValidating  ProtoResourceStatus = "validating"
+	ProtoResourceStatusAbnormal         ProtoResourceStatus = "abnormal"
+	ProtoResourceStatusDeleted          ProtoResourceStatus = "deleted"
+	ProtoResourceStatusDisabled         ProtoResourceStatus = "disabled"
+	ProtoResourceStatusIdentifying      ProtoResourceStatus = "identifying"
+	ProtoResourceStatusNormal           ProtoResourceStatus = "normal"
+	ProtoResourceStatusPending          ProtoResourceStatus = "pending"
+	ProtoResourceStatusValidating       ProtoResourceStatus = "validating"
+	ProtoResourceStatusValidationFailed ProtoResourceStatus = "validation_failed"
 )
 
 // Valid indicates whether the value is a known member of the ProtoResourceStatus enum.
@@ -3933,6 +3934,8 @@ func (e ProtoResourceStatus) Valid() bool {
 	case ProtoResourceStatusPending:
 		return true
 	case ProtoResourceStatusValidating:
+		return true
+	case ProtoResourceStatusValidationFailed:
 		return true
 	default:
 		return false
@@ -5072,13 +5075,14 @@ func (e GetAdminMessageParamsType) Valid() bool {
 
 // Defines values for GetAdminProtoResourcesParamsStatus.
 const (
-	GetAdminProtoResourcesParamsStatusAbnormal    GetAdminProtoResourcesParamsStatus = "abnormal"
-	GetAdminProtoResourcesParamsStatusDeleted     GetAdminProtoResourcesParamsStatus = "deleted"
-	GetAdminProtoResourcesParamsStatusDisabled    GetAdminProtoResourcesParamsStatus = "disabled"
-	GetAdminProtoResourcesParamsStatusIdentifying GetAdminProtoResourcesParamsStatus = "identifying"
-	GetAdminProtoResourcesParamsStatusNormal      GetAdminProtoResourcesParamsStatus = "normal"
-	GetAdminProtoResourcesParamsStatusPending     GetAdminProtoResourcesParamsStatus = "pending"
-	GetAdminProtoResourcesParamsStatusValidating  GetAdminProtoResourcesParamsStatus = "validating"
+	GetAdminProtoResourcesParamsStatusAbnormal         GetAdminProtoResourcesParamsStatus = "abnormal"
+	GetAdminProtoResourcesParamsStatusDeleted          GetAdminProtoResourcesParamsStatus = "deleted"
+	GetAdminProtoResourcesParamsStatusDisabled         GetAdminProtoResourcesParamsStatus = "disabled"
+	GetAdminProtoResourcesParamsStatusIdentifying      GetAdminProtoResourcesParamsStatus = "identifying"
+	GetAdminProtoResourcesParamsStatusNormal           GetAdminProtoResourcesParamsStatus = "normal"
+	GetAdminProtoResourcesParamsStatusPending          GetAdminProtoResourcesParamsStatus = "pending"
+	GetAdminProtoResourcesParamsStatusValidating       GetAdminProtoResourcesParamsStatus = "validating"
+	GetAdminProtoResourcesParamsStatusValidationFailed GetAdminProtoResourcesParamsStatus = "validation_failed"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProtoResourcesParamsStatus enum.
@@ -5097,6 +5101,8 @@ func (e GetAdminProtoResourcesParamsStatus) Valid() bool {
 	case GetAdminProtoResourcesParamsStatusPending:
 		return true
 	case GetAdminProtoResourcesParamsStatusValidating:
+		return true
+	case GetAdminProtoResourcesParamsStatusValidationFailed:
 		return true
 	default:
 		return false
@@ -6293,13 +6299,14 @@ func (e ConnectBotWebSocketParamsXBotChannel) Valid() bool {
 
 // Defines values for OpenListProtoResourcesParamsStatus.
 const (
-	OpenListProtoResourcesParamsStatusAbnormal    OpenListProtoResourcesParamsStatus = "abnormal"
-	OpenListProtoResourcesParamsStatusDeleted     OpenListProtoResourcesParamsStatus = "deleted"
-	OpenListProtoResourcesParamsStatusDisabled    OpenListProtoResourcesParamsStatus = "disabled"
-	OpenListProtoResourcesParamsStatusIdentifying OpenListProtoResourcesParamsStatus = "identifying"
-	OpenListProtoResourcesParamsStatusNormal      OpenListProtoResourcesParamsStatus = "normal"
-	OpenListProtoResourcesParamsStatusPending     OpenListProtoResourcesParamsStatus = "pending"
-	OpenListProtoResourcesParamsStatusValidating  OpenListProtoResourcesParamsStatus = "validating"
+	OpenListProtoResourcesParamsStatusAbnormal         OpenListProtoResourcesParamsStatus = "abnormal"
+	OpenListProtoResourcesParamsStatusDeleted          OpenListProtoResourcesParamsStatus = "deleted"
+	OpenListProtoResourcesParamsStatusDisabled         OpenListProtoResourcesParamsStatus = "disabled"
+	OpenListProtoResourcesParamsStatusIdentifying      OpenListProtoResourcesParamsStatus = "identifying"
+	OpenListProtoResourcesParamsStatusNormal           OpenListProtoResourcesParamsStatus = "normal"
+	OpenListProtoResourcesParamsStatusPending          OpenListProtoResourcesParamsStatus = "pending"
+	OpenListProtoResourcesParamsStatusValidating       OpenListProtoResourcesParamsStatus = "validating"
+	OpenListProtoResourcesParamsStatusValidationFailed OpenListProtoResourcesParamsStatus = "validation_failed"
 )
 
 // Valid indicates whether the value is a known member of the OpenListProtoResourcesParamsStatus enum.
@@ -6318,6 +6325,8 @@ func (e OpenListProtoResourcesParamsStatus) Valid() bool {
 	case OpenListProtoResourcesParamsStatusPending:
 		return true
 	case OpenListProtoResourcesParamsStatusValidating:
+		return true
+	case OpenListProtoResourcesParamsStatusValidationFailed:
 		return true
 	default:
 		return false
@@ -6626,13 +6635,14 @@ func (e GetProjectsParamsProductType) Valid() bool {
 
 // Defines values for ListProtoResourcesParamsStatus.
 const (
-	Abnormal    ListProtoResourcesParamsStatus = "abnormal"
-	Deleted     ListProtoResourcesParamsStatus = "deleted"
-	Disabled    ListProtoResourcesParamsStatus = "disabled"
-	Identifying ListProtoResourcesParamsStatus = "identifying"
-	Normal      ListProtoResourcesParamsStatus = "normal"
-	Pending     ListProtoResourcesParamsStatus = "pending"
-	Validating  ListProtoResourcesParamsStatus = "validating"
+	Abnormal         ListProtoResourcesParamsStatus = "abnormal"
+	Deleted          ListProtoResourcesParamsStatus = "deleted"
+	Disabled         ListProtoResourcesParamsStatus = "disabled"
+	Identifying      ListProtoResourcesParamsStatus = "identifying"
+	Normal           ListProtoResourcesParamsStatus = "normal"
+	Pending          ListProtoResourcesParamsStatus = "pending"
+	Validating       ListProtoResourcesParamsStatus = "validating"
+	ValidationFailed ListProtoResourcesParamsStatus = "validation_failed"
 )
 
 // Valid indicates whether the value is a known member of the ListProtoResourcesParamsStatus enum.
@@ -6651,6 +6661,8 @@ func (e ListProtoResourcesParamsStatus) Valid() bool {
 	case Pending:
 		return true
 	case Validating:
+		return true
+	case ValidationFailed:
 		return true
 	default:
 		return false
@@ -11809,11 +11821,13 @@ type ProtoResource struct {
 	LastSafeError       *string             `json:"lastSafeError,omitempty"`
 
 	// LongLived Supplier-provided lifecycle classification; not a protocol lifetime guarantee.
-	LongLived            bool                `json:"longLived"`
-	Owner                *ProtoOwnerSummary  `json:"owner,omitempty"`
-	OwnerUserId          int64               `json:"ownerUserId"`
-	PasswordConfigured   bool                `json:"passwordConfigured"`
-	QualityScore         int                 `json:"qualityScore"`
+	LongLived          bool               `json:"longLived"`
+	Owner              *ProtoOwnerSummary `json:"owner,omitempty"`
+	OwnerUserId        int64              `json:"ownerUserId"`
+	PasswordConfigured bool               `json:"passwordConfigured"`
+	QualityScore       int                `json:"qualityScore"`
+
+	// Status validation_failed is a read-only projection of a stopped validation for the current credential revision and generation. It is not proof of permanently invalid credentials and never changes refund eligibility.
 	Status               ProtoResourceStatus `json:"status"`
 	Suffix               string              `json:"suffix"`
 	UpdatedAt            time.Time           `json:"updatedAt"`
@@ -11849,32 +11863,36 @@ type ProtoResourceFacets struct {
 	Normal      int64              `json:"normal"`
 	Pending     int64              `json:"pending"`
 	Status      struct {
-		Abnormal    int64 `json:"abnormal"`
-		All         int64 `json:"all"`
-		Deleted     int64 `json:"deleted"`
-		Disabled    int64 `json:"disabled"`
-		Identifying int64 `json:"identifying"`
-		Normal      int64 `json:"normal"`
-		Pending     int64 `json:"pending"`
-		Validating  int64 `json:"validating"`
+		Abnormal         int64 `json:"abnormal"`
+		All              int64 `json:"all"`
+		Deleted          int64 `json:"deleted"`
+		Disabled         int64 `json:"disabled"`
+		Identifying      int64 `json:"identifying"`
+		Normal           int64 `json:"normal"`
+		Pending          int64 `json:"pending"`
+		Validating       int64 `json:"validating"`
+		ValidationFailed int64 `json:"validation_failed"`
 	} `json:"status"`
 	Suffixes []struct {
 		Count int64  `json:"count"`
 		Key   string `json:"key"`
 	} `json:"suffixes"`
-	Validating int64 `json:"validating"`
+	Validating       int64 `json:"validating"`
+	ValidationFailed int64 `json:"validation_failed"`
 }
 
 // ProtoResourceFilter defines model for ProtoResourceFilter.
 type ProtoResourceFilter struct {
-	CreatedFrom *time.Time           `json:"createdFrom,omitempty"`
-	CreatedTo   *time.Time           `json:"createdTo,omitempty"`
-	ForSale     *bool                `json:"forSale,omitempty"`
-	LongLived   *bool                `json:"longLived,omitempty"`
-	OwnerId     *int64               `json:"ownerId,omitempty"`
-	Search      *string              `json:"search,omitempty"`
-	Status      *ProtoResourceStatus `json:"status,omitempty"`
-	Suffix      *string              `json:"suffix,omitempty"`
+	CreatedFrom *time.Time `json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time `json:"createdTo,omitempty"`
+	ForSale     *bool      `json:"forSale,omitempty"`
+	LongLived   *bool      `json:"longLived,omitempty"`
+	OwnerId     *int64     `json:"ownerId,omitempty"`
+	Search      *string    `json:"search,omitempty"`
+
+	// Status validation_failed is a read-only projection of a stopped validation for the current credential revision and generation. It is not proof of permanently invalid credentials and never changes refund eligibility.
+	Status *ProtoResourceStatus `json:"status,omitempty"`
+	Suffix *string              `json:"suffix,omitempty"`
 }
 
 // ProtoResourceListResponse defines model for ProtoResourceListResponse.
@@ -11892,17 +11910,19 @@ type ProtoResourceListResponse struct {
 
 // ProtoResourceMutationResponse defines model for ProtoResourceMutationResponse.
 type ProtoResourceMutationResponse struct {
-	ForSale              bool                `json:"forSale"`
-	Queued               bool                `json:"queued"`
-	ResourceId           int64               `json:"resourceId"`
-	Reused               bool                `json:"reused"`
+	ForSale    bool  `json:"forSale"`
+	Queued     bool  `json:"queued"`
+	ResourceId int64 `json:"resourceId"`
+	Reused     bool  `json:"reused"`
+
+	// Status validation_failed is a read-only projection of a stopped validation for the current credential revision and generation. It is not proof of permanently invalid credentials and never changes refund eligibility.
 	Status               ProtoResourceStatus `json:"status"`
 	Todo                 bool                `json:"todo"`
 	ValidationGeneration int64               `json:"validationGeneration"`
 	Version              int64               `json:"version"`
 }
 
-// ProtoResourceStatus defines model for ProtoResourceStatus.
+// ProtoResourceStatus validation_failed is a read-only projection of a stopped validation for the current credential revision and generation. It is not proof of permanently invalid credentials and never changes refund eligibility.
 type ProtoResourceStatus string
 
 // ProtoValidationBatchResponse defines model for ProtoValidationBatchResponse.

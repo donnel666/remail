@@ -10829,8 +10829,11 @@ export interface components {
             limit: number;
             facets?: components["schemas"]["TicketFacets"];
         };
-        /** @enum {string} */
-        ProtoResourceStatus: "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
+        /**
+         * @description validation_failed is a read-only projection of a stopped validation for the current credential revision and generation. It is not proof of permanently invalid credentials and never changes refund eligibility.
+         * @enum {string}
+         */
+        ProtoResourceStatus: "pending" | "validating" | "validation_failed" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
         ProtoResource: {
             /** Format: int64 */
             id: number;
@@ -10873,6 +10876,8 @@ export interface components {
             /** Format: int64 */
             validating: number;
             /** Format: int64 */
+            validation_failed: number;
+            /** Format: int64 */
             identifying: number;
             /** Format: int64 */
             normal: number;
@@ -10889,6 +10894,8 @@ export interface components {
                 pending: number;
                 /** Format: int64 */
                 validating: number;
+                /** Format: int64 */
+                validation_failed: number;
                 /** Format: int64 */
                 identifying: number;
                 /** Format: int64 */
@@ -27182,7 +27189,7 @@ export interface operations {
                 includeTotal?: components["parameters"]["ProtoIncludeTotalQuery"];
                 includeFacets?: components["parameters"]["ProtoIncludeFacetsQuery"];
                 search?: string;
-                status?: "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
+                status?: "pending" | "validating" | "validation_failed" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
                 forSale?: boolean;
             };
             header?: never;
@@ -27463,7 +27470,7 @@ export interface operations {
                 ownerId?: number;
                 /** @description Resource ID, full mailbox email, exact local part, @suffix, or owner email/nickname. */
                 search?: string;
-                status?: "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
+                status?: "pending" | "validating" | "validation_failed" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
                 forSale?: boolean;
             };
             header?: never;
@@ -28053,7 +28060,7 @@ export interface operations {
                 includeTotal?: components["parameters"]["ProtoIncludeTotalQuery"];
                 includeFacets?: components["parameters"]["ProtoIncludeFacetsQuery"];
                 search?: string;
-                status?: "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
+                status?: "pending" | "validating" | "validation_failed" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
                 forSale?: boolean;
             };
             header?: never;

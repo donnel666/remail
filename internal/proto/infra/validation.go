@@ -144,18 +144,20 @@ func (s *Service) commitValidation(ctx context.Context, task protoapp.Validation
 		} else {
 			maximum := min(runtimeconfig.Int("resource_validation_max_failures", 3, 1), 100)
 			failures, quality = min(resource.ValidationFailures+1, maximum), 0
-			status, runStatus = domain.StatusPending, maintenanceUncertain
+			status, runStatus = domain.StatusPending, maintenanceFailed
 			safeError = safeSessionError(failure.Category + ": " + failure.SafeMessage)
-			// Trade's permanent-refund scanner consumes abnormal. Protocol changes,
-			// extra account verification and exhausted network retries are not proof
-			// that the supplier's account credentials are permanently invalid.
+			// A failed validation is not necessarily a permanently invalid account.
+			// Reads project pending + this generation's failed run as validation_failed;
+			// Trade's permanent-refund scanner continues to consume only abnormal.
 			switch failure.Category {
 			case "invalid_credentials", "identity_mismatch":
-				status, runStatus = domain.StatusAbnormal, maintenanceFailed
-			case "request", "rate_limited", "proxy":
+				status = domain.StatusAbnormal
+			case "action_required":
+				// Human verification must not be retried automatically, even if an
+				// upstream adapter incorrectly marks this failure retryable.
+			default:
 				if failure.Retryable && failures < maximum {
 					generation++
-					runStatus = maintenanceFailed
 				}
 			}
 			// A malformed response or temporary login failure does not invalidate

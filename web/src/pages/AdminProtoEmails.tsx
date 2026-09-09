@@ -7,7 +7,6 @@ import {
   Input,
   Modal,
   Space,
-  Tabs,
   Tag,
   Toast,
   Tooltip,
@@ -17,7 +16,7 @@ import {
   IllustrationNoResult,
   IllustrationNoResultDark,
 } from "@douyinfe/semi-illustrations";
-import { Layers, SlidersHorizontal } from "lucide-react";
+import { SlidersHorizontal, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CardPro } from "@/components/semi/card-pro";
@@ -100,7 +99,6 @@ export default function AdminProtoEmails() {
   const isMobile = useIsMobile();
   const [bulkTaskId, setBulkTaskId] = useState<string | null>(null);
 
-  const [activeSuffix, setActiveSuffix] = useState("all");
   const [ownerFilter, setOwnerFilter] = useState<number | undefined>();
   const [searchKeyword, setSearchKeyword] = useState("");
   const [createdAtRange, setCreatedAtRange] = useState<DateRangeValue>([]);
@@ -165,7 +163,7 @@ export default function AdminProtoEmails() {
     []
   );
 
-  const statsFilter = useMemo<AdminProtoListFilter>(() => {
+  const listFilter = useMemo<AdminProtoListFilter>(() => {
     const filter: AdminProtoListFilter = {};
     const search = debouncedSearchKeyword.trim();
     const createdFrom = createdFromISOString(createdAtRange);
@@ -187,10 +185,6 @@ export default function AdminProtoEmails() {
     statusFilter,
   ]);
 
-  const listFilter = useMemo<AdminProtoListFilter>(() => {
-    if (activeSuffix === "all") return statsFilter;
-    return { ...statsFilter, suffix: activeSuffix };
-  }, [activeSuffix, statsFilter]);
   const listFilterKey = JSON.stringify(listFilter);
 
   const loadProtoBlock = useCallback(
@@ -342,20 +336,6 @@ export default function AdminProtoEmails() {
     }
   }, [t]);
 
-  const suffixCounts = useMemo(
-    () => facets?.suffixes.map((item) => [item.key, item.count] as [string, number]) ?? [],
-    [facets]
-  );
-  const suffixSet = useMemo(
-    () => new Set(suffixCounts.map(([suffix]) => suffix)),
-    [suffixCounts]
-  );
-  useEffect(() => {
-    if (facets && activeSuffix !== "all" && !suffixSet.has(activeSuffix)) {
-      setActiveSuffix("all");
-    }
-  }, [activeSuffix, facets, suffixSet]);
-
   const stats = useMemo(() => {
     if (facets) return facets;
     return {
@@ -369,13 +349,13 @@ export default function AdminProtoEmails() {
         normal: 0,
         pending: 0,
         validating: 0,
+        validation_failed: 0,
         identifying: 0,
       },
       suffixes: [],
     } satisfies AdminProtoFacets;
   }, [facets, total]);
 
-  const allTabCount = suffixCounts.reduce((sum, [, count]) => sum + count, 0);
   const activeFilterCount =
     Number(statusFilter !== "all") +
     Number(privateFilter !== "all") +
@@ -387,12 +367,6 @@ export default function AdminProtoEmails() {
     if (safePage !== activePage) setActivePage(safePage);
   }, [activePage, safePage]);
 
-  const selectSuffix = (suffix: string) => {
-    setActiveSuffix(suffix);
-    setActivePage(1);
-    setSelectedKeys([]);
-  };
-
   const resetFilters = () => {
     setSearchKeyword("");
     flushSearchKeyword("");
@@ -401,7 +375,6 @@ export default function AdminProtoEmails() {
     setPrivateFilter("all");
     setOwnerFilter(undefined);
     setLongLivedFilter("all");
-    setActiveSuffix("all");
     setActivePage(1);
     setSelectedKeys([]);
   };
@@ -818,17 +791,6 @@ export default function AdminProtoEmails() {
     () =>
       [
         {
-          dataIndex: "suffix",
-          key: "suffix",
-          title: t("Suffix"),
-          width: 120,
-          render: (value: unknown) => (
-            <Tag color="white" shape="circle">
-              {String(value)}
-            </Tag>
-          ),
-        },
-        {
           dataIndex: "emailAddress",
           key: "email",
           title: t("Email"),
@@ -912,48 +874,12 @@ export default function AdminProtoEmails() {
     },
   };
 
-  const tabsArea = (
-    <Tabs
-      activeKey={activeSuffix}
-      className="mb-2"
-      collapsible
-      onChange={(key) => selectSuffix(String(key))}
-      type="card"
-    >
-      <Tabs.TabPane
-        itemKey="all"
-        tab={
-          <span className="flex items-center gap-2">
-            {t("All")}
-            <Tag color={activeSuffix === "all" ? "red" : "grey"} shape="circle">
-              {allTabCount}
-            </Tag>
-          </span>
-        }
-      />
-      {suffixCounts.map(([suffix, count]) => (
-        <Tabs.TabPane
-          itemKey={suffix}
-          key={suffix}
-          tab={
-            <span className="flex items-center gap-2">
-              <Layers size={14} />
-              {suffix}
-              <Tag color={activeSuffix === suffix ? "red" : "grey"} shape="circle">
-                {count}
-              </Tag>
-            </span>
-          }
-        />
-      ))}
-    </Tabs>
-  );
-
   const actionsArea = (
     <div className="flex w-full flex-col items-center justify-between gap-2 md:flex-row">
       <div className="order-2 flex w-full flex-wrap gap-2 md:order-1 md:w-auto">
         <Button
           className="flex-1 md:flex-initial"
+          icon={<Upload size={14} />}
           onClick={() => setImportOpen(true)}
           size="small"
           type="primary"
@@ -1028,7 +954,7 @@ export default function AdminProtoEmails() {
                 {t("Status")}
               </div>
               <div className="mb-2 space-y-1">
-                {(["all", "pending", "validating", "identifying", "normal", "abnormal", "disabled", "deleted"] as StatusFilter[]).map(
+                {(["all", "pending", "validating", "validation_failed", "identifying", "normal", "abnormal", "disabled", "deleted"] as StatusFilter[]).map(
                   (value) => (
                     <StatisticFilterOption
                       active={statusFilter === value}
@@ -1115,13 +1041,17 @@ export default function AdminProtoEmails() {
           loadOptions={async (search) => (await listAdminProtoOwners(search)).map((owner) => ({ value: owner.id, label: owner.email, data: owner }))}
           placeholder={t("Owner")}
           emptyContent={t("No users found")}
-          style={{ width: isMobile ? "100%" : 190 }}
+          style={{ width: isMobile ? "100%" : 224 }}
         />
         <Input
           className="resources-search-input w-full md:w-56"
           onChange={(value) => {
             setSearchKeyword(String(value));
             resetPageAndSelection();
+          }}
+          onEnterPress={() => {
+            flushSearchKeyword();
+            setActivePage(1);
           }}
           placeholder={t("Search email, owner or ID")}
           prefix={<IconSearch />}
@@ -1198,7 +1128,6 @@ export default function AdminProtoEmails() {
         actionsArea={actionsArea}
         paginationArea={paginationArea}
         t={t}
-        tabsArea={tabsArea}
         type="type3"
       >
         <CardTable
@@ -1220,7 +1149,7 @@ export default function AdminProtoEmails() {
           pagination={false}
           rowKey="id"
           rowSelection={rowSelection}
-          scroll={{ x: "max(100%, 1430px)", y: DESKTOP_TABLE_SCROLL_Y }}
+          scroll={{ x: "max(100%, 1310px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
       </CardPro>

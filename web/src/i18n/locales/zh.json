@@ -299,6 +299,7 @@
   "Gmail delivery verified at": "Gmail 实收验证时间",
   "Validation generation": "验证代数",
   "Validation failures": "连续验证失败次数",
+  "Validation failed": "验证失败",
   "Failures": "失败次数",
   "Cooldown until": "冷却截止时间",
   "Only the listed projects are cooling down; other projects remain available.": "仅以下项目正在冷却，其他项目仍可分配。",

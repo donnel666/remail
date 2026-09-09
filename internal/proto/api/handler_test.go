@@ -30,7 +30,7 @@ func (protoTestRoot) TableName() string { return "email_resources" }
 func TestProtoListNeverReturnsPassword(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:proto-api-list?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&protoTestRoot{}, &infra.Resource{}))
+	require.NoError(t, db.AutoMigrate(&protoTestRoot{}, &infra.Resource{}, &infra.MaintenanceRun{}))
 	require.NoError(t, db.Create(&protoTestRoot{ID: 1, Type: "proto", OwnerUserID: 7}).Error)
 	require.NoError(t, db.Create(&infra.Resource{ID: 1, ResourceType: "proto", OwnerUserID: 7, EmailAddress: "safe@proto.test", Password: "secret", Status: "pending", ValidationGeneration: 1, CredentialRevision: 1}).Error)
 
@@ -48,15 +48,18 @@ func TestProtoListNeverReturnsPassword(t *testing.T) {
 func TestProtoGetNeverReturnsPassword(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:proto-api-get?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&protoTestRoot{}, &infra.Resource{}))
+	require.NoError(t, db.AutoMigrate(&protoTestRoot{}, &infra.Resource{}, &infra.MaintenanceRun{}))
 	require.NoError(t, db.Create(&protoTestRoot{ID: 1, Type: "proto", OwnerUserID: 7}).Error)
 	require.NoError(t, db.Create(&infra.Resource{ID: 1, ResourceType: "proto", OwnerUserID: 7, EmailAddress: "safe@proto.test", Password: "secret", Status: "pending", Version: 1, ValidationGeneration: 1, CredentialRevision: 1}).Error)
+	require.NoError(t, db.Create(&infra.MaintenanceRun{ResourceID: 1, ValidationGeneration: 1, CredentialRevision: 1, Kind: "validation", Status: "failed"}).Error)
 
 	item, err := infra.NewService(db).GetResource(context.Background(), 1, nil)
 	require.NoError(t, err)
 	require.NotNil(t, item)
 	require.Empty(t, item.Password)
 	require.True(t, item.PasswordConfigured)
+	response := toResourceResponse(*item)
+	require.Equal(t, "validation_failed", response.Status)
 }
 
 func TestProtoRouteSurfaceIsProviderScoped(t *testing.T) {
@@ -157,7 +160,7 @@ func TestProtoAdminCommandPermissions(t *testing.T) {
 func TestProtoListVisibilityTotalsAndAdminSearch(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:proto-list-contract?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&protoTestRoot{}, &infra.Resource{}))
+	require.NoError(t, db.AutoMigrate(&protoTestRoot{}, &infra.Resource{}, &infra.MaintenanceRun{}))
 	for _, row := range []infra.Resource{
 		{ID: 1, OwnerUserID: 7, EmailAddress: "one@proto.test", EmailDomain: "proto.test", Status: "pending"},
 		{ID: 2, OwnerUserID: 7, EmailAddress: "deleted@proto.test", EmailDomain: "proto.test", Status: "deleted"},

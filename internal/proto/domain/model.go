@@ -18,6 +18,10 @@ const (
 	ErrorStrategyAbort = "abort"
 )
 
+// StatusValidationFailed is a read-only projection of terminal validation;
+// it must never be persisted into proto_resources.status.
+const StatusValidationFailed = "validation_failed"
+
 var (
 	ErrInvalidImportFormat = errors.New("proto: invalid import format")
 	ErrInvalidResource     = errors.New("proto: invalid resource")

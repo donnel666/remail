@@ -31,6 +31,7 @@ function validationStatus(target: AdminProtoResourceItem): MaintenanceStatus {
       return "succeeded";
     case "normal":
       return "succeeded";
+    case "validation_failed":
     case "abnormal":
       return "failed";
     default:

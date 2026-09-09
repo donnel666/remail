@@ -127,7 +127,7 @@ func TestProtoValidationRequiresUnlockedMailboxKeys(t *testing.T) {
 	require.NoError(t, s.ProcessValidation(ctx, protoapp.ValidationTaskPayload{ResourceID: id, OwnerUserID: 7, ValidationGeneration: generation, CredentialRevision: 1}))
 	item, err := s.GetResource(ctx, id, nil)
 	require.NoError(t, err)
-	require.Equal(t, domain.StatusPending, item.Status)
+	require.Equal(t, domain.StatusValidationFailed, item.Status)
 	require.Contains(t, item.LastSafeError, "invalid_session")
 	require.NotEqual(t, domain.StatusNormal, item.Status)
 }

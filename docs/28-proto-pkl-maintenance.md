@@ -37,6 +37,19 @@
 
 旧于 PKL 实现的镜像不能识别新 v2 会话；回滚时不要把它当成 Proto 会话格式也已回滚。其他邮箱模块不使用这些会话数据。
 
+## 验证重试与失败终态
+
+验证任务的失败不等于邮箱凭据已永久失效。此前资源保持 `pending`，当前维护任务却已经 `uncertain` 并停止调度，页面因此看起来一直在等待。
+
+- 可重试失败统一遵循 `Failure.Retryable` 和 `resource_validation_max_failures`，不再额外用类别白名单漏掉桥接 `protocol` 错误。配置为 3 表示最多执行 3 次；尚有预算时递增 generation，下一轮由原调度器领取。
+- 每次确定失败的验证任务记录为 `failed`。`action_required` 必须人工处理，不自动重试；只有明确的 `invalid_credentials / identity_mismatch` 才写入资源物理 `abnormal` 并撤销会话。
+- 选择复用现有维护事实：物理 `pending` 资源若存在相同资源 ID、generation 和 credential revision 的 `validation` 任务终态 `failed / uncertain`，Proto 的列表、详情、状态筛选和统计统一返回只读状态 `validation_failed`（“验证失败”）。它不写入数据库的资源状态列，也不会进入“待验证”筛选结果。
+- 不选择给所有错误写 `abnormal`：这会改变既有退款语义。也不增加数据库状态／字段：现有维护记录已足以判定流程是否停止，因而无需 DDL、数据回填或修改退款扫描器。
+- 旧版本留下的当前轮 `pending + uncertain` 会自动按该规则展示，无需修改历史记录。管理员明确重新验证时，原有命令递增 generation 并清零失败预算，旧终态不再影响新一轮。普通读取不会重新登录或自动复活已耗尽的任务。
+- 桥接失败记录固定安全原因，例如 `bridge_decode`、`bridge_missing_result`、`bridge_worker_exit`、`bridge_limit`、`bridge_session_metadata`。维护记录的安全文案同样区分这些原因；不再以统一的 “invalid or oversized” 文案暗示 PKL 一定超大。日志与返回值不包含原始输出、stderr、账号或 PKL。
+
+这些变化仅作用于 Proto；既有 PKL 的加密保存／刷新与订单分配、退款规则不变。API 增加了状态枚举值，部署后需要刷新浏览器加载支持 `validation_failed` 的新页面，旧标签页不保证能识别该值。新旧后端混用或回滚不会因本次只读状态改变钱款状态；旧后端仍会按原逻辑返回物理 `pending`。
+
 ## CMD 使用
 
 以下资源 ID／操作人 ID 只是示例，先换成已确认的目标。默认不执行远程登录、写入或入队，不提供全量遍历。

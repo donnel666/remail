@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	protoapp "github.com/donnel666/remail/internal/proto/app"
 	"github.com/donnel666/remail/internal/proto/domain"
 	"github.com/donnel666/remail/internal/proto/infra/proton"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,28 +57,63 @@ func TestProtoSessionEncryptionBindsResourceAndCredentials(t *testing.T) {
 }
 
 func TestProtoValidationFailureBudgetAndInFlightCredentialFence(t *testing.T) {
-	t.Run("retryable business failures stop at the configured budget", func(t *testing.T) {
-		s, _ := newProtoAsyncTestService(t)
-		ctx := context.Background()
-		id, _, err := s.ImportLine(ctx, 7, domain.ImportLine{Email: "retry@proto.test", Password: "secret"})
-		require.NoError(t, err)
-		require.NoError(t, s.SetForSale(ctx, id, nil, true))
-		s.Protocol = protoValidationClientStub{login: func(context.Context, proton.LoginRequest) (proton.Session, error) {
-			return proton.Session{}, &proton.Failure{Category: "request", SafeMessage: "Service temporarily unavailable.", Retryable: true, Cause: errors.New("sensitive-upstream-body")}
-		}}
-		for attempt := 1; attempt <= 3; attempt++ {
-			require.NoError(t, s.ProcessValidation(ctx, protoValidationTask(t, s, id)))
-			row, err := s.GetResource(ctx, id, nil)
+	for _, test := range []struct {
+		category string
+		maximum  int
+	}{{"request", 3}, {"protocol", 3}, {"protocol", 2}, {"dependency", 1}} {
+		t.Run(test.category+" budget "+strconv.Itoa(test.maximum), func(t *testing.T) {
+			const key = "resource_validation_max_failures"
+			previous, existed := runtimeconfig.Snapshot()[key]
+			runtimeconfig.Set(key, strconv.Itoa(test.maximum))
+			t.Cleanup(func() {
+				if existed {
+					runtimeconfig.Set(key, previous)
+				} else {
+					runtimeconfig.Delete(key)
+				}
+			})
+			s, _ := newProtoAsyncTestService(t)
+			ctx := context.Background()
+			id, _, err := s.ImportLine(ctx, 7, domain.ImportLine{Email: "retry@proto.test", Password: "secret"})
 			require.NoError(t, err)
-			require.Equal(t, attempt, row.ValidationFailures)
-			require.NotContains(t, row.LastSafeError, "sensitive-upstream-body")
-			require.Equal(t, domain.StatusPending, row.Status)
-			require.True(t, row.ForSale)
-		}
-		queued, err := s.DispatchPendingValidations(ctx, &protoQueueStub{}, 10)
-		require.NoError(t, err)
-		require.Zero(t, queued, "an exhausted transient failure must remain uncertain, never trigger permanent refunds")
-	})
+			require.NoError(t, s.SetForSale(ctx, id, nil, true))
+			s.Protocol = protoValidationClientStub{login: func(context.Context, proton.LoginRequest) (proton.Session, error) {
+				return proton.Session{}, &proton.Failure{Category: test.category, SafeMessage: "Service temporarily unavailable.", Retryable: true, Cause: errors.New("sensitive-upstream-body")}
+			}}
+			for attempt := 1; attempt <= test.maximum; attempt++ {
+				task := protoValidationTask(t, s, id)
+				require.NoError(t, s.ProcessValidation(ctx, task))
+				row, err := s.GetResource(ctx, id, nil)
+				require.NoError(t, err)
+				require.Equal(t, attempt, row.ValidationFailures)
+				require.NotContains(t, row.LastSafeError, "sensitive-upstream-body")
+				if attempt < test.maximum {
+					require.Equal(t, domain.StatusPending, row.Status)
+					require.Equal(t, task.ValidationGeneration+1, row.ValidationGeneration)
+				} else {
+					require.Equal(t, domain.StatusValidationFailed, row.Status)
+					require.Equal(t, task.ValidationGeneration, row.ValidationGeneration)
+				}
+				require.True(t, row.ForSale)
+				run, err := s.FindMaintenanceRun(ctx, id, task.ValidationGeneration, maintenanceKindValidation)
+				require.NoError(t, err)
+				require.Equal(t, maintenanceFailed, run.Status)
+			}
+			queued, err := s.DispatchPendingValidations(ctx, &protoQueueStub{}, 10)
+			require.NoError(t, err)
+			require.Zero(t, queued, "exhausted failures must stop without becoming permanently abnormal")
+			var physical Resource
+			require.NoError(t, s.DB.First(&physical, id).Error)
+			require.Equal(t, domain.StatusPending, physical.Status)
+			// A deliberate manual retry creates a fresh budget/generation; it is not
+			// blocked by the previous failed run or silently queued by a read.
+			_, err = s.ClaimForValidation(ctx, id, nil)
+			require.NoError(t, err)
+			queued, err = s.DispatchPendingValidations(ctx, &protoQueueStub{}, 10)
+			require.NoError(t, err)
+			require.Equal(t, 1, queued)
+		})
+	}
 	t.Run("infrastructure failures release the same attempt for retry", func(t *testing.T) {
 		s, _ := newProtoAsyncTestService(t)
 		ctx := context.Background()
@@ -113,15 +150,28 @@ func TestProtoValidationFailureBudgetAndInFlightCredentialFence(t *testing.T) {
 }
 
 func TestProtoValidationOnlyPermanentCredentialFailuresBecomeAbnormal(t *testing.T) {
-	for _, category := range []string{"invalid_credentials", "identity_mismatch", "action_required", "protocol", "decryption", "invalid_session"} {
-		t.Run(category, func(t *testing.T) {
+	for _, test := range []struct {
+		category  string
+		retryable bool
+		status    string
+		queued    int
+	}{
+		{"invalid_credentials", true, domain.StatusAbnormal, 0},
+		{"identity_mismatch", true, domain.StatusAbnormal, 0},
+		{"action_required", true, domain.StatusValidationFailed, 0},
+		{"protocol", true, domain.StatusPending, 1},
+		{"protocol", false, domain.StatusValidationFailed, 0},
+		{"decryption", false, domain.StatusValidationFailed, 0},
+		{"invalid_session", false, domain.StatusValidationFailed, 0},
+	} {
+		t.Run(test.category+strconv.FormatBool(test.retryable), func(t *testing.T) {
 			s, _ := newProtoAsyncTestService(t)
 			ctx := context.Background()
 			id, _, err := s.ImportLine(ctx, 7, domain.ImportLine{Email: "classification@proto.test", Password: "secret"})
 			require.NoError(t, err)
 			require.NoError(t, s.SetForSale(ctx, id, nil, true))
 			s.Protocol = protoValidationClientStub{login: func(context.Context, proton.LoginRequest) (proton.Session, error) {
-				return proton.Session{}, &proton.Failure{Category: category, SafeMessage: "Safe validation failure.", Retryable: true}
+				return proton.Session{}, &proton.Failure{Category: test.category, SafeMessage: "Safe validation failure.", Retryable: test.retryable}
 			}}
 			task := protoValidationTask(t, s, id)
 			require.NoError(t, s.ProcessValidation(ctx, task))
@@ -130,16 +180,11 @@ func TestProtoValidationOnlyPermanentCredentialFailuresBecomeAbnormal(t *testing
 			require.True(t, row.ForSale)
 			run, err := s.FindMaintenanceRun(ctx, id, task.ValidationGeneration, maintenanceKindValidation)
 			require.NoError(t, err)
-			if category == "invalid_credentials" || category == "identity_mismatch" {
-				require.Equal(t, domain.StatusAbnormal, row.Status)
-				require.Equal(t, maintenanceFailed, run.Status)
-			} else {
-				require.Equal(t, domain.StatusPending, row.Status)
-				require.Equal(t, maintenanceUncertain, run.Status)
-			}
+			require.Equal(t, test.status, row.Status)
+			require.Equal(t, maintenanceFailed, run.Status)
 			queued, err := s.DispatchPendingValidations(ctx, &protoQueueStub{}, 10)
 			require.NoError(t, err)
-			require.Zero(t, queued)
+			require.Equal(t, test.queued, queued)
 		})
 	}
 }

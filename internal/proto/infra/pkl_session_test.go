@@ -180,13 +180,19 @@ func TestProtoPKLTemporaryHTTPFailureKeepsPreviouslyVerifiedSession(t *testing.T
 	}}
 	_, err = s.ClaimForValidation(ctx, id, nil)
 	require.NoError(t, err)
-	require.NoError(t, s.ProcessValidation(ctx, protoValidationTask(t, s, id)))
-	row, err := s.GetResource(ctx, id, nil)
-	require.NoError(t, err)
-	require.Equal(t, domain.StatusPending, row.Status)
-	after, err := s.ReadSession(ctx, id, 1)
-	require.NoError(t, err)
-	require.Equal(t, proton.SessionTokenIdentity(*before), proton.SessionTokenIdentity(*after))
+	for attempt := 1; attempt <= 3; attempt++ {
+		require.NoError(t, s.ProcessValidation(ctx, protoValidationTask(t, s, id)))
+		row, err := s.GetResource(ctx, id, nil)
+		require.NoError(t, err)
+		if attempt < 3 {
+			require.Equal(t, domain.StatusPending, row.Status)
+		} else {
+			require.Equal(t, domain.StatusValidationFailed, row.Status)
+		}
+		after, err := s.ReadSession(ctx, id, 1)
+		require.NoError(t, err)
+		require.Equal(t, proton.SessionTokenIdentity(*before), proton.SessionTokenIdentity(*after))
+	}
 }
 
 func TestProtoMalformedPKLRevalidatesOnlyTheObservedSession(t *testing.T) {
