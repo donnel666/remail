@@ -28,7 +28,7 @@ type Repository interface {
 	DeleteAPIKey(ctx context.Context, userID uint, keyID uint, deletedAt time.Time) error
 	FindAPIKeyByPlain(ctx context.Context, plain string) (*domain.APIKey, error)
 	GetAPIKeyOwnerAccess(ctx context.Context, userID uint) (role string, active bool, groupConcurrencyLimit int64, err error)
-	AddAPIKeyQuotaUsed(ctx context.Context, keyID uint, delta int64, lastUsedAt time.Time) error
+	AddAPIKeyRequestCount(ctx context.Context, keyID uint, delta int64, lastUsedAt time.Time) error
 
 	IssueOrderToken(ctx context.Context, cmd IssueOrderTokenCommand) (*domain.OrderToken, error)
 	FindOrderTokenByOrder(ctx context.Context, orderNo string) (*domain.OrderToken, error)
@@ -194,7 +194,7 @@ func (uc *UseCase) GetAPIKeyUsage(ctx context.Context, userID uint) (*APIKeyUsag
 	if err != nil {
 		return nil, err
 	}
-	usage.RequestCount += uc.runtime.quotaDeltaForUser(userID)
+	usage.RequestCount += uc.runtime.requestDeltaForUser(userID)
 	return usage, nil
 }
 
@@ -213,7 +213,13 @@ func (uc *UseCase) GetAPIKey(ctx context.Context, userID uint, keyID uint) (*dom
 	if userID == 0 || keyID == 0 {
 		return nil, domain.ErrInvalidAPIKey
 	}
-	return uc.repo.FindAPIKey(ctx, userID, keyID)
+	item, err := uc.repo.FindAPIKey(ctx, userID, keyID)
+	if err != nil {
+		return nil, err
+	}
+	items := []domain.APIKey{*item}
+	uc.runtime.overlayKeys(items)
+	return &items[0], nil
 }
 
 func (uc *UseCase) UpdateAPIKey(ctx context.Context, req UpdateAPIKeyRequest) (*domain.APIKey, error) {

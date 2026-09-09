@@ -13,25 +13,27 @@ import (
 	"github.com/donnel666/remail/internal/openapi/domain"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/go-sql-driver/mysql"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 type APIKeyModel struct {
-	ID               uint       `gorm:"primaryKey;autoIncrement"`
-	UserID           uint       `gorm:"not null;column:user_id"`
-	Name             string     `gorm:"type:varchar(120);not null;default:''"`
-	KeyPrefix        string     `gorm:"type:varchar(32);not null;column:key_prefix"`
-	KeyPlain         string     `gorm:"type:varchar(255);not null;column:key_plain"`
-	Enabled          bool       `gorm:"not null;default:true"`
-	DeletedAt        *time.Time `gorm:"column:deleted_at"`
-	ConcurrencyLimit *int       `gorm:"column:concurrency_limit"`
-	QuotaLimit       *int64     `gorm:"column:quota_limit"`
-	QuotaUsed        int64      `gorm:"not null;column:quota_used"`
-	ExpireAt         *time.Time `gorm:"column:expire_at"`
-	LastUsedAt       *time.Time `gorm:"column:last_used_at"`
-	CreatedAt        time.Time  `gorm:"not null;autoCreateTime;column:created_at"`
-	UpdatedAt        time.Time  `gorm:"not null;autoUpdateTime;column:updated_at"`
+	ID               uint            `gorm:"primaryKey;autoIncrement"`
+	UserID           uint            `gorm:"not null;column:user_id"`
+	Name             string          `gorm:"type:varchar(120);not null;default:''"`
+	KeyPrefix        string          `gorm:"type:varchar(32);not null;column:key_prefix"`
+	KeyPlain         string          `gorm:"type:varchar(255);not null;column:key_plain"`
+	Enabled          bool            `gorm:"not null;default:true"`
+	DeletedAt        *time.Time      `gorm:"column:deleted_at"`
+	ConcurrencyLimit *int            `gorm:"column:concurrency_limit"`
+	QuotaLimit       *int64          `gorm:"column:quota_limit"`
+	QuotaUsed        decimal.Decimal `gorm:"type:decimal(18,6);not null;default:0;column:quota_used"`
+	RequestCount     int64           `gorm:"not null;default:0;column:request_count"`
+	ExpireAt         *time.Time      `gorm:"column:expire_at"`
+	LastUsedAt       *time.Time      `gorm:"column:last_used_at"`
+	CreatedAt        time.Time       `gorm:"not null;autoCreateTime;column:created_at"`
+	UpdatedAt        time.Time       `gorm:"not null;autoUpdateTime;column:updated_at"`
 }
 
 func (APIKeyModel) TableName() string { return "api_keys" }
@@ -158,7 +160,7 @@ func (r *Repo) GetAPIKeyUsage(ctx context.Context, userID uint) (*openapiapp.API
 	}
 	if err := r.db.WithContext(ctx).
 		Model(&APIKeyModel{}).
-		Select("COALESCE(SUM(quota_used), 0) AS request_count, COUNT(*) AS key_count").
+		Select("COALESCE(SUM(request_count), 0) AS request_count, COUNT(*) AS key_count").
 		Where("user_id = ? AND deleted_at IS NULL", userID).
 		Scan(&usage).Error; err != nil {
 		return nil, fmt.Errorf("sum api key usage: %w", err)
@@ -245,7 +247,9 @@ func (r *Repo) UpdateAPIKey(ctx context.Context, cmd openapiapp.UpdateAPIKeyComm
 	if len(updates) > 0 {
 		query := r.db.WithContext(ctx).Model(&APIKeyModel{}).Where("id = ? AND user_id = ? AND deleted_at IS NULL", cmd.KeyID, cmd.UserID)
 		if cmd.QuotaSet && cmd.QuotaLimit != nil {
-			query = query.Where("quota_used <= ?", *cmd.QuotaLimit)
+			// Historical spending may exceed a migrated limit; keeping that limit
+			// must not prevent editing the key's other properties.
+			query = query.Where("(quota_limit = ? OR quota_used <= ?)", *cmd.QuotaLimit, *cmd.QuotaLimit)
 		}
 		result := query.Updates(updates)
 		if result.Error != nil {
@@ -256,7 +260,9 @@ func (r *Repo) UpdateAPIKey(ctx context.Context, cmd openapiapp.UpdateAPIKeyComm
 			if err != nil {
 				return nil, err
 			}
-			if cmd.QuotaSet && cmd.QuotaLimit != nil && existing.QuotaUsed > *cmd.QuotaLimit {
+			if cmd.QuotaSet && cmd.QuotaLimit != nil &&
+				(existing.QuotaLimit == nil || *existing.QuotaLimit != *cmd.QuotaLimit) &&
+				existing.QuotaUsed.GreaterThan(decimal.NewFromInt(*cmd.QuotaLimit)) {
 				return nil, domain.ErrAPIKeyQuotaExceeded
 			}
 			return existing, nil
@@ -281,18 +287,18 @@ func (r *Repo) DeleteAPIKey(ctx context.Context, userID uint, keyID uint, delete
 	return nil
 }
 
-func (r *Repo) AddAPIKeyQuotaUsed(ctx context.Context, keyID uint, delta int64, lastUsedAt time.Time) error {
+func (r *Repo) AddAPIKeyRequestCount(ctx context.Context, keyID uint, delta int64, lastUsedAt time.Time) error {
 	if keyID == 0 || delta <= 0 {
 		return nil
 	}
 	result := r.db.WithContext(ctx).Model(&APIKeyModel{}).
 		Where("id = ? AND deleted_at IS NULL", keyID).
 		Updates(map[string]any{
-			"quota_used":   gorm.Expr("quota_used + ?", delta),
-			"last_used_at": gorm.Expr("CASE WHEN last_used_at IS NULL OR last_used_at < ? THEN ? ELSE last_used_at END", lastUsedAt, lastUsedAt),
+			"request_count": gorm.Expr("request_count + ?", delta),
+			"last_used_at":  gorm.Expr("CASE WHEN last_used_at IS NULL OR last_used_at < ? THEN ? ELSE last_used_at END", lastUsedAt, lastUsedAt),
 		})
 	if result.Error != nil {
-		return fmt.Errorf("add api key quota used: %w", result.Error)
+		return fmt.Errorf("add api key request count: %w", result.Error)
 	}
 	return nil
 }
@@ -449,6 +455,7 @@ func apiKeyModelToDomain(model APIKeyModel) domain.APIKey {
 		ConcurrencyLimit: model.ConcurrencyLimit,
 		QuotaLimit:       model.QuotaLimit,
 		QuotaUsed:        model.QuotaUsed,
+		RequestCount:     model.RequestCount,
 		ActiveRequests:   0,
 		ExpireAt:         model.ExpireAt,
 		LastUsedAt:       model.LastUsedAt,

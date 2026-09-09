@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 type APIKey struct {
@@ -16,7 +18,8 @@ type APIKey struct {
 	Enabled          bool
 	ConcurrencyLimit *int
 	QuotaLimit       *int64
-	QuotaUsed        int64
+	QuotaUsed        decimal.Decimal
+	RequestCount     int64
 	ActiveRequests   int
 	ExpireAt         *time.Time
 	LastUsedAt       *time.Time

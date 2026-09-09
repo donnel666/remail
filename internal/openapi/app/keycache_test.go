@@ -74,7 +74,8 @@ func TestAPIKeyRuntimeConcurrencyAndFlush(t *testing.T) {
 	first, err := rt.begin(ctx, "rk-test")
 	require.NoError(t, err)
 	require.EqualValues(t, 1, first.ActiveRequests)
-	require.EqualValues(t, 1, first.QuotaUsed)
+	require.EqualValues(t, 1, first.RequestCount)
+	require.True(t, first.QuotaUsed.IsZero())
 	active, rpm, err := rt.realtimeUsage(ctx, 2)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, active)
@@ -94,8 +95,9 @@ func TestAPIKeyRuntimeConcurrencyAndFlush(t *testing.T) {
 	require.EqualValues(t, 2, rpm)
 
 	require.NoError(t, rt.flush(ctx))
-	require.EqualValues(t, 2, repo.quotaAdded)
-	require.EqualValues(t, 2, repo.key.QuotaUsed)
+	require.EqualValues(t, 2, repo.requestsAdded)
+	require.EqualValues(t, 2, repo.key.RequestCount)
+	require.True(t, repo.key.QuotaUsed.IsZero())
 	now = now.Add(apiKeyRPMWindow + time.Second)
 	_, rpm, err = rt.realtimeUsage(ctx, 2)
 	require.NoError(t, err)
@@ -156,7 +158,7 @@ func TestGetAPIKeyUsageDoesNotDependOnRealtimeStore(t *testing.T) {
 	require.Zero(t, gate.realtimeCalls)
 }
 
-func TestAPIKeyRuntimeQuota(t *testing.T) {
+func TestAPIKeyRuntimeRequestsDoNotConsumeQuota(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	quotaLimit := int64(2)
@@ -183,8 +185,11 @@ func TestAPIKeyRuntimeQuota(t *testing.T) {
 	require.NoError(t, err)
 	rt.finish(1)
 
-	_, err = rt.begin(ctx, "rk-test")
-	require.ErrorIs(t, err, domain.ErrAPIKeyQuotaExceeded)
+	request, err := rt.begin(ctx, "rk-test")
+	require.NoError(t, err)
+	require.EqualValues(t, 3, request.RequestCount)
+	require.True(t, request.QuotaUsed.IsZero())
+	rt.finish(1)
 }
 
 func TestAPIKeyRuntimeRejectsCachedKeyAfterOwnerDeletion(t *testing.T) {
@@ -238,7 +243,7 @@ func TestAPIKeyRuntimeUsesCurrentOwnerRoleForCachedKey(t *testing.T) {
 type apiKeyRuntimeRepoStub struct {
 	key                   domain.APIKey
 	usage                 *APIKeyUsage
-	quotaAdded            int64
+	requestsAdded         int64
 	userActive            bool
 	ownerRole             string
 	groupConcurrencyLimit int64
@@ -323,12 +328,12 @@ func (r *apiKeyRuntimeRepoStub) GetAPIKeyOwnerAccess(context.Context, uint) (str
 	return r.ownerRole, r.userActive, r.groupConcurrencyLimit, nil
 }
 
-func (r *apiKeyRuntimeRepoStub) AddAPIKeyQuotaUsed(_ context.Context, keyID uint, delta int64, _ time.Time) error {
+func (r *apiKeyRuntimeRepoStub) AddAPIKeyRequestCount(_ context.Context, keyID uint, delta int64, _ time.Time) error {
 	if keyID != r.key.ID {
 		return domain.ErrAPIKeyNotFound
 	}
-	r.quotaAdded += delta
-	r.key.QuotaUsed += delta
+	r.requestsAdded += delta
+	r.key.RequestCount += delta
 	return nil
 }
 

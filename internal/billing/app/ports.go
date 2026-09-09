@@ -164,6 +164,7 @@ type RedeemCardResult struct {
 
 type AdjustConsumerBalanceRequest struct {
 	UserID          uint
+	APIKeyID        *uint
 	Amount          string
 	Reason          string
 	BizType         string
@@ -175,6 +176,7 @@ type AdjustConsumerBalanceRequest struct {
 
 type AdjustConsumerBalanceCommand struct {
 	UserID             uint
+	APIKeyID           *uint
 	Amount             string
 	Reason             string
 	BizType            string
@@ -463,8 +465,12 @@ func (uc *WalletUseCase) adjustConsumer(ctx context.Context, req AdjustConsumerB
 	if bizType != "" {
 		requestFingerprint = fingerprint("wallet.adjust", req.UserID, string(req.TransactionType), string(direction), amount, reason, bizType)
 	}
+	if req.APIKeyID != nil {
+		requestFingerprint = fingerprint(requestFingerprint, *req.APIKeyID)
+	}
 	return uc.repo.AdjustConsumerBalance(ctx, AdjustConsumerBalanceCommand{
 		UserID:             req.UserID,
+		APIKeyID:           req.APIKeyID,
 		Amount:             amount,
 		Reason:             reason,
 		BizType:            bizType,

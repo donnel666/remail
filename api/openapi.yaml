@@ -16399,7 +16399,7 @@ components:
           format: int64
           minimum: 1
           nullable: true
-          description: Empty means unlimited total requests.
+          description: Total spending limit in whole points. Empty means no key-specific limit; spending is still limited by the user's consumer wallet.
       additionalProperties: false
 
     APIKeyPatchRequest:
@@ -16425,6 +16425,7 @@ components:
           format: int64
           minimum: 1
           nullable: true
+          description: Total spending limit in whole points. Null clears the key-specific limit.
       additionalProperties: false
 
     APIKeyResponse:
@@ -16436,6 +16437,7 @@ components:
         - enabled
         - concurrencyLimit
         - quotaUsed
+        - requestCount
         - activeRequests
         - createdAt
         - updatedAt
@@ -16458,13 +16460,19 @@ components:
           type: integer
           format: int64
           nullable: true
+          description: Total spending limit in whole points. Omitted when unlimited.
         quotaUsed:
-          type: integer
-          format: int64
+          allOf:
+            - $ref: "#/components/schemas/NonNegativeLedgerAmount"
+          description: Points actually debited through this key minus refunded points. This is a decimal string, not a request count.
         remainingQuota:
+          type: string
+          nullable: true
+          description: Remaining point quota as a decimal string, max(quotaLimit - quotaUsed, 0). Omitted when unlimited.
+        requestCount:
           type: integer
           format: int64
-          nullable: true
+          description: Number of requests admitted through API key authentication, including requests whose business operation fails. Queries do not consume point quota.
         activeRequests:
           type: integer
         expireAt:

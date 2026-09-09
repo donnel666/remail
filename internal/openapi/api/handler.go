@@ -10,10 +10,12 @@ import (
 	"strings"
 
 	"github.com/donnel666/remail/api/middleware"
+	"github.com/donnel666/remail/internal/money"
 	openapiapp "github.com/donnel666/remail/internal/openapi/app"
 	"github.com/donnel666/remail/internal/openapi/domain"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 type Handler struct {
@@ -129,7 +131,31 @@ func (h *Handler) GetAPIKeyProfile(c *gin.Context) {
 		writeOpenAPIError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, KeyProfileResponse{APIKey: apiKeyResponse(*item, false)})
+	if h.mod.ConsumerBalances == nil {
+		writeOpenAPIError(c, errors.New("wallet balances unavailable"))
+		return
+	}
+	balances, err := h.mod.ConsumerBalances(c.Request.Context(), []uint{userID})
+	if err != nil {
+		writeOpenAPIError(c, err)
+		return
+	}
+	balance, ok := balances[userID]
+	if !ok {
+		balance = "0.00"
+	}
+	available, err := money.Parse(balance)
+	if err != nil {
+		writeOpenAPIError(c, err)
+		return
+	}
+	if item.QuotaLimit != nil {
+		available = decimal.Min(available, decimal.NewFromInt(*item.QuotaLimit).Sub(item.QuotaUsed))
+	}
+	c.JSON(http.StatusOK, KeyProfileResponse{APIKey: KeyProfile{
+		KeyResponse: apiKeyResponse(*item, false),
+		Balance:     money.Format(decimal.Max(decimal.Zero, available)),
+	}})
 }
 
 func (h *Handler) GetAPIKey(c *gin.Context) {
@@ -379,8 +405,9 @@ func apiKeyResponse(item domain.APIKey, includePlain bool) KeyResponse {
 		Enabled:          item.Enabled,
 		ConcurrencyLimit: item.ConcurrencyLimit,
 		QuotaLimit:       item.QuotaLimit,
-		QuotaUsed:        item.QuotaUsed,
+		QuotaUsed:        money.Format(item.QuotaUsed),
 		RemainingQuota:   remainingAPIKeyQuota(item),
+		RequestCount:     item.RequestCount,
 		ActiveRequests:   item.ActiveRequests,
 		ExpireAt:         item.ExpireAt,
 		LastUsedAt:       item.LastUsedAt,
@@ -413,13 +440,10 @@ func writeOpenAPIError(c *gin.Context, err error) {
 	}
 }
 
-func remainingAPIKeyQuota(item domain.APIKey) *int64 {
+func remainingAPIKeyQuota(item domain.APIKey) *string {
 	if item.QuotaLimit == nil {
 		return nil
 	}
-	remaining := *item.QuotaLimit - item.QuotaUsed
-	if remaining < 0 {
-		remaining = 0
-	}
+	remaining := money.Format(decimal.Max(decimal.Zero, decimal.NewFromInt(*item.QuotaLimit).Sub(item.QuotaUsed)))
 	return &remaining
 }

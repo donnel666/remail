@@ -40,6 +40,7 @@ type OrderingByTypePort interface {
 
 type WalletCommand struct {
 	UserID         uint
+	APIKeyID       *uint
 	Amount         string
 	Reason         string
 	IdempotencyKey string
@@ -2145,6 +2146,7 @@ func (uc *UseCase) AdminRetryOrderRefund(ctx context.Context, req AdminOrderComm
 		}
 		refund, err := uc.wallet.RefundConsumer(txCtx, WalletCommand{
 			UserID:         locked.UserID,
+			APIKeyID:       locked.APIKeyID,
 			Amount:         locked.PayAmount,
 			Reason:         "order:" + locked.OrderNo,
 			IdempotencyKey: idempotencyKey,
@@ -2531,6 +2533,7 @@ func (uc *UseCase) refundOrder(ctx context.Context, req refundOrderRequest) (*do
 		}
 		refund, err := uc.wallet.RefundConsumer(txCtx, WalletCommand{
 			UserID:         locked.UserID,
+			APIKeyID:       locked.APIKeyID,
 			Amount:         locked.PayAmount,
 			Reason:         "order:" + locked.OrderNo,
 			IdempotencyKey: idempotencyKey,
@@ -2849,6 +2852,7 @@ func (uc *UseCase) payPendingCheckout(ctx context.Context, orderNo string, userI
 		}
 		debit, err := uc.wallet.DebitConsumer(txCtx, WalletCommand{
 			UserID:         userID,
+			APIKeyID:       locked.APIKeyID,
 			Amount:         payAmount,
 			Reason:         "order:" + orderNo,
 			IdempotencyKey: "order:" + orderNo + ":debit",
@@ -3017,6 +3021,7 @@ func allocatedCheckoutPayAmount(order domain.Order, quote OrderingQuote, allocat
 func (uc *UseCase) refundPaidOrder(ctx context.Context, order domain.Order, failureCode domain.OrderFailureCode, reason string) (*domain.Order, error) {
 	refund, err := uc.wallet.RefundConsumer(ctx, WalletCommand{
 		UserID:         order.UserID,
+		APIKeyID:       order.APIKeyID,
 		Amount:         order.PayAmount,
 		Reason:         "order:" + order.OrderNo,
 		IdempotencyKey: "order:" + order.OrderNo + ":refund",

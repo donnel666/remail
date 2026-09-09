@@ -6461,7 +6461,7 @@ export interface components {
             concurrencyLimit?: number | null;
             /**
              * Format: int64
-             * @description Empty means unlimited total requests.
+             * @description Total spending limit in whole points. Empty means no key-specific limit; spending is still limited by the user's consumer wallet.
              */
             quotaLimit?: number | null;
         };
@@ -6472,7 +6472,10 @@ export interface components {
             expireAt?: string | null;
             /** @description Empty inherits the user's group limit. Explicit values are still capped by the group limit; a group limit of 0 falls back to the system default of 500. */
             concurrencyLimit?: number | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Total spending limit in whole points. Null clears the key-specific limit.
+             */
             quotaLimit?: number | null;
         };
         APIKeyResponse: {
@@ -6483,12 +6486,20 @@ export interface components {
             keyPlain?: string;
             enabled: boolean;
             concurrencyLimit: number | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Total spending limit in whole points. Omitted when unlimited.
+             */
             quotaLimit?: number | null;
-            /** Format: int64 */
-            quotaUsed: number;
-            /** Format: int64 */
-            remainingQuota?: number | null;
+            /** @description Points actually debited through this key minus refunded points. This is a decimal string, not a request count. */
+            quotaUsed: components["schemas"]["NonNegativeLedgerAmount"];
+            /** @description Remaining point quota as a decimal string, max(quotaLimit - quotaUsed, 0). Omitted when unlimited. */
+            remainingQuota?: string | null;
+            /**
+             * Format: int64
+             * @description Number of requests admitted through API key authentication, including requests whose business operation fails. Queries do not consume point quota.
+             */
+            requestCount: number;
             activeRequests: number;
             /** Format: date-time */
             expireAt?: string | null;

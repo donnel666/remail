@@ -26,6 +26,7 @@ import { useTranslation } from "react-i18next";
 import { createCopyableConfig } from "@/components/semi/copyable-config";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { getIamErrorMessage } from "@/lib/iam-errors";
+import { formatPointsValue } from "@/lib/points";
 import {
   createAPIKey,
   deleteAPIKey,
@@ -45,7 +46,7 @@ interface ApiKeyRecord {
   lastUsedAt: string;
   name: string;
   quota: number | null;
-  quotaUsed: number;
+  remainingQuota: string | null;
   token: string;
 }
 
@@ -81,7 +82,7 @@ function toApiKeyRecord(item: APIKeyResponse): ApiKeyRecord {
     lastUsedAt: formatDateTime(item.lastUsedAt),
     name: item.name || item.keyPrefix,
     quota: item.quotaLimit ?? null,
-    quotaUsed: item.quotaUsed,
+    remainingQuota: item.remainingQuota ?? null,
     token: item.keyPlain || item.keyPrefix,
   };
 }
@@ -91,11 +92,6 @@ function getRemainingDays(expiresAt: string | null) {
   const expiresAtTime = new Date(`${expiresAt}T23:59:59`).getTime();
   if (!Number.isFinite(expiresAtTime)) return null;
   return Math.max(0, Math.ceil((expiresAtTime - Date.now()) / 86_400_000));
-}
-
-function getRemainingQuota(record: ApiKeyRecord) {
-  if (record.quota == null) return null;
-  return Math.max(0, record.quota - record.quotaUsed);
 }
 
 function normalizeOptionalPositiveInteger(value: number | string | null | undefined) {
@@ -376,7 +372,7 @@ export function ApiKeyPanel() {
                       <Text size="small" strong>
                         {record.quota == null
                           ? t("Unlimited")
-                          : (getRemainingQuota(record) ?? 0).toLocaleString()}
+                          : formatPointsValue(record.remainingQuota ?? "0.00")}
                       </Text>
                     </div>
                     <div className="account-api-key-limit">

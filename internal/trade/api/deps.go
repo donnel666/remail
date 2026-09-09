@@ -382,6 +382,7 @@ func (a billingWalletAdapter) LockConsumer(ctx context.Context, userID uint) err
 func (a billingWalletAdapter) DebitConsumer(ctx context.Context, cmd tradeapp.WalletCommand) (*tradeapp.WalletTransaction, error) {
 	result, err := a.wallet.DebitConsumer(ctx, billingapp.AdjustConsumerBalanceRequest{
 		UserID:         cmd.UserID,
+		APIKeyID:       cmd.APIKeyID,
 		Amount:         cmd.Amount,
 		Reason:         cmd.Reason,
 		IdempotencyKey: cmd.IdempotencyKey,
@@ -407,6 +408,7 @@ func (a billingWalletAdapter) RecordHistoricalZeroDebit(ctx context.Context, cmd
 func (a billingWalletAdapter) RefundConsumer(ctx context.Context, cmd tradeapp.WalletCommand) (*tradeapp.WalletTransaction, error) {
 	result, err := a.wallet.RefundConsumer(ctx, billingapp.AdjustConsumerBalanceRequest{
 		UserID:         cmd.UserID,
+		APIKeyID:       cmd.APIKeyID,
 		Amount:         cmd.Amount,
 		Reason:         cmd.Reason,
 		IdempotencyKey: cmd.IdempotencyKey,

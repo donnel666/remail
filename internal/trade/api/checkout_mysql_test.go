@@ -2202,7 +2202,7 @@ INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
 	require.Nil(t, storedDefault.ConcurrencyLimit)
 }
 
-func TestAPIKeyQuotaAndNullableLimitsMySQL(t *testing.T) {
+func TestAPIKeyPointQuotaAndNullableLimitsMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
 	require.NoError(t, db.Exec(`
 INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
@@ -2220,13 +2220,11 @@ INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
 	})
 	require.NoError(t, err)
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 		acquired, err := openapiMod.UseCase.BeginAPIKeyRequest(context.Background(), key.KeyPlain)
 		require.NoError(t, err)
 		require.NoError(t, openapiMod.UseCase.FinishAPIKeyRequest(context.Background(), acquired.UserID, acquired.APIKeyID, acquired.LeaseID))
 	}
-	_, err = openapiMod.UseCase.BeginAPIKeyRequest(context.Background(), key.KeyPlain)
-	require.ErrorIs(t, err, openapidomain.ErrAPIKeyQuotaExceeded)
 
 	updated, err := openapiMod.UseCase.UpdateAPIKey(context.Background(), openapiapp.UpdateAPIKeyRequest{
 		UserID:           2,
@@ -2284,27 +2282,22 @@ INSERT INTO users(id, email, password_hash, nickname, status, role) VALUES
 	close(errs)
 
 	successes := 0
-	quotaExceeded := 0
 	for err := range errs {
-		if err == nil {
-			successes++
-			continue
-		}
-		require.ErrorIs(t, err, openapidomain.ErrAPIKeyQuotaExceeded)
-		quotaExceeded++
+		require.NoError(t, err)
+		successes++
 	}
-	require.Equal(t, 1, successes)
-	require.Equal(t, attempts-1, quotaExceeded)
+	require.Equal(t, attempts, successes)
 
 	require.NoError(t, openapiMod.UseCase.FlushRuntime(context.Background()))
-	var quotaUsed int64
-	require.NoError(t, db.Table("api_keys").Select("quota_used").Where("id = ?", concurrentKey.ID).Scan(&quotaUsed).Error)
-	require.EqualValues(t, 1, quotaUsed)
+	stored, err := openapiMod.UseCase.GetAPIKey(context.Background(), 2, concurrentKey.ID)
+	require.NoError(t, err)
+	require.EqualValues(t, attempts, stored.RequestCount)
+	require.True(t, stored.QuotaUsed.IsZero())
 
 	usage, err := openapiMod.UseCase.GetAPIKeyUsage(context.Background(), 2)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, usage.KeyCount)
-	require.EqualValues(t, 4, usage.RequestCount)
+	require.EqualValues(t, 4+attempts, usage.RequestCount)
 }
 
 func TestInactiveAPIKeyOwnerCannotOrderMySQL(t *testing.T) {

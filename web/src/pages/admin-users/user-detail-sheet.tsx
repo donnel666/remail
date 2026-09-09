@@ -39,6 +39,7 @@ import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedDashboardDateRange } from "@/hooks/use-shared-dashboard-date-range";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
+import { sumPointValues } from "@/lib/points";
 import {
   DATE_RANGE_DROPDOWN_CLASS,
   createDateRangePresets,
@@ -1477,9 +1478,9 @@ function ApiKeysTab({
           width: 140,
           render: (_: unknown, record: AdminApiKey) => (
             <span className="font-mono-data">
-              {record.quotaLimit == null
+              {formatMoney(record.quotaUsed)} / {record.quotaLimit == null
                 ? t("Unlimited")
-                : `${record.quotaUsed.toLocaleString()} / ${record.quotaLimit.toLocaleString()}`}
+                : formatMoney(record.quotaLimit)}
             </span>
           ),
         },
@@ -1543,7 +1544,7 @@ function ApiKeysTab({
   );
 
   const activeCount = apiKeys.filter((item) => item.enabled).length;
-  const usedQuota = apiKeys.reduce((sum, item) => sum + item.quotaUsed, 0);
+  const usedQuota = sumPointValues(apiKeys.map((item) => item.quotaUsed));
 
   return (
     <div>
@@ -1583,7 +1584,7 @@ function ApiKeysTab({
         />
         <InfoItem
           label={t("Quota used")}
-          value={<span className="font-mono-data">{usedQuota.toLocaleString()}</span>}
+          value={<span className="font-mono-data">{formatMoney(usedQuota)}</span>}
         />
       </div>
 

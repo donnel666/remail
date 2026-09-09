@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+
 	openapiapp "github.com/donnel666/remail/internal/openapi/app"
 	openapiinfra "github.com/donnel666/remail/internal/openapi/infra"
 	"github.com/redis/go-redis/v9"
@@ -8,7 +10,8 @@ import (
 )
 
 type Module struct {
-	UseCase *openapiapp.UseCase
+	UseCase          *openapiapp.UseCase
+	ConsumerBalances func(context.Context, []uint) (map[uint]string, error)
 }
 
 func NewModule(db *gorm.DB, redisClients ...redis.UniversalClient) *Module {

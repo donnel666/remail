@@ -125,8 +125,9 @@ export interface AdminApiKey {
   enabled: boolean;
   concurrencyLimit: number | null;
   quotaLimit?: number | null;
-  quotaUsed: number;
-  remainingQuota?: number | null;
+  quotaUsed: string;
+  remainingQuota?: string | null;
+  requestCount: number;
   activeRequests: number;
   expireAt?: string | null;
   lastUsedAt?: string | null;

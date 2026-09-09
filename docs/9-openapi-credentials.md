@@ -13,6 +13,7 @@
 | 2026-07-20 | V1.6 | Codex | 稳定 API 新增独立批量下单入口；原单笔下单契约不变，批量入口按索引返回独立订单的逐项结果。 |
 | 2026-07-20 | V1.7 | Codex | 公开取件 API 新增批量入口，一次读取 2 到 200 组 `email + token` 并按输入顺序返回逐项结果，同时增加客户端 IP 限流并保留逐 Token 限流。 |
 | 2026-07-25 | V1.8 | Codex | API Key 移除每分钟请求上限，统一保留实时并发请求数上限与总调用额度。 |
+| 2026-09-08 | V1.9 | Codex | Key 额度统一为积分：实际扣款增加 `quotaUsed`、退款归还额度，请求次数独立为 `requestCount`；当前 Key 信息新增 `balance`，取剩余额度与钱包余额的较小值。 |
 
 > 通用域。BC-OPENAPI 负责 API Key、OrderToken、请求入口保护和日志，不拥有订单服务数据。
 
@@ -45,8 +46,13 @@ API Key 限制补充设计：
 | 字段 | 规则 |
 |------|------|
 | `concurrency` | 正整数；省略时继承用户分组并发上限，显式值仍受分组上限约束。分组上限为 `0` 时不额外限制，最终回退到系统默认 `500`。 |
-| `quotaLimit` | `null` 表示不限制总请求额度；正整数表示该 Key 可消费的总请求次数。 |
-| `quotaUsed` | 鉴权通过并进入业务入口前原子递增；不得超过 `quotaLimit`。 |
+| `quotaLimit` | `null` 表示不限制 Key 的积分额度；正整数表示该 Key 的累计消费积分上限，仍受用户钱包余额约束。历史用量超限时，允许保留原额度编辑名称、有效期和并发；实际调整额度仍不得低于已用积分。 |
+| `quotaUsed` | 该 Key 实际扣除的积分减去已退回的积分；使用十进制字符串，最多六位小数。扣款、退款和额度更新在同一钱包事务内幂等执行。查询和未扣款的失败请求不消耗积分。 |
+| `remainingQuota` | 剩余积分额度，等于 `max(quotaLimit - quotaUsed, 0)`，使用十进制字符串；未设置上限时省略。 |
+| `balance` | 仅当前 Key 信息接口返回：未设置额度时为所属用户的 `consumerBalance`；设置额度时为 `min(remainingQuota, consumerBalance)`。没有钱包或余额耗尽时为 `"0.00"`，使用最多六位小数的十进制字符串。 |
+| `requestCount` | 累计请求次数，单位为次；鉴权通过并进入业务入口前递增 1，业务执行失败也计数，与积分分别统计。 |
+
+139 号迁移把旧 `quota_used` 次数保存到 `request_count`，按订单实际扣款及退款流水回填积分用量；现有 `quotaLimit` 保留数值并作为积分上限，历史消费超过上限时剩余额度为零。中断重跑会跳过已完成的改表并重新回填，不覆盖保存的请求次数。`quotaUsed`、`remainingQuota` 的接口类型由整数变为积分字符串。部署时须先停止旧版本的次数写入，执行迁移后再启动新版本；该语义迁移不支持回退到按次数计额度的旧版本。
 
 ---
 
@@ -66,12 +72,12 @@ API Key 限制补充设计：
 按提交的完整 API Key 明文与数据库保存值做等值校验，rk- 只是生成前缀，不作为鉴权策略分支
 校验用户启用/凭证启用/过期
 校验该接口是否允许该 principalType
-额度校验和并发占用
+并发占用和请求次数统计
 注入 Principal 到上下文
 请求结束释放并发占用
 ```
 
-成功请求不逐条写 MySQL 日志。API Key 使用总量由 `quota_used` 每 5 秒批量落库，HTTP 延迟/状态由 Prometheus 聚合；异常通过 requestId 和安全结构化日志定位，避免高 QPS 下每天产生亿级 `api_logs`。
+成功请求不逐条写 MySQL 日志。API Key 请求次数由 `request_count` 每 5 秒批量落库，积分用量 `quota_used` 与实际钱包扣款/退款同步更新；HTTP 延迟/状态由 Prometheus 聚合，异常通过 requestId 和安全结构化日志定位。
 
 ---
 
@@ -86,7 +92,7 @@ API Key 限制补充设计：
 | INV-O5 | 服务结束时 Trade 必须同步禁用 OrderToken。 |
 | INV-O6 | 购买邮箱正常服务长期有效，Token 不因质保到期自动过期。 |
 | INV-O7 | API Key 和 Token 明文不得进入普通日志和错误响应。 |
-| INV-O8 | 额度耗尽或并发超限必须在进入业务域前拒绝。 |
+| INV-O8 | 并发超限在业务入口拒绝；积分额度不足在钱包扣款事务内拒绝，不影响余额查询等免费操作。 |
 
 ---
 
@@ -136,7 +142,7 @@ SDK 可调用接口示例：
 
 | 方法 | URI | 说明 |
 |------|-----|------|
-| `GET` | `/v1/open/apikey/profile` | 查询当前 API Key 的额度、并发、过期时间和使用状态。 |
+| `GET` | `/v1/open/apikey/profile` | 查询当前 API Key 的已用积分、剩余积分额度、可用积分余额（`apiKey.balance`）、请求次数、并发、过期时间和使用状态。 |
 | `GET` | `/v1/open/projects` | API Key 查询可见项目。 |
 | `GET` | `/v1/open/projects/{projectId}` | API Key 查询可见项目详情。 |
 | `POST` | `/v1/open/orders` | API Key 单笔下单。 |

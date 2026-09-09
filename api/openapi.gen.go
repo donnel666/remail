@@ -6916,7 +6916,7 @@ type APIKeyCreateRequest struct {
 	ExpireAt         *time.Time `json:"expireAt,omitempty"`
 	Name             *string    `json:"name,omitempty"`
 
-	// QuotaLimit Empty means unlimited total requests.
+	// QuotaLimit Total spending limit in whole points. Empty means no key-specific limit; spending is still limited by the user's consumer wallet.
 	QuotaLimit *int64 `json:"quotaLimit,omitempty"`
 }
 
@@ -6935,7 +6935,9 @@ type APIKeyPatchRequest struct {
 	Enabled          *bool      `json:"enabled,omitempty"`
 	ExpireAt         *time.Time `json:"expireAt,omitempty"`
 	Name             *string    `json:"name,omitempty"`
-	QuotaLimit       *int64     `json:"quotaLimit,omitempty"`
+
+	// QuotaLimit Total spending limit in whole points. Null clears the key-specific limit.
+	QuotaLimit *int64 `json:"quotaLimit,omitempty"`
 }
 
 // APIKeyRealtimeUsageResponse defines model for APIKeyRealtimeUsageResponse.
@@ -6957,14 +6959,23 @@ type APIKeyResponse struct {
 	Id               int        `json:"id"`
 
 	// KeyPlain Plain API key returned to its owner on create, list, and detail views.
-	KeyPlain       *string    `json:"keyPlain,omitempty"`
-	KeyPrefix      string     `json:"keyPrefix"`
-	LastUsedAt     *time.Time `json:"lastUsedAt,omitempty"`
-	Name           string     `json:"name"`
-	QuotaLimit     *int64     `json:"quotaLimit,omitempty"`
-	QuotaUsed      int64      `json:"quotaUsed"`
-	RemainingQuota *int64     `json:"remainingQuota,omitempty"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
+	KeyPlain   *string    `json:"keyPlain,omitempty"`
+	KeyPrefix  string     `json:"keyPrefix"`
+	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+	Name       string     `json:"name"`
+
+	// QuotaLimit Total spending limit in whole points. Omitted when unlimited.
+	QuotaLimit *int64 `json:"quotaLimit,omitempty"`
+
+	// QuotaUsed Points actually debited through this key minus refunded points. This is a decimal string, not a request count.
+	QuotaUsed NonNegativeLedgerAmount `json:"quotaUsed"`
+
+	// RemainingQuota Remaining point quota as a decimal string, max(quotaLimit - quotaUsed, 0). Omitted when unlimited.
+	RemainingQuota *string `json:"remainingQuota,omitempty"`
+
+	// RequestCount Number of requests admitted through API key authentication, including requests whose business operation fails. Queries do not consume point quota.
+	RequestCount int64     `json:"requestCount"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 // APIKeyUsageResponse defines model for APIKeyUsageResponse.

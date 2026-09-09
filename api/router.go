@@ -306,6 +306,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		// OpenAPI credentials and order service tokens.
 		openapiMod := openapiapi.NewModule(p.DB, p.Redis)
+		openapiMod.ConsumerBalances = billingMod.WalletUseCase.ListConsumerBalances
 		cleanupFuncs = append(cleanupFuncs, func(ctx context.Context) {
 			if err := openapiMod.UseCase.Close(ctx); err != nil {
 				slog.Error("failed to flush OpenAPI runtime state during shutdown", "error", err)

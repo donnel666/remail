@@ -1333,6 +1333,7 @@ func (r *BillingRepo) adjustConsumerBalanceInTx(ctx context.Context, tx *gorm.DB
 	result, err := r.createConsumerTransaction(ctx, tx, wallet, consumerTransactionRequest{
 		UserID:          req.UserID,
 		Amount:          req.Amount,
+		APIKeyID:        req.APIKeyID,
 		Direction:       req.Direction,
 		TransactionType: req.TransactionType,
 		ClampToBalance:  req.ClampToBalance,
@@ -1612,6 +1613,7 @@ func (r *BillingRepo) lockWalletsInTx(ctx context.Context, tx *gorm.DB, userIDs 
 
 type consumerTransactionRequest struct {
 	UserID          uint
+	APIKeyID        *uint
 	Amount          string
 	Direction       domain.TransactionDirection
 	TransactionType domain.TransactionType
@@ -1654,6 +1656,27 @@ func (r *BillingRepo) createConsumerTransaction(ctx context.Context, tx *gorm.DB
 	}
 	amountString := domain.MoneyString(signedAmount)
 	beforeString := domain.MoneyString(before)
+	if req.APIKeyID != nil {
+		if *req.APIKeyID == 0 || (req.TransactionType != domain.TransactionTypeDebit && req.TransactionType != domain.TransactionTypeRefund) {
+			return nil, domain.ErrInvalidTransactionType
+		}
+		if !amount.IsZero() {
+			// Check both balances before writing the wallet transaction. The guarded
+			// update and wallet write share its transaction and idempotency receipt.
+			query := tx.WithContext(ctx).Table("api_keys").Where("id = ? AND user_id = ?", *req.APIKeyID, req.UserID)
+			if req.Direction == domain.TransactionDirectionOut {
+				query = query.Where("deleted_at IS NULL AND enabled = ? AND (expire_at IS NULL OR expire_at > ?)", true, time.Now().UTC()).
+					Where("quota_limit IS NULL OR quota_used - CAST(? AS DECIMAL(18,6)) <= quota_limit", amountString)
+			}
+			updated := query.UpdateColumn("quota_used", gorm.Expr("GREATEST(quota_used - CAST(? AS DECIMAL(18,6)), 0)", amountString))
+			if updated.Error != nil {
+				return nil, fmt.Errorf("update api key point usage: %w", updated.Error)
+			}
+			if updated.RowsAffected == 0 {
+				return nil, domain.ErrInsufficientBalance
+			}
+		}
+	}
 	transaction := WalletTransactionModel{
 		TransactionNo:   nextTransactionNo(),
 		UserID:          req.UserID,

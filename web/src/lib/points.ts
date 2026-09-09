@@ -35,6 +35,19 @@ export function formatPointsValue(value: PointValue) {
   return fraction ? `${grouped}.${fraction}` : grouped;
 }
 
+export function sumPointValues(values: readonly PointValue[]) {
+  let units = 0n;
+  for (const value of values) {
+    const normalized = normalizePointValue(value);
+    if (!normalized) return "";
+    const [integer, fraction = ""] = normalized.split(".");
+    units += BigInt(integer + fraction.padEnd(6, "0"));
+  }
+  const sign = units < 0n ? "-" : "";
+  const digits = (units < 0n ? -units : units).toString().padStart(7, "0");
+  return `${sign}${digits.slice(0, -6)}.${digits.slice(-6)}`;
+}
+
 export function formatPoints(value: PointValue) {
   const normalized = normalizePointValue(value);
   if (!normalized) return "—";

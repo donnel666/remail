@@ -28,8 +28,9 @@ type KeyResponse struct {
 	Enabled          bool       `json:"enabled"`
 	ConcurrencyLimit *int       `json:"concurrencyLimit"`
 	QuotaLimit       *int64     `json:"quotaLimit,omitempty"`
-	QuotaUsed        int64      `json:"quotaUsed"`
-	RemainingQuota   *int64     `json:"remainingQuota,omitempty"`
+	QuotaUsed        string     `json:"quotaUsed"`
+	RemainingQuota   *string    `json:"remainingQuota,omitempty"`
+	RequestCount     int64      `json:"requestCount"`
 	ActiveRequests   int        `json:"activeRequests"`
 	ExpireAt         *time.Time `json:"expireAt,omitempty"`
 	LastUsedAt       *time.Time `json:"lastUsedAt,omitempty"`
@@ -55,5 +56,10 @@ type KeyRealtimeUsageResponse struct {
 }
 
 type KeyProfileResponse struct {
-	APIKey KeyResponse `json:"apiKey"`
+	APIKey KeyProfile `json:"apiKey"`
+}
+
+type KeyProfile struct {
+	KeyResponse
+	Balance string `json:"balance"`
 }

@@ -38,9 +38,9 @@ type apiKeyState struct {
 
 	active int
 
-	quotaDelta int64
-	lastUsedAt time.Time
-	recent     []time.Time
+	requestDelta int64
+	lastUsedAt   time.Time
+	recent       []time.Time
 }
 
 func newAPIKeyRuntime(repo Repository, now func() time.Time, concurrencyGates ...APIKeyConcurrencyGate) *apiKeyRuntime {
@@ -88,9 +88,6 @@ func (rt *apiKeyRuntime) begin(ctx context.Context, plain string, leaseIDs ...st
 	if meta.ExpireAt != nil && !meta.ExpireAt.After(now) {
 		return nil, domain.ErrAPIKeyExpired
 	}
-	if meta.QuotaLimit != nil && meta.QuotaUsed+state.quotaDelta >= *meta.QuotaLimit {
-		return nil, domain.ErrAPIKeyQuotaExceeded
-	}
 	limit := effectiveAPIKeyConcurrency(meta.ConcurrencyLimit, groupConcurrencyLimit)
 	globalActive := 0
 	if rt.concurrencyGate == nil {
@@ -112,7 +109,7 @@ func (rt *apiKeyRuntime) begin(ctx context.Context, plain string, leaseIDs ...st
 		}
 	}
 	state.active++
-	state.quotaDelta++
+	state.requestDelta++
 	state.lastUsedAt = now
 	if rt.concurrencyGate == nil {
 		state.trimRecentLocked(now.Add(-apiKeyRPMWindow))
@@ -209,7 +206,7 @@ func (rt *apiKeyRuntime) overlayKeys(items []domain.APIKey) {
 		}
 		state.mu.Lock()
 		items[i].ActiveRequests = state.active
-		items[i].QuotaUsed += state.quotaDelta
+		items[i].RequestCount += state.requestDelta
 		if !state.lastUsedAt.IsZero() {
 			lastUsedAt := state.lastUsedAt
 			items[i].LastUsedAt = &lastUsedAt
@@ -218,7 +215,7 @@ func (rt *apiKeyRuntime) overlayKeys(items []domain.APIKey) {
 	}
 }
 
-func (rt *apiKeyRuntime) quotaDeltaForUser(userID uint) int64 {
+func (rt *apiKeyRuntime) requestDeltaForUser(userID uint) int64 {
 	var total int64
 	rt.mu.RLock()
 	states := make([]*apiKeyState, 0, len(rt.byID))
@@ -229,7 +226,7 @@ func (rt *apiKeyRuntime) quotaDeltaForUser(userID uint) int64 {
 	for _, state := range states {
 		state.mu.Lock()
 		if state.meta.UserID == userID {
-			total += state.quotaDelta
+			total += state.requestDelta
 		}
 		state.mu.Unlock()
 	}
@@ -284,7 +281,7 @@ func (rt *apiKeyRuntime) reloadStateLocked(ctx context.Context, state *apiKeySta
 func (state *apiKeyState) overlayLocked(now time.Time) domain.APIKey {
 	meta := state.meta
 	meta.ActiveRequests = state.active
-	meta.QuotaUsed += state.quotaDelta
+	meta.RequestCount += state.requestDelta
 	if !state.lastUsedAt.IsZero() {
 		lastUsedAt := state.lastUsedAt
 		meta.LastUsedAt = &lastUsedAt
@@ -322,10 +319,10 @@ func (rt *apiKeyRuntime) close(ctx context.Context) error {
 }
 
 func (rt *apiKeyRuntime) flush(ctx context.Context) error {
-	return rt.flushQuota(ctx)
+	return rt.flushRequests(ctx)
 }
 
-func (rt *apiKeyRuntime) flushQuota(ctx context.Context) error {
+func (rt *apiKeyRuntime) flushRequests(ctx context.Context) error {
 	rt.mu.RLock()
 	states := make([]*apiKeyState, 0, len(rt.byID))
 	for _, state := range rt.byID {
@@ -335,23 +332,23 @@ func (rt *apiKeyRuntime) flushQuota(ctx context.Context) error {
 	var errs []error
 	for _, state := range states {
 		state.mu.Lock()
-		delta := state.quotaDelta
+		delta := state.requestDelta
 		lastUsedAt := state.lastUsedAt
 		if delta == 0 {
 			state.mu.Unlock()
 			continue
 		}
-		if err := rt.repo.AddAPIKeyQuotaUsed(ctx, state.meta.ID, delta, lastUsedAt); err != nil {
+		if err := rt.repo.AddAPIKeyRequestCount(ctx, state.meta.ID, delta, lastUsedAt); err != nil {
 			errs = append(errs, err)
 			state.mu.Unlock()
 			continue
 		}
-		state.meta.QuotaUsed += delta
+		state.meta.RequestCount += delta
 		if !lastUsedAt.IsZero() {
 			lastUsedAtCopy := lastUsedAt
 			state.meta.LastUsedAt = &lastUsedAtCopy
 		}
-		state.quotaDelta = 0
+		state.requestDelta = 0
 		state.mu.Unlock()
 	}
 	return errors.Join(errs...)
