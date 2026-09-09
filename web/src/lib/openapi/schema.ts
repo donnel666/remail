@@ -6656,7 +6656,7 @@ export interface components {
             clientChannel: "console" | "api_key";
             apiKeyId?: number | null;
             serviceCleanupStatus: string;
-            /** @description Service credential used by pickup URLs and later mail-result APIs. */
+            /** @description Grants mail access only for this order's project through system pickup APIs. Both purchase and code modes keep resource passwords, 2FA secrets, application passwords, and provider tokens write-only; they are never returned in order responses. */
             serviceToken?: string;
             /** @description Whether the order already has a matched delivery. Purchase deliveries may have no verification code. */
             hasDelivery: boolean;
@@ -6667,12 +6667,6 @@ export interface components {
              * @description Provider receive time of the delivered message.
              */
             lastMailReceivedAt?: string | null;
-            /** @description Local Gmail purchase password. Returned only by checkout and authorized order-detail reads; omitted from order lists and resource APIs. */
-            gmailPassword?: string;
-            /** @description Local Gmail purchase 2FA secret. Returned only by checkout and authorized order-detail reads. */
-            gmailTwoFactorSecret?: string;
-            /** @description Local Gmail purchase application password. Returned only by checkout and authorized order-detail reads. */
-            gmailAppPassword?: string;
             /** Format: date-time */
             archivedAt?: string | null;
             /** Format: date-time */

@@ -2,12 +2,56 @@ package api
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	"github.com/donnel666/remail/internal/trade/domain"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOrderResponseOnlyExposesOrderAndPickupFields(t *testing.T) {
+	allowedFields := []string{
+		"id", "orderNo", "userId", "owner", "projectId", "projectName", "projectLogoUrl",
+		"productType", "serviceMode", "supplyPolicy", "status", "failureCode",
+		"payAmount", "refundAmount", "allocationType", "allocationId", "deliveryEmail",
+		"receiveStartedAt", "receiveUntil", "activatedAt", "afterSaleUntil",
+		"clientChannel", "apiKeyId", "serviceCleanupStatus", "serviceToken",
+		"hasDelivery", "verificationCode", "lastMailReceivedAt", "archivedAt", "createdAt", "updatedAt",
+	}
+	for _, product := range []domain.ProductType{
+		domain.ProductTypeMicrosoft, domain.ProductTypeDomain, domain.ProductTypeLegacyRandom,
+		domain.ProductTypeGmail, domain.ProductTypeGmailVariant, domain.ProductTypeICloud, domain.ProductTypeProto,
+	} {
+		for _, mode := range []domain.ServiceMode{domain.ServiceModePurchase, domain.ServiceModeCode} {
+			t.Run(string(product)+"/"+string(mode), func(t *testing.T) {
+				result := tradeapp.CheckoutResult{Order: domain.Order{
+					OrderNo: "ORDER-1", ProjectID: 17, ProductType: product, ServiceMode: mode,
+					DeliveryEmail: "delivery@example.test", Status: domain.OrderStatusActive,
+				}}
+				// Populate optional fields so omitempty cannot hide a resource credential leak.
+				fields := reflect.ValueOf(&result).Elem()
+				for i := 0; i < fields.NumField(); i++ {
+					if field := fields.Field(i); field.Kind() == reflect.String {
+						field.SetString("populated")
+					}
+				}
+				payload, err := json.Marshal(orderResponse(result))
+				require.NoError(t, err)
+				var response map[string]any
+				require.NoError(t, json.Unmarshal(payload, &response))
+				for field := range response {
+					require.Contains(t, allowedFields, field, "order responses must never expose resource credentials")
+				}
+				require.Equal(t, "populated", response["serviceToken"])
+				require.Equal(t, float64(17), response["projectId"])
+				require.Equal(t, "delivery@example.test", response["deliveryEmail"])
+				require.Equal(t, string(product), response["productType"])
+				require.Equal(t, string(mode), response["serviceMode"])
+			})
+		}
+	}
+}
 
 func TestOrderResponseMapsOptionalProjectLogoURL(t *testing.T) {
 	resp := orderResponse(tradeapp.CheckoutResult{

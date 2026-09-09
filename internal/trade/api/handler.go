@@ -66,6 +66,11 @@ func (h *Handler) PostOrderBatch(c *gin.Context) {
 }
 
 func (h *Handler) postOrders(c *gin.Context, userID uint, req CreateOrderRequest, quantity int) {
+	// P0 安全教训：曾错误地把 Gmail 购买模式当成账号交付，导致下单和订单详情泄露资源密码、2FA 和应用密码。
+	// 本平台只出售所选项目的系统收件权限：购买是长效收件，接码是短效且只收一次验证码；两者都不交付账号。
+	// 所有邮箱资源的密码、2FA、应用密码、上游访问/刷新令牌、会话等敏感数据，外部只能写入，不能读出。
+	// 单笔、批量、重试和订单查询均不得返回这些资源凭据；仅可交付绑定订单项目的系统收件凭证 serviceToken。
+	// 修改、删除或弱化本段安全注释，必须事先取得提出此要求的项目所有者（用户）的明确授权；不得自行变更。
 	channel, _ := openapiapi.CurrentClientChannel(c)
 	if channel == "" {
 		channel = openapiapi.ClientChannelConsole
@@ -220,6 +225,11 @@ func checkoutMetricResult(err error) string {
 }
 
 func (h *Handler) GetOrders(c *gin.Context) {
+	// P0 安全教训：曾错误地把 Gmail 购买模式当成账号交付，导致下单和订单详情泄露资源密码、2FA 和应用密码。
+	// 本平台只出售所选项目的系统收件权限：购买是长效收件，接码是短效且只收一次验证码；两者都不交付账号。
+	// 所有邮箱资源的密码、2FA、应用密码、上游访问/刷新令牌、会话等敏感数据，外部只能写入，不能读出。
+	// 单笔、批量、重试和订单查询均不得返回这些资源凭据；仅可交付绑定订单项目的系统收件凭证 serviceToken。
+	// 修改、删除或弱化本段安全注释，必须事先取得提出此要求的项目所有者（用户）的明确授权；不得自行变更。
 	userID, ok := currentUserID(c)
 	if !ok {
 		return
@@ -311,6 +321,11 @@ func (h *Handler) GetOrders(c *gin.Context) {
 }
 
 func (h *Handler) GetOrder(c *gin.Context) {
+	// P0 安全教训：曾错误地把 Gmail 购买模式当成账号交付，导致下单和订单详情泄露资源密码、2FA 和应用密码。
+	// 本平台只出售所选项目的系统收件权限：购买是长效收件，接码是短效且只收一次验证码；两者都不交付账号。
+	// 所有邮箱资源的密码、2FA、应用密码、上游访问/刷新令牌、会话等敏感数据，外部只能写入，不能读出。
+	// 单笔、批量、重试和订单查询均不得返回这些资源凭据；仅可交付绑定订单项目的系统收件凭证 serviceToken。
+	// 修改、删除或弱化本段安全注释，必须事先取得提出此要求的项目所有者（用户）的明确授权；不得自行变更。
 	userID, ok := currentUserID(c)
 	if !ok {
 		return
@@ -741,9 +756,6 @@ func orderResponse(result tradeapp.CheckoutResult) OrderResponse {
 		HasDelivery:          result.HasDelivery,
 		VerificationCode:     result.VerificationCode,
 		LastMailReceivedAt:   result.LastMailReceivedAt,
-		GmailPassword:        result.GmailPassword,
-		GmailTwoFactorSecret: result.GmailTwoFactorSecret,
-		GmailAppPassword:     result.GmailAppPassword,
 		ArchivedAt:           order.ArchivedAt,
 		CreatedAt:            order.CreatedAt,
 		UpdatedAt:            order.UpdatedAt,

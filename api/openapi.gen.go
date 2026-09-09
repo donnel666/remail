@@ -11078,15 +11078,6 @@ type OrderResponse struct {
 	DeliveryEmail  string                       `json:"deliveryEmail"`
 	FailureCode    *OrderResponseFailureCode    `json:"failureCode,omitempty"`
 
-	// GmailAppPassword Local Gmail purchase application password. Returned only by checkout and authorized order-detail reads.
-	GmailAppPassword *string `json:"gmailAppPassword,omitempty"`
-
-	// GmailPassword Local Gmail purchase password. Returned only by checkout and authorized order-detail reads; omitted from order lists and resource APIs.
-	GmailPassword *string `json:"gmailPassword,omitempty"`
-
-	// GmailTwoFactorSecret Local Gmail purchase 2FA secret. Returned only by checkout and authorized order-detail reads.
-	GmailTwoFactorSecret *string `json:"gmailTwoFactorSecret,omitempty"`
-
 	// HasDelivery Whether the order already has a matched delivery. Purchase deliveries may have no verification code.
 	HasDelivery bool `json:"hasDelivery"`
 	Id          int  `json:"id"`
@@ -11118,7 +11109,7 @@ type OrderResponse struct {
 	ServiceCleanupStatus string                          `json:"serviceCleanupStatus"`
 	ServiceMode          OrderResponseServiceMode        `json:"serviceMode"`
 
-	// ServiceToken Service credential used by pickup URLs and later mail-result APIs.
+	// ServiceToken Grants mail access only for this order's project through system pickup APIs. Both purchase and code modes keep resource passwords, 2FA secrets, application passwords, and provider tokens write-only; they are never returned in order responses.
 	ServiceToken *string                   `json:"serviceToken,omitempty"`
 	Status       OrderResponseStatus       `json:"status"`
 	SupplyPolicy OrderResponseSupplyPolicy `json:"supplyPolicy"`

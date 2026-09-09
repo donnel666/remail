@@ -150,28 +150,6 @@ export function OrderDetailModal({
               <CopyableValue copiedText={t("Copied")} text={order.deliveryEmail} />
             }
           />
-          {(order.productType === "gmail" || order.productType === "gmail_variant") &&
-          order.serviceMode === "purchase" &&
-          order.gmailPassword ? (
-            <>
-              <DetailRow
-                label={t("Password")}
-                value={<SecretValue copyContent={order.gmailPassword} text={maskSecret(order.gmailPassword)} />}
-              />
-              {order.gmailTwoFactorSecret ? (
-                <DetailRow
-                  label="2FA"
-                  value={<SecretValue copyContent={order.gmailTwoFactorSecret} text={maskSecret(order.gmailTwoFactorSecret)} />}
-                />
-              ) : null}
-              {order.gmailAppPassword ? (
-                <DetailRow
-                  label={t("App password")}
-                  value={<SecretValue copyContent={order.gmailAppPassword} text={maskSecret(order.gmailAppPassword)} />}
-                />
-              ) : null}
-            </>
-          ) : null}
           <DetailRow
             label={t("Order No")}
             value={<CopyableValue copiedText={t("Copied")} text={order.orderNo} />}

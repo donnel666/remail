@@ -44,7 +44,7 @@ func TestBotOrdersOwnerScopeAndPrivateProjection(t *testing.T) {
 				}
 				return &tradeapp.OrderListResult{Total: 101, Items: []tradeapp.CheckoutResult{{
 					Order:       tradedomain.Order{UserID: tc.owner, ProjectID: 2, OrderNo: "PRIVATE_ORDER", DeliveryEmail: "private@example.test", PayAmount: "99", ServiceMode: tradedomain.ServiceModePurchase, ProductType: tradedomain.ProductTypeICloud, Status: tradedomain.OrderStatusActive, CreatedAt: time.Now().UTC()},
-					ProjectName: "OwnProject", ServiceToken: "PRIVATE_TOKEN", VerificationCode: "PRIVATE_CODE", GmailPassword: "PRIVATE_PASSWORD",
+					ProjectName: "OwnProject", ServiceToken: "PRIVATE_TOKEN", VerificationCode: "PRIVATE_CODE",
 				}}}, nil
 			}
 			router := gin.New()

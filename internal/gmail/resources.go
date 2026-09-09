@@ -12,8 +12,6 @@ import (
 	"unicode"
 
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
-	tradeapp "github.com/donnel666/remail/internal/trade/app"
-	tradedomain "github.com/donnel666/remail/internal/trade/domain"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -445,49 +443,6 @@ func removeWhitespace(value string) string {
 		}
 		return r
 	}, value)
-}
-
-func (s *Service) FindLocalPurchase(ctx context.Context, orderNo string) (*tradeapp.GmailPurchaseDelivery, error) {
-	orderNo = strings.TrimSpace(orderNo)
-	if orderNo == "" {
-		return nil, ErrLocalResourceMissing
-	}
-	delivery, err := findLocalPurchaseWithDB(s.dbFor(ctx), orderNo)
-	if err != nil {
-		return nil, err
-	}
-	if delivery == nil {
-		return nil, ErrLocalResourceMissing
-	}
-	return delivery, nil
-}
-
-func findLocalPurchaseWithDB(db *gorm.DB, orderNo string) (*tradeapp.GmailPurchaseDelivery, error) {
-	var row struct {
-		AllocationID    uint   `gorm:"column:allocation_id"`
-		ResourceID      uint   `gorm:"column:resource_id"`
-		SupplyScope     string `gorm:"column:supply_scope"`
-		Email           string `gorm:"column:email"`
-		Password        string `gorm:"column:password"`
-		TwoFactorSecret string `gorm:"column:two_factor_secret"`
-		AppPassword     string `gorm:"column:app_password"`
-	}
-	err := db.Table("gmail_allocations AS a").
-		Select("a.id AS allocation_id, r.id AS resource_id, a.supply_scope, a.email, r.password, r.two_factor_secret, r.app_password").
-		Joins("JOIN gmail_resources AS r ON r.id = a.resource_id").
-		Where("a.order_no = ? AND a.source = ? AND a.service_mode = ? AND a.status = ?", orderNo, SourceLocal, string(tradedomain.ServiceModePurchase), AllocationStatusAllocated).
-		Take(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("load local Gmail purchase: %w", err)
-	}
-	return &tradeapp.GmailPurchaseDelivery{
-		AllocationID: row.AllocationID, ResourceID: row.ResourceID,
-		SupplyScope: tradeapp.SupplyScope(row.SupplyScope), Email: row.Email, Password: row.Password,
-		TwoFactorSecret: row.TwoFactorSecret, AppPassword: row.AppPassword,
-	}, nil
 }
 
 func (s *Service) SetLocalResourceEnabled(ctx context.Context, resourceID uint, enabled bool) error {

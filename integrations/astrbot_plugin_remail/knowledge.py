@@ -42,7 +42,7 @@ PUBLIC_DISCLOSURE_RULES = """<remail_public_disclosure_rules>
 # internal/mailmatch/app/ports.go, app/bot_diagnosis.go and infra/repo.go;
 # internal/billing/app/recharge.go; docs/9-openapi-credentials.md and api/openapi.yaml.
 # Product details: internal/alloc/app/allocation.go and infra/repo.go;
-# internal/trade/app/ports.go (attachGmailPurchase, tokenExpireAt);
+# internal/trade/app/ports.go (CheckoutResult, tokenExpireAt);
 # internal/mailmatch/app/ports.go (scopeReadUntil); internal/icloud/hme.go;
 # web/src/pages/Projects.tsx, orders/order-detail-modal.tsx and web/public/openapi.json.
 # This is static implementation knowledge, never a current order or availability result.
@@ -85,6 +85,6 @@ INTERNAL_MODULE_KNOWLEDGE = """<remail_internal_module_knowledge>
 iCloud：从已登记的iCloud资源及其现有别名中分配，别名转发地址必须符合允许的转发范围；按目标项目检查占用与分配历史。别名准备涉及HME，和订单使用期限不是同一环节。当前候选查询没有把传入的所需期限变成账号会员租期校验，不得编造“AppleID有效多久，订单就能用多久”的规则。对外使用iCloud类别、两种服务模式及本人订单页面，不解释别名池、转发目的地或历史排除。
 Microsoft/Outlook：按项目配置选择主地址、点号或加号形式；主地址路径还可以使用已有的显式别名。分配检查所选微软后缀、占用与同项目历史，加号形式另有日用量限制。这些是内部资源选择策略，不是客户的有效期。对外只解释微软邮箱类别及当前可选后缀，不能推断交付微软账号密码或保证所有后缀都有货。
 域名邮箱：按允许的域名／后缀范围选资源，从已有生成邮箱中复用或生成新地址，并检查同项目历史与日用量。私有范围与公共供给分开核验；域名资源、生成邮箱与邮箱订单不是同一对象。对外可以说明按页面可选域名后缀取得收件地址，不等于购买域名所有权，不披露生成、复用或匹配策略。
-Gmail：普通Gmail商品只走原始主地址分配；候选按当前资源可用性、供给范围和同项目主地址历史检查。Gmail与Gmail变种使用同一类资源但走不同地址形态，不能把普通Gmail自动说成加号／点号变种。购买订单的有效结果会取得实际提供的密码、双重验证信息或应用密码供本人订单页面展示；接码模式不能类推有这些凭据，机器人也不得索取或复述。
-Gmail变种：独立的gmail_variant商品选择点号或加号路径，包括等价的googlemail.com形式；内部生成与历史检查、变种冷却决定候选可用性，冷却时间不是用户邮箱寿命。对外可解释公开契约中的地址形式和选择方式，不展开遍历、复用、冷却或跨项目规则。与普通Gmail一样，购买凭据仅以本人订单实际提供的字段为准；地址变体不保证目标网站接受注册。
+Gmail：普通Gmail商品只走原始主地址分配；候选按当前资源可用性、供给范围和同项目主地址历史检查。Gmail与Gmail变种使用同一类资源但走不同地址形态，不能把普通Gmail自动说成加号／点号变种。购买与接码都只授予订单项目的系统收件权限，绝不交付资源密码、2FA 或应用密码；这些数据对外只写不读。
+Gmail变种：独立的gmail_variant商品选择点号或加号路径，包括等价的googlemail.com形式；内部生成与历史检查、变种冷却决定候选可用性，冷却时间不是用户邮箱寿命。对外可解释公开契约中的地址形式和选择方式，不展开遍历、复用、冷却或跨项目规则。与所有邮箱类型一样，购买为长效收件，接码为短效且只收一次验证码，只允许通过系统取件，绝不交付资源凭据；地址变体不保证目标网站接受注册。
 </remail_internal_module_knowledge>"""

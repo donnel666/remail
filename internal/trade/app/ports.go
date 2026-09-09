@@ -191,20 +191,6 @@ type OrderDeliveryPort interface {
 	ListPendingNotifications(ctx context.Context, afterOrderID uint, limit int) ([]OrderDeliveryNotification, error)
 }
 
-type GmailPurchaseDelivery struct {
-	AllocationID    uint
-	ResourceID      uint
-	SupplyScope     SupplyScope
-	Email           string
-	Password        string
-	TwoFactorSecret string
-	AppPassword     string
-}
-
-type GmailPurchaseSupplyPort interface {
-	FindLocalPurchase(ctx context.Context, orderNo string) (*GmailPurchaseDelivery, error)
-}
-
 type SystemLogPort interface {
 	Create(ctx context.Context, log *governancedomain.SystemLog) error
 }
@@ -486,19 +472,17 @@ type CheckoutRequest struct {
 	RequestID      string
 }
 
+// CheckoutResult grants order-scoped mail access only; resource credentials are write-only.
 type CheckoutResult struct {
-	Order                domain.Order
-	AllocationID         uint
-	ProjectName          string
-	ProjectLogoURL       string
-	ServiceToken         string
-	Created              bool
-	HasDelivery          bool
-	VerificationCode     string
-	LastMailReceivedAt   *time.Time
-	GmailPassword        string
-	GmailTwoFactorSecret string
-	GmailAppPassword     string
+	Order              domain.Order
+	AllocationID       uint
+	ProjectName        string
+	ProjectLogoURL     string
+	ServiceToken       string
+	Created            bool
+	HasDelivery        bool
+	VerificationCode   string
+	LastMailReceivedAt *time.Time
 	// Owner is populated only for the administrator site-wide order list.
 	Owner *OrderOwnerSummary
 }
@@ -547,7 +531,6 @@ type UseCase struct {
 	allocation                 AllocationPort
 	tokens                     OrderTokenPort
 	deliveries                 OrderDeliveryPort
-	gmailPurchases             GmailPurchaseSupplyPort
 	systemLogs                 SystemLogPort
 	projectDisplays            ProjectDisplayPort
 	owners                     OwnerLookupPort
@@ -579,10 +562,6 @@ func NewUseCase(repo Repository, ordering OrderingPort, wallet WalletPort, alloc
 
 func (uc *UseCase) SetOrderDeliveryPort(deliveries OrderDeliveryPort) {
 	uc.deliveries = deliveries
-}
-
-func (uc *UseCase) SetGmailPurchaseSupplyPort(supply GmailPurchaseSupplyPort) {
-	uc.gmailPurchases = supply
 }
 
 func (uc *UseCase) SetProjectDisplayPort(projectDisplays ProjectDisplayPort) {
@@ -1127,16 +1106,12 @@ func (uc *UseCase) checkoutPrepared(ctx context.Context, prepared checkoutPrepar
 		return nil, prepared.prepareErr
 	}
 	if prepared.existing != nil {
-		result, err := uc.resumeExistingCheckout(
+		return uc.resumeExistingCheckout(
 			ctx,
 			prepared.existing.OrderNo,
 			prepared.emailSuffix,
 			prepared.requestID,
 		)
-		if err == nil {
-			err = uc.attachGmailPurchase(ctx, result)
-		}
-		return result, err
 	}
 	if prepared.quote == nil {
 		return nil, errors.New("checkout quote was not prepared")
@@ -1191,29 +1166,7 @@ func (uc *UseCase) checkoutPrepared(ctx context.Context, prepared checkoutPrepar
 	if result != nil {
 		result.Created = created
 	}
-	if err == nil {
-		err = uc.attachGmailPurchase(ctx, result)
-	}
 	return result, err
-}
-
-func (uc *UseCase) attachGmailPurchase(ctx context.Context, result *CheckoutResult) error {
-	if result == nil || !domain.IsGmailProductType(result.Order.ProductType) || result.Order.ServiceMode != domain.ServiceModePurchase ||
-		(result.Order.Status != domain.OrderStatusActive && result.Order.Status != domain.OrderStatusCompleted) {
-		return nil
-	}
-	if uc.gmailPurchases == nil {
-		return errors.New("gmail purchase service is unavailable")
-	}
-	delivery, err := uc.gmailPurchases.FindLocalPurchase(ctx, result.Order.OrderNo)
-	if err != nil {
-		return err
-	}
-	result.AllocationID = delivery.AllocationID
-	result.GmailPassword = delivery.Password
-	result.GmailTwoFactorSecret = delivery.TwoFactorSecret
-	result.GmailAppPassword = delivery.AppPassword
-	return nil
 }
 
 func (uc *UseCase) CheckoutBatch(ctx context.Context, requests []CheckoutRequest) (items []CheckoutBatchItem, runErr error) {
@@ -1738,11 +1691,6 @@ func (uc *UseCase) GetOrder(ctx context.Context, orderNo string, userID uint, is
 	}
 	if err := uc.attachOrderDelivery(ctx, result); err != nil {
 		return nil, err
-	}
-	if domain.IsGmailProductType(result.Order.ProductType) {
-		if err := uc.attachGmailPurchase(ctx, result); err != nil {
-			return nil, err
-		}
 	}
 	if err := uc.attachAllocationIDs(ctx, result); err != nil {
 		return nil, err

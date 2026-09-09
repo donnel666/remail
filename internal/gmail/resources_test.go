@@ -15,7 +15,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestLocalGmailPurchaseUsesUnifiedAllocationAndOrderLookup(t *testing.T) {
+func TestLocalGmailPurchaseUsesUnifiedAllocation(t *testing.T) {
 	db := newLocalGmailAllocationTestDB(t, "gmail-local-purchase")
 	root := resourceRootModel{Type: "gmail", OwnerUserID: 1}
 	require.NoError(t, db.Create(&root).Error)
@@ -27,13 +27,7 @@ func TestLocalGmailPurchaseUsesUnifiedAllocationAndOrderLookup(t *testing.T) {
 
 	allocator := allocapp.NewUseCase(allocinfra.NewRepo(db))
 	allocation := allocateLocalGmailTest(t, allocator, "PURCHASE-1", 2, 12, allocdomain.GmailServiceModePurchase, allocdomain.SupplyScopePublic)
-	service := NewService(db, nil)
-	delivery, err := service.FindLocalPurchase(context.Background(), "PURCHASE-1")
-	require.NoError(t, err)
-	require.Equal(t, allocation.ID, delivery.AllocationID)
-	require.Equal(t, allocation.Email, delivery.Email)
-	require.Equal(t, "purchase@gmail.com", delivery.Email)
-	require.Equal(t, "password", delivery.Password)
+	require.Equal(t, "purchase@gmail.com", allocation.Email)
 
 	var resource localResourceModel
 	require.NoError(t, db.First(&resource, root.ID).Error)
@@ -46,7 +40,7 @@ func TestLocalGmailPurchaseUsesUnifiedAllocationAndOrderLookup(t *testing.T) {
 
 	replayed := allocateLocalGmailTest(t, allocator, "PURCHASE-1", 2, 12, allocdomain.GmailServiceModePurchase, allocdomain.SupplyScopePublic)
 	require.Equal(t, allocation.ID, replayed.ID)
-	_, err = allocator.ReleaseByOrder(context.Background(), "PURCHASE-1")
+	_, err := allocator.ReleaseByOrder(context.Background(), "PURCHASE-1")
 	require.NoError(t, err)
 	require.Equal(t, AllocationStatusReleased, mustLocalGmailAllocation(t, db, allocation.ID).Status)
 }

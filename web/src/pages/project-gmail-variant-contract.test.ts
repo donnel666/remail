@@ -30,9 +30,17 @@ describe("Gmail variant product contract", () => {
     expect(applicationSource).toContain('<Select.Option value="gmail_variant">');
   });
 
-  it("recognizes variant purchases and documents the checkout selector", () => {
-    expect(orderDetailSource).toContain('order.productType === "gmail_variant"');
-    expect(publicOpenApiSource).toContain("gmail_variant");
+  it("documents variant checkout without exposing resource credentials", () => {
+    const orderProperties = JSON.parse(publicOpenApiSource).components.schemas.Order.properties;
+    expect(orderProperties.productType.enum).toContain("gmail_variant");
+    for (const field of [
+      "password", "twoFactorSecret", "appPassword", "refreshToken", "accessToken",
+      "gmailPassword", "gmailTwoFactorSecret", "gmailAppPassword",
+    ]) {
+      expect(orderProperties).not.toHaveProperty(field);
+      expect(orderDetailSource).not.toContain(`order.${field}`);
+    }
+    expect(orderDetailSource).toContain("order.serviceToken");
     expect(publicOpenApiSource).toContain("@googlemail.com 地址");
   });
 });

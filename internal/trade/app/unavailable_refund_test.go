@@ -235,15 +235,9 @@ func TestExpireDueOrdersResumesPaidGmailPurchaseWithoutSupplyPrecheck(t *testing
 		PayAmount: "1.000000", ActivationWindowMinutes: 10, WarrantyMinutes: 10,
 		CreatedAt: now.Add(-16 * time.Minute),
 	}}
-	supply := &checkoutGmailSupplySpy{purchase: &GmailPurchaseDelivery{
-		AllocationID: 61, ResourceID: 51, SupplyScope: SupplyScopePublic,
-		Email: "buyer@gmail.com", Password: "password",
-		TwoFactorSecret: "JBSWY3DPEHPK3PXP", AppPassword: "abcdefghijklmnop",
-	}}
 	tokens := &issuedOrderTokenSpy{tokens: map[string]*OrderToken{}}
 	allocation := &unavailableRefundAllocationStub{}
 	uc := NewUseCase(repo, nil, nil, allocation, tokens)
-	uc.SetGmailPurchaseSupplyPort(supply)
 	uc.now = func() time.Time { return now }
 
 	result, err := uc.ExpireDueOrders(context.Background(), 200)
@@ -251,7 +245,6 @@ func TestExpireDueOrdersResumesPaidGmailPurchaseWithoutSupplyPrecheck(t *testing
 	require.NoError(t, err)
 	require.Equal(t, 1, result.CheckoutRecovered)
 	require.Zero(t, result.Failed)
-	require.Zero(t, supply.purchases)
 	require.Equal(t, domain.OrderStatusActive, repo.order.Status)
 	require.Equal(t, "buyer@gmail.com", repo.order.DeliveryEmail)
 	require.Equal(t, 1, tokens.issues)

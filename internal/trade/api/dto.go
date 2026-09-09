@@ -83,9 +83,6 @@ type OrderResponse struct {
 	HasDelivery          bool                `json:"hasDelivery"`
 	VerificationCode     string              `json:"verificationCode,omitempty"`
 	LastMailReceivedAt   *time.Time          `json:"lastMailReceivedAt,omitempty"`
-	GmailPassword        string              `json:"gmailPassword,omitempty"`
-	GmailTwoFactorSecret string              `json:"gmailTwoFactorSecret,omitempty"`
-	GmailAppPassword     string              `json:"gmailAppPassword,omitempty"`
 	ArchivedAt           *time.Time          `json:"archivedAt,omitempty"`
 	CreatedAt            time.Time           `json:"createdAt"`
 	UpdatedAt            time.Time           `json:"updatedAt"`

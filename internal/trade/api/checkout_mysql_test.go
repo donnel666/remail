@@ -24,7 +24,6 @@ import (
 	billinginfra "github.com/donnel666/remail/internal/billing/infra"
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	coreinfra "github.com/donnel666/remail/internal/core/infra"
-	gmailapp "github.com/donnel666/remail/internal/gmail"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	openapiapi "github.com/donnel666/remail/internal/openapi/api"
@@ -379,8 +378,6 @@ func TestGmailSpecialCodeUsesSharedTimeoutLifecycleMySQL(t *testing.T) {
 	)`).Error)
 	creditBuyer(t, db, 2, "10.00")
 	module := newTradeModule(db)
-	gmail := gmailapp.NewService(db, nil)
-	module.UseCase.SetGmailPurchaseSupplyPort(gmail)
 
 	result, err := module.UseCase.Checkout(context.Background(), tradeapp.CheckoutRequest{
 		UserID: 2, ProjectID: 10, ProductID: 20, ServiceMode: "code",

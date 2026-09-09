@@ -41,7 +41,7 @@
 | 项目 | 通用 Project | 需要 | 保留 | 复用项目访问和规则，不复用 Microsoft 业务代码 |
 | 商品 | Microsoft Product fields | 需要 proto 商品 | 保留并新增类型 | main weight；dot/plus 权重为 0 |
 | 接码 code | Microsoft code order | 是否支持未知 | 待确认/保留接口 | 未启用时 checkout 明确不可用 |
-| 购买 purchase | Microsoft purchase order | 是否交付密码未知 | 待确认/保留接口 | 未确认不得返回凭据 |
+| 购买 purchase | Microsoft purchase order | 仅交付项目的系统长效收件权限 | 复用通用履约 | 资源密码、2FA、应用密码和上游令牌对外只写不读，任何邮箱均不得交付 |
 | 钱包扣款 | 通用 Trade/Billing | 需要 | 保留通用设施 | Proto 失败可退款，账务幂等 |
 | OrderToken | 通用交易 | 需要 | 保留 | token scope 绑定 Proto 订单 |
 | allocation | Microsoft 专用 allocation | 需要 | 独立复制 | `proto_allocations`、项目隔离、active 唯一 |
@@ -92,10 +92,10 @@
 | 2FA | 未知 | 可能需要独立密钥字段和凭据替换 API |
 | 历史邮件读取 | 未知 | 决定 identifying 是否可实现 |
 | code 服务 | 未知 | 决定 code product、服务窗口和 MailMatch 接入 |
-| purchase 服务 | 未知 | 决定是否可向买方返回 password |
+| purchase 服务 | 仅交付项目的系统长效收件权限 | 不涉及账号交付，资源 password 等敏感数据对外只写不读 |
 | alias/多地址 | 未知 | 只有确认后才建 alias/domain 事实表 |
 | 自定义域名 | 未知 | 决定 inventory/suffix 选择是否存在 |
-| 公开出售 | 默认保留通用开关 | 若协议禁止转交账号，应禁用 purchase/public |
+| 公开出售 | 默认保留通用开关 | 仅出售指定项目的系统收件服务，不转交账号或底层凭据 |
 | 账号生命周期和保修 | 默认复制通用商品窗口 | 需要协议可验证、可交付后再开放 |
 
 ## 隔离验收清单

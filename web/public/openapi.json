@@ -1094,6 +1094,7 @@
           },
           "serviceToken": {
             "type": "string",
+            "description": "仅授予订单所选项目的系统收件权限。购买与接码均不交付账号；资源密码、2FA、应用密码和上游令牌对外只写不读。",
             "example": "st_550e8400-e29b-41d4-a716-446655440000"
           },
           "hasDelivery": {
@@ -1108,15 +1109,6 @@
             "type": "string",
             "nullable": true,
             "format": "date-time"
-          },
-          "gmailPassword": {
-            "type": "string"
-          },
-          "gmailTwoFactorSecret": {
-            "type": "string"
-          },
-          "gmailAppPassword": {
-            "type": "string"
           },
           "archivedAt": {
             "type": "string",

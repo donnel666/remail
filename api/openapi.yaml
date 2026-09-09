@@ -16831,7 +16831,7 @@ components:
           type: string
         serviceToken:
           type: string
-          description: Service credential used by pickup URLs and later mail-result APIs.
+          description: Grants mail access only for this order's project through system pickup APIs. Both purchase and code modes keep resource passwords, 2FA secrets, application passwords, and provider tokens write-only; they are never returned in order responses.
         hasDelivery:
           type: boolean
           description: Whether the order already has a matched delivery. Purchase deliveries may have no verification code.
@@ -16843,15 +16843,6 @@ components:
           format: date-time
           nullable: true
           description: Provider receive time of the delivered message.
-        gmailPassword:
-          type: string
-          description: Local Gmail purchase password. Returned only by checkout and authorized order-detail reads; omitted from order lists and resource APIs.
-        gmailTwoFactorSecret:
-          type: string
-          description: Local Gmail purchase 2FA secret. Returned only by checkout and authorized order-detail reads.
-        gmailAppPassword:
-          type: string
-          description: Local Gmail purchase application password. Returned only by checkout and authorized order-detail reads.
         archivedAt:
           type: string
           format: date-time
