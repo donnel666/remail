@@ -122,10 +122,21 @@ func bridgeProtocolFailure(reason bridgeFailureReason) *Failure {
 
 func (c *PKLClient) Login(ctx context.Context, req LoginRequest) (Session, error) {
 	email := strings.ToLower(strings.TrimSpace(req.Email))
-	if email == "" || req.Password == "" {
+	request := pklRequest{Action: "login", Email: email, Password: req.Password, ProxyURL: req.ProxyURL}
+	if len(req.PKL) > 0 {
+		if email == "" {
+			return Session{}, bridgeProtocolFailure(bridgeInput)
+		}
+		if len(req.PKL) > MaxPKLBytes {
+			return Session{}, bridgeProtocolFailure(bridgeLimit)
+		}
+		// Imported sessions are verified read-only. Never send the accompanying
+		// password or fall back to a login/refresh that consumes session tokens.
+		request.Action, request.Password, request.PKL, request.Recipient = "resume", "", req.PKL, email
+	} else if email == "" || req.Password == "" {
 		return Session{}, &Failure{Stage: "input", Category: "invalid_credentials", SafeMessage: "Proto email and password are required."}
 	}
-	session, complete, err := c.run(ctx, pklRequest{Action: "login", Email: email, Password: req.Password, ProxyURL: req.ProxyURL}, nil)
+	session, complete, err := c.run(ctx, request, nil)
 	if err != nil {
 		return Session{}, err
 	}

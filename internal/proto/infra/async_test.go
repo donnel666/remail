@@ -68,7 +68,6 @@ func newProtoAsyncTestService(t *testing.T) (*Service, *protoMemoryFiles) {
 	files := &protoMemoryFiles{objects: map[string][]byte{}}
 	require.NoError(t, db.AutoMigrate(&resourceRoot{}, &Resource{}, &importRecord{}, &importItem{}, &protoTestAllocation{}, &MaintenanceRun{}, &commandReceipt{}, &sessionRecord{}))
 	service := NewService(db, files)
-	service.SessionSecret = "test-proto-session-secret"
 	service.Protocol = protoValidationClientStub{}
 	return service, files
 }

@@ -39,6 +39,7 @@ type ImportLine struct {
 	LineNumber int
 	Email      string
 	Password   string
+	PKLBase64  string `json:"-"`
 }
 
 type ImportLineError struct {

@@ -18424,7 +18424,7 @@ type ServerInterface interface {
 	// Queue a Proto resource command for selected resources or a filter
 	// (POST /v1/open/proto/resources/bulk/{command})
 	OpenPostProtoResourceBulk(c *gin.Context, command OpenPostProtoResourceBulkParamsCommand, params OpenPostProtoResourceBulkParams)
-	// Import Proto resources in email----password format
+	// Import Proto resources with a password and optional Base64 PKL
 	// (POST /v1/open/proto/resources/imports)
 	OpenPostProtoResourceImport(c *gin.Context, params OpenPostProtoResourceImportParams)
 	// Get Proto import progress
@@ -18532,7 +18532,7 @@ type ServerInterface interface {
 	// Queue a Proto resource command for selected resources or a filter
 	// (POST /v1/proto/resources/bulk/{command})
 	PostProtoResourceBulk(c *gin.Context, command PostProtoResourceBulkParamsCommand, params PostProtoResourceBulkParams)
-	// Import Proto resources in email----password format
+	// Import Proto resources with a password and optional Base64 PKL
 	// (POST /v1/proto/resources/imports)
 	PostProtoResourceImport(c *gin.Context, params PostProtoResourceImportParams)
 	// Get Proto import progress

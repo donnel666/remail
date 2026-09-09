@@ -14,7 +14,8 @@ export interface EmailResource {
   lastSafeError?: string;
   createdAt: string;
 }
-export const PROTO_EMAIL_FORMAT_HINT = "email----password";
+export const PROTO_DEFAULT_EMAIL_SUFFIX = "@proton.me";
+export const PROTO_EMAIL_FORMAT_HINT = `email----password\nemail----password----base64(PKL)\naccount → account${PROTO_DEFAULT_EMAIL_SUFFIX}`;
 export function getSuffix(email: string) {
   const index = email.lastIndexOf("@");
   return index < 0 ? "" : email.slice(index).toLowerCase();

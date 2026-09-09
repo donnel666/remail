@@ -80,7 +80,6 @@ func openRuntime(ctx context.Context, opts options) (*commandRuntime, error) {
 	queue := asynq.NewClient(asynq.RedisClientOpt{Addr: address, Password: os.Getenv("REDIS_PASSWORD"), DB: redisDB, PoolSize: 4})
 	rt.close = func() { _ = queue.Close(); _ = sqlDB.Close() }
 	rt.service.Queue = queue
-	rt.service.SessionSecret = os.Getenv("SESSION_SECRET")
 	rt.service.Protocol = proton.NewPKLClient()
 	rt.service.OperationLogs = governanceinfra.NewOperationLogRepo(db)
 	rt.service.SystemLogs = governanceinfra.NewSystemLogRepo(db)
@@ -91,10 +90,6 @@ func openRuntime(ctx context.Context, opts options) (*commandRuntime, error) {
 	}
 	rt.service.Proxies = proxies.ProxyUseCase
 	rt.fetch = rt.service.FetchMailbox
-	if opts.Mode == "fetch" && rt.service.SessionSecret == "" {
-		rt.close()
-		return nil, safeError("SESSION_SECRET is required to load the encrypted Proto session")
-	}
 	return rt, nil
 }
 

@@ -91,15 +91,12 @@ type Platform struct {
 	// ponytail: add a dedicated stable ticket secret if reply links must survive
 	// session-secret rotation.
 	TicketReplySecret string
-	// Proto derives a separate encryption key; rotating SESSION_SECRET requires
-	// revalidating Proto sessions, without changing other mailbox credentials.
-	ProtoSessionSecret string
-	Turnstile          TurnstileConfig
-	Diagnostics        DiagnosticsConfig
-	redisConfig        RedisConfig
-	workersReady       atomic.Bool
-	workerStop         sync.Once
-	clientClose        sync.Once
+	Turnstile         TurnstileConfig
+	Diagnostics       DiagnosticsConfig
+	redisConfig       RedisConfig
+	workersReady      atomic.Bool
+	workerStop        sync.Once
+	clientClose       sync.Once
 }
 
 // New initializes all external service clients and returns the Platform.
@@ -141,7 +138,6 @@ func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 
 	p.SessionSecure = cfg.Session.Secure
 	p.TicketReplySecret = cfg.Session.Secret
-	p.ProtoSessionSecret = cfg.Session.Secret
 	p.Turnstile = cfg.Turnstile
 	p.Diagnostics = cfg.Diagnostics
 

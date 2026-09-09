@@ -13,9 +13,10 @@ type LoginRequest struct {
 	Email    string
 	Password string
 	ProxyURL string
+	PKL      []byte `json:"-"`
 }
 
-// Session contains secrets. Persist only through the encrypted Proto session store.
+// Session contains secrets. Persist only through the private Proto session store.
 type Session struct {
 	Version        int           `json:"version"`
 	UID            string        `json:"uid"`
@@ -31,7 +32,7 @@ type Session struct {
 const MaxPKLBytes = 8 << 20
 
 // ValidFor checks the reusable metadata without decoding Python's trusted PKL.
-// PKL is accepted only from the helper or the authenticated encrypted store.
+// PKL is accepted only from the helper or the verified private session store.
 func (s Session) ValidFor(email string) bool {
 	if s.UID == "" {
 		return false

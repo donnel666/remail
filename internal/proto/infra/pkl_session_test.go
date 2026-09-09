@@ -2,6 +2,8 @@ package infra
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -31,19 +33,44 @@ func newPKLValidatedProto(t *testing.T) (*Service, uint) {
 	return s, id
 }
 
-func TestProtoPKLUsesExistingEncryptedSessionStorage(t *testing.T) {
+func TestProtoPKLUsesExistingPlainSessionStorage(t *testing.T) {
+	t.Setenv("SESSION_SECRET", "")
 	s, id := newPKLValidatedProto(t)
 	var stored sessionRecord
 	require.NoError(t, s.DB.First(&stored, id).Error)
-	require.NotContains(t, string(stored.Payload), "native-pkl-secret-fixture")
+	require.True(t, json.Valid(stored.Payload))
+	require.Contains(t, string(stored.Payload), base64.StdEncoding.EncodeToString([]byte("native-pkl-secret-fixture")))
 	loaded, err := s.ReadSession(context.Background(), id, 1)
 	require.NoError(t, err)
 	require.Equal(t, testPKLSession("pkl@proton.me"), *loaded)
 	require.Empty(t, loaded.AccessToken)
 	require.Empty(t, loaded.RefreshToken)
 	stored.ResourceID++
-	_, err = s.decryptSession(&stored)
+	_, err = s.decodeSession(&stored)
 	require.ErrorIs(t, err, ErrSessionUnavailable)
+}
+
+func TestProtoPlainSessionReadAndRefreshPersistence(t *testing.T) {
+	t.Setenv("SESSION_SECRET", "")
+	s, id := newPKLValidatedProto(t)
+	ctx := context.Background()
+	var stored sessionRecord
+	require.NoError(t, s.DB.First(&stored, id).Error)
+	before := append([]byte(nil), stored.Payload...)
+	_, err := s.ReadSession(ctx, id, 1)
+	require.NoError(t, err)
+	require.NoError(t, s.DB.First(&stored, id).Error)
+	require.Equal(t, before, stored.Payload, "reads must not silently rewrite stored credentials")
+	require.NoError(t, s.WithSession(ctx, id, 1, func(_ context.Context, session *proton.Session, save func(proton.Session) error) error {
+		next := *session
+		next.PKL = []byte("refreshed-native-pkl")
+		return save(next)
+	}))
+	require.NoError(t, s.DB.First(&stored, id).Error)
+	require.True(t, json.Valid(stored.Payload))
+	loaded, err := s.ReadSession(ctx, id, 1)
+	require.NoError(t, err)
+	require.Equal(t, "refreshed-native-pkl", string(loaded.PKL))
 }
 
 func TestProtoPKLMetadataFailsClosed(t *testing.T) {

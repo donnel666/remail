@@ -42,7 +42,7 @@ func FormatSender(sender proton.Address) string {
 	return name + " <" + address + ">"
 }
 
-func (s *Service) loginProtocol(ctx context.Context, row Resource, requestID string) (session proton.Session, err error) {
+func (s *Service) loginProtocol(ctx context.Context, row Resource, requestID string, importedPKL []byte) (session proton.Session, err error) {
 	if s.Protocol == nil {
 		return session, domain.ErrDependency
 	}
@@ -52,14 +52,18 @@ func (s *Service) loginProtocol(ctx context.Context, row Resource, requestID str
 	if err != nil {
 		return session, err
 	}
-	session, err = s.Protocol.Login(ctx, proton.LoginRequest{Email: row.EmailAddress, Password: row.Password, ProxyURL: proxy.URL})
+	request := proton.LoginRequest{Email: row.EmailAddress, Password: row.Password, ProxyURL: proxy.URL}
+	if len(importedPKL) > 0 {
+		request.Password, request.PKL = "", importedPKL
+	}
+	session, err = s.Protocol.Login(ctx, request)
 	s.reportProtocolProxy(ctx, proxy.ID, err)
 	return session, err
 }
 
 // FetchMailbox is the single Proto session boundary used by order pickup,
 // administrator fetches and historical recognition. Password login belongs to
-// validation; ordinary reads only reuse/refresh the encrypted persisted session.
+// validation; ordinary reads only reuse/refresh the persisted session.
 func (s *Service) FetchMailbox(ctx context.Context, resourceID uint, revision uint64, request proton.FetchRequest) (result proton.FetchResult, err error) {
 	if s == nil || s.Protocol == nil || s.DB == nil {
 		return result, domain.ErrDependency

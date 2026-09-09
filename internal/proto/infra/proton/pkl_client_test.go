@@ -36,8 +36,9 @@ func TestPKLBridgeHelper(_ *testing.T) {
 		return
 	}
 	scenario := os.Args[len(os.Args)-1]
+	var raw json.RawMessage
 	var request pklRequest
-	if json.NewDecoder(os.Stdin).Decode(&request) != nil {
+	if json.NewDecoder(os.Stdin).Decode(&raw) != nil || json.Unmarshal(raw, &request) != nil {
 		os.Exit(3)
 	}
 	write := func(value any) {
@@ -72,6 +73,25 @@ func TestPKLBridgeHelper(_ *testing.T) {
 	case "login":
 		if request.Action != "login" || request.Email != "owner@proton.me" || request.Password != " secret-fixture-password " {
 			os.Exit(5)
+		}
+		writeSession("opaque-native-pickle-old")
+		write(pklEvent{Event: "result", Complete: &complete})
+	case "resume", "resume-revoked", "resume-identity-mismatch", "resume-invalid-credentials":
+		if request.Action != "resume" || request.Email != "owner@proton.me" || request.Recipient != request.Email ||
+			string(request.PKL) != "opaque-native-pickle-imported" || request.ProxyURL != "http://proxy.example.test:8080" ||
+			strings.Contains(string(raw), `"password"`) {
+			os.Exit(5)
+		}
+		switch scenario {
+		case "resume-revoked":
+			write(pklEvent{Event: "error", Stage: "keys", Category: "session_revoked", HTTPStatus: 401, APICode: 10013})
+			os.Exit(1)
+		case "resume-identity-mismatch":
+			write(pklEvent{Event: "error", Stage: "addresses", Category: "identity_mismatch"})
+			os.Exit(1)
+		case "resume-invalid-credentials":
+			write(pklEvent{Event: "error", Stage: "auth", Category: "invalid_credentials", HTTPStatus: 422, APICode: 8002})
+			os.Exit(1)
 		}
 		writeSession("opaque-native-pickle-old")
 		write(pklEvent{Event: "result", Complete: &complete})
@@ -168,6 +188,58 @@ func TestPKLLoginUsesOpaqueSessionAndStdin(t *testing.T) {
 	require.Empty(t, session.UserKeys)
 }
 
+func TestPKLResumeVerifiesImportedSessionWithoutSendingPassword(t *testing.T) {
+	for _, password := range []string{"", "must-not-send-import-password"} {
+		client := pklTestClient("resume")
+		session, err := client.Login(context.Background(), LoginRequest{Email: " OWNER@proton.me ", Password: password,
+			ProxyURL: "http://proxy.example.test:8080", PKL: []byte("opaque-native-pickle-imported")})
+		require.NoError(t, err)
+		require.Equal(t, fixturePKLSession(), session)
+	}
+}
+
+func TestPKLResumeFailureNeverFallsBackToPasswordLoginOrRefresh(t *testing.T) {
+	for _, test := range []struct{ scenario, category, stage string }{
+		{"resume-revoked", "session_revoked", "keys"},
+		{"resume-identity-mismatch", "identity_mismatch", "addresses"},
+		{"resume-invalid-credentials", "protocol", string(bridgeErrorMetadata)},
+	} {
+		t.Run(test.scenario, func(t *testing.T) {
+			client := pklTestClient(test.scenario)
+			command := client.command
+			calls := 0
+			client.command = func(ctx context.Context) *exec.Cmd {
+				calls++
+				return command(ctx)
+			}
+			session, err := client.Login(context.Background(), LoginRequest{Email: "owner@proton.me", Password: "must-not-send-import-password",
+				ProxyURL: "http://proxy.example.test:8080", PKL: []byte("opaque-native-pickle-imported")})
+			var failure *Failure
+			require.ErrorAs(t, err, &failure)
+			require.Equal(t, test.category, failure.Category)
+			require.Equal(t, test.stage, failure.Stage)
+			require.Equal(t, 1, calls)
+			require.Empty(t, session.PKL)
+			require.Nil(t, failure.Cause)
+			for _, secret := range []string{"must-not-send-import-password", "opaque-native-pickle-imported", "owner@proton.me", "proxy.example.test"} {
+				require.NotContains(t, err.Error(), secret)
+			}
+		})
+	}
+}
+
+func TestPKLResumeRejectsOversizedImportBeforeStartingWorker(t *testing.T) {
+	client := pklTestClient("resume")
+	client.command = func(context.Context) *exec.Cmd {
+		t.Fatal("oversized PKL must not start the worker")
+		return nil
+	}
+	_, err := client.Login(context.Background(), LoginRequest{Email: "owner@proton.me", PKL: make([]byte, MaxPKLBytes+1)})
+	var failure *Failure
+	require.ErrorAs(t, err, &failure)
+	require.Equal(t, string(bridgeLimit), failure.Stage)
+}
+
 func TestPKLFetchRefreshUsesPersistenceHookAndDeduplicatesReplay(t *testing.T) {
 	client := pklTestClient("refresh")
 	session := fixturePKLSession()
@@ -180,7 +252,7 @@ func TestPKLFetchRefreshUsesPersistenceHookAndDeduplicatesReplay(t *testing.T) {
 			next := *observed
 			require.NoError(t, refresh(ctx, &next))
 			require.Equal(t, "opaque-native-pickle-old", string(observed.PKL))
-			*observed = next // The real service does this only after encrypted persistence.
+			*observed = next // The real service does this only after successful persistence.
 			return nil
 		},
 		OnMessages: func(batch []Message) error {

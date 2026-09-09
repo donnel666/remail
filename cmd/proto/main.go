@@ -4,6 +4,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -133,7 +134,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	fs.UintVar(&opts.ResourceID, "resource-id", 0, "one Proto resource ID")
 	fs.StringVar(&opts.File, "file", "", "login only: credential TXT file; never pass credentials as arguments")
 	fs.IntVar(&opts.Line, "line", 0, "login only: one-based physical line in -file")
-	fs.BoolVar(&opts.Stdin, "stdin", false, "login only: read exactly one email----password line from stdin")
+	fs.BoolVar(&opts.Stdin, "stdin", false, "login only: read one email-or-username----password[----base64(PKL)] line; usernames default to @proton.me")
 	fs.StringVar(&opts.Engine, "engine", "python", "login only: python (native PKL) or go (legacy comparison)")
 	fs.BoolVar(&opts.Apply, "apply", false, "execute remote login or database maintenance; default is preview only")
 	fs.UintVar(&opts.OperatorUserID, "operator-user-id", 0, "enabled admin/super-admin required for validate/history/fetch -apply")
@@ -255,6 +256,9 @@ func execute(ctx context.Context, opts options, stdin io.Reader, rt *commandRunt
 		if resource == nil {
 			out.PasswordConfigured = credential.Password != ""
 		}
+		if credential.PKLBase64 != "" && opts.Engine == "go" {
+			return out, safeError("native PKL requires the python engine")
+		}
 		if !opts.Apply {
 			return out, nil
 		}
@@ -265,7 +269,15 @@ func execute(ctx context.Context, opts options, stdin io.Reader, rt *commandRunt
 		if login == nil {
 			return out, domain.ErrDependency
 		}
-		session, err := login.Login(ctx, proton.LoginRequest{Email: credential.Email, Password: credential.Password, ProxyURL: proxyURL})
+		request := proton.LoginRequest{Email: credential.Email, Password: credential.Password, ProxyURL: proxyURL}
+		if credential.PKLBase64 != "" {
+			request.PKL, err = base64.StdEncoding.Strict().DecodeString(credential.PKLBase64)
+			if err != nil {
+				return out, safeError("PKL must be valid standard Base64")
+			}
+			request.Password = ""
+		}
+		session, err := login.Login(ctx, request)
 		if err != nil {
 			return out, err
 		}
@@ -344,7 +356,7 @@ func readCredential(opts options, stdin io.Reader) (domain.ImportLine, error) {
 		reader = file
 	}
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 1024), 8192)
+	scanner.Buffer(make([]byte, 1024), protoinfra.MaxImportLineBytes+2)
 	lineNumber, target := 0, opts.Line
 	if opts.Stdin {
 		target = 1
@@ -366,7 +378,7 @@ func readCredential(opts options, stdin io.Reader) (domain.ImportLine, error) {
 	}
 	entries, _, err := protoinfra.ParseImport(selected, domain.ErrorStrategyAbort)
 	if err != nil || len(entries) != 1 {
-		return domain.ImportLine{}, safeError("selected line must contain exactly email----password")
+		return domain.ImportLine{}, safeError("selected line must contain email-or-username----password[----base64(PKL)]; usernames default to @proton.me")
 	}
 	return entries[0], nil
 }

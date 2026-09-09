@@ -97,7 +97,7 @@ class RestrictedUnpickler(pickle.Unpickler):
         raise BridgeError("session")
 
 
-def load_pickle(encoded):
+def load_pickle(encoded, *, imported=False):
     bounded_text(encoded, MAX_PKL * 4 // 3 + 8, False)
     try:
         raw = base64.b64decode(encoded, validate=True)
@@ -113,6 +113,22 @@ def load_pickle(encoded):
                 stop = position
         need(stop == len(raw) - 1)
         value = RestrictedUnpickler(io.BytesIO(raw)).load()
+        if imported:
+            # Native requests sessions retain mixed-case default headers. Only
+            # canonicalize known names, and let the transport own compression /
+            # connection headers; conflicting case variants remain invalid.
+            primitive_tree(value)
+            need(type(value) is dict and type(value.get("headers")) is dict)
+            headers, seen = {}, set()
+            for name, val in value["headers"].items():
+                canonical = name.lower()
+                need(canonical in HEADER_NAMES | {"accept-encoding", "connection"} and canonical not in seen)
+                bounded_text(val, 16384)
+                need(not any(ord(c) < 32 or ord(c) == 127 for c in val))
+                seen.add(canonical)
+                if canonical in HEADER_NAMES:
+                    headers[canonical] = val
+            value["headers"] = headers
         validate_session(value)
         return value
     except BridgeError:
@@ -207,6 +223,40 @@ def restore_session(client, value, recipient, models):
         client.session.cookies.set(name, val)
 
 
+def resume_session(client, recipient, models):
+    """Authenticate an imported PKL without login or rotating its refresh token."""
+    user = client._get("mail", "core/v4/users").json().get("User")
+    need(type(user) is dict and type(user.get("Keys")) is list and 1 <= len(user["Keys"]) <= 4096, "keys")
+    bounded_text(user.get("ID"), 1024, False, stage="keys")
+    accounts, page = [], 0
+    while True:
+        batch = client._get("mail", "core/v4/addresses", params={"Page": page, "PageSize": PAGE_SIZE}).json().get("Addresses")
+        need(type(batch) is list and len(batch) <= PAGE_SIZE and len(accounts) + len(batch) <= 4096, "addresses")
+        accounts.extend(batch)
+        if len(batch) < PAGE_SIZE:
+            break
+        page += 1
+    need(accounts, "addresses")
+    addresses, seen_ids, seen_emails = [], set(), set()
+    for account in accounts:
+        need(type(account) is dict, "addresses")
+        aid = bounded_text(account.get("ID"), 1024, False, stage="addresses")
+        email = identity(account.get("Email"), stage="addresses")
+        name = bounded_text(account.get("DisplayName", ""), 8192, stage="addresses")
+        need(aid not in seen_ids and email not in seen_emails, "addresses")
+        need(type(account.get("Keys", [])) is list and len(account.get("Keys", [])) <= 4096, "addresses")
+        seen_ids.add(aid)
+        seen_emails.add(email)
+        addresses.append(models.AccountAddress(id=aid, email=email, name=name))
+    need(identity(recipient) in seen_emails, "addresses", "identity_mismatch")
+    # Neither address IDs nor receiving emails in the imported pickle are
+    # authoritative. Rebuild them solely from the authenticated remote response.
+    client.account_addresses = addresses
+    client.session.login_data = {"user": user, "addresses": accounts}
+    client.pgp.aes256_keys.clear()
+    client.validate_keys(recipient)
+
+
 def request_stage(action, method, url):
     parsed = urlsplit(url)
     need(parsed.scheme == "https" and parsed.port in (None, 443) and not parsed.username and not parsed.password
@@ -222,6 +272,8 @@ def request_stage(action, method, url):
         ("login", "GET", "account.proton.me", "/api/core/v4/users"): "keys",
         ("login", "GET", "account.proton.me", "/api/core/v4/keys/salts"): "keys",
         ("login", "GET", "api.protonmail.ch", "/api/core/v4/addresses"): "addresses",
+        ("resume", "GET", "mail.proton.me", "/api/core/v4/users"): "keys",
+        ("resume", "GET", "mail.proton.me", "/api/core/v4/addresses"): "addresses",
         ("refresh", "POST", "mail.proton.me", "/api/auth/refresh"): "refresh",
         ("fetch", "GET", "mail.proton.me", "/api/mail/v4/messages"): "list",
     }
@@ -244,7 +296,7 @@ def response_error(stage, status, code, action):
         return BridgeError(stage, "action_required", status, code)
     if code == 2028:
         return BridgeError(stage, "rate_limited", status, code, True)
-    if action in ("fetch", "refresh") and (status == 401 or code in (8002, 6003, 10013)):
+    if action in ("fetch", "refresh", "resume") and (status == 401 or code in (8002, 6003, 10013)):
         return BridgeError(stage, "session_revoked", status, code)
     if (stage == "auth_info" and code == 6003) or (stage == "auth" and code in (6003, 8002)):
         return BridgeError(stage, "invalid_credentials", status, code)
@@ -279,7 +331,7 @@ def build_client(action, proxy):
             def request(self, method, url, **kwargs):
                 stage = request_stage(action, method, url)
                 self.calls += 1
-                need(self.calls <= (100000 if action == "fetch" else 20), "transport")
+                need(self.calls <= (100000 if action == "fetch" else 2 + 4096 // PAGE_SIZE if action == "resume" else 20), "transport")
                 kwargs.update(timeout=30, allow_redirects=False, verify=True, stream=True)
                 try:
                     response = super().request(method, url, **kwargs)
@@ -394,9 +446,22 @@ def build_client(action, proxy):
                         if pair.is_user_key:
                             need(any(k.get("PrivateKey") == pair.private_key and k.get("Active", 1)
                                      for k in remote_user_keys), "keys", "action_required")
+                        elif action == "resume":
+                            # Native exports retain historical address keys. They
+                            # must still belong to this mailbox; active usability
+                            # is checked separately below for the receiving address.
+                            need(any(identity(a["Email"], stage="addresses") == identity(pair.email)
+                                     and any(k.get("PrivateKey") == pair.private_key
+                                             for k in a.get("Keys", []))
+                                     for a in accounts), "keys", "action_required")
                         key, _ = PGPKey.from_blob(pair.private_key)
                         with key.unlock(pair.passphrase):
                             need(key.is_unlocked, "keys", "action_required")
+                        if action == "resume":
+                            fingerprints = {str(k.fingerprint).upper() for k in (key, *key.subkeys.values())}
+                            need(pair.fingerprint_private.upper() in fingerprints
+                                 and (not pair.fingerprint_public or pair.fingerprint_public.upper() in fingerprints),
+                                 "keys", "action_required")
                         if pair.is_user_key:
                             user_keys.append(key.pubkey)
                     usable = set()
@@ -600,7 +665,7 @@ def fetch(client, request, state, emit):
 def run(request, emit):
     need(type(request) is dict, "input")
     action = request.get("action")
-    need(action in ("login", "fetch", "refresh"), "input")
+    need(action in ("login", "fetch", "refresh", "resume"), "input")
     recipient = identity(request.get("email") if action == "login" else request.get("recipient", request.get("email", "")), stage="input")
     proxy = bounded_text(request.get("proxy_url", ""), 4096, stage="input")
     if proxy:
@@ -610,8 +675,8 @@ def run(request, emit):
     state = None
     if action != "login":
         need("password" not in request or not request["password"], "input")
-        state = load_pickle(request.get("pkl", ""))
-        validate_session(state, recipient)
+        state = load_pickle(request.get("pkl", ""), imported=action == "resume")
+        validate_session(state, None if action == "resume" else recipient)
     else:
         password = bounded_text(request.get("password", ""), 4096, False, stage="input")
     client, models = build_client(action, proxy)
@@ -623,8 +688,12 @@ def run(request, emit):
             emit(dump_session(client, recipient))
             emit(dict(event="result", complete=True))
         else:
-            restore_session(client, state, recipient, models)
-            if action == "fetch":
+            restore_session(client, state, None if action == "resume" else recipient, models)
+            if action == "resume":
+                resume_session(client, recipient, models)
+                emit(dump_session(client, recipient))
+                emit(dict(event="result", complete=True))
+            elif action == "fetch":
                 fetch(client, request, state, emit)
             else:
                 uid = state["headers"]["x-pm-uid"]

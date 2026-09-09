@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"testing"
@@ -31,29 +32,43 @@ func newValidatedProto(t *testing.T) (*Service, uint) {
 	return s, id
 }
 
-func TestProtoSessionEncryptionBindsResourceAndCredentials(t *testing.T) {
+func TestProtoPlainSessionBindsResourceAndCredentialsWithoutSecret(t *testing.T) {
+	t.Setenv("SESSION_SECRET", "")
 	s := NewService(nil)
-	s.SessionSecret = "test-encryption-secret"
 	session := testProtoSession("session@proto.test")
-	payload, err := s.encryptSession(42, 3, session)
+	session.ExpiresAt = session.ExpiresAt.UTC()
+	payload, err := encodeSession(42, 3, session)
 	require.NoError(t, err)
-	require.NotContains(t, string(payload), session.RefreshToken)
-	require.NotContains(t, string(payload), session.Addresses[0].PrivateKeys[0])
+	require.True(t, json.Valid(payload))
+	require.Contains(t, string(payload), session.RefreshToken)
 	row := &sessionRecord{ResourceID: 42, CredentialRevision: 3, Payload: payload}
-	decoded, err := s.decryptSession(row)
+	decoded, err := s.decodeSession(row)
 	require.NoError(t, err)
-	require.Equal(t, session.RefreshToken, decoded.RefreshToken)
+	require.Equal(t, session, *decoded)
 	row.ResourceID++
-	_, err = s.decryptSession(row)
+	_, err = s.decodeSession(row)
 	require.ErrorIs(t, err, ErrSessionUnavailable)
 	row.ResourceID--
 	row.CredentialRevision++
-	_, err = s.decryptSession(row)
+	_, err = s.decodeSession(row)
 	require.ErrorIs(t, err, ErrSessionUnavailable)
 	row.CredentialRevision--
-	s.SessionSecret = "rotated-secret"
-	_, err = s.decryptSession(row)
-	require.ErrorIs(t, err, ErrSessionUnavailable)
+	t.Setenv("SESSION_SECRET", "rotated-secret")
+	decoded, err = s.decodeSession(row)
+	require.NoError(t, err)
+	require.Equal(t, session, *decoded)
+}
+
+func TestProtoPlainSessionRejectsLegacyCiphertext(t *testing.T) {
+	s := NewService(nil)
+	row := &sessionRecord{ResourceID: 42, CredentialRevision: 3, Payload: append([]byte{1}, []byte("legacy-ciphertext-canary")...)}
+	for _, secret := range []string{"", "legacy-secret"} {
+		t.Setenv("SESSION_SECRET", secret)
+		decoded, err := s.decodeSession(row)
+		require.ErrorIs(t, err, ErrSessionUnavailable)
+		require.Nil(t, decoded)
+		require.NotContains(t, err.Error(), "legacy-ciphertext-canary")
+	}
 }
 
 func TestProtoValidationFailureBudgetAndInFlightCredentialFence(t *testing.T) {
@@ -258,7 +273,7 @@ func TestProtoSessionLeaseFencesRotationAndUnrefreshedReads(t *testing.T) {
 }
 
 func TestProtoReadSessionRejectsChangedOrDeletedCredentials(t *testing.T) {
-	for _, change := range []string{"password", "deleted", "session_revision", "ciphertext", "address_keys"} {
+	for _, change := range []string{"password", "deleted", "session_revision", "invalid_payload", "address_keys"} {
 		t.Run(change, func(t *testing.T) {
 			s, id := newValidatedProto(t)
 			ctx := context.Background()
@@ -275,17 +290,17 @@ func TestProtoReadSessionRejectsChangedOrDeletedCredentials(t *testing.T) {
 				want = domain.ErrInvalidClaim
 			case "session_revision":
 				require.NoError(t, s.DB.Model(&sessionRecord{}).Where("resource_id = ?", id).Update("credential_revision", 2).Error)
-			case "ciphertext":
+			case "invalid_payload":
 				require.NoError(t, s.DB.Model(&sessionRecord{}).Where("resource_id = ?", id).Update("payload", []byte("invalid-payload")).Error)
 			case "address_keys":
 				before.Addresses = nil
-				payload, err := s.encryptSession(id, 1, *before)
+				payload, err := encodeSession(id, 1, *before)
 				require.NoError(t, err)
 				require.NoError(t, s.DB.Model(&sessionRecord{}).Where("resource_id = ?", id).Update("payload", payload).Error)
 			}
 			after, err := s.ReadSession(ctx, id, 1)
 			require.ErrorIs(t, err, want)
-			require.Nil(t, after, "no decrypted snapshot may escape a failed fence")
+			require.Nil(t, after, "no session snapshot may escape a failed fence")
 		})
 	}
 }
@@ -363,7 +378,7 @@ func TestProtoUnavailableSessionRequeuesOnceWithoutRemovingSupplyIntent(t *testi
 	ctx := context.Background()
 	require.NoError(t, s.SetForSale(ctx, id, nil, true))
 	before := protoValidationTask(t, s, id)
-	s.SessionSecret = "rotated-session-secret"
+	require.NoError(t, s.DB.Model(&sessionRecord{}).Where("resource_id = ?", id).Update("payload", []byte("invalid-payload")).Error)
 	require.NoError(t, s.RequeueSessionValidation(ctx, id, before.CredentialRevision, before.ValidationGeneration, "", "Proto session needs validation."))
 	require.NoError(t, s.RequeueSessionValidation(ctx, id, before.CredentialRevision, before.ValidationGeneration, "", "Repeated session failure."))
 	row, err := s.GetResource(ctx, id, nil)

@@ -15,13 +15,14 @@ import (
 )
 
 func (s *Service) ProcessValidation(ctx context.Context, task protoapp.ValidationTaskPayload) (resultErr error) {
-	if s == nil || s.Protocol == nil || s.SessionSecret == "" {
+	if s == nil || s.Protocol == nil {
 		return domain.ErrDependency
 	}
 	ctx, cancel := context.WithTimeout(ctx, sessionOperationTimeout)
 	defer cancel()
 	var resource *Resource
 	var run *MaintenanceRun
+	var importedPKL []byte
 	err := s.transaction(ctx, func(ctx context.Context, tx *gorm.DB) error {
 		var err error
 		resource, err = lockResource(tx, task.ResourceID, &task.OwnerUserID)
@@ -41,6 +42,21 @@ func (s *Service) ProcessValidation(ctx context.Context, task protoapp.Validatio
 		}
 		if run.Status == maintenanceRunning && run.StartedAt != nil && run.StartedAt.Add(sessionLeaseDuration).After(now) {
 			return domain.ErrInvalidClaim
+		}
+		stored, err := lockSessionTx(tx, resource.ID)
+		if err != nil && !errors.Is(err, ErrSessionUnavailable) {
+			return err
+		}
+		if stored != nil && stored.CredentialRevision == task.CredentialRevision {
+			saved, err := s.decodeSession(stored)
+			if err != nil && !errors.Is(err, ErrSessionUnavailable) {
+				return err
+			}
+			if saved != nil && saved.Version == 2 && len(saved.PKL) > 0 && saved.UID == "" &&
+				saved.KeyFingerprint == "" && len(saved.Addresses) == 0 && len(saved.UserKeys) == 0 &&
+				saved.AccessToken == "" && saved.RefreshToken == "" && saved.ExpiresAt.IsZero() {
+				importedPKL = saved.PKL
+			}
 		}
 		run.Attempts++
 		if err := tx.Model(run).Updates(map[string]any{"status": maintenanceRunning, "attempts": run.Attempts, "started_at": now, "updated_at": now}).Error; err != nil {
@@ -64,7 +80,7 @@ func (s *Service) ProcessValidation(ctx context.Context, task protoapp.Validatio
 	}()
 
 	// Password login and key unlocking must never hold database row locks.
-	session, loginErr := s.loginProtocol(ctx, *resource, task.RequestID)
+	session, loginErr := s.loginProtocol(ctx, *resource, task.RequestID, importedPKL)
 	if ctx.Err() != nil {
 		return domain.ErrDependency
 	}
@@ -75,9 +91,16 @@ func (s *Service) ProcessValidation(ctx context.Context, task protoapp.Validatio
 	if loginErr == nil && !validSession(session, resource.EmailAddress) {
 		failure = &proton.Failure{Category: "invalid_session", SafeMessage: "Proto login did not produce usable mailbox keys."}
 	}
+	if failure != nil && len(importedPKL) > 0 && failure.Category == "identity_mismatch" {
+		// A wrong imported session is not proof that the supplied password is bad.
+		// Retain the input for an explicit correction, never switch to password login.
+		invalid := *failure
+		invalid.Category, invalid.Retryable = "invalid_session", false
+		failure = &invalid
+	}
 	var payload []byte
 	if failure == nil {
-		payload, err = s.encryptSession(resource.ID, task.CredentialRevision, session)
+		payload, err = encodeSession(resource.ID, task.CredentialRevision, session)
 		if err != nil {
 			return err
 		}

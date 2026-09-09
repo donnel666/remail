@@ -45,7 +45,7 @@ func TestProtoValidationFailureProjectionUsesCurrentFactsEverywhere(t *testing.T
 		if test.kind != "" {
 			require.NoError(t, s.DB.Create(&MaintenanceRun{ResourceID: id, ValidationGeneration: 2, CredentialRevision: 2, Kind: test.kind, Status: test.outcome}).Error)
 		}
-		payload, err := s.encryptSession(id, test.revision, testPKLSession(email))
+		payload, err := encodeSession(id, test.revision, testPKLSession(email))
 		require.NoError(t, err)
 		require.NoError(t, s.DB.Create(&sessionRecord{ResourceID: id, CredentialRevision: test.revision, Version: 1, Payload: payload}).Error)
 		payloads[id], physical[id] = payload, test.stored
@@ -82,7 +82,7 @@ func TestProtoValidationFailureProjectionUsesCurrentFactsEverywhere(t *testing.T
 		require.EqualValues(t, len(ids[status]), filtered.Facets.ForSale.Yes, status)
 	}
 
-	// Read projection does not rewrite physical state or touch encrypted PKL.
+	// Read projection does not rewrite physical state or touch stored PKL.
 	for id, status := range physical {
 		var row Resource
 		require.NoError(t, s.DB.First(&row, id).Error)

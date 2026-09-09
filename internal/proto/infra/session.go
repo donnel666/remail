@@ -2,13 +2,9 @@ package infra
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/hkdf"
-	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/donnel666/remail/internal/platform"
@@ -41,60 +37,58 @@ type sessionRecord struct {
 
 func (sessionRecord) TableName() string { return "proto_sessions" }
 
-func (s *Service) sessionCipher() (cipher.AEAD, error) {
-	if s == nil || s.SessionSecret == "" {
-		return nil, domain.ErrDependency
-	}
-	key, err := hkdf.Key(sha256.New, []byte(s.SessionSecret), nil, "remail/proto/session/v1", 32)
-	if err != nil {
-		return nil, domain.ErrDependency
-	}
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, domain.ErrDependency
-	}
-	return cipher.NewGCMWithRandomNonce(block)
+// PKL is represented as Base64 by JSON, not encrypted. The resource/revision
+// fields retain accidental cross-resource and stale-credential checks.
+type sessionPayload struct {
+	ResourceID         uint   `json:"resourceId"`
+	CredentialRevision uint64 `json:"credentialRevision"`
+	proton.Session
 }
 
-func sessionAAD(id uint, revision uint64) []byte {
-	return []byte(fmt.Sprintf("remail/proto/session/v1:%d:%d", id, revision))
+func encodeSession(id uint, revision uint64, session proton.Session) ([]byte, error) {
+	payload, err := json.Marshal(sessionPayload{ResourceID: id, CredentialRevision: revision, Session: session})
+	if err != nil {
+		return nil, ErrSessionUnavailable
+	}
+	return payload, nil
 }
 
-func (s *Service) encryptSession(id uint, revision uint64, session proton.Session) ([]byte, error) {
-	aead, err := s.sessionCipher()
-	if err != nil {
-		return nil, err
-	}
-	plain, err := json.Marshal(session)
-	if err != nil {
+func (s *Service) decodeSession(row *sessionRecord) (*proton.Session, error) {
+	if row == nil || len(row.Payload) == 0 {
 		return nil, ErrSessionUnavailable
 	}
-	defer clear(plain)
-	return append([]byte{1}, aead.Seal(nil, nil, plain, sessionAAD(id, revision))...), nil
-}
-
-func (s *Service) decryptSession(row *sessionRecord) (*proton.Session, error) {
-	aead, err := s.sessionCipher()
-	if err != nil {
-		return nil, err
-	}
-	if len(row.Payload) < 2 || row.Payload[0] != 1 {
+	var payload sessionPayload
+	if json.Unmarshal(row.Payload, &payload) != nil || payload.ResourceID != row.ResourceID || payload.CredentialRevision != row.CredentialRevision {
 		return nil, ErrSessionUnavailable
 	}
-	plain, err := aead.Open(nil, nil, row.Payload[1:], sessionAAD(row.ResourceID, row.CredentialRevision))
-	if err != nil {
-		return nil, ErrSessionUnavailable
-	}
-	defer clear(plain)
-	var session proton.Session
-	if json.Unmarshal(plain, &session) != nil {
-		return nil, ErrSessionUnavailable
-	}
-	return &session, nil
+	return &payload.Session, nil
 }
 
 func validSession(session proton.Session, email string) bool {
 	return session.ValidFor(email)
+}
+
+// Imported bytes are persisted immediately but have no verified UID/key metadata.
+// ReadSession must reject this envelope until the validation worker authenticates
+// the PKL and replaces it with a complete session; import never runs pickle or HTTP.
+func (s *Service) storeImportedPKLTx(tx *gorm.DB, id uint, revision uint64, encoded string, now time.Time) error {
+	if encoded == "" {
+		return nil
+	}
+	if len(encoded) > base64.StdEncoding.EncodedLen(proton.MaxPKLBytes) {
+		return domain.ErrInvalidResource
+	}
+	pkl, err := base64.StdEncoding.Strict().DecodeString(encoded)
+	if err != nil || len(pkl) == 0 || len(pkl) > proton.MaxPKLBytes {
+		return domain.ErrInvalidResource
+	}
+	defer clear(pkl)
+	payload, err := encodeSession(id, revision, proton.Session{Version: 2, PKL: pkl})
+	if err != nil {
+		return err
+	}
+	return tx.Create(&sessionRecord{ResourceID: id, CredentialRevision: revision, Version: 1,
+		Payload: payload, CreatedAt: now, UpdatedAt: now}).Error
 }
 
 func deleteSessionTx(tx *gorm.DB, id uint) error {
@@ -112,7 +106,7 @@ func (s *Service) RequeueSessionValidation(ctx context.Context, id uint, revisio
 		}
 		var current *proton.Session
 		if stored != nil && stored.CredentialRevision == revision {
-			current, err = s.decryptSession(stored)
+			current, err = s.decodeSession(stored)
 			if err != nil && !errors.Is(err, ErrSessionUnavailable) {
 				return err
 			}
@@ -167,7 +161,7 @@ func (s *Service) ReadSession(ctx context.Context, id uint, revision uint64) (*p
 		if row.CredentialRevision != revision {
 			return ErrSessionUnavailable
 		}
-		session, err = s.decryptSession(row)
+		session, err = s.decodeSession(row)
 		if err != nil {
 			return err
 		}
@@ -216,7 +210,7 @@ func (s *Service) WithSession(ctx context.Context, id uint, revision uint64, fn 
 		if row.LeaseToken != "" && row.LeaseExpiresAt != nil && row.LeaseExpiresAt.After(now) {
 			return ErrSessionBusy
 		}
-		session, err = s.decryptSession(row)
+		session, err = s.decodeSession(row)
 		if err != nil {
 			return err
 		}
@@ -261,7 +255,7 @@ func (s *Service) WithSession(ctx context.Context, id uint, revision uint64, fn 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		payload, err := s.encryptSession(id, revision, next)
+		payload, err := encodeSession(id, revision, next)
 		if err != nil {
 			return err
 		}

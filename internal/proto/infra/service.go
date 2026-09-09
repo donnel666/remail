@@ -74,7 +74,6 @@ type Service struct {
 	BackgroundExecution   BackgroundExecutionGate
 	Protocol              ProtocolClient
 	Proxies               ProxyProvider
-	SessionSecret         string
 	HistoricalUsage       func(context.Context, []HistoricalUsage) error
 	ValidateOwner         func(context.Context, uint) (bool, error)
 	ValidateSupplierOwner func(context.Context, uint) (bool, error)
@@ -125,7 +124,8 @@ func emailDomain(email string) string {
 }
 
 func (s *Service) ImportLine(ctx context.Context, owner uint, line domain.ImportLine) (uint, string, error) {
-	if owner == 0 || !validEmail(line.Email) || line.Password == "" {
+	line.Email = normalizeImportEmail(line.Email)
+	if owner == 0 || !validEmail(line.Email) || !validPassword(line.Password) || (line.PKLBase64 != "" && !validImportPKL(line.PKLBase64)) {
 		return 0, "", domain.ErrInvalidResource
 	}
 	var id uint
@@ -163,6 +163,9 @@ func (s *Service) importLineTx(_ context.Context, tx *gorm.DB, owner uint, line 
 		if err := tx.Model(&Resource{}).Where("id = ?", row.ID).Updates(map[string]any{"owner_user_id": owner, "password": line.Password, "status": domain.StatusPending, "for_sale": false, "email_domain": emailDomain(line.Email), "quality_score": 0, "alloc_bucket": row.ID % 2048, "version": row.Version + 1, "credential_revision": row.CredentialRevision + 1, "credential_updated_at": now, "validation_generation": row.ValidationGeneration + 1, "validation_failures": 0, "validation_request_id": "", "last_safe_error": "", "last_checked_at": nil, "last_allocated_at": nil, "updated_at": now}).Error; err != nil {
 			return err
 		}
+		if err := s.storeImportedPKLTx(tx, row.ID, row.CredentialRevision+1, line.PKLBase64, now); err != nil {
+			return err
+		}
 		*id = row.ID
 		*outcome = "restored"
 		return nil
@@ -176,6 +179,9 @@ func (s *Service) importLineTx(_ context.Context, tx *gorm.DB, owner uint, line 
 	}
 	row := Resource{ID: root.ID, ResourceType: domain.ResourceType, OwnerUserID: owner, EmailAddress: line.Email, EmailDomain: emailDomain(line.Email), Password: line.Password, Status: domain.StatusPending, Version: 1, ValidationGeneration: 1, CredentialRevision: 1, CredentialUpdatedAt: now, AllocBucket: uint16(root.ID % 2048), CreatedAt: now, UpdatedAt: now}
 	if err := tx.Create(&row).Error; err != nil {
+		return err
+	}
+	if err := s.storeImportedPKLTx(tx, row.ID, row.CredentialRevision, line.PKLBase64, now); err != nil {
 		return err
 	}
 	*id = root.ID

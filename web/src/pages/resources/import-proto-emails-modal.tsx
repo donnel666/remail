@@ -316,7 +316,7 @@ export function ImportProtoEmailsModal({
             <TextArea
               className="font-mono"
               onChange={(value) => setText(value)}
-              placeholder="email----password"
+              placeholder={PROTO_EMAIL_FORMAT_HINT}
               rows={8}
               style={{ height: ENTRY_AREA_HEIGHT, resize: "none" }}
               value={text}
@@ -327,7 +327,7 @@ export function ImportProtoEmailsModal({
             <TextArea
               className="font-mono"
               onChange={(value) => setText(value)}
-              placeholder="email----password"
+              placeholder={PROTO_EMAIL_FORMAT_HINT}
               rows={8}
               style={{ height: ENTRY_AREA_HEIGHT, resize: "none" }}
               value={text}

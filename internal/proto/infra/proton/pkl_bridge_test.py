@@ -57,6 +57,24 @@ class FakeClient:
 
 
 class PickleTests(unittest.TestCase):
+    def test_imported_native_headers_are_safely_normalized_only_for_resume(self):
+        value = state()
+        value["headers"] = {"Authorization": "Bearer offline-only", "X-Pm-Uid": "offline-uid",
+                            "User-Agent": "python-requests/offline", "Accept-Encoding": "gzip, deflate",
+                            "Connection": "keep-alive"}
+        encoded = encode(value)
+        with self.assertRaises(bridge.BridgeError):
+            bridge.load_pickle(encoded)
+        normalized = bridge.load_pickle(encoded, imported=True)
+        self.assertEqual(normalized["headers"], {"authorization": "Bearer offline-only", "x-pm-uid": "offline-uid",
+                                                "user-agent": "python-requests/offline"})
+        for extra in ({"authorization": "Bearer conflicting"}, {"Host": "evil.example"},
+                      {"Connection": "keep-alive\r\nHost: evil.example"}):
+            rejected = copy.deepcopy(value)
+            rejected["headers"].update(extra)
+            with self.subTest(extra_header=next(iter(extra))), self.assertRaises(bridge.BridgeError):
+                bridge.load_pickle(encode(rejected), imported=True)
+
     def test_round_trip_restricted_schema_and_identity(self):
         value = bridge.load_pickle(encode(state()))
         self.assertEqual(value, state())
@@ -105,6 +123,21 @@ class PickleTests(unittest.TestCase):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_resume_allowlist_is_only_same_origin_read_only_identity_queries(self):
+        for endpoint, stage in (("users", "keys"), ("addresses", "addresses")):
+            url = "https://mail.proton.me/api/core/v4/" + endpoint
+            self.assertEqual(bridge.request_stage("resume", "GET", url), stage)
+            for method in ("POST", "PUT", "DELETE"):
+                with self.subTest(method=method), self.assertRaises(bridge.BridgeError):
+                    bridge.request_stage("resume", method, url)
+        for method, url in (("POST", "https://mail.proton.me/api/auth/refresh"),
+                            ("POST", "https://account.proton.me/api/core/v4/auth"),
+                            ("GET", "https://mail.proton.me/api/mail/v4/messages"),
+                            ("GET", "https://account.proton.me/api/core/v4/users"),
+                            ("GET", "https://evil.example/api/core/v4/addresses")):
+            with self.subTest(url=url), self.assertRaises(bridge.BridgeError):
+                bridge.request_stage("resume", method, url)
+
     def test_allowlist_denies_cross_action_sends_and_redirect_hosts(self):
         self.assertEqual(bridge.request_stage("fetch", "GET", "https://mail.proton.me/api/mail/v4/messages"), "list")
         self.assertEqual(bridge.request_stage("refresh", "POST", "https://mail.proton.me/api/auth/refresh"), "refresh")
@@ -129,6 +162,12 @@ class ProtocolTests(unittest.TestCase):
                                                      ("refresh", 408, 10013, "refresh", "request"),
                                                      ("auth_info", 422, 8002, "login", "request"),
                                                      ("auth_info", 422, 6003, "login", "invalid_credentials"),
+                                                     ("keys", 401, 0, "resume", "session_revoked"),
+                                                     ("addresses", 422, 8002, "resume", "session_revoked"),
+                                                     ("keys", 422, 6003, "resume", "session_revoked"),
+                                                     ("addresses", 422, 10013, "resume", "session_revoked"),
+                                                     ("keys", 429, 8002, "resume", "rate_limited"),
+                                                     ("keys", 503, 8002, "resume", "request"),
                                                      ("auth", 500, 0, "login", "request")]:
             event = bridge.response_error(stage, status, code, action).event
             self.assertEqual(event["category"], expected)
@@ -210,6 +249,80 @@ class OperationTests(unittest.TestCase):
             with self.assertRaises(bridge.BridgeError):
                 bridge.run(dict(action="fetch", pkl="invalid", recipient="one@example.com"), lambda event: None)
             build.assert_not_called()
+
+    def test_resume_replaces_untrusted_address_metadata_without_login_or_refresh(self):
+        client, models = self.fixture()
+        calls, checked, events = [], [], []
+        value = state()
+        value["account_addresses"] = [{"id": "forged-id", "email": "fake@example.com", "name": "untrusted"}]
+        value["pgp"]["aes256_keys"] = {"untrusted-cache": b"x" * 32}
+
+        def get(base, endpoint, **kwargs):
+            calls.append((base, endpoint))
+            self.assertEqual(base, "mail")
+            self.assertEqual(client.session.headers["authorization"], "Bearer offline-only")
+            if endpoint == "core/v4/users":
+                return types.SimpleNamespace(json=lambda: {"User": {"ID": "remote-user", "Keys": [{}]}})
+            self.assertEqual(endpoint, "core/v4/addresses")
+            self.assertEqual(kwargs, {"params": {"Page": 0, "PageSize": bridge.PAGE_SIZE}})
+            return types.SimpleNamespace(json=lambda: {"Addresses": [{"ID": "remote-id", "Email": "one@example.com", "DisplayName": "Remote Name", "Keys": []}]})
+
+        def validate(recipient):
+            self.assertEqual(client.account_addresses[0].id, "remote-id")
+            self.assertEqual(client.account_addresses[0].email, "one@example.com")
+            self.assertEqual(client.session.login_data["user"]["ID"], "remote-user")
+            checked.append(recipient)
+
+        client._get, client.validate_keys = get, validate
+        client.login = lambda *args, **kwargs: self.fail("resume must never log in")
+        client._post = lambda *args, **kwargs: self.fail("resume must never refresh or write")
+        with patch.object(bridge, "build_client", return_value=(client, models)) as build:
+            bridge.run(dict(action="resume", pkl=encode(value), email="one@example.com", proxy_url="http://proxy.example.test:8080"), events.append)
+        build.assert_called_once_with("resume", "http://proxy.example.test:8080")
+        self.assertEqual(calls, [("mail", "core/v4/users"), ("mail", "core/v4/addresses")])
+        self.assertEqual(checked, ["one@example.com"])
+        self.assertEqual([event["event"] for event in events], ["session", "result"])
+        saved = bridge.load_pickle(events[0]["pkl"])
+        self.assertEqual(saved["account_addresses"], [{"id": "remote-id", "email": "one@example.com", "name": "Remote Name"}])
+        self.assertEqual(saved["pgp"]["aes256_keys"], {})
+        self.assertEqual(saved["cookies"], value["cookies"])
+
+    def test_resume_rejects_password_and_malicious_pickle_before_network_client(self):
+        class Execute:
+            def __reduce__(self):
+                return (eval, ("must-never-execute-or-echo",))
+        requests = [dict(action="resume", pkl=encode(state()), recipient="one@example.com", password="must-never-echo"),
+                    dict(action="resume", pkl=encode(Execute()), recipient="one@example.com"),
+                    dict(action="resume", pkl="not base64", recipient="one@example.com")]
+        for request in requests:
+            with patch.object(bridge, "build_client") as build, patch("builtins.eval") as execute, self.assertRaises(bridge.BridgeError) as failure:
+                bridge.run(request, lambda event: self.fail("invalid resume cannot emit success"))
+            build.assert_not_called()
+            execute.assert_not_called()
+            self.assertNotIn("must-never", json.dumps(failure.exception.event))
+
+    def test_resume_checks_remote_addresses_beyond_the_first_page(self):
+        client, models = self.fixture()
+        pages = []
+
+        def get(base, endpoint, **kwargs):
+            self.assertEqual(base, "mail")
+            if endpoint == "core/v4/users":
+                return types.SimpleNamespace(json=lambda: {"User": {"ID": "remote-user", "Keys": [{}]}})
+            self.assertEqual(endpoint, "core/v4/addresses")
+            page = kwargs["params"]["Page"]
+            pages.append(page)
+            if page == 0:
+                accounts = [{"ID": "other-" + str(i), "Email": "other-" + str(i) + "@example.com"} for i in range(bridge.PAGE_SIZE)]
+            else:
+                self.assertEqual(page, 1)
+                accounts = [{"ID": "remote-id", "Email": "one@example.com"}]
+            return types.SimpleNamespace(json=lambda: {"Addresses": accounts})
+
+        client._get = get
+        bridge.resume_session(client, "one@example.com", models)
+        self.assertEqual(pages, [0, 1])
+        self.assertEqual(client.account_addresses[-1].id, "remote-id")
 
 
 class FetchTests(unittest.TestCase):
@@ -304,6 +417,11 @@ class InstalledDependencyTests(unittest.TestCase):
         cls.user_key = key("Offline User Key")
         cls.address_key = key("Offline Mailbox Key")
         cls.wrong_key = key("Wrong Mailbox Key")
+        with cls.user_key.unlock(cls.passphrase):
+            cls.address_token_signature = str(cls.user_key.sign(cls.passphrase))
+        cls.address_token = str(cls.user_key.pubkey.encrypt(
+            PGPMessage.new(cls.passphrase, compression=CompressionAlgorithm.Uncompressed),
+            cipher=SymmetricKeyAlgorithm.AES256))
         cls.crypto_state = state()
         cls.crypto_state["pgp"]["pairs_keys"] = [
             PgpPairKeys(is_primary=True, is_user_key=is_user,
@@ -329,6 +447,152 @@ class InstalledDependencyTests(unittest.TestCase):
         damaged[-1] ^= 1  # Valid packet structure, but the encrypted MDC no longer verifies.
         cls.corrupt_encrypted = str(PGPMessage.from_blob(bytes(damaged)))
         cls.bad_mime_encrypted = str(encrypted("Content-Type: multipart/mixed; boundary=missing\r\n\r\nincomplete MIME"))
+
+    def crypto_resume(self, value=None, recipient="one@example.com", user=None, accounts=None, expired=False):
+        """Real restricted pickle, SDK and PGP; the only mock is HTTPS transport."""
+        from curl_cffi import requests as curl_requests
+
+        user = user if user is not None else {"ID": "remote-user", "Keys": [{"PrivateKey": str(self.user_key), "Active": 1}]}
+        accounts = accounts if accounts is not None else [{"ID": "remote-address", "Email": "one@example.com",
+                    "DisplayName": "Remote User", "Status": 1, "Receive": 1,
+                    "Keys": [{"PrivateKey": str(self.address_key), "Active": 1, "Token": self.address_token,
+                              "Signature": self.address_token_signature}]}]
+        calls, events = [], []
+
+        def http(session, method, url, **kwargs):
+            self.assertEqual(method.upper(), "GET")
+            self.assertEqual(urlsplit(url).hostname, "mail.proton.me")
+            self.assertEqual(session.headers["authorization"], "Bearer offline-only")
+            self.assertEqual(session.headers["x-pm-uid"], "offline-uid")
+            self.assertEqual(session.cookies.get_dict()["AUTH-offline-uid"], "offline-cookie")
+            self.assertFalse(kwargs["allow_redirects"])
+            self.assertTrue(kwargs["verify"])
+            self.assertNotIn("json", kwargs)
+            self.assertNotIn("data", kwargs)
+            path = urlsplit(url).path
+            self.assertIn(path, ("/api/core/v4/users", "/api/core/v4/addresses"))
+            calls.append(path)
+            if path.endswith("/users"):
+                data = {"Code": 1000, "User": user}
+            else:
+                page, size = kwargs["params"]["Page"], kwargs["params"]["PageSize"]
+                self.assertEqual(size, bridge.PAGE_SIZE)
+                data = {"Code": 1000, "Addresses": accounts[page * size:(page + 1) * size]}
+            body = b"expired-session-response-must-never-echo" if expired else json.dumps(data).encode()
+            return types.SimpleNamespace(status_code=401 if expired else 200, content=b"", close=lambda: None,
+                                         iter_content=lambda: iter([body]), json=lambda: json.loads(body),
+                                         cookies=types.SimpleNamespace(get_dict=lambda: {}))
+
+        with patch.object(curl_requests.Session, "request", autospec=True, side_effect=http):
+            try:
+                bridge.run({"action": "resume", "pkl": encode(value if value is not None else self.crypto_state),
+                            "recipient": recipient}, events.append)
+            except bridge.BridgeError as error:
+                events.append(error.event)
+        return events, calls
+
+    def test_real_resume_canonicalizes_addresses_and_preserves_tokens(self):
+        value = copy.deepcopy(self.crypto_state)
+        value["account_addresses"] = [{"id": "forged-address-id", "email": "fake@example.com", "name": "untrusted"}]
+        value["headers"] = {"Authorization": "Bearer offline-only", "X-Pm-Uid": "offline-uid", "Accept-Encoding": "gzip", "Connection": "keep-alive"}
+        value["pgp"]["aes256_keys"] = {"untrusted-cache": b"x" * 32}
+        events, calls = self.crypto_resume(value)
+        self.assertEqual([event["event"] for event in events], ["session", "result"])
+        self.assertEqual(calls, ["/api/core/v4/users", "/api/core/v4/addresses"])
+        self.assertEqual(events[0]["addresses"], [{"id": "remote-address", "email": "one@example.com"}])
+        saved = bridge.load_pickle(events[0]["pkl"])
+        self.assertEqual(saved["account_addresses"], [{"id": "remote-address", "email": "one@example.com", "name": "Remote User"}])
+        self.assertEqual(saved["cookies"], value["cookies"])
+        self.assertEqual(saved["headers"]["authorization"], value["headers"]["Authorization"])
+        self.assertEqual(saved["pgp"]["aes256_keys"], {})
+
+    def test_real_resume_cannot_forge_recipient_with_local_email_or_address_id(self):
+        value = copy.deepcopy(self.crypto_state)
+        value["account_addresses"][0].update(id="remote-address", email="victim@example.com")
+        for pair in value["pgp"]["pairs_keys"]:
+            pair["email"] = "victim@example.com"
+        events, _ = self.crypto_resume(value, recipient="victim@example.com")
+        self.assertEqual([event["event"] for event in events], ["error"])
+        self.assertEqual(events[0]["category"], "identity_mismatch")
+        self.assertNotIn("victim@example.com", json.dumps(events))
+
+    def test_real_resume_rejects_wrong_key_passphrase_fingerprint_and_token_signature(self):
+        for index, change in ((0, {"private_key": str(self.wrong_key)}),
+                              (1, {"private_key": str(self.wrong_key)}),
+                              (1, {"passphrase": "incorrect-import-passphrase"}),
+                              (1, {"fingerprint_private": "F" * 40})):
+            with self.subTest(pair=index, field=next(iter(change))):
+                value = copy.deepcopy(self.crypto_state)
+                value["pgp"]["pairs_keys"][index].update(change)
+                events, _ = self.crypto_resume(value)
+                self.assertEqual([event["event"] for event in events], ["error"])
+                self.assertEqual(events[0]["stage"], "keys")
+                self.assertEqual(events[0]["category"], "action_required")
+                self.assertNotIn("incorrect-import-passphrase", json.dumps(events))
+        with self.wrong_key.unlock(self.passphrase):
+            signature = str(self.wrong_key.sign(self.passphrase))
+        accounts = [{"ID": "remote-address", "Email": "one@example.com", "Status": 1, "Receive": 1,
+                     "Keys": [{"PrivateKey": str(self.address_key), "Active": 1, "Token": self.address_token, "Signature": signature}]}]
+        events, _ = self.crypto_resume(accounts=accounts)
+        self.assertEqual([event["event"] for event in events], ["error"])
+        self.assertEqual(events[0]["stage"], "keys")
+        self.assertIn(events[0]["category"], ("protocol", "action_required"))
+
+    def test_real_resume_html_401_fails_without_refresh_or_login(self):
+        events, calls = self.crypto_resume(expired=True)
+        self.assertEqual(calls, ["/api/core/v4/users"])
+        self.assertEqual([event["event"] for event in events], ["error"])
+        self.assertEqual(events[0]["category"], "session_revoked")
+        self.assertFalse(events[0]["retryable"])
+        self.assertNotIn("expired-session-response", json.dumps(events))
+
+    def test_real_resume_full_address_limit_fits_derived_request_budget(self):
+        accounts = [{"ID": "other-" + str(i), "Email": "other-" + str(i) + "@example.com", "Status": 1, "Keys": []}
+                    for i in range(4095)]
+        accounts.append({"ID": "last-address", "Email": "one@example.com", "Status": 1,
+                         "Keys": [{"PrivateKey": str(self.address_key), "Active": 1, "Token": self.address_token,
+                                   "Signature": self.address_token_signature}]})
+        events, calls = self.crypto_resume(accounts=accounts)
+        self.assertEqual([event["event"] for event in events], ["session", "result"])
+        self.assertEqual(len(calls), 2 + 4096 // bridge.PAGE_SIZE)
+        self.assertEqual(events[0]["addresses"], [{"id": "last-address", "email": "one@example.com"}])
+
+    def test_request_budget_stays_bounded_and_login_retains_twenty_calls(self):
+        from curl_cffi import requests as curl_requests
+        for action, limit, origin in (("resume", 2 + 4096 // bridge.PAGE_SIZE, "mail"), ("login", 20, "account")):
+            with self.subTest(action=action):
+                client, _ = bridge.build_client(action, "")
+                self.addCleanup(client.session.close)
+                client.session.calls = limit
+                with patch.object(curl_requests.Session, "request") as request, self.assertRaises(bridge.BridgeError) as failure:
+                    client._get(origin, "core/v4/users")
+                request.assert_not_called()
+                self.assertEqual(failure.exception.event["stage"], "transport")
+
+    def test_real_resume_preserves_owned_inactive_keys_but_requires_an_active_key(self):
+        value = copy.deepcopy(self.crypto_state)
+        historical = dict(value["pgp"]["pairs_keys"][1], is_primary=False, private_key=str(self.wrong_key),
+                          public_key=str(self.wrong_key.pubkey), fingerprint_private=str(self.wrong_key.fingerprint),
+                          fingerprint_public=str(self.wrong_key.fingerprint))
+        value["pgp"]["pairs_keys"].append(historical)
+        accounts = [{"ID": "remote-address", "Email": "one@example.com", "Status": 1,
+                     "Keys": [{"PrivateKey": str(self.address_key), "Active": 1, "Token": self.address_token,
+                               "Signature": self.address_token_signature},
+                              {"PrivateKey": str(self.wrong_key), "Active": 0}]}]
+        events, _ = self.crypto_resume(value, accounts=accounts)
+        self.assertEqual([event["event"] for event in events], ["session", "result"])
+        self.assertEqual(len(bridge.load_pickle(events[0]["pkl"])["pgp"]["pairs_keys"]), 3)
+        for change in ({"passphrase": "invalid-historical-passphrase"}, {"fingerprint_private": "F" * 40}):
+            invalid = copy.deepcopy(value)
+            invalid["pgp"]["pairs_keys"][-1].update(change)
+            with self.subTest(changed_field=next(iter(change))):
+                events, _ = self.crypto_resume(invalid, accounts=accounts)
+                self.assertEqual([event["event"] for event in events], ["error"])
+                self.assertEqual(events[0]["category"], "action_required")
+        accounts[0]["Keys"][0]["Active"] = 0
+        events, _ = self.crypto_resume(value, accounts=accounts)
+        self.assertEqual([event["event"] for event in events], ["error"])
+        self.assertEqual(events[0]["category"], "identity_mismatch")
 
     def crypto_fetch(self, encoded_state=None, corrupt=None, full_history=True):
         """Only HTTP is mocked: real PKL parsing, SDK key restore, PGP and MIME run."""

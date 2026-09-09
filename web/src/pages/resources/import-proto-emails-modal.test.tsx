@@ -45,11 +45,12 @@ vi.mock("@douyinfe/semi-ui", () => ({
     <button aria-busy={props.confirmLoading} disabled={props.confirmLoading} onClick={props.onOk}>{props.okText}</button>
   </>}</div> : null,
   Space: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  TextArea: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => <textarea value={value} onChange={(event) => onChange(event.target.value)} />,
+  TextArea: ({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder?: string }) => <textarea placeholder={placeholder} value={value} onChange={(event) => onChange(event.target.value)} />,
   Typography: { Text: ({ children }: { children: ReactNode }) => <span>{children}</span> },
   Toast: { success: mocks.success, error: mocks.error, warning: mocks.warning, info: mocks.info },
 }));
 import { ImportProtoEmailsModal } from "./import-proto-emails-modal";
+import { PROTO_EMAIL_FORMAT_HINT } from "./proto-model";
 
 const owners = [{ id: 31, email: "admin@example.com", nickname: "Admin", groupName: "Administrators", role: "admin" as const, enabled: true }];
 const completed = { importId: 7, status: "imported", imported: 1, skipped: 0, failed: 0 };
@@ -66,7 +67,48 @@ function deferred<T>() {
 
 describe("Proto import feedback", () => {
   beforeEach(() => { vi.resetAllMocks(); sessionStorage.clear(); mocks.turnstile.mockResolvedValue("challenge"); });
-  afterEach(cleanup);
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+  it.each([false, true])("shows bare-account completion and submits both formats verbatim for admin=%s", async (admin) => {
+    const importResources = admin ? mocks.importAdminResources : mocks.importResources;
+    importResources.mockResolvedValue({ ...completed, imported: 3 });
+    const content = "first----  first password  \nsecond----  second password  ---- \tAAEC/w== \t\nthird@custom.example----  full email password  ----AAA=";
+    render(<ImportProtoEmailsModal admin={admin} open owners={owners} onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
+    expect(screen.getByRole("textbox").getAttribute("placeholder")).toBe(PROTO_EMAIL_FORMAT_HINT);
+    expect(PROTO_EMAIL_FORMAT_HINT).toBe("email----password\nemail----password----base64(PKL)\naccount → account@proton.me");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: content } });
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    await waitFor(() => expect(importResources).toHaveBeenCalledTimes(1));
+    if (admin) {
+      expect(importResources.mock.calls[0][0].content).toBe(content);
+    } else {
+      const uploaded = importResources.mock.calls[0][0] as File;
+      const uploadedText = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsText(uploaded);
+      });
+      expect(uploadedText).toBe(content);
+    }
+    expect(mocks.error).not.toHaveBeenCalled();
+  });
+  it("rejects malformed PKL without exposing credentials in feedback, storage or logs", async () => {
+    const stored = vi.spyOn(Storage.prototype, "setItem");
+    const logged = (["log", "warn", "error"] as const).map((method) => vi.spyOn(console, method).mockImplementation(() => undefined));
+    const password = "sensitive password";
+    const pkl = "AAEC/w==not-pkl";
+    render(<ImportProtoEmailsModal admin open owners={owners} onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: `person@example.com----${password}----${pkl}` } });
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith("No valid import entries."));
+    expect(mocks.importAdminResources).not.toHaveBeenCalled();
+    expect(mocks.importResources).not.toHaveBeenCalled();
+    expect(mocks.turnstile).not.toHaveBeenCalled();
+    expect(stored).not.toHaveBeenCalled();
+    const feedback = JSON.stringify([mocks.error.mock.calls, mocks.warning.mock.calls, mocks.success.mock.calls, mocks.info.mock.calls, ...logged.map((spy) => spy.mock.calls)]);
+    expect(feedback).not.toContain(password);
+    expect(feedback).not.toContain(pkl);
+  });
   it("does not report success when the accepted import has failed", async () => {
     mocks.importResources.mockResolvedValue({ importId: 7, status: "failed", lastSafeError: "Invalid proto import format.", imported: 0, skipped: 0, failed: 1 });
     const onSuccess = vi.fn();

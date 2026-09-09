@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -57,6 +58,7 @@ func TestUsageNeverEchoesAccidentallyPastedCredentials(t *testing.T) {
 	require.ErrorIs(t, err, flag.ErrHelp)
 	require.Contains(t, stderr.String(), "-apply")
 	require.Contains(t, stderr.String(), "-resource-id")
+	require.Contains(t, stderr.String(), "usernames default to @proton.me")
 }
 
 func TestCredentialSelectionPreservesPasswordAndRejectsMultipleStdinLines(t *testing.T) {
@@ -115,6 +117,69 @@ func TestLoginReportsPKLMetadataWithoutSecretsOrDatabaseWrites(t *testing.T) {
 	require.Equal(t, 1, out.AddressCount)
 	require.Nil(t, out.KeyCount, "native PKL does not expose a plaintext key count")
 	assertNoSecrets(t, out, "person@example.test", "password-canary", "pickle-canary", "uid-canary", "address-canary", "proxy-secret", strings.Repeat("a", 64))
+}
+
+func TestLoginAcceptsPKLInputWithoutSendingPasswordOrIgnoringIt(t *testing.T) {
+	raw := bytes.Repeat([]byte("pkl-canary"), 1000)
+	encoded := base64.StdEncoding.EncodeToString(raw)
+	line := "owner@proton.me---- password-canary ----" + encoded + "\n"
+	opts := parsed(t, "-mode", "login", "-stdin", "-direct", "-apply")
+	provider := protocolStub{login: func(_ context.Context, req proton.LoginRequest) (proton.Session, error) {
+		require.Empty(t, req.Password)
+		require.Equal(t, raw, req.PKL)
+		return proton.Session{Version: 2, UID: "uid-canary", PKL: req.PKL, KeyFingerprint: strings.Repeat("a", 64), Addresses: []proton.AddressKeys{{ID: "address-canary", Email: req.Email}}}, nil
+	}}
+	out, err := execute(context.Background(), opts, strings.NewReader(line), nil, provider)
+	require.NoError(t, err)
+	require.Equal(t, "login_succeeded", out.Outcome)
+	assertNoSecrets(t, out, encoded, "password-canary", "pkl-canary", "uid-canary", "owner@proton.me")
+	opts.Engine = "go"
+	_, err = execute(context.Background(), opts, strings.NewReader(line), nil, nil)
+	require.ErrorContains(t, err, "PKL requires the python engine")
+	opts.Engine, opts.Apply = "python", false
+	out, err = execute(context.Background(), opts, strings.NewReader(line), nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, "preview", out.Outcome)
+}
+
+func TestLoginNormalizesBareUsernameWithAndWithoutPKLWithoutEchoingCredentials(t *testing.T) {
+	raw := []byte("imported-pkl-canary")
+	encoded := base64.StdEncoding.EncodeToString(raw)
+	for _, withPKL := range []bool{false, true} {
+		name := "password"
+		if withPKL {
+			name = "pkl"
+		}
+		t.Run(name, func(t *testing.T) {
+			input := " BareUsernameCanary ---- password-canary "
+			if withPKL {
+				input += "----" + encoded
+			}
+			calls := 0
+			provider := protocolStub{login: func(_ context.Context, req proton.LoginRequest) (proton.Session, error) {
+				calls++
+				require.Equal(t, "bareusernamecanary@proton.me", req.Email)
+				if withPKL {
+					require.Empty(t, req.Password)
+					require.Equal(t, raw, req.PKL)
+				} else {
+					require.Equal(t, " password-canary ", req.Password)
+					require.Empty(t, req.PKL)
+				}
+				return proton.Session{Version: 2, UID: "uid-canary", PKL: []byte("session-canary"), KeyFingerprint: strings.Repeat("a", 64),
+					Addresses: []proton.AddressKeys{{ID: "address-canary", Email: req.Email}}}, nil
+			}}
+			opts := parsed(t, "-mode", "login", "-stdin", "-direct", "-apply")
+			for _, apply := range []bool{true, false} {
+				opts.Apply = apply
+				out, err := execute(context.Background(), opts, strings.NewReader(input), nil, provider)
+				require.NoError(t, err)
+				require.Equal(t, !apply, out.DryRun)
+				assertNoSecrets(t, out, "BareUsernameCanary", "bareusernamecanary", "password-canary", "imported-pkl-canary", encoded, "session-canary", "uid-canary")
+			}
+			require.Equal(t, 1, calls, "preview must not call the protocol client")
+		})
+	}
 }
 
 func TestLoginOnlyUsesExplicitDirectOrProxyEnvironmentWhenBindingMissing(t *testing.T) {
@@ -268,6 +333,7 @@ func TestFailedEnqueueDoesNotClaimBusinessSuccessOrExposeBackendErrors(t *testin
 }
 
 func TestFetchIsBoundedAndNeverPrintsMailBody(t *testing.T) {
+	t.Setenv("SESSION_SECRET", "")
 	rt := testRuntime(t)
 	rt.fetch = func(_ context.Context, id uint, revision uint64, req proton.FetchRequest) (proton.FetchResult, error) {
 		require.Equal(t, uint(1), id)
@@ -282,6 +348,14 @@ func TestFetchIsBoundedAndNeverPrintsMailBody(t *testing.T) {
 	require.Equal(t, 1, out.Fetched)
 	require.True(t, out.Complete)
 	assertNoSecrets(t, out, "subject-canary", "body-canary", "sender@example.test")
+}
+
+func TestRuntimeDoesNotDependOnSessionSecret(t *testing.T) {
+	// Verify startup does not read or inject a session secret without opening MySQL/Redis.
+	source, err := os.ReadFile("runtime.go")
+	require.NoError(t, err)
+	require.NotContains(t, string(source), "SessionSecret")
+	require.NotContains(t, string(source), "SESSION_SECRET")
 }
 
 func TestProviderFailureOnlyExposesSafeDiagnosticFields(t *testing.T) {

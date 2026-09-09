@@ -2,17 +2,49 @@
 
 日期：2026-09-08。
 
+2026-09-09 更新：新增 Base64 PKL／裸用户名导入；应用只读写明文会话，不保留密文读取兼容。存量密文另做一次性受控转换。
+
+## 导入现成的 PKL
+
+一行一条，可在同一文件中混用：
+
+```text
+email----password
+email----password----base64(PKL)
+username----password
+username----password----base64(PKL)
+```
+
+- 第一段可为完整邮箱地址或裸用户名；裸用户名自动补 `@proton.me`，已有 `@` 的地址不会替换后缀。补全后统一校验和去重，例如 `name` 与 `name@proton.me` 视为同一账号。密码的首尾空格保留；第三段允许首尾空白，内部不能折行或有空白。
+- 第三段是原生 PKL 文件内容的标准 Base64，要求规范 padding，解码后最多 8 MiB。不是文件路径、JSON 会话或 URL-safe Base64。前端只校验格式与大小；服务端流式预检，不同时保留整批 PKL 的解码副本。
+- 导入时逐行解码，与新建／恢复资源在同一事务中明文保存到 `proto_sessions.payload`。JSON 中的 `pkl` 使用 Base64 表示二进制，不做二次加密。先保存缺少 UID／地址／指纹的待验证数据，不能被普通取件或分配当成有效会话；导入事务内不运行 Python 或网络请求。
+- 验证任务复用导入的 PKL，安全反序列化后只读查询 Proton 用户、地址和密钥，验证归属、私钥、指纹及签名。成功后保存完整 v2 会话并进入原旧项目识别流程。首次验证不发送密码，不自动刷新导入令牌，也不在失败后自动回退密码登录；过期／错误 PKL 明确验证失败。需要重新用密码登录时，通过原凭据更新入口清除旧会话并重新验证。
+- 沿用原来的重复跳过、删除后恢复、skip/abort、分块提交和重放规则。已有非删除资源不会被新导入覆盖；跨分块的基础设施失败仍保留此前已提交行。数据库、备份和原私有导入 TXT 都含敏感凭据，必须限制访问，不能公开下载。
+- CMD 的 `login -file/-stdin` 同样识别第三段，仅做诊断、不落库；带 PKL 只能使用 Python 引擎。正式持久化使用管理员导入流程，普通用户权限不因此开放。
+
 ## 决策：PKL 是数据库中的会话凭据
 
 用户要求验证任务生成 PKL，取件复用 PKL，作用类似微软 RT。`proton.py` 默认使用 `protonmail-api-client 2.4.3` 的 WEB 登录，并不是此前 Go 客户端的直接登录路径。
 
 选择在 **Proto 自己的协议边界**调用短生命周期 Python 子进程：复用已验证的 WEB 登录、cookie 和 PKL 数据结构，而不再自行补写一套 WEB 登录实现。旧 Go 客户端保留用于对照以及既有 v1 会话取件，不修改微软、苹果、Gmail 的客户端。
 
-- 验证：现有任务领取及 revision/generation 检查 → WEB 登录、服务器证明和密钥校验 → 原生 PKL → 原有 AES-GCM 加密 → `proto_sessions.payload` → 原有历史识别任务。
-- 取件：读取该资源的加密 PKL 快照 → Python 内存恢复 → 收件；不传密码、不重新登录、不落本地 `.pkl`。
+- 验证：现有任务领取及 revision/generation 检查 → WEB 登录或导入 PKL 验证、服务器证明和密钥校验 → 原生 PKL → 明文 JSON 写入 `proto_sessions.payload` → 原有历史识别任务。
+- 取件：读取该资源的 PKL 快照 → Python 内存恢复 → 收件；不传密码、不重新登录、不落本地 `.pkl`。
 - 刷新：Python 不自行刷新或循环重试 401。Go 在原来的 60 秒操作／90 秒数据库租约内完成刷新并持久化新 PKL，再继续读取；并发读者复用已轮换会话。
-- 新会话载体为 v2；旧 v1 JSON 会话仍可用旧 Go 取件路径。外层加密格式、HKDF 用途、资源 ID／凭据 revision 的 AAD 都不改变。
-- **本次没有新表、新迁移或订单字段。** PKL 内容在现有 BLOB 中加密保存，不进入资源 DTO、队列载荷、命令参数或日志。轮换 `SESSION_SECRET` 仍需要重新验证 Proto 会话。
+- 新会话载体为 v2；已转换成明文存储的旧 v1 会话仍可用旧 Go 取件路径，这不代表兼容旧密文。存储统一为普通 JSON，包含原会话字段及 `resourceId / credentialRevision`，读取时仍核对资源和凭据版本；不依赖应用加密密钥。
+- **本次没有新表、SQL 结构迁移或订单字段。** 存量密文需要一次性数据格式转换；新写入和刷新的 PKL 在现有 BLOB 中明文保存，不进入资源 DTO、队列载荷、命令参数或日志。Proto 不再读取或注入 `SESSION_SECRET`；全局该配置仍用于系统其他功能，不可一并删除。
+
+### 存储决策与一次性历史数据转换
+
+按当前业务要求，与微软 RT 一样采用明文持久化，不引入新的密钥管理系统。收益是新会话可以独立于应用密钥恢复和迁移；代价是拥有数据库或备份读取权限的人可以获取 PKL，必须依靠访问控制、备份保护和输出脱敏限制暴露。
+
+- 应用只解析明文 JSON；AES／HKDF／AAD 解密分支和 Proto 专属密钥注入已删除，不提供双格式读取、读时回填或自然转换。普通读取不更新数据库。旧首字节 `1` 的密文会返回会话不可用，取件恢复可能清除它并重新排队验证，因此必须先完成受控转换，不能靠新应用自行修复格式。
+- 一次性操作先保存受控密文备份，再使用加密时的原 `SESSION_SECRET`、原资源 ID／凭据 revision 的 AAD 解开历史载荷。原密钥只用于这次操作，不重新引入应用运行时。没有正确的原密钥就不能恢复密文，不以删除会话或密码重验冒充转换成功。
+- 目标是平铺 JSON：在原 session 字段同一层加入数值型 `resourceId` 和 `credentialRevision`，完整保留 `version / uid / accessToken / refreshToken / expiresAt / userKeys / addresses` 以及存在的 `pkl / keyFingerprint`。不能只保存原解密 JSON、只保存 PKL 或把原字段嵌套到 `session` 下。session 的 `version` 是内容版本，不是表的行 version；转换不改变业务凭据 revision、validation generation 或资源状态，也不触发登录／验证／历史识别。
+- 转换后逐条核对 JSON、资源 ID／revision 与原 session 内容一致，并确认不存在漏转密文；操作日志只记录数量和安全结果，不输出密钥、账号、session 或 PKL。备份、数据库及其日志按敏感凭据保护。
+- 本次按用户确认的测试场景安排转换窗口。从转换开始到 review 完成并部署明文版本前，不运行任何 Proto 操作，包括导入、取件、刷新、验证、历史识别和已排队的后台任务。应用不会自动阻止旧镜像读取新格式，必须保证此窗口内没有 Proto 任务实际执行。
+
+2026-09-09 已在用户确认的测试窗口通过 SSH 完成一次性转换：5 条密文会话全部转为明文 JSON，独立查库确认密文剩余 0 条，资源 ID／凭据 revision 和 PKL 元数据均校验通过。原密文已保存为服务器上的 root-only 备份。更新事务耗时约 4 毫秒，只更新 `payload`，表行 version、revision、更新时间、资源状态和分配记录均未改变；没有执行 DDL、显式表锁、登录、验证或取件，也没有停止应用。此时旧镜像仍在运行，必须继续保持 Proto 无操作，直到部署明文版本完成；后续新写入不应使用本次旧备份直接覆盖。
 
 代价是新增 Proto 专用 Python 运行环境及每次协议调用的进程开销。当前调试阶段优先隔离和可核验性；若未来进程启动成为实际瓶颈，再评估复用进程，不预先增加服务或工作池。
 
@@ -35,7 +67,7 @@
 
 生产当前已有 136–138 的表结构，无需为 PKL 再迁移。新协议代码必须随镜像部署后才会由验证 worker 使用；**只提交验证任务，不会让旧镜像自动获得 PKL 实现**。既有部署仍有其原来的服务停止／启动步骤，本次没有修改该流程。
 
-旧于 PKL 实现的镜像不能识别新 v2 会话；回滚时不要把它当成 Proto 会话格式也已回滚。其他邮箱模块不使用这些会话数据。
+旧于 PKL 实现的镜像不能识别 v2 会话；只支持加密存储的旧镜像也不能读取转换后的明文记录。完成一次性转换、核对和 review 后，按现有停止／启动流程统一更新 Proto API 和 worker，再恢复 Proto 操作；不混跑新旧实例。写入新格式后不要直接回滚至只读密文的旧版本，修复镜像必须支持明文。若确需回到旧镜像，须在停止 Proto 操作后另行评估备份及转换后的新写入，不能认为回滚镜像也会回滚数据格式，也不能盲目用旧备份覆盖新会话。其他邮箱模块不使用这些会话数据。
 
 ## 验证重试与失败终态
 
@@ -48,7 +80,7 @@
 - 旧版本留下的当前轮 `pending + uncertain` 会自动按该规则展示，无需修改历史记录。管理员明确重新验证时，原有命令递增 generation 并清零失败预算，旧终态不再影响新一轮。普通读取不会重新登录或自动复活已耗尽的任务。
 - 桥接失败记录固定安全原因，例如 `bridge_decode`、`bridge_missing_result`、`bridge_worker_exit`、`bridge_limit`、`bridge_session_metadata`。维护记录的安全文案同样区分这些原因；不再以统一的 “invalid or oversized” 文案暗示 PKL 一定超大。日志与返回值不包含原始输出、stderr、账号或 PKL。
 
-这些变化仅作用于 Proto；既有 PKL 的加密保存／刷新与订单分配、退款规则不变。API 增加了状态枚举值，部署后需要刷新浏览器加载支持 `validation_failed` 的新页面，旧标签页不保证能识别该值。新旧后端混用或回滚不会因本次只读状态改变钱款状态；旧后端仍会按原逻辑返回物理 `pending`。
+上述重试与状态投影变化仅作用于 Proto，不改变 PKL 刷新与订单分配、退款规则。API 增加了状态枚举值，部署后需要刷新浏览器加载支持 `validation_failed` 的新页面，旧标签页不保证能识别该值。只读状态本身不会改变钱款状态；本次会话存储格式的独立部署／回滚限制见上节。
 
 ## CMD 使用
 
@@ -70,7 +102,7 @@ proto -mode login -file /secure/proto-account.txt -line 1 -json
 # 明确执行时，代理从已配置的环境变量读取，不写进命令行
 proto -mode login -file /secure/proto-account.txt -line 1 -proxy-env PROTO_PROXY_URL -apply -json
 
-# 提交正式验证：worker 才负责将 PKL 加密持久化到数据库
+# 提交正式验证：worker 负责将验证后的 PKL 明文持久化到数据库
 proto -mode validate -resource-id 12345 -operator-user-id 1 -apply -json
 
 # 提交旧项目识别任务
@@ -80,11 +112,11 @@ proto -mode history -resource-id 12345 -operator-user-id 1 -apply -json
 proto -mode fetch -resource-id 12345 -operator-user-id 1 -since 24h -limit 20 -apply -json
 ```
 
-数据库模式沿用 `MYSQL_DSN`，正式维护另使用已有 Redis／系统设置／代理配置；取件需要 `SESSION_SECRET`。CLI 不执行迁移、不启动 HTTP 服务或后台 worker。`validate/history` 输出 `queued` 只是入队成功，不是业务完成，之后用 `inspect` 核对维护状态。可传 `-version` 确认资源版本。
+数据库模式沿用 `MYSQL_DSN`，正式维护另使用已有 Redis／系统设置／代理配置；Proto CLI 只读取明文会话，不读取或注入 `SESSION_SECRET`，不兼容密文。全局会话密钥仍由系统其他功能使用。CLI 不执行数据转换或 SQL 迁移、不启动 HTTP 服务或后台 worker。`validate/history` 输出 `queued` 只是入队成功，不是业务完成，之后用 `inspect` 核对维护状态。可传 `-version` 确认资源版本。
 
 `login` 是对照诊断，其 PKL 仅留在进程内；需要持久化时使用正式 `validate` 任务。`fetch -apply` 可能刷新并回写 PKL或请求会话恢复，因此不是纯只读命令。没有有效代理绑定时必须显式选择 `-direct` 或 `-proxy-env`，不会悄悄换出口。
 
-## 本次受控对照
+## 2026-09-08 受控对照（历史记录，当时仍为加密存储）
 
 使用同一条数据库凭据、同一个已绑定代理，且不修改数据库：
 

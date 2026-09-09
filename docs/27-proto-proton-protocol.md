@@ -1,8 +1,10 @@
 # Proto 的 Proton 协议接入（旧 v1 参考）
 
-2026-09-08 更新：当前验证/取件已改为原生 PKL 会话，见 [28-proto-pkl-maintenance.md](28-proto-pkl-maintenance.md)。本文的纯 Go 登录设计保留为旧 v1 会话兼容与对照说明，不再是新验证任务的默认实现；任务、订单和加密隔离原则继续适用。
+2026-09-09 更新：当前验证/取件已改为原生 PKL 会话，应用只读写明文 JSON，不再兼容密文存储，见 [28-proto-pkl-maintenance.md](28-proto-pkl-maintenance.md)。本文的纯 Go 登录方案保留为历史设计和旧 v1 会话的协议参考；v1 协议支持不代表密文读取兼容。任务、订单和模块隔离原则继续适用。存量密文须通过一次性受控操作，用原密钥解开并转换，不能交给应用自然转换；具体发布／回滚限制以新文档为准。
 
 日期：2026-09-07。本文接续 `26`，描述提供 `proton.py` 后的实现；`26` 中的协议 TODO 和默认禁售说明已被本次实现替代。
+
+下文迁移与验证结果属于当时的实施记录，不表示本轮一次性线上密文转换已执行或完成。
 
 最近修正：2026-09-08，补齐异常响应、正文完整性、后台读取与实时收件并发，以及批量商品的历史调度。
 
@@ -10,7 +12,7 @@
 
 ## 决策与隔离边界
 
-参考脚本的 SRP 登录、会话复用和 PGP 解密流程；底层协议还核对了脚本依赖 `protonmail-api-client` 的 DEV 模式以及 Proton 的 Go API 客户端源码。生产实现不运行 Python，不读写或反序列化 pickle 文件。
+旧 v1 方案参考脚本的 SRP 登录、会话复用和 PGP 解密流程；底层协议还核对了脚本依赖 `protonmail-api-client` 的 DEV 模式以及 Proton 的 Go API 客户端源码。当时的实现不运行 Python，不读写或反序列化 pickle 文件；当前默认 PKL 路径见新文档。
 
 HTTP 会话独立复制微软客户端的设计，代码在 `internal/proto/infra/proton`：已有的 `tls-client`/`fhttp`、Chrome 124 指纹、cookie jar、禁用 HTTP/3、正常 TLS 校验、禁止跟随重定向、30 秒请求超时和 context 取消。Proto 使用独立的 `proto:<全局资源ID>` 代理绑定，通过原公共代理入口取代理；不引用或改写微软的客户端、私有表及任务。
 
@@ -20,16 +22,16 @@ HTTP 会话独立复制微软客户端的设计，代码在 `internal/proto/infr
 
 ## 验证和密钥持久化
 
-导入格式保持 `邮箱----密码`，不裁剪密码。验证任务执行：
+旧 v1 的两段式导入格式为 `邮箱----密码`，不裁剪密码；当前还支持 PKL／裸用户名导入，详见新文档。以下为旧 v1 登录流程，持久化边界已按当前明文实现更新：
 
 1. 短事务按根资源→Proto 资源领取维护任务，记录本次 attempt，校验归属、凭据 revision 和 validation generation。
 2. 退出事务后，调用 `/auth/v4/info` 与 `/auth/v4` 完成 SRP。验证签名 modulus 和服务器 proof，不把拿到 Token 当成充分的验证成功。
 3. 按 Key ID 读取邮箱盐，解锁用户私钥；解密地址 Token 并验证其签名，再解锁地址私钥。导入地址必须属于该账户的有效收件地址且有可用密钥。
-4. 再次检查任务归属，原子保存密文会话、将资源设为 `identifying`、创建历史识别任务。登录期间改密码、改邮箱、转移归属、禁用或删除，会使旧任务不能提交。
+4. 再次检查任务归属，原子保存明文 JSON 会话、将资源设为 `identifying`、创建历史识别任务。登录期间改密码、改邮箱、转移归属、禁用或删除，会使旧任务不能提交。
 
-新表 `proto_sessions` 以全局资源 ID 为主键，保存 `credential_revision`、会话 version、加密 payload、lease token/期限及时间戳。payload 包含 UID、access/refresh token 和已解锁的用户/地址私钥；不会进入资源 DTO、公开接口、队列 payload 或日志。
+现有表 `proto_sessions` 以全局资源 ID 为主键，保存 `credential_revision`、行 version、明文 JSON payload、lease token/期限及时间戳。payload 在原 session 字段同一层加入 `resourceId / credentialRevision`；v1 内容包括 UID、access/refresh token 和已解锁的用户/地址私钥，v2 使用 PKL 及其身份元数据。它们不会进入资源 DTO、公开接口、队列 payload 或日志。session 内部的 `version` 是内容版本，与表的行 version 不同。
 
-加密使用 AES-GCM 随机 nonce，AAD 绑定资源 ID 与凭据 revision。使用现有 `SESSION_SECRET` 经 HKDF、独立用途 `remail/proto/session/v1` 派生密钥，不复用其他模块的加密实现。代价是更换 `SESSION_SECRET` 后旧 Proto 会话无法解密：读取时会停止使用旧会话并请求重新验证，也可以主动批量验证。旧邮箱模块的凭据不受此机制影响。
+历史存储曾使用 AES-GCM 随机 nonce，以资源 ID／凭据 revision 组成 AAD，并用原 `SESSION_SECRET` 经 HKDF、用途 `remail/proto/session/v1` 派生密钥。应用中的这套解密代码及 Proto 专属密钥注入现已删除。历史密文只能在一次性转换操作中用原密钥解开，保存为包含 `resourceId / credentialRevision` 和完整 session 字段的平铺 JSON。转换前保存受控密文备份；从转换开始到部署明文版本前，不运行取件、刷新、验证、历史识别等 Proto 操作，旧镜像不能读取转换后的数据。全局 `SESSION_SECRET` 仍用于系统其他功能，不因删除 Proto 依赖而删除或变更。
 
 ## 复用密钥收件
 
@@ -39,7 +41,7 @@ HTTP 会话独立复制微软客户端的设计，代码在 `internal/proto/infr
 - DB lease 只覆盖刷新令牌交换及持久化，刷新操作最多 60 秒、lease 为 90 秒；验证和历史维护任务的 15 分钟操作上限/16 分钟防重复领取期限保持不变。网络调用不持 SQL 事务，数据库读写均为短事务。
 - 刷新开始时在租约内重新加载最新会话：其他 worker 已完成相同会话的有效 Token 轮换时直接复用，不再次消费旧 refresh token。新 Token 必须先保存并完成 revision/version/lease 检查，才返回给 HTTP 客户端继续请求。
 - 完整读取结束时再次检查凭据 revision 和可用会话。正常 Token 轮换不会作废已解密的读取结果；新登录 UID 或用户/地址密钥集合变化则要求旧读取者重新加载密钥，不用旧 key ring 读取新会话。
-- 正常/识别中的资源缺少密钥、密文无法解密或会话被撤销时，转入验证恢复；修复检查最初观察到的 generation 和 refresh token，迟到请求不能删除其他 worker 刚保存的新会话。已停在 pending/uncertain 等待人工处理的资源仍需显式重验，不会绕过其终态自动重复登录。
+- 正常/识别中的资源缺少可用会话、载荷无法解析或会话被撤销时，转入验证恢复；修复检查最初观察到的 generation 和 refresh token，迟到请求不能删除其他 worker 刚保存的新会话。未转换的旧密文同样会被判为不可用，不能利用此恢复路径代替一次性转换。已停在 pending/uncertain 等待人工处理的资源仍需显式重验，不会绕过其终态自动重复登录。
 - 读取 Inbox `0` 和 Spam `4`，分页取得邮件详情并解密正文。脚本使用的 Label `5` 实际是 All Mail，不是收件箱；本实现按微软现有机制扫描收件箱与垃圾箱，不宣称包含归档、已删除、已发或草稿。
 - 普通取码支持时间窗口、数量限制和公共消息缓存的 `internet:` / `provider:proton:` 边界。先按导入地址精确筛选，不将同 AddressID 下的 dot/plus 或其他显式收件地址推断成当前资源。
 - 完整历史扫描不受取码数量和已有缓存边界截断；通过逐页回调汇总证据。任何分页、解密、持久化或回调失败都不能产生完整成功结果。

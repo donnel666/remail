@@ -5714,7 +5714,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Import Proto resources in email----password format */
+        /**
+         * Import Proto resources with a password and optional Base64 PKL
+         * @description Each line is email----password or email----password----base64(PKL). A bare username is completed with @proton.me before validation and deduplication; full email domains are unchanged. Password whitespace is preserved. PKL must be canonical standard Base64 decoding to at most 8 MiB. Imported bytes are stored without application encryption with the resource in the same transaction; asynchronous validation verifies the imported session without password login before historical recognition or allocation. Access restrictions are unchanged.
+         */
         post: operations["postProtoResourceImport"];
         delete?: never;
         options?: never;
@@ -5854,7 +5857,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Import Proto resources for a selected owner */
+        /**
+         * Import Proto resources for a selected owner
+         * @description Accepts mixed email----password and email----password----base64(PKL) lines. A bare username is completed with @proton.me before validation and deduplication; full email domains are unchanged. PKL is standard Base64, at most 8 MiB decoded, and is stored without application encryption in the existing session store atomically with the resource. The database and original private source file contain sensitive credentials. Session ownership and keys are verified asynchronously; duplicate non-deleted resources are not overwritten.
+         */
         post: operations["postAdminProtoResourceImport"];
         delete?: never;
         options?: never;
@@ -6148,7 +6154,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Import Proto resources in email----password format */
+        /**
+         * Import Proto resources with a password and optional Base64 PKL
+         * @description Each line is email----password or email----password----base64(PKL). A bare username is completed with @proton.me before validation and deduplication; full email domains are unchanged. PKL must be canonical standard Base64 decoding to at most 8 MiB. Supplied PKL is stored without application encryption and verified asynchronously; this format does not grant access to an otherwise unavailable Proto endpoint.
+         */
         post: operations["openPostProtoResourceImport"];
         delete?: never;
         options?: never;

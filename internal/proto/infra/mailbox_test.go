@@ -64,7 +64,7 @@ func TestProtoMailboxUnavailableSessionAutomaticallyRevalidates(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, s.SetForSale(ctx, id, nil, true))
 	s.Queue = &protoQueueStub{}
-	s.SessionSecret = "rotated-application-secret"
+	require.NoError(t, s.DB.Model(&sessionRecord{}).Where("resource_id = ?", id).Update("payload", []byte("invalid-payload")).Error)
 	before := protoValidationTask(t, s, id)
 	for range 2 {
 		result, err := s.FetchMailbox(ctx, id, 1, proton.FetchRequest{})

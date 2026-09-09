@@ -1249,7 +1249,7 @@ const spec = {
   tags: [
     { name: "Core", description: "高频集成接口，覆盖 API Key 状态、项目查询、统一下单、订单查询和邮件取件。" },
     { name: "Resources", description: "自有微软邮箱、域名邮箱、邮件服务器和资源检测接口。" },
-    { name: "Proto", description: "当前 API Key 所属用户的 Proto 资源、两段格式导入、验证和批量任务。商品与订单仍使用 Core 统一入口。" },
+    { name: "Proto", description: "当前 API Key 所属用户的 Proto 资源、密码及可选 Base64 PKL 导入、验证和批量任务。商品与订单仍使用 Core 统一入口。" },
     { name: "Wallet", description: "钱包余额、账单、充值记录和兑换码充值接口。" },
   ],
   components: {
@@ -1669,7 +1669,7 @@ const spec = {
         tags: ["Proto"],
         operationId: "openPostProtoResourceImport",
         summary: "导入 Proto 邮箱 TXT",
-        description: "每行格式为 邮箱----密码，导入为当前用户的私有资源。密码仅用于后端接入，不通过查询或订单接口回显。异步任务受理不表示验证成功。",
+        description: "每行格式为 email----password 或 email----password----base64(PKL)，第一段支持裸用户名，自动补 @proton.me 后校验和去重，完整邮箱保留原后缀。PKL 使用规范标准 Base64，解码后最多 8 MiB，服务端明文保存并异步验证，JSON 中的 Base64 不是加密。导入为当前用户的私有资源，密码及 PKL 不通过查询或订单接口回显。异步任务受理不表示验证成功，新格式不改变现有访问权限。",
         security: apiKeySecurity,
         parameters: [idempotencyHeader],
         requestBody: {
