@@ -236,6 +236,7 @@
   "No iCloud resources found": "No iCloud resources found",
   "Please enter iCloud resources.": "Please enter iCloud resources.",
   "Please select a TXT file.": "Please select a TXT file.",
+  "Import file must not exceed {{max}} MiB.": "Import file must not exceed {{max}} MiB.",
   "Please paste an iCloud HME cURL request.": "Please paste an iCloud HME cURL request.",
   "HME cURL request": "HME cURL request",
   "The HME cURL does not contain the primary email. Enter it separately.": "The HME cURL does not contain the primary email. Enter it separately.",

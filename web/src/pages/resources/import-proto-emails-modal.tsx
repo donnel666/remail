@@ -23,6 +23,8 @@ import {
 
 const { Text } = Typography;
 const ENTRY_AREA_HEIGHT = 208;
+// ponytail: mirror Proto's server hard cap; lower configured limits stay server-enforced.
+const MAX_IMPORT_FILE_BYTES = 512 * 1024 * 1024;
 const SKIPPED_IMPORT_ENTRIES_PATTERN = /^Skipped (\d+) import entr(?:y|ies)\.$/;
 
 interface ImportProtoEmailsModalProps {
@@ -116,11 +118,28 @@ export function ImportProtoEmailsModal({
         : "border-[var(--semi-color-border)] bg-[var(--semi-color-bg-2)] text-[var(--semi-color-text-1)] hover:border-[var(--semi-color-primary)] hover:bg-[var(--semi-color-fill-0)]",
     ].join(" ");
 
+  const selectFile = (selected: File | null) => {
+    // Keep the File in state, but allow selecting the same native path again.
+    if (fileRef.current) fileRef.current.value = "";
+    if (busy || importPollAbortRef.current) return;
+    if (selected && !selected.name.toLowerCase().endsWith(".txt")) {
+      setFile(null);
+      Toast.warning(t("Please select a TXT file."));
+      return;
+    }
+    if (selected && selected.size > MAX_IMPORT_FILE_BYTES) {
+      setFile(null);
+      Toast.warning(t("Import file must not exceed {{max}} MiB.", { max: MAX_IMPORT_FILE_BYTES / 1024 / 1024 }));
+      return;
+    }
+    setFile(selected);
+  };
+
   const handleImport = async () => {
     if (busy || importPollAbortRef.current) return;
     if (admin && !ownerId) { Toast.warning(t("Please select an owner.")); return; }
-    if (lines.length === 0 && !file) {
-      if (admin) Toast.warning(t("Please enter Proto resources."));
+    if (mode === "paste" ? lines.length === 0 : !file) {
+      if (admin) Toast.warning(t(mode === "file" ? "Please select a TXT file." : "Please enter Proto resources."));
       return;
     }
     const controller = new AbortController();
@@ -246,9 +265,11 @@ export function ImportProtoEmailsModal({
             style={{ width: "100%" }}
           />
         </label> : null}
-        {!admin ? <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <button
+            aria-pressed={mode === "paste"}
             className={switchButtonClass(mode === "paste")}
+            disabled={busy}
             onClick={() => {
               setMode("paste");
               setFile(null);
@@ -259,7 +280,9 @@ export function ImportProtoEmailsModal({
             {t("Manual input")}
           </button>
           <button
+            aria-pressed={mode === "file"}
             className={switchButtonClass(mode === "file")}
+            disabled={busy}
             onClick={() => {
               setMode("file");
               setText("");
@@ -269,7 +292,7 @@ export function ImportProtoEmailsModal({
             <Upload size={16} />
             {t("TXT file")}
           </button>
-        </div> : null}
+        </div>
 
         <div className="grid grid-cols-2 gap-2">
           <button
@@ -305,7 +328,7 @@ export function ImportProtoEmailsModal({
           </button>
         </div>
 
-        {admin ? (
+        {admin && mode === "paste" ? (
           <label className="block">
             <span className="mb-1.5 flex items-center justify-between text-sm font-medium text-[var(--semi-color-text-0)]">
               <span>{t("Proto resource entries")} *</span>
@@ -335,14 +358,24 @@ export function ImportProtoEmailsModal({
           ) : (
             <button
               className="flex w-full flex-col items-center justify-center rounded-xl border border-dashed border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-6 text-center transition-colors hover:bg-[var(--semi-color-fill-1)]"
+              disabled={busy}
               onClick={() => fileRef.current?.click()}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                const dropped = event.dataTransfer.files[0];
+                if (dropped) selectFile(dropped);
+              }}
               style={{ height: ENTRY_AREA_HEIGHT }}
               type="button"
             >
               <input
                 accept=".txt"
+                aria-label={t("Select TXT file")}
                 className="hidden"
-                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                disabled={busy}
+                onChange={(event) => selectFile(event.target.files?.[0] ?? null)}
+                onClick={(event) => event.stopPropagation()}
                 ref={fileRef}
                 type="file"
               />

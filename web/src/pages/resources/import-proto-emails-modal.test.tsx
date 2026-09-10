@@ -149,15 +149,15 @@ describe("Proto import feedback", () => {
     expect(mocks.getAdminImport).not.toHaveBeenCalled();
   });
 
-  it("matches the administrator Microsoft input layout and closes after refresh", async () => {
+  it("preserves the administrator input layout and closes after refresh", async () => {
     mocks.importAdminResources.mockResolvedValue(completed);
     let finishRefresh!: () => void;
     const onSuccess = vi.fn(() => new Promise<void>((resolve) => { finishRefresh = resolve; }));
     const onOpenChange = vi.fn();
     render(<ImportProtoEmailsModal admin open owners={owners} onOpenChange={onOpenChange} onSuccess={onSuccess} />);
     expect((screen.getByLabelText("owner") as HTMLSelectElement).value).toBe("31");
-    expect(screen.queryByRole("button", { name: "Manual input" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "TXT file" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Manual input" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "TXT file" })).toBeTruthy();
     expect(screen.getByText("Proto resource entries", { exact: false })).toBeTruthy();
     expect(screen.getByText("Parsed entries")).toBeTruthy();
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@example.com----secret" } });
@@ -170,6 +170,136 @@ describe("Proto import feedback", () => {
     await act(async () => finishRefresh());
     expect(onOpenChange.mock.calls).toEqual([[false]]);
     expect(mocks.info).not.toHaveBeenCalled();
+  });
+
+  it.each(["select", "drop"])("imports an administrator TXT file by %s without changing its content", async (method) => {
+    mocks.importAdminResources.mockResolvedValue(completed);
+    const content = "bare----  password  ----AAEC/w==\r\nfull@proton.me---- next password \r\n";
+    const bytes = new TextEncoder().encode(content);
+    const file = new File([bytes], "proto-fixture.txt", { type: "text/plain" });
+    Object.defineProperty(file, "arrayBuffer", { value: vi.fn().mockResolvedValue(bytes.buffer) });
+    const onOpenChange = vi.fn();
+    render(<ImportProtoEmailsModal admin open owners={owners} onOpenChange={onOpenChange} onSuccess={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "TXT file" }));
+    expect(screen.queryByRole("textbox")).toBeNull();
+    const fileInput = screen.getByLabelText("Select TXT file") as HTMLInputElement;
+    // jsdom does not model the browser's same-path change suppression.
+    Object.defineProperty(fileInput, "value", { configurable: true, writable: true, value: "C:\\fakepath\\previous.txt" });
+    if (method === "select") {
+      fireEvent.change(fileInput, { target: { files: [file] } });
+    } else {
+      fireEvent.drop(screen.getByRole("button", { name: /Click to select or drag file here/ }), { dataTransfer: { files: [file] } });
+    }
+    expect(fileInput.value).toBe("");
+    expect(screen.getByText("proto-fixture.txt")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Short-lived" }));
+    fireEvent.click(screen.getByRole("button", { name: "Abort on error" }));
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    await waitFor(() => expect(mocks.importAdminResources).toHaveBeenCalledTimes(1));
+    expect(mocks.importAdminResources.mock.calls[0][0]).toEqual({ content, ownerId: 31, longLived: false, errorStrategy: "abort" });
+    expect(mocks.importResources).not.toHaveBeenCalled();
+    expect(mocks.turnstile).not.toHaveBeenCalled();
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(mocks.error).not.toHaveBeenCalled();
+  });
+
+  it("clears the selected file when returning to manual input", async () => {
+    render(<ImportProtoEmailsModal admin open owners={owners} onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "TXT file" }));
+    fireEvent.change(screen.getByLabelText("Select TXT file"), { target: { files: [new File(["bare----secret"], "old.txt")] } });
+    expect(screen.getByText("old.txt")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Manual input" }));
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "TXT file" }));
+    expect(screen.queryByText("old.txt")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    await waitFor(() => expect(mocks.warning).toHaveBeenCalledWith("Please select a TXT file."));
+    expect(mocks.importAdminResources).not.toHaveBeenCalled();
+  });
+
+  it.each(["select", "drop"])("rejects an oversized TXT by %s before reading and clears a previous file", async (method) => {
+    const valid = new File(["bare----secret"], "previous.txt");
+    const oversized = new File(["bare----secret"], "oversized.txt");
+    const read = vi.fn().mockResolvedValue(new TextEncoder().encode("bare----secret").buffer);
+    Object.defineProperty(valid, "arrayBuffer", { value: read });
+    Object.defineProperty(oversized, "arrayBuffer", { value: read });
+    Object.defineProperty(oversized, "size", { value: 512 * 1024 * 1024 + 1 });
+    render(<ImportProtoEmailsModal admin open owners={owners} onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "TXT file" }));
+    const input = screen.getByLabelText("Select TXT file") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [valid] } });
+    expect(screen.getByText("previous.txt")).toBeTruthy();
+    Object.defineProperty(input, "value", { configurable: true, writable: true, value: "C:\\fakepath\\oversized.txt" });
+    if (method === "select") {
+      fireEvent.change(input, { target: { files: [oversized] } });
+    } else {
+      fireEvent.drop(screen.getByRole("button", { name: /previous.txt/ }), { dataTransfer: { files: [oversized] } });
+    }
+    expect(input.value).toBe("");
+    expect(mocks.warning).toHaveBeenCalledWith("Import file must not exceed {{max}} MiB.");
+    expect(screen.queryByText("previous.txt")).toBeNull();
+    expect(screen.queryByText("oversized.txt")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    await act(async () => undefined);
+    expect(read).not.toHaveBeenCalled();
+    expect(mocks.importAdminResources).not.toHaveBeenCalled();
+    expect(mocks.importResources).not.toHaveBeenCalled();
+    expect(mocks.turnstile).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("allows the hard-cap boundary without allocating a large test file", async () => {
+    mocks.importAdminResources.mockResolvedValue(completed);
+    const content = "bare----secret";
+    const file = new File([content], "boundary.txt");
+    const read = vi.fn().mockResolvedValue(new TextEncoder().encode(content).buffer);
+    Object.defineProperty(file, "arrayBuffer", { value: read });
+    Object.defineProperty(file, "size", { value: 512 * 1024 * 1024 });
+    render(<ImportProtoEmailsModal admin open owners={owners} onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "TXT file" }));
+    fireEvent.change(screen.getByLabelText("Select TXT file"), { target: { files: [file] } });
+    expect(screen.getByText("boundary.txt")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    await waitFor(() => expect(mocks.importAdminResources).toHaveBeenCalledTimes(1));
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(mocks.importAdminResources.mock.calls[0][0].content).toBe(content);
+    expect(mocks.warning).not.toHaveBeenCalled();
+  });
+
+  it.each(["wrong extension", "invalid UTF-8"])("does not upload a file with %s", async (invalid) => {
+    const file = new File([new Uint8Array([0xff])], invalid === "wrong extension" ? "fixture.csv" : "fixture.txt");
+    const read = vi.fn().mockResolvedValue(new Uint8Array([0xff]).buffer);
+    Object.defineProperty(file, "arrayBuffer", { value: read });
+    render(<ImportProtoEmailsModal admin open owners={owners} onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "TXT file" }));
+    fireEvent.change(screen.getByLabelText("Select TXT file"), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    if (invalid === "wrong extension") {
+      expect(mocks.warning).toHaveBeenCalledWith("Please select a TXT file.");
+      expect(read).not.toHaveBeenCalled();
+    } else {
+      await waitFor(() => expect(mocks.error).toHaveBeenCalledTimes(1));
+    }
+    expect(mocks.importAdminResources).not.toHaveBeenCalled();
+    expect(mocks.importResources).not.toHaveBeenCalled();
+    expect(mocks.turnstile).not.toHaveBeenCalled();
+  });
+
+  it("locks file selection while reading and ignores a read completed after unmount", async () => {
+    const read = deferred<ArrayBuffer>();
+    const file = new File(["bare----secret"], "fixture.txt");
+    Object.defineProperty(file, "arrayBuffer", { value: () => read.promise });
+    const view = render(<ImportProtoEmailsModal admin open owners={owners} onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "TXT file" }));
+    fireEvent.change(screen.getByLabelText("Select TXT file"), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    expect((screen.getByRole("button", { name: "Manual input" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Select TXT file") as HTMLInputElement).disabled).toBe(true);
+    view.unmount();
+    await act(async () => read.resolve(new TextEncoder().encode("bare----secret").buffer));
+    expect(mocks.importAdminResources).not.toHaveBeenCalled();
+    expect(mocks.success).not.toHaveBeenCalled();
+    expect(mocks.error).not.toHaveBeenCalled();
   });
 
   it("uses the administrator Microsoft empty-input warning", async () => {
