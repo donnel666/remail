@@ -10,10 +10,9 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from .diagnostics import DiagnosticLog
 from .test_entry import _load
 from .test_fae_session_flow import Event, MessageType, _flow
-from .test_security import _fact_plan, _load_welcome_functions
+from .test_security import _fact, _fact_plan, _load_welcome_functions
 from .test_sessions import native as native
 
 
@@ -32,22 +31,24 @@ def _transport_functions():
     return functions
 
 
-def test_private_orders_start_before_intent_and_background_reuses_the_task(native):
-    plan = _fact_plan(intents=("orders",))
+def test_private_orders_start_after_intent_and_background_reuses_the_task(native):
+    plan = _fact_plan(intents=("orders",), facts=(_fact("orders", "orders"),), privacy="private")
     flow = _flow(native, [plan, plan])
 
     async def run():
-        release = asyncio.Event()
+        release, entered = asyncio.Event(), asyncio.Event()
         timeline = []
         query = AsyncMock()
         event = Event(group="")
 
         async def request(method, path, *, event, **kwargs):
             assert method == "GET" and path == "/v1/bot/orders"
-            assert event.get_extra("provider_request") is None
+            assert event.get_extra("provider_request") is not None
             assert event.get_extra("_remail_authorized") is True
+            assert event.get_extra("_remail_initial_intent") == plan
             timeline.append("orders-start")
             await query()
+            entered.set()
             await release.wait()
             timeline.append("orders-end")
             return {"available": True, "items": [], "total": 0, "offset": 0}
@@ -55,14 +56,20 @@ def test_private_orders_start_before_intent_and_background_reuses_the_task(nativ
         original_llm = flow.context.llm_generate
 
         async def llm(**kwargs):
-            timeline.append("model")
-            assert timeline[0] == "orders-start"
-            release.set()
+            phase = json.loads(kwargs["prompt"])["workflowPhase"]
+            timeline.append(phase)
+            if phase == "intent":
+                query.assert_not_awaited()
             return await original_llm(**kwargs)
 
         flow.plugin._request = request
         flow.context.llm_generate = llm
-        assert not (await flow.run(flow.plugin, event, event.message_str)).failed
+        workflow = asyncio.create_task(flow.run(flow.plugin, event, event.message_str))
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        assert timeline == ["intent", "orders-start"]
+        release.set()
+        assert not (await workflow).failed
+        assert timeline == ["intent", "orders-start", "orders-end", "planner"]
         query.assert_awaited_once()
         prefetch = event.get_extra("_remail_order_prefetch")[2]
         assert prefetch.done() and not prefetch.cancelled()
@@ -75,62 +82,32 @@ def test_private_orders_start_before_intent_and_background_reuses_the_task(nativ
 
 
 @pytest.mark.parametrize("intent", ["social", "service"])
-def test_unneeded_orders_keep_running_without_blocking_the_plan(native, intent):
+def test_unneeded_orders_are_never_requested(native, intent):
     plan = _fact_plan(intents=(intent,))
     flow = _flow(native, [plan, plan])
 
     async def run():
-        release, entered = asyncio.Event(), asyncio.Event()
-        original = {
-            "available": True, "items": [], "total": 0, "offset": 0,
-            "debugOriginal": {"value": "complete original order response"},
-        }
-
-        async def request(method, path, *, event, **kwargs):
-            assert method == "GET" and path == "/v1/bot/orders"
-            entered.set()
-            await release.wait()
-            return original
-
         event = Event(group="")
-        log = DiagnosticLog(None, enabled=True)
-        log.attach(event)
-        flow.plugin._request = AsyncMock(side_effect=request)
-        try:
-            result = await asyncio.wait_for(
-                flow.run(flow.plugin, event, event.message_str), timeout=1
-            )
-            task = event.get_extra("_remail_order_prefetch")[2]
-            assert not result.failed and entered.is_set() and not task.done()
-            assert flow.context.llm_generate.await_count == 2
-            assert task in flow.plugin.order_prefetch_tasks
-            assert event.get_extra("_remail_dynamic_background")["ownOrders"] == {
-                "status": "not_needed", "sourceValid": False,
-            }
-            assert event.get_extra("_remail_prefetched_order_summary") is None
-            release.set()
-            assert await task is original
-            assert event.get_extra("_remail_prefetched_order_summary")["sourceValid"]
-            assert event.get_extra("_remail_dynamic_background")["ownOrders"]["status"] == "not_needed"
-            captured = [
-                row["details"]["output"]
-                for row in log.entries
-                if row["stage"] == "background"
-                and row["outcome"] == "completed"
-                and row["details"].get("name") == "ownOrders"
-            ]
-            assert captured == [original]
-            flow.plugin._request.assert_awaited_once()
-        finally:
-            await flow.runtime["_finish_order_prefetch"](event)
-            log.close()
+        flow.plugin._request = AsyncMock()
+        result = await asyncio.wait_for(
+            flow.run(flow.plugin, event, event.message_str), timeout=1
+        )
+        assert not result.failed and flow.context.llm_generate.await_count == 2
+        assert event.get_extra("_remail_order_prefetch") is None
+        assert event.get_extra("_remail_prefetched_order_summary") is None
+        assert not getattr(flow.plugin, "order_prefetch_tasks", set())
+        assert event.get_extra("_remail_dynamic_background")["ownOrders"] == {
+            "status": "not_needed", "sourceValid": False,
+        }
+        flow.plugin._request.assert_not_awaited()
+        flow.plugin._public_api_capability_context.assert_not_awaited()
 
     asyncio.run(run())
 
 
 @pytest.mark.parametrize("problem", [None, "api_failure", "scope_change"])
 def test_orders_tool_reuses_pending_prefetch_and_preserves_its_errors(native, problem):
-    plan = _fact_plan(intents=("social",))
+    plan = _fact_plan(intents=("orders",), facts=(_fact("orders", "orders"),), privacy="private")
     flow = _flow(native, [plan, plan])
 
     async def run():
@@ -144,14 +121,12 @@ def test_orders_tool_reuses_pending_prefetch_and_preserves_its_errors(native, pr
             return {"available": True, "items": [], "total": 0, "offset": 0}
 
         event = Event(group="")
+        event.set_extra("_remail_initial_intent", plan)
         flow.plugin._request = AsyncMock(side_effect=request)
         flow.plugin._authorize_event = AsyncMock()
         flow.plugin._private = lambda incoming: not bool(incoming.group)
         try:
-            assert not (await asyncio.wait_for(
-                flow.run(flow.plugin, event, event.message_str), timeout=1
-            )).failed
-            prefetch = event.get_extra("_remail_order_prefetch")[2]
+            prefetch = flow.runtime["_start_order_prefetch"](flow.plugin, event)
             tool = flow.runtime["remail_orders"]
             result = asyncio.create_task(tool(flow.plugin, event, offset=0))
             await asyncio.sleep(0)
@@ -214,6 +189,9 @@ def test_reply_paths_finish_prefetch_after_sending_and_preserve_native_save(
         functions["_install_owned_send_guard"] = AsyncMock(return_value=True)
         plugin = NS(_request=request, order_prefetch_tasks=set())
         event = Event(group="")
+        event.set_extra("_remail_initial_intent", _fact_plan(
+            intents=("orders",), facts=(_fact("orders", "orders"),), privacy="private"
+        ))
         event.set_extra("_remail_owned", True)
         event.set_extra("_remail_canonical_response", "安全答复。")
         event.send = AsyncMock(side_effect=send)
@@ -245,20 +223,12 @@ def test_reply_paths_finish_prefetch_after_sending_and_preserve_native_save(
 
 
 @pytest.mark.parametrize("failure", ["rejected", "cancelled", "session"])
-def test_workflow_exit_cancels_and_awaits_the_unfinished_order_query(native, failure):
+def test_workflow_exit_before_context_does_not_start_an_order_query(native, failure):
     plan = _fact_plan(route="ignore", intents=()) if failure == "rejected" else _fact_plan(intents=("service",))
     flow = _flow(native, [plan])
 
     async def run():
-        closed = []
-
-        async def request(*args, **kwargs):
-            try:
-                await asyncio.Event().wait()
-            finally:
-                closed.append(True)
-
-        flow.plugin._request = request
+        flow.plugin._request = AsyncMock()
         if failure == "cancelled":
             flow.context.conversation_manager.get_curr_conversation_id = AsyncMock(side_effect=asyncio.CancelledError)
         elif failure == "session":
@@ -273,8 +243,36 @@ def test_workflow_exit_cancels_and_awaits_the_unfinished_order_query(native, fai
                 assert result.route == "ignore"
             else:
                 assert result.failed
-        task = event.get_extra("_remail_order_prefetch")[2]
-        assert task.done() and task.cancelled() and closed == [True]
+        assert event.get_extra("_remail_order_prefetch") is None
+        flow.plugin._request.assert_not_awaited()
+        assert not getattr(flow.plugin, "order_prefetch_tasks", set())
+
+    asyncio.run(run())
+
+
+def test_cancellation_during_requested_orders_drains_the_query(native):
+    plan = _fact_plan(intents=("orders",), facts=(_fact("orders", "orders"),), privacy="private")
+    flow = _flow(native, [plan])
+
+    async def run():
+        entered, closed = asyncio.Event(), []
+
+        async def request(*args, **kwargs):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                closed.append(True)
+
+        flow.plugin._request = request
+        event = Event(group="")
+        task = asyncio.create_task(flow.run(flow.plugin, event, event.message_str))
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert closed == [True]
+        assert event.get_extra("_remail_order_prefetch")[2].cancelled()
         assert not flow.plugin.order_prefetch_tasks
 
     asyncio.run(run())
@@ -282,22 +280,28 @@ def test_workflow_exit_cancels_and_awaits_the_unfinished_order_query(native, fai
 
 def test_prefetch_requires_private_authorization_and_refuses_foreign_or_changed_scope():
     functions = _transport_functions()
+    plan = _fact_plan(intents=("orders",), facts=(_fact("orders", "orders"),), privacy="private")
 
     async def run():
         request = AsyncMock(return_value={"available": True, "items": [], "total": 0, "offset": 0})
         plugin = NS(_request=request, order_prefetch_tasks=set())
         for event in (Event(), Event(group="")):
+            event.set_extra("_remail_initial_intent", plan)
             if not event.group:
                 event.set_extra("_remail_authorized", False)
             assert functions["_start_order_prefetch"](plugin, event) is None
         unbound = Event(group="")
+        unbound.set_extra("_remail_initial_intent", plan)
         unbound.set_extra("_remail_binding_state", "unbound")
         assert functions["_start_order_prefetch"](plugin, unbound) is None
+        assert functions["_start_order_prefetch"](plugin, Event(group="")) is None
         request.assert_not_awaited()
 
         event = Event(group="")
+        event.set_extra("_remail_initial_intent", plan)
         task = functions["_start_order_prefetch"](plugin, event)
         other = Event(group="", sender="10002")
+        other.set_extra("_remail_initial_intent", plan)
         other.set_extra("_remail_order_prefetch", event.get_extra("_remail_order_prefetch"))
         with pytest.raises(functions["ReMailError"]):
             functions["_start_order_prefetch"](plugin, other)
@@ -406,7 +410,11 @@ def test_terminate_awaits_prefetch_cancellation_before_closing_the_client():
             feedback_task=None, websocket_tasks=[], launch_worker=None,
             websocket_pending={}, client=NS(aclose=close),
         )
-        task = functions["_start_order_prefetch"](plugin, Event(group=""))
+        event = Event(group="")
+        event.set_extra("_remail_initial_intent", _fact_plan(
+            intents=("orders",), facts=(_fact("orders", "orders"),), privacy="private"
+        ))
+        task = functions["_start_order_prefetch"](plugin, event)
         await entered.wait()
         await functions["terminate"](plugin)
         assert task.cancelled() and finished == ["query-cancelled", "client-closed"]

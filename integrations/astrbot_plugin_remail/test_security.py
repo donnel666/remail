@@ -516,6 +516,7 @@ def _load_welcome_functions():
             "_public_api_capability_summary",
             "_project_background_view",
             "_prepare_fae_context",
+            "_intent_needs_context",
             "_start_order_prefetch",
             "_finish_order_prefetch",
             "_model_background",

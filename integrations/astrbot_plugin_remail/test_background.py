@@ -57,7 +57,7 @@ def test_static_service_and_clarification_are_valid_without_dynamic_facts():
     assert "facts=[]" in PLANNER_SYSTEM_PROMPT
 
 
-def test_social_keeps_prefetched_orders_out_of_model_and_output_evidence():
+def test_social_does_not_prefetch_orders_or_api_documents():
     functions, _ = _load_welcome_functions()
     event = event_for(question="你好")
     plan = _fact_plan(intents=("social",))
@@ -72,16 +72,14 @@ def test_social_keeps_prefetched_orders_out_of_model_and_output_evidence():
     )
     async def prepare():
         prefetch = functions["_start_order_prefetch"](plugin, event)
-        assert prefetch is not None
+        assert prefetch is None
         try:
-            await prefetch
             return await functions["_prepare_fae_context"](plugin, event)
         finally:
             await functions["_finish_order_prefetch"](event)
 
     background = asyncio.run(prepare())
-    assert plugin._request.await_count == 1
-    assert plugin._request.await_args.args[1] == "/v1/bot/orders"
+    plugin._request.assert_not_awaited()
     plugin._public_request.assert_not_awaited()
     plugin._public_api_capability_context.assert_not_awaited()
     assert background["groupContext"]["status"] == "not_applicable"
@@ -91,7 +89,7 @@ def test_social_keeps_prefetched_orders_out_of_model_and_output_evidence():
     }
 
 
-def test_public_api_recovery_prefetches_contract_even_after_refusal_plan():
+def test_public_api_keywords_do_not_bypass_unconfirmed_or_refused_intent():
     functions, _ = _load_welcome_functions()
     event = event_for(question="如何通过API购买谷歌变种邮箱？")
     event.set_extra("_remail_initial_intent", _fact_plan(intents=(), answer_mode="refuse_internal"))
@@ -104,8 +102,106 @@ def test_public_api_recovery_prefetches_contract_even_after_refusal_plan():
         ),
     )
     background = asyncio.run(functions["_prepare_fae_context"](plugin, event))
-    plugin._public_api_capability_context.assert_awaited_once_with(event)
-    assert "/v1/open/orders" in background["publicApiCapabilities"]
+    plugin._public_api_capability_context.assert_not_awaited()
+    plugin._request.assert_not_awaited()
+    assert background["publicApiCapabilities"] == ""
+
+
+@pytest.mark.parametrize(
+    "plan, needs_orders, needs_api",
+    [
+        (None, False, False),
+        (parse_fact_plan("invalid"), False, False),
+        (_fact_plan(intents=("service",)), False, False),
+        (_fact_plan(intents=("service",), answer_mode="client_guidance"), False, False),
+        (
+            _fact_plan(
+                intents=("account",), facts=(_fact("account", "binding_status"),)
+            ),
+            False,
+            False,
+        ),
+        (
+            _fact_plan(intents=("recharge",), facts=(_fact("pay", "recharge_config"),)),
+            False,
+            False,
+        ),
+        (
+            _fact_plan(
+                intents=("diagnosis",),
+                facts=(_fact("mail", "code_diagnosis"),),
+                answer_mode="diagnosis",
+                privacy="private",
+            ),
+            False,
+            False,
+        ),
+        (
+            _fact_plan(
+                intents=("orders", "api"), answer_mode="clarify", privacy="private"
+            ),
+            False,
+            False,
+        ),
+        (
+            _fact_plan(
+                intents=("orders",), facts=(_fact("own", "orders"),), privacy="private"
+            ),
+            True,
+            False,
+        ),
+        (
+            _fact_plan(
+                intents=("api",),
+                facts=(_fact("docs", "api_documentation"),),
+                answer_mode="public_api",
+            ),
+            False,
+            True,
+        ),
+        (
+            _fact_plan(
+                intents=("orders", "api"),
+                facts=(_fact("own", "orders"), _fact("docs", "api_documentation")),
+                privacy="private",
+            ),
+            True,
+            True,
+        ),
+    ],
+)
+def test_heavy_context_follows_confirmed_scenario(plan, needs_orders, needs_api):
+    functions, _ = _load_welcome_functions()
+    event = event_for(question="Python API 查询订单，账号和充值怎么处理？")
+    event.set_extra("_remail_initial_intent", plan)
+    plugin = SimpleNamespace(
+        config={},
+        _request=AsyncMock(
+            return_value={"available": True, "items": [], "total": 0, "offset": 0}
+        ),
+        _public_request=AsyncMock(
+            return_value={"enabled": True, "items": [], "total": 0}
+        ),
+        _public_api_capability_context=AsyncMock(return_value='{"operations":[]}'),
+    )
+    background = asyncio.run(functions["_prepare_fae_context"](plugin, event))
+    assert (
+        any(
+            call.args[1] == "/v1/bot/orders" for call in plugin._request.await_args_list
+        )
+        == needs_orders
+    )
+    assert plugin._public_api_capability_context.await_count == int(needs_api)
+    model = functions["_model_background"](
+        {
+            **background,
+            "ownOrders": {"sourceValid": True},
+            "publicApiCapabilities": "cached documents",
+        },
+        plan,
+    )
+    assert ("ownOrders" in model) == needs_orders
+    assert ("publicApiCapabilities" in model) == needs_api
 
 
 def test_public_console_instructions_are_not_rejected_for_internal_sounding_question():
@@ -259,6 +355,13 @@ def test_background_sources_are_bounded_scoped_and_reused_per_event():
         _public_api_capability_context=AsyncMock(return_value='{"operations":[]}'),
     )
     event = event_for()
+    event.set_extra("_remail_initial_intent", _fact_plan(
+        intents=("project", "recharge", "faq", "announcement", "orders", "api"),
+        facts=tuple(_fact(f"source-{index}", claim) for index, claim in enumerate((
+            "projects", "recharge_config", "faqs", "announcements", "orders", "api_documentation"
+        ))),
+        privacy="private",
+    ))
     asyncio.run(functions["_prepare_fae_context"](plugin, event))
     asyncio.run(functions["_prepare_fae_context"](plugin, event))
     assert plugin._request.await_count == 3

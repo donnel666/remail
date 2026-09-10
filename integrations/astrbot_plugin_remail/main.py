@@ -726,7 +726,7 @@ def _is_public_api_path(path: str) -> bool:
 
 
 def _public_api_capability_summary(spec: Any) -> str:
-    """Return a bounded capability list for internal intent classification."""
+    """Return a bounded capability list for a confirmed API question."""
     paths = spec.get("paths", {}) if isinstance(spec, dict) else {}
     if not isinstance(paths, dict):
         return ""
@@ -841,12 +841,30 @@ def _project_background_view(payload: Any) -> dict[str, Any]:
     return view
 
 
+def _intent_needs_context(plan: Any, claim: str) -> bool:
+    """Heavy context requires an accepted intent or an explicit fact request."""
+    if (
+        not isinstance(plan, FactPlan)
+        or plan.failed
+        or plan.route != "remail"
+        or plan.answer_mode in {"refuse_internal", "refuse_group_mail"}
+    ):
+        return False
+    intent = {"orders": "orders", "api_documentation": "api"}.get(claim)
+    return any(fact.claim == claim for fact in plan.facts) or (
+        plan.answer_mode != "clarify" and intent in plan.intents
+    )
+
+
 def _start_order_prefetch(plugin: Any, event: Any):
-    """Start one authorized private order read before waiting for intent/planning."""
+    """Start one authorized private order read after order intent is confirmed."""
     if (
         not _event_is_private(event)
         or event.get_extra(_REMAIL_AUTHORIZED_MARKER, False) is not True
         or event.get_extra("_remail_binding_state", "") != "bound"
+        or not _intent_needs_context(
+            event.get_extra("_remail_initial_intent", None), "orders"
+        )
     ):
         return None
     target = _event_reply_target(event)
@@ -896,7 +914,7 @@ def _start_order_prefetch(plugin: Any, event: Any):
 
 
 async def _finish_order_prefetch(event: Any) -> None:
-    """Cancel and await this event's remaining speculative order read."""
+    """Cancel and await this event's unfinished order read."""
     previous = event.get_extra("_remail_order_prefetch", None)
     if previous is None:
         return
@@ -909,7 +927,7 @@ async def _finish_order_prefetch(event: Any) -> None:
 
 
 async def _prepare_fae_context(plugin: Any, event: AstrMessageEvent) -> dict[str, Any]:
-    """After event authorization, fetch independent background sources once per turn."""
+    """After intent confirmation, collect the selected sources once per turn."""
     cached = event.get_extra("_remail_dynamic_background", None)
     if isinstance(cached, dict):
         return cached
@@ -917,12 +935,10 @@ async def _prepare_fae_context(plugin: Any, event: AstrMessageEvent) -> dict[str
     initial = event.get_extra("_remail_initial_intent", None)
     wants = {
         "projectCatalog",
-        "publicApiCapabilities",
         "rechargeConfig",
         "faqs",
         "announcements",
         "groupContext",
-        "ownOrders",
     }
     if isinstance(initial, FactPlan):
         intents = set(initial.intents)
@@ -930,16 +946,10 @@ async def _prepare_fae_context(plugin: Any, event: AstrMessageEvent) -> dict[str
         wants = set()
         for source, intent_names, claim_names in (
             (
-                "ownOrders",
-                {"orders", "diagnosis", "account"},
-                {"orders", "code_diagnosis", "binding_status"},
-            ),
-            (
                 "projectCatalog",
                 {"price", "project", "inventory", "future"},
                 {"projects", "project_prices", "project_inventory"},
             ),
-            ("publicApiCapabilities", {"api"}, {"api_documentation"}),
             ("rechargeConfig", {"recharge"}, {"recharge_config", "recharge_quote"}),
             ("faqs", {"faq"}, {"faqs"}),
             ("announcements", {"announcement", "future"}, {"announcements"}),
@@ -951,20 +961,15 @@ async def _prepare_fae_context(plugin: Any, event: AstrMessageEvent) -> dict[str
         ):
             if intents & intent_names or claims & claim_names:
                 wants.add(source)
-        if initial.answer_mode in {"public_api", "client_guidance"}:
-            wants.add("publicApiCapabilities")
-            # API order guidance needs the current project/product catalog to
-            # resolve a public ``projectId``.  Do not make the model search the
-            # project name with a product-type token (the API treats ``search``
-            # as a project-name query).
-            if initial.product_types:
-                wants.add("projectCatalog")
-    if _public_api_support_likely(getattr(event, "message_str", "")):
-        # Recovery only: the LLM still owns intent and answer mode, but public
-        # API documentation must not disappear when a refusal is misclassified.
-        wants.add("publicApiCapabilities")
-        if _normalize_product_types(getattr(event, "message_str", "")):
-            wants.add("projectCatalog")
+    for source, claim in (
+        ("ownOrders", "orders"),
+        ("publicApiCapabilities", "api_documentation"),
+    ):
+        if _intent_needs_context(initial, claim):
+            wants.add(source)
+    if "publicApiCapabilities" in wants and initial.product_types:
+        # Confirmed API guidance can need a projectId for a known product type.
+        wants.add("projectCatalog")
 
     async def collect(name, operation, inputs=None):
         status = (
@@ -1246,7 +1251,7 @@ async def _prepare_fae_context(plugin: Any, event: AstrMessageEvent) -> dict[str
 
 
 def _model_background(background: dict[str, Any], plan: Any) -> dict[str, Any]:
-    """Keep prefetched personal records out of model calls that do not need them."""
+    """Only include heavy context still requested by this model call's plan."""
     result = {
         key: value
         for key, value in background.items()
@@ -1259,14 +1264,12 @@ def _model_background(background: dict[str, Any], plan: Any) -> dict[str, Any]:
             "disabled",
         }
     }
-    if isinstance(plan, FactPlan) and not (
-        set(plan.intents) & {"orders", "diagnosis", "account"}
-        or any(
-            fact.claim in {"orders", "code_diagnosis", "binding_status"}
-            for fact in plan.facts
-        )
+    for key, claim in (
+        ("ownOrders", "orders"),
+        ("publicApiCapabilities", "api_documentation"),
     ):
-        result.pop("ownOrders", None)
+        if not _intent_needs_context(plan, claim):
+            result.pop(key, None)
     metadata = result.get("sourceReliability")
     if isinstance(metadata, dict):
         result["sourceReliability"] = {
@@ -1551,7 +1554,7 @@ def _event_is_command(event: Any) -> bool:
 async def _prepare_fae_workflow(
     plugin: Any, event: Any, question: str, recent: str = "", request: Any = None
 ) -> FactPlan:
-    """Preload authorized orders; intent admits session binding and further queries."""
+    """Confirm intent, bind the session, then load only the requested context."""
     scope = _event_scope(event)
     target = _event_reply_target(event)
     config = getattr(plugin, "config", {})
@@ -1577,12 +1580,8 @@ async def _prepare_fae_workflow(
             getattr(plugin, "config", {}).get("auxiliary_provider_id", "") or ""
         ).strip(),
     )
-    prefetch = _start_order_prefetch(plugin, event)
     continue_to_agent = False
     try:
-        if prefetch is not None:
-            # Let the order request start before the first model request.
-            await asyncio.sleep(0)
         context = getattr(plugin, "context", None)
         if _event_scope(event) != scope or _event_reply_target(event) != target:
             return FactPlan.failure("scope_mismatch")
@@ -1646,6 +1645,7 @@ async def _prepare_fae_workflow(
         if not bind_native_request(event, request, scope=scope):
             trace_note(event, "session", "blocked", reason="session_mismatch")
             return FactPlan.failure("session_mismatch")
+        _start_order_prefetch(plugin, event)
         background = await logged_operation(
             event,
             "background",
@@ -1658,7 +1658,10 @@ async def _prepare_fae_workflow(
             event,
             question,
             recent,
-            str(background.get("publicApiCapabilities") or ""),
+            str(
+                _model_background(background, initial).get("publicApiCapabilities")
+                or ""
+            ),
             phase="planner",
         )
         event.set_extra(_REMAIL_INTENT_PLAN_KEY, plan)
@@ -5441,6 +5444,10 @@ class Main(Star):
         return self.openapi_spec or {}
 
     async def _public_api_capability_context(self, event: AstrMessageEvent) -> str:
+        if not _intent_needs_context(
+            event.get_extra("_remail_initial_intent", None), "api_documentation"
+        ):
+            return ""
         cached = event.get_extra("_remail_public_api_capabilities", None)
         if isinstance(cached, str):
             return cached
@@ -8092,6 +8099,9 @@ class Main(Star):
     async def remail_orders(self, event: AstrMessageEvent, offset: int = 0) -> str:
         """私聊查询当前绑定用户自己的最近订单摘要，不读取邮件或凭证。
 
+        只用于本轮确实需要本人订单记录的目标；余额、绑定、一般规则或订单 API 用法
+        不需要此查询。意图已确认后的首屏背景可复用，不要为补齐资料而无目的翻页。
+
         Args:
             offset(number): 默认 0，实际使用非负整数 0 到 10000；每页最多 100 条，可按截断提示继续翻页。
 
@@ -8223,6 +8233,8 @@ class Main(Star):
         self, event: AstrMessageEvent, query: str
     ) -> str:
         """任何 ReMail 公开 API 对接、路径、鉴权、参数、schema、状态码或报错问题都必须调用。
+
+        只在本轮需要实际 API 契约时加载，不作为普通订单、充值、规则咨询的默认背景。
 
         常用场景：如何通过 API 下单、查询订单、收取邮件、处理幂等和错误，用户询问下单
         时某个字段或邮箱后缀应该填什么（例如“Gmail 变种邮箱后缀应该填什么”），或用户

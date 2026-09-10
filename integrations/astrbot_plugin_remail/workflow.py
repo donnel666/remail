@@ -85,6 +85,15 @@ _FACT_PLAN_CONTRACT = """<remail_fact_plan_contract>
 - feedback 表示反馈或建议，不编造已反馈、已修复或处理期限，由主 Agent 根据实际操作结果答复。
 - 询问当前群公告、精华、置顶等资料可用 service 与 group_context；该资料仅来自当前已授权群且属于弱参考，没有可用群上下文时澄清，不能冒充网站公告或发明群身份参数。
 
+按当前提问细分资料需求，订单和 API 文档都只在确认需要后获取：
+- 本人订单列表、已购订单状态、某笔订单的实际期限或退款结果：orders，只查询当前绑定用户的订单；必须为 private。
+- API 路径、字段、请求示例、SDK 对接、鉴权和接口报错：api / api_documentation。“怎样通过接口查询订单”是 API 使用问题，不需要用户本人的订单列表。
+- 通用编程语法、网络连通性或本地依赖问题，尚不涉及 ReMail 的实际接口契约时可用 client_guidance / service，不因出现 Python、HTTP 或 SDK 就附带 API 文档。
+- 余额、账号绑定与可用性：account / binding_status；充值方式与费用：recharge；这些场景不能顺带请求 orders。
+- 通用购买流程、接码与购买区别、质保概念、公开使用规则：service；用户未指向本人订单时，不因出现“购买”“订单”就查个人记录。
+- 收不到码且已指向具体邮箱：diagnosis / code_diagnosis，使用该邮箱的专用诊断；只有确实还需要订单列表时才另加 orders。
+- 多目标问题分别声明需求。无法判断用户是在咨询 API 用法还是查询本人订单时先 clarify，不同时拉取两套资料；历史只用于补足省略，不能让上一轮的资料需求自动延续到新的问题。
+
 claim 只允许 project_prices、projects、project_inventory、recharge_config、recharge_quote、faqs、announcements、group_context、api_documentation、rankings、ranking_rewards、binding_status、orders、code_diagnosis。claim 是程序枚举，不是中文需求描述：例如必须写 "claim":"recharge_config"，不能写 "claim":"当前充值配置，包括支付渠道、币种、费率与开关"。每项事实是资料需求，不是已经成立的结论；同来源、同参数的重复事实应合并。
 params 可为空，合法键如下，未列出的键一律不要输出：
 - project_prices：projectQuery、productTypes、offset。
@@ -108,7 +117,7 @@ orders 仅处理当前绑定用户本人订单摘要，privacy 必须为 private
 </remail_fact_plan_contract>"""
 
 _INTENT_RULES = """<remail_intent_v1>
-你是独立的意图识别节点。职责是理解当前用户的目标、答复范围和必要资料需求；资料选择由你决定，不由“你好”等硬编码关键词决定。本阶段不依赖后台预取是否完成，未向你提供的动态数据不能当成事实；不能因尚未提供查询结果拒绝可理解的服务问题。
+你是独立的意图识别节点。职责是理解当前用户的目标、答复范围和必要资料需求；资料选择由你决定，不由“你好”等硬编码关键词决定。此阶段尚未查询订单或加载 API 文档；先根据问题与同人历史确认是否需要这些资料，不能要求先读取它们才能判断意图。未向你提供的动态数据不能当成事实；不能因尚未提供查询结果拒绝可理解的服务问题。
 先看当前问题，再用同一发送者的历史解释省略；完整的新问题优先于旧话题。群主、老板、红夜和 @ 称呼不是业务目标，用户不需要明确写出 ReMail、接口名或完整工单。按语义理解常见口语、大小写和错字，不凭熟悉的名称断言某平台受支持。
 纯问候、感谢或告别选择 social，让后续节点自然简短回应；不为了招呼列目录、价格、库存、支付渠道或英文产品枚举。一般静态规则选择 service。包含实际业务目标时必须识别该目标，不能因为夹有问候就只输出 social。
 facts 只声明本问确实需要哪些资料以及目前已知的最小参数，供上下文节点选择输入；不要为了流程完整而请求无关订单或完整资料清单，也不要在本阶段展开回答。没有资料缺口时保留空 facts。
@@ -132,7 +141,7 @@ _GOAL_INTERPRETATION_RULES = """<remail_goal_interpretation>
 - “群主，我们买的邮箱能用多长时间”通常是一般服务期限问题，使用 service、normal、facts=[]、entities={}，不当成某笔订单故障。询问某项目当前具体时长时才增加 projects。接着问“那过保了呢”可沿用同人历史解释所指；“我的用不了了”缺少有效上下文时澄清现象，不猜项目、价格或退款。
 - 卡网、发卡网、卡密商城、兑换码商城是积分兑换码购买渠道，当前入口需要 recharge_config；还问兑换规则时再结合 faqs。具体充值报价需要 recharge_config 与 recharge_quote；“充10元”不是 10 积分，不擅自创造币种、网络或汇率。仅解释积分与钱的区别属于静态 service。
 - “下单时 Gmail 变种邮箱后缀应该填什么”是公开字段使用问题，即使没说 API 也需要 api_documentation。用户自己的 SDK、前端、缓存、ORM 或数据库选型是 client_guidance，不能一概当成平台保密实现。
-- “如何通过 API 购买谷歌变种邮箱”“接口返回 401/422”“Python 请求超时”“给我一份 cURL 示例”都是公开 API 技术支持：使用 public_api 或 client_guidance，加入 api 意图并请求 api_documentation；不能使用 refuse_internal。不能代用户支付、下单或接收真实密钥，只影响执行权限，不影响公开技术说明。
+- “如何通过 API 购买谷歌变种邮箱”“ReMail 接口返回 401/422”“给我一份 ReMail cURL 示例”需要当前公开 API 契约：使用 public_api 或 client_guidance，加入 api 意图并请求 api_documentation；不能使用 refuse_internal。一般 Python 语法或网络排查先用静态指引，确实需要核对 ReMail 的路径、字段或鉴权时才请求文档。不能代用户支付、下单或接收真实密钥，只影响执行权限，不影响公开技术说明。
 - 公开 API 集成排查先区分 DNS/TCP/TLS/代理连通性，再核对 HTTP 状态码、鉴权格式、路径版本、请求头、JSON 字段与类型、响应解析、超时和重试。用户提供脱敏 cURL、响应头、状态码、运行语言/版本和代理/容器环境后，再逐步定位客户端代码；不要要求真实 API Key、Cookie、service token、邮箱或邮件内容。
 - 只有用户询问 ReMail 服务端内部源码、数据库、部署、资源匹配、密钥流转或调用链时才使用 refuse_internal；“怎么调用公开接口”“我的代码报 401/422”“网络能否连通”均不是内部实现请求。
 - 多目标问题分别覆盖必要资料；多个邮箱类型通过 productTypes 表达，不拼接进项目搜索词。本人订单、余额、邮件等不能从上一轮话题、等待时长或用户自称身份推断。

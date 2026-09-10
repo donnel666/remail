@@ -16,7 +16,7 @@ from .sessions import (
     session_request_matches,
 )
 from .diagnostics import logged_llm_call, trace_tool
-from .test_security import _fact_plan, _load_welcome_functions
+from .test_security import _fact, _fact_plan, _load_welcome_functions
 from .test_sessions import Event as SessionEvent
 from .test_sessions import native as native
 from .test_sessions import native_messages as native_messages
@@ -159,7 +159,7 @@ def _flow(native, responses):
 
 @pytest.mark.parametrize("group", ["20001", ""])
 @pytest.mark.parametrize("decision", ["ignore", "failed"])
-def test_unrelated_or_failed_intent_only_allows_authorized_private_order_prefetch(
+def test_unrelated_or_failed_intent_never_fetches_dynamic_context(
     native, group, decision
 ):
     output = _fact_plan(route="ignore", intents=())
@@ -170,10 +170,10 @@ def test_unrelated_or_failed_intent_only_allows_authorized_private_order_prefetc
     event = Event(question="客户的实际表述由模型理解", group=group)
     result = asyncio.run(flow.run(flow.plugin, event, event.message_str))
     assert result.failed == (decision == "failed") and result.route == "ignore"
-    prefetch = ["data:/v1/bot/orders"] if not group else []
-    assert flow.order == [*prefetch, "history:read", *(["llm:intent"] * len(responses))]
+    assert flow.order == ["history:read", *(["llm:intent"] * len(responses))]
     assert flow.db.created == 0 and flow.db.rows == {}
-    assert flow.plugin._request.await_count == (0 if group else 1)
+    flow.plugin._request.assert_not_awaited()
+    flow.plugin._public_api_capability_context.assert_not_awaited()
     assert flow.plugin._public_request.await_count == 0
     assert event.get_extra(SESSION_REFERENCE_KEY) is None
     assert event.get_extra("provider_request") is None
@@ -186,29 +186,20 @@ def test_unrelated_or_failed_intent_only_allows_authorized_private_order_prefetc
 
 @pytest.mark.parametrize("group", ["20001", ""])
 @pytest.mark.parametrize("mode", ["refuse_internal", "refuse_group_mail"])
-def test_refusal_paths_keep_their_session_and_prefetch_rules(native, group, mode):
+def test_refusal_paths_do_not_start_heavy_context_reads(native, group, mode):
     refusal = _fact_plan(
         intents=(),
         answer_mode=mode,
         privacy="group_sensitive" if mode == "refuse_group_mail" else "public",
     )
-    flow = _flow(native, [refusal] * (2 if mode == "refuse_internal" else 1))
+    flow = _flow(native, [refusal, refusal])
     event = Event(group=group)
     actual = asyncio.run(flow.run(flow.plugin, event, event.message_str))
     assert actual.answer_mode == mode
-    if mode == "refuse_internal":
-        assert not event.stopped and flow.db.created == 1 and not flow.replies
-        assert flow.context.llm_generate.await_count == 2
-        return
-    assert event.stopped
-    prefetch = ["data:/v1/bot/orders"] if not group else []
-    assert flow.order == [*prefetch, "history:read", "llm:intent", "reply"]
-    assert flow.db.created == 0 and flow.db.rows == {}
-    assert event.get_extra(SESSION_REFERENCE_KEY) is None
-    assert event.get_extra("provider_request") is None
-    assert flow.plugin._request.await_count == (0 if group else 1)
-    assert flow.plugin._public_request.await_count == 0
-    assert len(flow.replies) == 1
+    flow.plugin._request.assert_not_awaited()
+    flow.plugin._public_api_capability_context.assert_not_awaited()
+    flow.plugin._public_request.assert_not_awaited()
+    assert flow.context.llm_generate.await_count <= 2
 
 
 @pytest.mark.parametrize("group", ["20001", ""])
@@ -216,7 +207,7 @@ def test_accepted_intent_binds_native_request_before_real_background_and_planner
     native, group
 ):
     admission, planning = (
-        _fact_plan(intents=("project",)),
+        _fact_plan(intents=("project",), facts=(_fact("catalog", "projects"),)),
         _fact_plan(intents=("service",), answer_mode="clarify"),
     )
     flow = _flow(native, [admission, planning])
@@ -224,7 +215,7 @@ def test_accepted_intent_binds_native_request_before_real_background_and_planner
     original_umo = event.unified_msg_origin
     actual = asyncio.run(flow.run(flow.plugin, event, event.message_str))
     assert actual == planning
-    preparation = [step for step in flow.order if step != "data:/v1/bot/orders"]
+    preparation = flow.order
     assert preparation[:5] == [
         "history:read",
         "llm:intent",
@@ -234,10 +225,8 @@ def test_accepted_intent_binds_native_request_before_real_background_and_planner
     ]
     assert flow.order[-1] == "llm:planner"
     assert all(step.startswith("data:") for step in preparation[5:-1])
-    assert bool("data:/v1/bot/orders" in flow.order) == (not group)
-    if not group:
-        assert flow.order[0] == "data:/v1/bot/orders"
-        assert flow.order.count("data:/v1/bot/orders") == 1
+    assert "data:/v1/bot/orders" not in flow.order
+    flow.plugin._public_api_capability_context.assert_not_awaited()
     reference = get_session_reference(event, scope=event.scope)
     request = event.get_extra("provider_request")
     assert request.session_id == reference.owner_umo == request.conversation.user_id
@@ -373,7 +362,7 @@ def test_session_failure_stops_before_dynamic_context_or_second_llm(native):
 
 
 def test_existing_request_is_rebound_before_background_without_old_contexts(native):
-    accepted = _fact_plan(intents=("service",))
+    accepted = _fact_plan(intents=("project",), facts=(_fact("catalog", "projects"),))
     flow = _flow(native, [accepted, accepted])
     event = Event(group="")
     previous = NS(cid="unrelated-cid", user_id="different-owner")
@@ -393,11 +382,11 @@ def test_existing_request_is_rebound_before_background_without_old_contexts(nati
         and request.conversation is not previous
     )
     assert request.contexts == [] and request.session_id == reference.owner_umo
-    assert flow.order[0] == "data:/v1/bot/orders"
+    assert "data:/v1/bot/orders" not in flow.order
     assert all(
         flow.order.index("session:bind") < index
         for index, stage in enumerate(flow.order)
-        if stage.startswith("data:") and stage != "data:/v1/bot/orders"
+        if stage.startswith("data:")
     )
 
 
