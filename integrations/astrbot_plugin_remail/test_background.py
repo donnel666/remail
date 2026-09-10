@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from .persona import CRITIC_SYSTEM_PROMPT, PERSONA_SYSTEM_PROMPT
+from .persona import CRITIC_SYSTEM_PROMPT, PERSONA_SYSTEM_PROMPT, build_critic_payload
 from .security import normalize_security_text
 from .test_security import _fact, _fact_plan, _load_welcome_functions
 from .workflow import PLANNER_SYSTEM_PROMPT, PUBLIC_BUSINESS_RULES, parse_fact_plan
@@ -390,6 +390,52 @@ def test_background_sources_are_bounded_scoped_and_reused_per_event():
     )
     assert "policy.business" in service_packet
     assert set(service_packet) == {"policy.business"}
+    for final_plan, needs_orders in (
+        (
+            _fact_plan(
+                intents=("account",), facts=(_fact("binding", "binding_status"),)
+            ),
+            False,
+        ),
+        (
+            _fact_plan(
+                intents=("orders",), answer_mode="clarify", privacy="private"
+            ),
+            False,
+        ),
+        (
+            _fact_plan(
+                intents=("orders",),
+                facts=(_fact("own-orders", "orders"),),
+                privacy="private",
+            ),
+            True,
+        ),
+        (
+            _fact_plan(
+                intents=("orders",),
+                facts=(_fact("own-orders", "orders"),),
+                answer_mode="clarify",
+                privacy="private",
+            ),
+            True,
+        ),
+    ):
+        critic = build_critic_payload(
+            question=event.message_str,
+            candidate_answer="请说明你希望了解哪一项。",
+            evidence=functions["_persona_evidence_packet"](event, final_plan),
+            fact_plan=final_plan.to_dict(),
+            review_mode="facts",
+        )
+        assert ("本人近期订单摘要" in critic.to_json()) == needs_orders
+    functions["_record_evidence"](
+        event, "orders", background["ownOrders"], {"offset": 0}
+    )
+    supplement_packet = functions["_persona_evidence_packet"](
+        event, _fact_plan(intents=("service",))
+    )
+    assert any(key.startswith("tool.orders.") for key in supplement_packet)
     group = event_for(private=False)
     plugin._request.reset_mock()
     asyncio.run(functions["_prepare_fae_context"](plugin, group))

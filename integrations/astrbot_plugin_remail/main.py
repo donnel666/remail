@@ -314,7 +314,6 @@ _REMAIL_REACT_SYSTEM_PROMPT = """<remail_react_rules>
 
 内部思考、行动、观察、轮数、工具名和参数不得展示给用户。ReAct 在结束前形成完整答案，保留所有结论、成立条件、必要步骤、不确定性和有依据的并列可能；多个可能逐项列举，不强行择一。后续只做人格化语言重组，不再重新选择事实、补做业务决策或删减答案。
 普通招呼或确认只需自然回应，不主动罗列项目、价格、库存、支付渠道和接口枚举；公开业务问题按用户视图说明操作，不描述系统如何实现。
-公开 API 是 ReMail FAE 的正常技术支持范围。用户问如何调用、如何集成、cURL、SDK、网络、401/403/404/422/429/5xx、超时、响应解析或代码报错时，必须先用本轮 API 契约给出安全的最小复现和逐步排查；“不能替用户执行交易”不等于“不能提供技术指导”。先判断网络层，再判断鉴权、契约、响应和客户端代码；每一步只收集决定下一步的脱敏信息。机器人只能发送命令和代码指导，不能主动执行用户的 cURL、脚本、网络探测或 API 请求，也不能代用户使用 API Key。
 </remail_react_rules>"""
 _REMAIL_TOOL_ROUTING_SYSTEM_PROMPT = """<remail_tool_routing_rules>
 只能使用当前请求实际提供的工具，参数名称、类型、范围和返回含义以工具定义为准，不猜测不存在的参数或操作。
@@ -325,7 +324,7 @@ _REMAIL_TOOL_ROUTING_SYSTEM_PROMPT = """<remail_tool_routing_rules>
 - 充值入口、渠道和币种：remail_recharge_config；指定积分及渠道的应付金额：remail_recharge_quote。
 - 通用使用说明：remail_faqs；已公布安排：remail_announcements，并核对当前项目状态。
 - 本人订单模式、状态和截止时间：remail_orders，仅私聊；收件、错购及退款诊断：remail_code_diagnosis。
-- 公开接口、字段、后缀和客户端对接：remail_api_documentation，保留契约中的原始字段与枚举，解释用中文。
+- ReMail 公开接口的路径、字段、后缀、鉴权和响应契约：remail_api_documentation，保留契约中的原始字段与枚举，解释用中文。
 - 榜单和已结算奖励：remail_order_rankings、remail_latest_ranking_rewards；绑定状态：remail_binding_status。
 - 已经排查仍不能解决的群聊问题：remail_record_unresolved；只有记录成功才能说已反馈。
 
@@ -3412,6 +3411,11 @@ def _persona_evidence_packet(event: Any, plan: FactPlan) -> dict[str, str]:
         )
     }
     relevant = {fact.claim for fact in plan.facts}
+    relevant.update(
+        claim
+        for claim in ("orders", "api_documentation")
+        if _intent_needs_context(plan, claim)
+    )
     for intents, claims in (
         (
             {"price", "project", "inventory", "future"},
@@ -3420,11 +3424,6 @@ def _persona_evidence_packet(event: Any, plan: FactPlan) -> dict[str, str]:
         ({"recharge"}, {"recharge_config", "recharge_quote"}),
         ({"faq"}, {"faqs", "group_context"}),
         ({"announcement", "future"}, {"announcements", "group_context"}),
-        (
-            {"orders", "account", "diagnosis"},
-            {"orders", "binding_status", "code_diagnosis"},
-        ),
-        ({"api"}, {"api_documentation"}),
         ({"ranking", "ranking_rewards"}, {"rankings", "ranking_rewards"}),
     ):
         if set(plan.intents) & intents:
@@ -8232,7 +8231,7 @@ class Main(Star):
     async def remail_api_documentation(
         self, event: AstrMessageEvent, query: str
     ) -> str:
-        """任何 ReMail 公开 API 对接、路径、鉴权、参数、schema、状态码或报错问题都必须调用。
+        """需要核对 ReMail 公开 API 的路径、鉴权、参数、schema 或响应行为时查询当前契约。
 
         只在本轮需要实际 API 契约时加载，不作为普通订单、充值、规则咨询的默认背景。
 
