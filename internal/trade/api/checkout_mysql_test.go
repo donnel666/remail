@@ -2394,7 +2394,12 @@ func TestConcurrentAPIKeyOrderReplayDoesNotDuplicateFactsMySQL(t *testing.T) {
 	const requests = 8
 	body, err := json.Marshal(CreateOrderRequest{ProjectID: 10, ProductID: 20})
 	require.NoError(t, err)
-	results := make(chan int, requests)
+	type replayResult struct {
+		Status  int    `json:"-"`
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	results := make(chan replayResult, requests)
 	var wg sync.WaitGroup
 	for i := 0; i < requests; i++ {
 		wg.Add(1)
@@ -2406,13 +2411,20 @@ func TestConcurrentAPIKeyOrderReplayDoesNotDuplicateFactsMySQL(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
-			results <- rec.Code
+			result := replayResult{Status: rec.Code}
+			if rec.Code >= http.StatusBadRequest {
+				// Decode only safe error fields, never successful order credentials.
+				if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+					result.Code, result.Message = "", "Error response could not be decoded."
+				}
+			}
+			results <- result
 		}()
 	}
 	wg.Wait()
 	close(results)
-	for code := range results {
-		require.Contains(t, []int{http.StatusCreated, http.StatusOK}, code)
+	for result := range results {
+		require.Contains(t, []int{http.StatusCreated, http.StatusOK}, result.Status, "error code=%q message=%q", result.Code, result.Message)
 	}
 
 	var orderRow struct {

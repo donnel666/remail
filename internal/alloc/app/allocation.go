@@ -314,6 +314,20 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 	if errors.Is(err, errResourceTypeBusy) {
 		err = domain.ErrAllocationConflict
 	}
+	// A concurrent request can commit this order's allocation after our first
+	// lookup. Recheck after rollback, never in a parent transaction or for
+	// wrapped errors that may include a rollback failure.
+	if (err == domain.ErrDefinitiveInventoryExhausted || err == domain.ErrInsufficientInventory || err == domain.ErrAllocationConflict) && !uc.repo.HasParentTx(ctx) {
+		existing, findErr := uc.findAllocationForFulfillment(ctx, cmd.OrderNo)
+		if findErr != nil {
+			return nil, findErr
+		}
+		if existing != nil && existing.Status == domain.AllocationStatusAllocated && existing.ReleasedAt == nil {
+			result = existing
+			existingHit = true
+			return result, nil
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
