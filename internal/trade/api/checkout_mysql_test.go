@@ -58,6 +58,12 @@ func TestMain(m *testing.M) {
 func newTradeMySQLTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db := tradeAPIMySQLTestServer.Database(t, tradeMigrationsDir(t))
+	pinTradeMicrosoftFixtureBucket(t, db)
+	return db
+}
+
+func pinTradeMicrosoftFixtureBucket(t *testing.T, db *gorm.DB) {
+	t.Helper()
 	// Small business-rule fixtures pin the starting bucket. Routing/performance
 	// tests remove this callback and exercise the production UUID distribution.
 	require.NoError(t, db.Callback().Create().Before("gorm:create").Register("test:allocation_bucket", func(tx *gorm.DB) {
@@ -66,7 +72,6 @@ func newTradeMySQLTestDB(t *testing.T) *gorm.DB {
 			order.OrderNo = testmysql.AllocationOrderNo(order.OrderNo, order.ProjectID, "main", 1000, allocapp.MicrosoftBucketCount)
 		}
 	}))
-	return db
 }
 
 func newTradeLegacyMigrationTestDB(t *testing.T) (*gorm.DB, string) {
@@ -919,7 +924,7 @@ func TestExpireDueOrdersReleasesStalePendingAllocationMySQL(t *testing.T) {
 	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
 	repo := tradeinfra.NewRepo(db)
 	order, created, err := repo.LoadOrCreatePendingOrder(context.Background(), tradeapp.CreatePendingOrderCommand{
-		OrderNo: "OR_STALE_PENDING_ALLOCATION", UserID: 2, ProjectID: 10, ProjectProductID: 20,
+		OrderNo: testmysql.AllocationOrderNo("OR_STALE_PENDING_ALLOCATION", 10, "main", 1000, allocapp.MicrosoftBucketCount), UserID: 2, ProjectID: 10, ProjectProductID: 20,
 		ProductType: tradedomain.ProductTypeMicrosoft, ServiceMode: tradedomain.ServiceModeCode,
 		SupplyPolicy: tradedomain.SupplyPolicyPublicOnly, PayAmount: "1.00",
 		CodeWindowMinutes: 10, ActivationWindowMinutes: 60, WarrantyMinutes: 1440,
@@ -963,7 +968,7 @@ func TestExpireDueOrdersKeepsFreshAllocationOnOldPendingOrderMySQL(t *testing.T)
 	seedTradeMicrosoftResources(t, db, 1, 1000, 1, true)
 	repo := tradeinfra.NewRepo(db)
 	order, created, err := repo.LoadOrCreatePendingOrder(context.Background(), tradeapp.CreatePendingOrderCommand{
-		OrderNo: "OR_OLD_PENDING_FRESH_ALLOCATION", UserID: 2, ProjectID: 10, ProjectProductID: 20,
+		OrderNo: testmysql.AllocationOrderNo("OR_OLD_PENDING_FRESH_ALLOCATION", 10, "main", 1000, allocapp.MicrosoftBucketCount), UserID: 2, ProjectID: 10, ProjectProductID: 20,
 		ProductType: tradedomain.ProductTypeMicrosoft, ServiceMode: tradedomain.ServiceModeCode,
 		SupplyPolicy: tradedomain.SupplyPolicyPublicOnly, PayAmount: "1.00",
 		CodeWindowMinutes: 10, ActivationWindowMinutes: 60, WarrantyMinutes: 1440,
@@ -1005,7 +1010,7 @@ func TestExpireDueOrdersResumesStalePaidAllocationMySQL(t *testing.T) {
 
 	repo := tradeinfra.NewRepo(db)
 	order, created, err := repo.LoadOrCreatePendingOrder(context.Background(), tradeapp.CreatePendingOrderCommand{
-		OrderNo: "OR_STALE_PAID_ALLOCATION", UserID: 2, ProjectID: 10, ProjectProductID: 20,
+		OrderNo: testmysql.AllocationOrderNo("OR_STALE_PAID_ALLOCATION", 10, "main", 1000, allocapp.MicrosoftBucketCount), UserID: 2, ProjectID: 10, ProjectProductID: 20,
 		ProductType: tradedomain.ProductTypeMicrosoft, ServiceMode: tradedomain.ServiceModeCode,
 		SupplyPolicy: tradedomain.SupplyPolicyPublicOnly, PayAmount: "1.00",
 		CodeWindowMinutes: 10, ActivationWindowMinutes: 60, WarrantyMinutes: 1440,

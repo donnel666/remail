@@ -4122,7 +4122,12 @@ def test_api_routing_matches_capability_not_keywords() -> None:
     routing_prompt = functions["_REMAIL_TOOL_ROUTING_SYSTEM_PROMPT"]
     assert "按目标理解而非按单个词触发" in intent_prompt
     assert "公开字段使用问题" in intent_prompt
-    assert "公开接口、字段、后缀和客户端对接" in routing_prompt
+    api_route = next(
+        line for line in routing_prompt.splitlines() if "remail_api_documentation" in line
+    )
+    assert all(
+        field in api_route for field in ("公开接口", "字段", "后缀", "鉴权", "响应契约")
+    )
     assert "公开 API 技术支持" in service_prompt
     assert "Gmail 变种邮箱后缀" in intent_prompt
     assert "即使没说 API" in intent_prompt

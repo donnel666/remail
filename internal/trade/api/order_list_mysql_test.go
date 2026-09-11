@@ -24,6 +24,7 @@ func checkoutListOrder(
 	projectID uint,
 	productID uint,
 	serviceMode string,
+	emailSuffix string,
 	idempotencyKey string,
 ) tradeapp.CheckoutResult {
 	t.Helper()
@@ -32,6 +33,7 @@ func checkoutListOrder(
 		ProjectID:      projectID,
 		ProductID:      productID,
 		ServiceMode:    serviceMode,
+		EmailSuffix:    emailSuffix,
 		SupplyPolicy:   "public_only",
 		ClientChannel:  tradedomain.ClientChannelConsole,
 		IdempotencyKey: idempotencyKey,
@@ -79,21 +81,20 @@ INSERT INTO project_mail_rules(project_id, rule_type, pattern, enabled) VALUES
 	uc := newTradeUseCase(db)
 	ctx := context.Background()
 
-	// Seed exactly one available resource before each checkout so the
-	// delivery email mapping stays deterministic regardless of the
-	// allocation picking strategy.
+	// Each checkout selects a suffix with exactly one unused mailbox for its
+	// project; mailboxes used by another project remain reusable.
 	seedTradeMicrosoftResource(t, db, 1, 1001, "a1@outlook.test", "outlook.test", 100, true)
-	first := checkoutListOrder(t, uc, 2, 10, 20, "code", "order-list-1")
+	first := checkoutListOrder(t, uc, 2, 10, 20, "code", "outlook.test", "order-list-1")
 	seedTradeMicrosoftResource(t, db, 1, 1002, "a2@outlook.test", "outlook.test", 99, true)
-	second := checkoutListOrder(t, uc, 2, 10, 20, "code", "order-list-2")
+	second := checkoutListOrder(t, uc, 2, 10, 20, "code", "outlook.test", "order-list-2")
 	seedTradeMicrosoftResource(t, db, 1, 1003, "b1@hotmail.test", "hotmail.test", 98, true)
-	third := checkoutListOrder(t, uc, 2, 11, 21, "purchase", "order-list-3")
+	third := checkoutListOrder(t, uc, 2, 11, 21, "purchase", "hotmail.test", "order-list-3")
 	require.NoError(t, db.Table("orders").Where("order_no = ?", third.Order.OrderNo).
 		Update("product_type", string(tradedomain.ProductTypeDomain)).Error)
 	seedTradeMicrosoftResource(t, db, 1, 1004, "b2@hotmail.test", "hotmail.test", 97, true)
-	fourth := checkoutListOrder(t, uc, 2, 11, 21, "purchase", "order-list-4")
+	fourth := checkoutListOrder(t, uc, 2, 11, 21, "purchase", "hotmail.test", "order-list-4")
 	seedTradeMicrosoftResource(t, db, 1, 1005, "c1@outlook.test", "outlook.test", 96, true)
-	other := checkoutListOrder(t, uc, 3, 10, 20, "code", "order-list-other")
+	other := checkoutListOrder(t, uc, 3, 10, 20, "code", "outlook.test", "order-list-other")
 	require.NoError(t, db.Table("orders").Where("order_no = ?", other.Order.OrderNo).Updates(map[string]any{
 		"product_type":                string(tradedomain.ProductTypeLegacyRandom),
 		"random_microsoft_pay_amount": "1.00",

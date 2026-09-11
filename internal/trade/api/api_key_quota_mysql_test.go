@@ -138,6 +138,7 @@ func TestAPIKeyPointQuotaMigrationMySQL(t *testing.T) {
 	ctx := context.Background()
 	t.Cleanup(func() { require.NoError(t, server.Close(ctx)) })
 	db := server.Database(t, testmysql.MigrationsThrough(t, tradeMigrationsDir(t), 138))
+	pinTradeMicrosoftFixtureBucket(t, db)
 	seedTradeBase(t, db, "microsoft")
 	seedTradeMicrosoftResources(t, db, 1, 1000, 2, true)
 	require.NoError(t, db.Table("project_products").Where("id = ?", 20).Update("code_price", "12345.123456").Error)
