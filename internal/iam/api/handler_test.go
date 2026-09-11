@@ -527,6 +527,28 @@ func (r *mockUserRepo) UpdateNonSuperAdminProfileWithOperationLog(ctx context.Co
 	return &cp, nil
 }
 
+func (r *mockUserRepo) UpdateUserGroupAssignmentWithOperationLog(ctx context.Context, userID, groupID uint, allowSuperAdminGroup bool, log *governancedomain.OperationLog) (*domain.User, error) {
+	r.mu.Lock()
+	current, ok := r.users[userID]
+	if !ok || current.IsDeleted() {
+		r.mu.Unlock()
+		return nil, domain.ErrUserNotFound
+	}
+	if current.Role == domain.RoleSuperAdmin && !allowSuperAdminGroup {
+		r.mu.Unlock()
+		return nil, domain.ErrPermissionDenied
+	}
+	cp := *current
+	cp.UserGroupID = groupID
+	cp.UserGroup = *r.userGroups[groupID]
+	r.users[userID] = &cp
+	r.mu.Unlock()
+	if err := r.operationLogs.Create(ctx, log); err != nil {
+		return nil, err
+	}
+	return &cp, nil
+}
+
 func (r *mockUserRepo) DeleteNonSuperAdminWithOperationLog(ctx context.Context, userID uint, log *governancedomain.OperationLog) error {
 	r.mu.Lock()
 	current, ok := r.users[userID]
@@ -2470,6 +2492,73 @@ func TestPatchAdminUserCannotModifyExistingSuperAdminEvenWithSensitivePermission
 	stored, err := testRepo(h).FindByID(context.Background(), target.ID)
 	require.NoError(t, err)
 	require.Equal(t, domain.RoleSuperAdmin, stored.Role)
+}
+
+func TestPatchSuperAdminAllowsOnlyAuthorizedGroupChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		body         string
+		operatorRole domain.Role
+		self         bool
+		write        bool
+		sensitive    bool
+		status       int
+	}{
+		{"another super admin", `{"userGroupId":4}`, domain.RoleSuperAdmin, false, true, true, http.StatusOK},
+		{"own group", `{"userGroupId":4}`, domain.RoleSuperAdmin, true, true, true, http.StatusOK},
+		{"ordinary admin with sensitive permission", `{"userGroupId":4}`, domain.RoleAdmin, false, true, true, http.StatusForbidden},
+		{"ordinary admin with unchanged group", `{"userGroupId":1}`, domain.RoleAdmin, false, true, true, http.StatusForbidden},
+		{"user with sensitive permission", `{"userGroupId":4}`, domain.RoleUser, false, true, true, http.StatusForbidden},
+		{"missing sensitive permission", `{"userGroupId":4}`, domain.RoleSuperAdmin, false, true, false, http.StatusForbidden},
+		{"missing write permission", `{"userGroupId":4}`, domain.RoleSuperAdmin, false, false, true, http.StatusForbidden},
+		{"role included", `{"userGroupId":4,"role":"super_admin"}`, domain.RoleSuperAdmin, false, true, true, http.StatusForbidden},
+		{"status included", `{"userGroupId":4,"enabled":false}`, domain.RoleSuperAdmin, false, true, true, http.StatusForbidden},
+		{"email included", `{"userGroupId":4,"email":"changed@test.com"}`, domain.RoleSuperAdmin, false, true, true, http.StatusForbidden},
+		{"nickname included", `{"userGroupId":4,"nickname":"changed"}`, domain.RoleSuperAdmin, false, true, true, http.StatusForbidden},
+		{"password included", `{"userGroupId":4,"password":"changed-password"}`, domain.RoleSuperAdmin, false, true, true, http.StatusForbidden},
+		{"unknown group", `{"userGroupId":999}`, domain.RoleSuperAdmin, false, true, true, http.StatusUnprocessableEntity},
+		{"disabled group", `{"userGroupId":5}`, domain.RoleSuperAdmin, false, true, true, http.StatusUnprocessableEntity},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHandler()
+			h.module.PermissionChecker = permissionMapChecker{
+				"iam:user:write": tc.write, "iam:permission:sensitive": tc.sensitive,
+			}
+			r := setupTestRouterWithHandler(h)
+			operator := seedAdminSession(t, h, "admin-session")
+			operator.Role = tc.operatorRole
+			require.NoError(t, testRepo(h).Update(context.Background(), operator))
+			target := operator
+			if !tc.self {
+				target = seedUser(t, h, "protected-group@test.com")
+				target.Role = domain.RoleSuperAdmin
+			}
+			target.UserGroupID = 1
+			require.NoError(t, testRepo(h).Update(context.Background(), target))
+			testRepo(h).userGroups[4] = &domain.UserGroup{ID: 4, Code: "vip3", Name: "VIP3", Enabled: true, APIConcurrencyLimit: 300}
+			testRepo(h).userGroups[5] = &domain.UserGroup{ID: 5, Code: "disabled", Name: "Disabled"}
+			req := httptest.NewRequest(http.MethodPatch, fmt.Sprintf("/v1/admin/users/%d", target.ID), strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			addAuthenticatedRequest(req, "admin-session")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			require.Equal(t, tc.status, w.Code, w.Body.String())
+			stored, err := testRepo(h).FindByID(context.Background(), target.ID)
+			require.NoError(t, err)
+			require.Equal(t, domain.RoleSuperAdmin, stored.Role)
+			require.Equal(t, target.Email, stored.Email)
+			require.Equal(t, target.Nickname, stored.Nickname)
+			require.Equal(t, target.PasswordHash, stored.PasswordHash)
+			require.Equal(t, target.Status, stored.Status)
+			require.Equal(t, target.TokenVersion, stored.TokenVersion)
+			if tc.status == http.StatusOK {
+				require.EqualValues(t, 4, stored.UserGroupID)
+				require.Equal(t, "success", testRepo(h).lastLog().Result)
+			} else {
+				require.EqualValues(t, 1, stored.UserGroupID)
+			}
+		})
+	}
 }
 
 func TestPostAdminRevokeSessionsWritesOperationLog(t *testing.T) {

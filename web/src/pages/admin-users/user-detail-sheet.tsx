@@ -49,6 +49,7 @@ import {
 } from "@/pages/resources/date-range-filter";
 
 import {
+  canEditAdminUserGroup,
   canMutateAdminUser,
   type AdminUserCapabilities,
 } from "./admin-user-access";
@@ -244,12 +245,14 @@ function ProfileTab({
   user,
   canAssignSuperAdmin,
   canEdit,
+  canEditGroup,
   canReadMetrics,
   onSaved,
 }: {
   user: AdminUser;
   canAssignSuperAdmin: boolean;
   canEdit: boolean;
+  canEditGroup: boolean;
   canReadMetrics: boolean;
   onSaved: (user: AdminUser) => void | Promise<void>;
 }) {
@@ -486,16 +489,19 @@ function ProfileTab({
   ];
 
   const save = async () => {
-    if (!editable) return;
+    if (!editable && !canEditGroup) return;
     if (role === "super_admin" && !canAssignSuperAdmin) return;
     setSaving(true);
     try {
-      const updated = await updateAdminUser(user.id, {
-        nickname,
-        role,
-        userGroupId,
-        enabled,
-      });
+      const updated = await updateAdminUser(
+        user.id,
+        isSuperAdmin ? { userGroupId } : {
+          nickname,
+          role,
+          userGroupId,
+          enabled,
+        }
+      );
       Toast.success(t("User updated."));
       await onSaved({
         ...updated,
@@ -711,7 +717,7 @@ function ProfileTab({
               {t("User Group")}
             </span>
             <Select
-              disabled={!editable}
+              disabled={!canEditGroup}
               onChange={(value) => setUserGroupId(Number(value))}
               style={{ width: "100%" }}
               value={userGroupId}
@@ -742,7 +748,7 @@ function ProfileTab({
         </div>
         <div className="mt-3 flex justify-end">
           <Button
-            disabled={!editable || !dirty}
+            disabled={(!editable && !canEditGroup) || !dirty}
             loading={saving}
             onClick={() => void save()}
             theme="solid"
@@ -2065,6 +2071,7 @@ export function UserDetailSheet({
               <ProfileTab
                 canAssignSuperAdmin={capabilities.canAssignSuperAdmin}
                 canEdit={canEditCurrent}
+                canEditGroup={canEditAdminUserGroup(current.role, capabilities)}
                 canReadMetrics={capabilities.canReadMetrics}
                 onSaved={handleSaved}
                 user={current}

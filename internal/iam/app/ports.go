@@ -97,6 +97,11 @@ type UserRepository interface {
 	// refuses a super_admin row, and writes the operation log in one transaction.
 	UpdateNonSuperAdminProfileWithOperationLog(ctx context.Context, userID uint, email, nickname, passwordHash *string, enabled *bool, role *domain.Role, userGroupID *uint, incrementTokenVersion bool, log *governancedomain.OperationLog) (*domain.User, error)
 
+	// UpdateUserGroupAssignmentWithOperationLog only changes the entitlement
+	// group. A protected target requires allowSuperAdminGroup from an active
+	// super_admin operator with sensitive authorization.
+	UpdateUserGroupAssignmentWithOperationLog(ctx context.Context, userID, userGroupID uint, allowSuperAdminGroup bool, log *governancedomain.OperationLog) (*domain.User, error)
+
 	// DeleteNonSuperAdminWithOperationLog logically deletes a user, refusing a
 	// super_admin row, and writes the operation log in the same transaction.
 	DeleteNonSuperAdminWithOperationLog(ctx context.Context, userID uint, log *governancedomain.OperationLog) error

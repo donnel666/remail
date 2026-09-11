@@ -675,7 +675,17 @@ func (uc *AdminUseCase) UpdateUser(ctx context.Context, operatorUserID uint, req
 		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.update", targetUserID, "failure", "User access update failed."))
 		return nil, domain.ErrUserNotFound
 	}
-	if user.Role == domain.RoleSuperAdmin || (!allowSensitive && req.Role != nil && *req.Role == domain.RoleSuperAdmin) {
+	groupOnly := req.UserGroupID != nil && req.Email == nil && req.Nickname == nil && req.Password == nil && req.Enabled == nil && req.Role == nil
+	allowSuperAdminGroup := false
+	if groupOnly && allowSensitive {
+		operator, err := uc.repo.FindByID(ctx, operatorUserID)
+		if err != nil {
+			_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.update", targetUserID, "failure", "User access update failed."))
+			return nil, fmt.Errorf("admin update find operator: %w", err)
+		}
+		allowSuperAdminGroup = operator != nil && operator.IsActive() && operator.Role == domain.RoleSuperAdmin
+	}
+	if (user.Role == domain.RoleSuperAdmin && !allowSuperAdminGroup) || (!allowSensitive && req.Role != nil && *req.Role == domain.RoleSuperAdmin) {
 		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.update", targetUserID, "failure", "User access update failed."))
 		return nil, domain.ErrPermissionDenied
 	}
@@ -750,18 +760,16 @@ func (uc *AdminUseCase) UpdateUser(ctx context.Context, operatorUserID uint, req
 		return user, nil
 	}
 
-	updated, err := uc.repo.UpdateNonSuperAdminProfileWithOperationLog(
-		ctx,
-		targetUserID,
-		emailUpdate,
-		nicknameUpdate,
-		passwordUpdate,
-		enabledUpdate,
-		roleUpdate,
-		userGroupUpdate,
-		tokenBump,
-		adminOperationLog(operatorUserID, requestID, path, "iam.user.update", targetUserID, "success", "User access settings updated."),
-	)
+	log := adminOperationLog(operatorUserID, requestID, path, "iam.user.update", targetUserID, "success", "User access settings updated.")
+	var updated *domain.User
+	if groupOnly {
+		updated, err = uc.repo.UpdateUserGroupAssignmentWithOperationLog(ctx, targetUserID, *userGroupUpdate, allowSuperAdminGroup, log)
+	} else {
+		updated, err = uc.repo.UpdateNonSuperAdminProfileWithOperationLog(
+			ctx, targetUserID, emailUpdate, nicknameUpdate, passwordUpdate,
+			enabledUpdate, roleUpdate, userGroupUpdate, tokenBump, log,
+		)
+	}
 	if err != nil {
 		_ = uc.logs.Create(ctx, adminOperationLog(operatorUserID, requestID, path, "iam.user.update", targetUserID, "failure", "User access update failed."))
 		return nil, fmt.Errorf("admin update user: %w", err)

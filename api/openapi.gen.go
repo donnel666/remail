@@ -18178,7 +18178,7 @@ type ServerInterface interface {
 	// Logically delete a user (admin only)
 	// (DELETE /v1/admin/users/{userId})
 	DeleteAdminUser(c *gin.Context, userId int, params DeleteAdminUserParams)
-	// Update a user (enable/disable, change role)
+	// Update a user's profile, status, role or group
 	// (PATCH /v1/admin/users/{userId})
 	PatchAdminUser(c *gin.Context, userId int, params PatchAdminUserParams)
 	// List a user's API keys (admin only)

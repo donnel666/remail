@@ -51,6 +51,7 @@ import {
   EditUserModal,
 } from "./admin-users/create-user-modal";
 import {
+  canEditAdminUserGroup,
   canMutateAdminUser,
   getAdminUserCapabilities,
 } from "./admin-users/admin-user-access";
@@ -102,8 +103,8 @@ export default function AdminUsers() {
   const isMobile = useIsMobile();
   const { groups } = useUserGroups();
   const capabilities = useMemo(
-    () => getAdminUserCapabilities(currentUser?.permissions ?? []),
-    [currentUser?.permissions]
+    () => getAdminUserCapabilities(currentUser?.permissions ?? [], currentUser?.role),
+    [currentUser?.permissions, currentUser?.role]
   );
   const canSelectUsers =
     capabilities.canAdjustBalance || capabilities.canOperateUsers;
@@ -704,10 +705,7 @@ export default function AdminUsers() {
           width: 400,
           render: (_: unknown, record: AdminUser) => {
             const rowLoading = operatingUserID === record.id;
-            const canEditRecord = canMutateAdminUser(
-              record.role,
-              capabilities.canWriteUsers
-            );
+            const canEditRecord = canEditAdminUserGroup(record.role, capabilities);
             const canAdjustRecord = canMutateAdminUser(
               record.role,
               capabilities.canAdjustBalance
@@ -778,6 +776,7 @@ export default function AdminUsers() {
       ] as any[],
     [
       capabilities.canAdjustBalance,
+      capabilities.canEditSuperAdminGroup,
       capabilities.canOperateUsers,
       capabilities.canWriteUsers,
       confirmDelete,
@@ -1097,11 +1096,12 @@ export default function AdminUsers() {
       />
       <EditUserModal
         canAssignSuperAdmin={capabilities.canAssignSuperAdmin}
+        canEditSuperAdminGroup={capabilities.canEditSuperAdminGroup}
         onClose={() => setEditTarget(null)}
         onSaved={handleUserChanged}
         user={
           editTarget &&
-          canMutateAdminUser(editTarget.role, capabilities.canWriteUsers)
+          canEditAdminUserGroup(editTarget.role, capabilities)
             ? editTarget
             : null
         }

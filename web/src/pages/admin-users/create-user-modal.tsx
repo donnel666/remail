@@ -185,11 +185,13 @@ export function CreateUserModal({
 export function EditUserModal({
   user,
   canAssignSuperAdmin,
+  canEditSuperAdminGroup,
   onClose,
   onSaved,
 }: {
   user: AdminUser | null;
   canAssignSuperAdmin: boolean;
+  canEditSuperAdminGroup: boolean;
   onClose: () => void;
   onSaved: (user: AdminUser) => void | Promise<void>;
 }) {
@@ -215,27 +217,31 @@ export function EditUserModal({
 
   const submit = async () => {
     if (!user) return;
-    if (user.role === "super_admin") return;
+    const groupOnly = user.role === "super_admin";
+    if (groupOnly && !canEditSuperAdminGroup) return;
     if (role === "super_admin" && !canAssignSuperAdmin) return;
     const normalizedEmail = email.trim().toLowerCase();
-    if (!EMAIL_PATTERN.test(normalizedEmail)) {
+    if (!groupOnly && !EMAIL_PATTERN.test(normalizedEmail)) {
       Toast.warning(t("Please enter a valid email address."));
       return;
     }
-    if (password && password.length < 6) {
+    if (!groupOnly && password && password.length < 6) {
       Toast.warning(t("Password must be at least 6 characters."));
       return;
     }
     setSaving(true);
     try {
-      const updated = await updateAdminUser(user.id, {
-        email: normalizedEmail,
-        nickname: nickname.trim(),
-        password: password || undefined,
-        role,
-        userGroupId,
-        enabled,
-      });
+      const updated = await updateAdminUser(
+        user.id,
+        groupOnly ? { userGroupId } : {
+          email: normalizedEmail,
+          nickname: nickname.trim(),
+          password: password || undefined,
+          role,
+          userGroupId,
+          enabled,
+        }
+      );
       Toast.success(t("User updated."));
       await onSaved(updated);
       onClose();
@@ -254,7 +260,7 @@ export function EditUserModal({
       confirmLoading={saving}
       onCancel={onClose}
       onOk={() => void submit()}
-      okButtonProps={{ disabled: protectedUser }}
+      okButtonProps={{ disabled: protectedUser && !canEditSuperAdminGroup }}
       okText={t("Save")}
       cancelText={t("Cancel")}
       style={{ width: 600 }}
@@ -330,7 +336,7 @@ export function EditUserModal({
               {t("User Group")}
             </span>
             <Select
-              disabled={protectedUser}
+              disabled={protectedUser && !canEditSuperAdminGroup}
               onChange={(value) => setUserGroupId(Number(value))}
               style={{ width: "100%" }}
               value={userGroupId}

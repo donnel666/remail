@@ -107,9 +107,9 @@ eft = allow/deny
 | `billing:card/read|write` | 卡密查看、创建和状态修改。 |
 | `trade:order/read|operate` | 管理员工单、订单查看、退款和终止。 |
 | `governance:log/read|operate` | 管理员读取系统/审计日志；operate 仅用于 super_admin 手动清理，且不能绕过角色校验。 |
-| `iam:permission/sensitive` | 提升普通用户为 `super_admin`，或增删任何 `sensitive` 用户权限覆盖。只默认授予 `super_admin`。 |
+| `iam:permission/sensitive` | 提升普通用户为 `super_admin`，或增删任何 `sensitive` 用户权限覆盖。只默认授予 `super_admin`；修改已有 `super_admin` 的权益分组还要求调用人实际角色为 `super_admin`，并具备 `iam:user/write`。 |
 
-已有 `super_admin` 是受保护身份：用户资料、角色、权限覆盖和强制退出均不能通过普通管理员命令修改。提升新 `super_admin` 必须具备 `iam:permission/sensitive`；相关角色检查和写入必须在同一数据库并发保护边界内完成，不能只依赖前端禁用按钮。
+已有 `super_admin` 是受保护身份：用户资料、角色、启停状态、删除、权限覆盖和强制退出均不能通过管理员用户命令修改。权益分组仅允许超级管理员单独修改：调用人在数据库中的实际角色必须为 `super_admin`，同时具备 `iam:user/write` 和 `iam:permission/sensitive`，且 PATCH 请求只提交 `userGroupId`；普通管理员即使拥有这些权限也不能修改超级管理员分组。此操作不递增 `tokenVersion` 或清理会话。提升新 `super_admin` 必须具备 `iam:permission/sensitive`；目标角色检查、写入和操作审计必须在同一数据库并发保护边界内完成，不能只依赖前端禁用按钮。
 
 ---
 
@@ -164,7 +164,7 @@ eft = allow/deny
 | INV-I6 | 邀请码使用必须原子递增，不能并发突破次数。 |
 | INV-I7 | 权限变更必须写 OperationLog，并刷新 Casbin enforcer/cache。 |
 | INV-I8 | 首次激活只允许发生一次。 |
-| INV-I9 | 已有 `super_admin` 不能被管理员用户命令修改或强制退出；提升新 `super_admin` 和增删 `sensitive` policy 必须具备 `iam:permission/sensitive`。 |
+| INV-I9 | 已有 `super_admin` 的身份、状态和权限覆盖不能被管理员用户命令修改，也不能删除或强制退出；仅权益分组允许具备 `iam:user/write` 和 `iam:permission/sensitive` 的超级管理员单独修改。提升新 `super_admin` 和增删 `sensitive` policy 必须具备 `iam:permission/sensitive`。 |
 | INV-I10 | 普通 `user` 不能发布公开供给；供应商申请工单不自动改角色或发布资源，管理员必须人工将用户角色改为 `supplier`。 |
 
 ---

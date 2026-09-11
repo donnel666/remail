@@ -756,7 +756,7 @@ func (r *UserRepo) UpdateNonSuperAdminAccessWithOperationLog(ctx context.Context
 	if userGroupID != nil {
 		updates["user_group_id"] = *userGroupID
 	}
-	return r.updateNonSuperAdmin(ctx, userID, updates, incrementTokenVersion, log)
+	return r.updateManagedUser(ctx, userID, updates, incrementTokenVersion, false, log)
 }
 
 // UpdateNonSuperAdminProfileWithOperationLog updates profile and access fields
@@ -782,14 +782,21 @@ func (r *UserRepo) UpdateNonSuperAdminProfileWithOperationLog(ctx context.Contex
 	if userGroupID != nil {
 		updates["user_group_id"] = *userGroupID
 	}
-	updated, err := r.updateNonSuperAdmin(ctx, userID, updates, incrementTokenVersion, log)
+	updated, err := r.updateManagedUser(ctx, userID, updates, incrementTokenVersion, false, log)
 	if err != nil && isIAMDuplicateKeyError(err) {
 		return nil, domain.ErrEmailAlreadyExists
 	}
 	return updated, err
 }
 
-func (r *UserRepo) updateNonSuperAdmin(ctx context.Context, userID uint, updates map[string]any, incrementTokenVersion bool, log *governancedomain.OperationLog) (*domain.User, error) {
+func (r *UserRepo) UpdateUserGroupAssignmentWithOperationLog(ctx context.Context, userID, userGroupID uint, allowSuperAdminGroup bool, log *governancedomain.OperationLog) (*domain.User, error) {
+	if userGroupID == 0 {
+		return nil, domain.ErrInvalidUserGroup
+	}
+	return r.updateManagedUser(ctx, userID, map[string]any{"user_group_id": userGroupID}, false, allowSuperAdminGroup, log)
+}
+
+func (r *UserRepo) updateManagedUser(ctx context.Context, userID uint, updates map[string]any, incrementTokenVersion, allowSuperAdminGroup bool, log *governancedomain.OperationLog) (*domain.User, error) {
 	var updated *domain.User
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if incrementTokenVersion {
@@ -799,11 +806,14 @@ func (r *UserRepo) updateNonSuperAdmin(ctx context.Context, userID uint, updates
 			return errors.New("user access update has no changes")
 		}
 
-		result := tx.Model(&UserModel{}).
-			Where("id = ? AND role <> ? AND status <> ?", userID, domain.RoleSuperAdmin.String(), domain.UserStatusDeleted).
-			Updates(updates)
+		groupOnly := allowSuperAdminGroup && len(updates) == 1 && updates["user_group_id"] != nil
+		query := tx.Model(&UserModel{}).Where("id = ? AND status <> ?", userID, domain.UserStatusDeleted)
+		if !groupOnly {
+			query = query.Where("role <> ?", domain.RoleSuperAdmin.String())
+		}
+		result := query.Updates(updates)
 		if result.Error != nil {
-			return fmt.Errorf("update non-super-admin with log: %w", result.Error)
+			return fmt.Errorf("update managed user with log: %w", result.Error)
 		}
 		if result.RowsAffected == 0 {
 			var current UserModel
@@ -813,7 +823,7 @@ func (r *UserRepo) updateNonSuperAdmin(ctx context.Context, userID uint, updates
 				}
 				return fmt.Errorf("inspect unchanged user access: %w", err)
 			}
-			if domain.Role(current.Role) == domain.RoleSuperAdmin {
+			if domain.Role(current.Role) == domain.RoleSuperAdmin && !groupOnly {
 				return domain.ErrPermissionDenied
 			}
 			if domain.UserStatus(current.Status).IsDeleted() {

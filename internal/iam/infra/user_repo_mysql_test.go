@@ -469,6 +469,60 @@ func TestUserRepoUpdateNonSuperAdminAccessPreservesUnrelatedConcurrentFieldsMySQ
 	require.Equal(t, 1, updated.TokenVersion)
 }
 
+func TestUserRepoProtectedGroupAssignmentMySQL(t *testing.T) {
+	db := newMySQLTestDB(t)
+	repo := NewUserRepo(db)
+	ctx := context.Background()
+	user := &domain.User{
+		Email: "protected-group@test.local", PasswordHash: "hash", Nickname: "Protected",
+		Status: domain.UserStatusActive, Role: domain.RoleSuperAdmin, UserGroupID: 1, TokenVersion: 7,
+	}
+	require.NoError(t, repo.Create(ctx, user))
+	require.NoError(t, db.Exec("INSERT INTO user_groups(id, code, name, enabled, api_concurrency_limit) VALUES (4, 'vip3', 'VIP3', TRUE, 300)").Error)
+	log := &governancedomain.OperationLog{
+		OperatorUserID: user.ID, OperationType: "iam.user.update", ResourceType: "user",
+		ResourceID: fmt.Sprint(user.ID), Path: fmt.Sprintf("/v1/admin/users/%d", user.ID),
+		Result: "success", SafeSummary: "User access settings updated.", RequestID: "req-protected-group",
+	}
+
+	_, err := repo.UpdateUserGroupAssignmentWithOperationLog(ctx, user.ID, 4, false, log)
+	require.ErrorIs(t, err, domain.ErrPermissionDenied)
+	_, err = repo.updateManagedUser(ctx, user.ID, map[string]any{"user_group_id": uint(4), "nickname": "changed"}, false, true, log)
+	require.ErrorIs(t, err, domain.ErrPermissionDenied)
+	_, err = repo.updateManagedUser(ctx, user.ID, map[string]any{"user_group_id": uint(4)}, true, true, log)
+	require.ErrorIs(t, err, domain.ErrPermissionDenied)
+	stored, err := repo.FindByID(ctx, user.ID)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, stored.UserGroupID)
+	var logCount int64
+	require.NoError(t, db.Table("operation_logs").Count(&logCount).Error)
+	require.Zero(t, logCount)
+
+	updated, err := repo.UpdateUserGroupAssignmentWithOperationLog(ctx, user.ID, 4, true, log)
+	require.NoError(t, err)
+	require.EqualValues(t, 4, updated.UserGroupID)
+	require.Equal(t, "vip3", updated.UserGroup.Code)
+	require.Equal(t, user.Role, updated.Role)
+	require.Equal(t, user.Email, updated.Email)
+	require.Equal(t, user.Nickname, updated.Nickname)
+	require.Equal(t, user.PasswordHash, updated.PasswordHash)
+	require.Equal(t, user.Status, updated.Status)
+	require.Equal(t, user.TokenVersion, updated.TokenVersion)
+	require.NoError(t, db.Table("operation_logs").Where("request_id = ?", log.RequestID).Count(&logCount).Error)
+	require.EqualValues(t, 1, logCount)
+
+	// Force an audit insert failure after the group update; both must roll back.
+	log.RequestID = strings.Repeat("x", 65)
+	_, err = repo.UpdateUserGroupAssignmentWithOperationLog(ctx, user.ID, 1, true, log)
+	require.ErrorContains(t, err, "create operation log")
+	stored, err = repo.FindByID(ctx, user.ID)
+	require.NoError(t, err)
+	require.EqualValues(t, 4, stored.UserGroupID)
+	require.Equal(t, user.TokenVersion, stored.TokenVersion)
+	require.NoError(t, db.Table("operation_logs").Count(&logCount).Error)
+	require.EqualValues(t, 1, logCount)
+}
+
 func TestUserRepoListByFilterSearchUsesFullTextIndexMySQL(t *testing.T) {
 	db := newMySQLTestDB(t)
 	repo := NewUserRepo(db)

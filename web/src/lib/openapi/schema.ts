@@ -750,7 +750,10 @@ export interface paths {
         delete: operations["deleteAdminUser"];
         options?: never;
         head?: never;
-        /** Update a user (enable/disable, change role) */
+        /**
+         * Update a user's profile, status, role or group
+         * @description Requires `iam:user:write`. An existing `super_admin` only permits a group-only request containing `userGroupId` from another or the same `super_admin`, with additional `iam:permission:sensitive` permission. An ordinary administrator cannot change a super administrator's group even with these permissions. Identity and status changes remain forbidden for that target; a group-only update preserves sessions.
+         */
         patch: operations["patchAdminUser"];
         trace?: never;
     };
@@ -13338,7 +13341,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Invalid role level */
+            /** @description Invalid role or user group */
             422: {
                 headers: {
                     [name: string]: unknown;
