@@ -17,7 +17,8 @@ const maxPasswordLength = 512
 // A native PKL is at most 8 MiB; reserve space for UTF-8 credentials and delimiters.
 const MaxImportLineBytes = ((proton.MaxPKLBytes + 2) / 3 * 4) + (4 << 10)
 
-// ParseImport accepts email/username----password with an optional Base64 PKL field.
+// ParseImport accepts complete proton.me/protonmail.com emails and passwords,
+// with an optional Base64 PKL field. Usernames are never completed implicitly.
 // Password whitespace is significant; supplied PKL is data, never deserialized here.
 func ParseImport(content string, strategy string) ([]domain.ImportLine, []domain.ImportLineError, error) {
 	content = strings.TrimPrefix(content, "\ufeff")
@@ -48,15 +49,15 @@ func ParseImport(content string, strategy string) ([]domain.ImportLine, []domain
 			failures = append(failures, e)
 			continue
 		}
-		rawEmail := strings.ToLower(strings.TrimSpace(parts[0]))
-		email := normalizeImportEmail(rawEmail)
+		email := strings.ToLower(strings.TrimSpace(parts[0]))
+		_, suffix, _ := strings.Cut(email, "@")
 		// Preserve password whitespace exactly. Only the CR line terminator was
 		// removed above; trimming a credential changes its meaning.
 		password := parts[1]
-		if !validEmail(email) || !validPassword(password) {
+		if !validEmail(email) || (suffix != "proton.me" && suffix != "protonmail.com") || !validPassword(password) {
 			e := domain.ImportLineError{Line: lineNo, Category: "invalid_format", SafeMessage: "Invalid proto import format."}
-			if validEmail(rawEmail) {
-				e.Email = rawEmail
+			if validEmail(email) {
+				e.Email = email
 			}
 			if strategy == domain.ErrorStrategyAbort {
 				return nil, nil, &e
@@ -69,8 +70,8 @@ func ParseImport(content string, strategy string) ([]domain.ImportLine, []domain
 			pklBase64 = strings.TrimSpace(parts[2])
 			if !validImportPKL(pklBase64) {
 				e := domain.ImportLineError{Line: lineNo, Category: "invalid_pkl", SafeMessage: "Proto PKL must be valid standard Base64 and decode to at most 8 MiB."}
-				if validEmail(rawEmail) {
-					e.Email = rawEmail
+				if validEmail(email) {
+					e.Email = email
 				}
 				if strategy == domain.ErrorStrategyAbort {
 					return nil, nil, &e
@@ -94,14 +95,6 @@ func ParseImport(content string, strategy string) ([]domain.ImportLine, []domain
 		return nil, nil, domain.ErrInvalidImportFormat
 	}
 	return out, failures, nil
-}
-
-func normalizeImportEmail(value string) string {
-	email := strings.ToLower(strings.TrimSpace(value))
-	if email != "" && !strings.Contains(email, "@") {
-		email += "@proton.me"
-	}
-	return email
 }
 
 func validImportPKL(encoded string) bool {

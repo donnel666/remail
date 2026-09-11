@@ -5545,7 +5545,7 @@
         ],
         "operationId": "openPostProtoResourceImport",
         "summary": "导入 Proto 邮箱 TXT",
-        "description": "每行格式为 email----password 或 email----password----base64(PKL)，第一段支持裸用户名，自动补 @proton.me 后校验和去重，完整邮箱保留原后缀。PKL 使用规范标准 Base64，解码后最多 8 MiB，服务端明文保存并异步验证，JSON 中的 Base64 不是加密。导入为当前用户的私有资源，密码及 PKL 不通过查询或订单接口回显。异步任务受理不表示验证成功，新格式不改变现有访问权限。",
+        "description": "每行格式为 email----password 或 email----password----base64(PKL)，第一段必须是 @proton.me 或 @protonmail.com 的完整邮箱，不接受裸用户名或其他后缀。按完整地址去重，同一用户名的两个后缀属于不同邮箱。PKL 使用规范标准 Base64，解码后最多 8 MiB，服务端明文保存并异步验证，JSON 中的 Base64 不是加密。导入为当前用户的私有资源，密码及 PKL 不通过查询或订单接口回显。异步任务受理不表示验证成功，新格式不改变现有访问权限。",
         "security": [
           {
             "remailApiKey": []

@@ -1,5 +1,5 @@
 import type { ImportErrorStrategy } from "@/lib/proto-api";
-import { PROTO_DEFAULT_EMAIL_SUFFIX } from "./proto-model";
+import { PROTO_EMAIL_SUFFIXES } from "./proto-model";
 
 export interface ProtoImportPreprocessFailure {
   line: number;
@@ -55,12 +55,12 @@ export function preprocessProtoImportContent(content: string, strategy: ImportEr
     if (!line.trim()) continue;
     const parts = line.split("----", 4);
     const validPartCount = parts.length === 2 || parts.length === 3;
-    const account = (parts[0] ?? "").trim().toLowerCase();
-    const email = validPartCount && account && !account.includes("@") ? account + PROTO_DEFAULT_EMAIL_SUFFIX : account;
+    const email = (parts[0] ?? "").trim().toLowerCase();
     const password = parts[1] ?? "";
     let failure: ProtoImportPreprocessFailure | undefined;
     if (!validPartCount
       || !validCredentialText(email, 255) || !/^[^\s@]+@[^\s@]+$/.test(email)
+      || !PROTO_EMAIL_SUFFIXES.some((suffix) => email.endsWith(`@${suffix}`))
       || !validCredentialText(password, 512) || /[\r\n\0]/.test(parts[0] ?? "")
       || (parts.length === 3 && !validPKLBase64(parts[2]))) {
       failure = { line: index + 1, category: "invalid_format" };

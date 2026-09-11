@@ -124,7 +124,7 @@ func emailDomain(email string) string {
 }
 
 func (s *Service) ImportLine(ctx context.Context, owner uint, line domain.ImportLine) (uint, string, error) {
-	line.Email = normalizeImportEmail(line.Email)
+	line.Email = strings.ToLower(strings.TrimSpace(line.Email))
 	if owner == 0 || !validEmail(line.Email) || !validPassword(line.Password) || (line.PKLBase64 != "" && !validImportPKL(line.PKLBase64)) {
 		return 0, "", domain.ErrInvalidResource
 	}

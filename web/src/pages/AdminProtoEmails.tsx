@@ -63,6 +63,7 @@ import {
   type DateRangeValue,
 } from "./resources/date-range-filter";
 import { ProtoBulkTaskProgress } from "./resources/proto-bulk-task-progress";
+import { PROTO_EMAIL_SUFFIXES } from "./resources/proto-model";
 import { useSelectionNotification } from "./resources/use-selection-notification";
 import {
   OwnerIdentity,
@@ -100,6 +101,7 @@ export default function AdminProtoEmails() {
   const [bulkTaskId, setBulkTaskId] = useState<string | null>(null);
 
   const [ownerFilter, setOwnerFilter] = useState<number | undefined>();
+  const [suffixFilter, setSuffixFilter] = useState<string | undefined>();
   const [searchKeyword, setSearchKeyword] = useState("");
   const [createdAtRange, setCreatedAtRange] = useState<DateRangeValue>([]);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -170,6 +172,7 @@ export default function AdminProtoEmails() {
     const createdTo = createdToISOString(createdAtRange);
     if (search) filter.search = search;
     if (ownerFilter !== undefined) filter.ownerId = ownerFilter;
+    if (suffixFilter) filter.suffix = suffixFilter;
     if (statusFilter !== "all") filter.status = statusFilter;
     if (privateFilter !== "all") filter.forSale = privateFilter === "no";
     if (longLivedFilter !== "all") filter.longLived = longLivedFilter === "yes";
@@ -183,6 +186,7 @@ export default function AdminProtoEmails() {
     longLivedFilter,
     privateFilter,
     statusFilter,
+    suffixFilter,
   ]);
 
   const listFilterKey = JSON.stringify(listFilter);
@@ -359,7 +363,8 @@ export default function AdminProtoEmails() {
   const activeFilterCount =
     Number(statusFilter !== "all") +
     Number(privateFilter !== "all") +
-    Number(longLivedFilter !== "all") + Number(ownerFilter !== undefined);
+    Number(longLivedFilter !== "all") + Number(ownerFilter !== undefined) +
+    Number(Boolean(suffixFilter));
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(activePage, totalPages);
@@ -374,6 +379,7 @@ export default function AdminProtoEmails() {
     setStatusFilter("all");
     setPrivateFilter("all");
     setOwnerFilter(undefined);
+    setSuffixFilter(undefined);
     setLongLivedFilter("all");
     setActivePage(1);
     setSelectedKeys([]);
@@ -1015,7 +1021,26 @@ export default function AdminProtoEmails() {
                 ))}
               </div>
 
-
+              <div className="px-2 pb-1 text-xs font-medium text-[var(--semi-color-text-2)]">
+                {t("Suffix")}
+              </div>
+              <div className="mb-2 space-y-1">
+                {(["all", ...PROTO_EMAIL_SUFFIXES] as const).map((value) => (
+                  <StatisticFilterOption
+                    active={(suffixFilter ?? "all") === value}
+                    count={value === "all"
+                      ? stats.suffixes.reduce((sum, item) => sum + item.count, 0)
+                      : stats.suffixes.find((item) => item.key === value)?.count ?? 0}
+                    key={value}
+                    label={value === "all" ? t("All") : `@${value}`}
+                    onSelect={(next) => {
+                      setSuffixFilter(next === "all" ? undefined : next);
+                      resetPageAndSelection();
+                    }}
+                    value={value}
+                  />
+                ))}
+              </div>
             </div>
           }
           trigger="click"

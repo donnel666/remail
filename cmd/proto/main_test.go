@@ -58,17 +58,17 @@ func TestUsageNeverEchoesAccidentallyPastedCredentials(t *testing.T) {
 	require.ErrorIs(t, err, flag.ErrHelp)
 	require.Contains(t, stderr.String(), "-apply")
 	require.Contains(t, stderr.String(), "-resource-id")
-	require.Contains(t, stderr.String(), "usernames default to @proton.me")
+	require.Contains(t, stderr.String(), "email must include @proton.me or @protonmail.com")
 }
 
 func TestCredentialSelectionPreservesPasswordAndRejectsMultipleStdinLines(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "credentials.txt")
-	require.NoError(t, os.WriteFile(file, []byte("ignored\n\xef\xbb\xbfpERSON@EXAMPLE.TEST---- password with spaces \r\nignored"), 0600))
+	require.NoError(t, os.WriteFile(file, []byte("ignored\n\xef\xbb\xbfpERSON@PROTONMAIL.COM---- password with spaces \r\nignored"), 0600))
 	credential, err := readCredential(options{File: file, Line: 2}, nil)
 	require.NoError(t, err)
-	require.Equal(t, "person@example.test", credential.Email)
+	require.Equal(t, "person@protonmail.com", credential.Email)
 	require.Equal(t, " password with spaces ", credential.Password)
-	for _, input := range []string{"", "bad", "person@example.test----secret----extra", "person@example.test----secret\nsecond@example.test----secret"} {
+	for _, input := range []string{"", "bad", "person@proton.me----secret----extra", "person@proton.me----secret\nsecond@protonmail.com----secret"} {
 		_, err := readCredential(options{Stdin: true}, strings.NewReader(input))
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), "secret")
@@ -89,7 +89,7 @@ func (protocolStub) Fetch(context.Context, *proton.Session, proton.FetchRequest)
 func TestStandaloneLoginPreviewDoesNotNeedDatabaseOrProvider(t *testing.T) {
 	opts, err := parseOptions([]string{"-mode", "login", "-stdin"}, io.Discard)
 	require.NoError(t, err)
-	out, err := execute(context.Background(), opts, strings.NewReader("person@example.test----secret"), nil, protocolStub{login: func(context.Context, proton.LoginRequest) (proton.Session, error) {
+	out, err := execute(context.Background(), opts, strings.NewReader("person@proton.me----secret"), nil, protocolStub{login: func(context.Context, proton.LoginRequest) (proton.Session, error) {
 		t.Fatal("dry-run contacted provider")
 		return proton.Session{}, nil
 	}})
@@ -142,7 +142,7 @@ func TestLoginAcceptsPKLInputWithoutSendingPasswordOrIgnoringIt(t *testing.T) {
 	require.Equal(t, "preview", out.Outcome)
 }
 
-func TestLoginNormalizesBareUsernameWithAndWithoutPKLWithoutEchoingCredentials(t *testing.T) {
+func TestLoginAcceptsFullProtoEmailWithAndWithoutPKLWithoutEchoingCredentials(t *testing.T) {
 	raw := []byte("imported-pkl-canary")
 	encoded := base64.StdEncoding.EncodeToString(raw)
 	for _, withPKL := range []bool{false, true} {
@@ -151,14 +151,18 @@ func TestLoginNormalizesBareUsernameWithAndWithoutPKLWithoutEchoingCredentials(t
 			name = "pkl"
 		}
 		t.Run(name, func(t *testing.T) {
-			input := " BareUsernameCanary ---- password-canary "
+			email := "accountcanary@proton.me"
+			if withPKL {
+				email = "accountcanary@protonmail.com"
+			}
+			input := " " + strings.ToUpper(email) + " ---- password-canary "
 			if withPKL {
 				input += "----" + encoded
 			}
 			calls := 0
 			provider := protocolStub{login: func(_ context.Context, req proton.LoginRequest) (proton.Session, error) {
 				calls++
-				require.Equal(t, "bareusernamecanary@proton.me", req.Email)
+				require.Equal(t, email, req.Email)
 				if withPKL {
 					require.Empty(t, req.Password)
 					require.Equal(t, raw, req.PKL)
@@ -175,10 +179,27 @@ func TestLoginNormalizesBareUsernameWithAndWithoutPKLWithoutEchoingCredentials(t
 				out, err := execute(context.Background(), opts, strings.NewReader(input), nil, provider)
 				require.NoError(t, err)
 				require.Equal(t, !apply, out.DryRun)
-				assertNoSecrets(t, out, "BareUsernameCanary", "bareusernamecanary", "password-canary", "imported-pkl-canary", encoded, "session-canary", "uid-canary")
+				assertNoSecrets(t, out, email, strings.ToUpper(email), "password-canary", "imported-pkl-canary", encoded, "session-canary", "uid-canary")
 			}
 			require.Equal(t, 1, calls, "preview must not call the protocol client")
 		})
+	}
+}
+
+func TestLoginRejectsMissingOrUnsupportedSuffixBeforeProtocol(t *testing.T) {
+	opts := parsed(t, "-mode", "login", "-stdin", "-direct", "-apply")
+	provider := protocolStub{login: func(context.Context, proton.LoginRequest) (proton.Session, error) {
+		t.Fatal("invalid account reached the protocol client")
+		return proton.Session{}, nil
+	}}
+	for _, email := range []string{"accountcanary", "accountcanary@pm.me", "accountcanary@example.test", "accountcanary@proton.me.invalid"} {
+		for _, tail := range []string{"", "----AAEC/w=="} {
+			_, err := execute(context.Background(), opts, strings.NewReader(email+"----password-canary"+tail), nil, provider)
+			require.Error(t, err)
+			require.NotContains(t, err.Error(), email)
+			require.NotContains(t, err.Error(), "password-canary")
+			require.NotContains(t, err.Error(), "AAEC/w==")
+		}
 	}
 }
 
@@ -221,7 +242,7 @@ func TestDiagnosticBindingRejectsUnhealthyOrIneligibleRoutesWithoutMutation(t *t
 func TestLegacyLoginCountsKeysAndRejectsWrongMailbox(t *testing.T) {
 	opts := parsed(t, "-mode", "login", "-stdin", "-apply", "-direct", "-engine", "go")
 	for _, valid := range []bool{true, false} {
-		out, err := execute(context.Background(), opts, strings.NewReader("person@example.test----password-canary"), nil, protocolStub{login: func(_ context.Context, req proton.LoginRequest) (proton.Session, error) {
+		out, err := execute(context.Background(), opts, strings.NewReader("person@proton.me----password-canary"), nil, protocolStub{login: func(_ context.Context, req proton.LoginRequest) (proton.Session, error) {
 			email := req.Email
 			if !valid {
 				email = "other@example.test"
@@ -237,7 +258,7 @@ func TestLegacyLoginCountsKeysAndRejectsWrongMailbox(t *testing.T) {
 		} else {
 			require.ErrorContains(t, err, "invalid or mismatched session")
 		}
-		assertNoSecrets(t, out, "person@example.test", "other@example.test", "password-canary", "access-canary", "refresh-canary", "key-one", "key-two")
+		assertNoSecrets(t, out, "person@proton.me", "other@example.test", "password-canary", "access-canary", "refresh-canary", "key-one", "key-two")
 	}
 }
 

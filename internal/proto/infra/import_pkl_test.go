@@ -18,7 +18,7 @@ func TestProtoImportPKLPersistsBeforeValidationAndReusesIt(t *testing.T) {
 	ctx := context.Background()
 	raw := []byte("native-pkl-import-canary")
 	encoded := base64.StdEncoding.EncodeToString(raw)
-	content := []byte("pkl----password-canary----" + encoded + "\nlegacy---- old password ")
+	content := []byte("pkl@proton.me----password-canary----" + encoded + "\npkl@protonmail.com---- old password ")
 	importID, _, err := s.CreateImport(ctx, 7, 7, domain.ErrorStrategyAbort, "pkl-import", content)
 	require.NoError(t, err)
 	calls := 0
@@ -30,6 +30,7 @@ func TestProtoImportPKLPersistsBeforeValidationAndReusesIt(t *testing.T) {
 			require.Equal(t, raw, req.PKL)
 			require.Empty(t, req.Password)
 		} else {
+			require.Equal(t, "pkl@protonmail.com", req.Email)
 			require.Empty(t, req.PKL)
 			require.Equal(t, " old password ", req.Password)
 		}
@@ -81,6 +82,23 @@ func TestProtoImportPKLPersistsBeforeValidationAndReusesIt(t *testing.T) {
 	require.Equal(t, before, stored.Payload, "duplicate import/replay must not replace a verified PKL")
 }
 
+func TestProtoImportLineDoesNotCompleteBareUsernames(t *testing.T) {
+	s, _ := newProtoAsyncTestService(t)
+	ctx := context.Background()
+	for _, email := range []string{"bare", " Bare "} {
+		_, _, err := s.ImportLine(ctx, 7, domain.ImportLine{Email: email, Password: "password-canary"})
+		require.ErrorIs(t, err, domain.ErrInvalidResource)
+	}
+	var count int64
+	require.NoError(t, s.DB.Model(&Resource{}).Count(&count).Error)
+	require.Zero(t, count)
+	// The supported-domain policy belongs to ParseImport, not generic mailbox
+	// editing/session validation or this internal test/helper entry point.
+	require.True(t, validEmail("existing@custom.example"))
+	_, _, err := s.ImportLine(ctx, 7, domain.ImportLine{Email: "existing@custom.example", Password: "unchanged"})
+	require.NoError(t, err)
+}
+
 func TestProtoImportPKLRestorationBindsNewCredentialRevision(t *testing.T) {
 	s, _ := newProtoAsyncTestService(t)
 	ctx := context.Background()
@@ -110,7 +128,8 @@ func TestProtoImportPKLFailuresDoNotLeavePartialResourcesOrLeakInput(t *testing.
 			s, files := newProtoAsyncTestService(t)
 			ctx := context.Background()
 			encoded := base64.StdEncoding.EncodeToString([]byte("pkl-canary"))
-			content := []byte("good@proton.me----secret----" + encoded + "\ninvalid-format-" + encoded + "\nbad@proton.me----secret----not-base64!")
+			content := []byte("good@proton.me----secret----" + encoded + "\ninvalid-format-" + encoded + "\nbad@proton.me----secret----not-base64!" +
+				"\nbare----secret----" + encoded + "\nunsupported@example.com----secret----" + encoded)
 			id, _, err := s.CreateImport(ctx, 7, 7, strategy, "invalid-pkl", content)
 			require.NoError(t, err)
 			require.NoError(t, s.ProcessImport(ctx, id, 1, 7, strategy, content))

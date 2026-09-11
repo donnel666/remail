@@ -1,6 +1,7 @@
 // @ts-expect-error -- This source-contract test runs in Node, not the browser.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { PROTO_EMAIL_SUFFIXES } from "./resources/proto-model";
 
 const protoSource = readFileSync(new URL("./AdminProtoEmails.tsx", import.meta.url), "utf8");
 const icloudSource = readFileSync(new URL("./AdminICloudEmails.tsx", import.meta.url), "utf8");
@@ -60,9 +61,46 @@ describe("admin Proto mailbox toolbar", () => {
       expect(protoSource).not.toContain(fragment);
     }
     expect(protoSource).toContain('scroll={{ x: "max(100%, 1310px)"');
-    for (const field of ["ownerId", "search", "status", "forSale", "longLived", "createdFrom", "createdTo"]) {
+    for (const field of ["ownerId", "suffix", "search", "status", "forSale", "longLived", "createdFrom", "createdTo"]) {
       expect(protoSource).toContain(`filter.${field} =`);
     }
+  });
+
+  it("keeps all three suffix choices inside the existing filters menu", () => {
+    expect(PROTO_EMAIL_SUFFIXES).toEqual(["protonmail.com", "proton.me"]);
+    const protoToolbar = toolbar(protoSource);
+    const filtersMenu = protoToolbar.match(/<Dropdown\b[\s\S]*?<\/Dropdown>/)?.[0];
+    expect(filtersMenu).toBeDefined();
+    expect(protoToolbar).not.toMatch(/<Select\b/);
+    for (const fragment of [
+      '{t("Suffix")}',
+      '(["all", ...PROTO_EMAIL_SUFFIXES] as const).map',
+      "<StatisticFilterOption",
+      'active={(suffixFilter ?? "all") === value}',
+      'label={value === "all" ? t("All") : `@${value}`}',
+      "stats.suffixes.reduce((sum, item) => sum + item.count, 0)",
+      "stats.suffixes.find((item) => item.key === value)?.count ?? 0",
+      'setSuffixFilter(next === "all" ? undefined : next)',
+      "resetPageAndSelection();",
+    ]) {
+      expect(filtersMenu).toContain(fragment);
+    }
+  });
+
+  it("carries the suffix through the shared list and bulk filter and clears it on reset", () => {
+    const listFilter = protoSource.slice(protoSource.indexOf("  const listFilter ="), protoSource.indexOf("  const listFilterKey ="));
+    expect(listFilter).toContain("if (suffixFilter) filter.suffix = suffixFilter;");
+    expect(listFilter).toMatch(/\}, \[[\s\S]*?suffixFilter,/);
+    expect(protoSource).toContain("const listFilterKey = JSON.stringify(listFilter)");
+    expect(protoSource).toContain("Number(Boolean(suffixFilter))");
+    const reset = protoSource.slice(protoSource.indexOf("  const resetFilters ="), protoSource.indexOf("  const runRowOperation ="));
+    expect(reset).toContain("setSuffixFilter(undefined)");
+    expect(reset).toContain("setActivePage(1)");
+    expect(reset).toContain("setSelectedKeys([])");
+    expect(protoSource).toContain("listAdminProtoResources(\n        listFilter,");
+    expect(protoSource).toContain("filter: { ...listFilter }");
+    expect(protoSource).toContain("deleteAdminProtoResourcesByFilter(listFilter)");
+    expect(protoSource).toContain("setAdminProtoResourcesForSaleByFilter(\n              listFilter,");
   });
 
   it("displays stopped validations as failures and exposes the same status filter", () => {

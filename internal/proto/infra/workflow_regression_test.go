@@ -96,14 +96,14 @@ func TestImportChunkFailureRollsBackRootAndResumesCommittedLines(t *testing.T) {
 	ctx := context.Background()
 	var input strings.Builder
 	for i := 0; i < 1001; i++ {
-		fmt.Fprintf(&input, "account%04d@proto.test----secret\n", i)
+		fmt.Fprintf(&input, "account%04d@proton.me----secret\n", i)
 	}
 	content := []byte(input.String())
 	_, err := files.SavePrivate(ctx, governancedomain.PrivateFile{ObjectKey: "source", ContentBytes: content})
 	require.NoError(t, err)
 	id, _, err := s.CreateImportWithArtifact(ctx, 7, 7, "skip", "chunk-import", "source", "source.txt", "import-test", content)
 	require.NoError(t, err)
-	require.NoError(t, s.DB.Exec(`CREATE TRIGGER reject_proto_insert BEFORE INSERT ON proto_resources WHEN NEW.email_address = 'account1000@proto.test' BEGIN SELECT RAISE(ABORT, 'injected write failure'); END`).Error)
+	require.NoError(t, s.DB.Exec(`CREATE TRIGGER reject_proto_insert BEFORE INSERT ON proto_resources WHEN NEW.email_address = 'account1000@proton.me' BEGIN SELECT RAISE(ABORT, 'injected write failure'); END`).Error)
 	_, err = s.ProcessImportTask(ctx, id, 1)
 	require.Error(t, err)
 	var roots, children int64
@@ -296,10 +296,10 @@ func (f unavailableImportFiles) ReadPrivate(context.Context, string) (*governanc
 func TestImportRetryBudgetTerminatesAndPreservesCommittedItems(t *testing.T) {
 	s, files := newProtoAsyncTestService(t)
 	ctx := context.Background()
-	content := []byte("kept@proto.test----secret\npending@proto.test----secret")
+	content := []byte("kept@proton.me----secret\npending@proton.me----secret")
 	id, _, err := s.CreateImport(ctx, 7, 7, "skip", "budget", content)
 	require.NoError(t, err)
-	resourceID, _, err := s.ImportLine(ctx, 7, domain.ImportLine{Email: "kept@proto.test", Password: "secret"})
+	resourceID, _, err := s.ImportLine(ctx, 7, domain.ImportLine{Email: "kept@proton.me", Password: "secret"})
 	require.NoError(t, err)
 	require.NoError(t, s.DB.Create(&importItem{ImportID: id, LineNumber: 1, ResourceID: &resourceID, Outcome: "imported"}).Error)
 	require.NoError(t, s.DB.Model(&importRecord{}).Where("id = ?", id).Updates(map[string]any{"accepted_count": 2, "imported_count": 1}).Error)
@@ -336,7 +336,7 @@ func TestImportAcceptedTotalIncludesRejectedAndAbortedRows(t *testing.T) {
 		t.Run(strategy, func(t *testing.T) {
 			s, _ := newProtoAsyncTestService(t)
 			ctx := context.Background()
-			content := []byte("\ufeffgood@proto.test----secret\ninvalid\n\nlast@proto.test----secret\n")
+			content := []byte("\ufeffgood@proton.me----secret\ninvalid\n\nlast@proton.me----secret\n")
 			id, _, err := s.CreateImport(ctx, 7, 7, strategy, "total", content)
 			require.NoError(t, err)
 			require.NoError(t, s.ProcessImport(ctx, id, 1, 7, strategy, content))

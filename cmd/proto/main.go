@@ -134,7 +134,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	fs.UintVar(&opts.ResourceID, "resource-id", 0, "one Proto resource ID")
 	fs.StringVar(&opts.File, "file", "", "login only: credential TXT file; never pass credentials as arguments")
 	fs.IntVar(&opts.Line, "line", 0, "login only: one-based physical line in -file")
-	fs.BoolVar(&opts.Stdin, "stdin", false, "login only: read one email-or-username----password[----base64(PKL)] line; usernames default to @proton.me")
+	fs.BoolVar(&opts.Stdin, "stdin", false, "login only: read one email----password[----base64(PKL)] line; email must include @proton.me or @protonmail.com")
 	fs.StringVar(&opts.Engine, "engine", "python", "login only: python (native PKL) or go (legacy comparison)")
 	fs.BoolVar(&opts.Apply, "apply", false, "execute remote login or database maintenance; default is preview only")
 	fs.UintVar(&opts.OperatorUserID, "operator-user-id", 0, "enabled admin/super-admin required for validate/history/fetch -apply")
@@ -378,7 +378,7 @@ func readCredential(opts options, stdin io.Reader) (domain.ImportLine, error) {
 	}
 	entries, _, err := protoinfra.ParseImport(selected, domain.ErrorStrategyAbort)
 	if err != nil || len(entries) != 1 {
-		return domain.ImportLine{}, safeError("selected line must contain email-or-username----password[----base64(PKL)]; usernames default to @proton.me")
+		return domain.ImportLine{}, safeError("selected line must contain email----password[----base64(PKL)]; email must include @proton.me or @protonmail.com")
 	}
 	return entries[0], nil
 }

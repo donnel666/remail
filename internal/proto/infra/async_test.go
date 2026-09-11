@@ -92,7 +92,7 @@ func testProtoSession(email string) proton.Session {
 func TestProtoImportTaskReadsPrivateArtifactAndQueuesOnlyImportedRows(t *testing.T) {
 	s, files := newProtoAsyncTestService(t)
 	ctx := context.Background()
-	content := []byte("First@proto.test----pw\nfirst@proto.test----duplicate\ninvalid\n")
+	content := []byte("First@proton.me----pw\nfirst@proton.me----duplicate\ninvalid\n")
 	stored, err := files.SavePrivate(ctx, governancedomain.PrivateFile{ObjectKey: "proto/source/1.txt", ContentBytes: content})
 	require.NoError(t, err)
 	id, reused, err := s.CreateImportWithArtifact(ctx, 7, 7, domain.ErrorStrategySkip, "idem-1", stored.ObjectKey, "source.txt", "req-1", content)
@@ -108,7 +108,7 @@ func TestProtoImportTaskReadsPrivateArtifactAndQueuesOnlyImportedRows(t *testing
 	require.GreaterOrEqual(t, status.SkippedCount, 2)
 	var resource Resource
 	require.NoError(t, s.DB.First(&resource).Error)
-	require.Equal(t, "first@proto.test", resource.EmailAddress)
+	require.Equal(t, "first@proton.me", resource.EmailAddress)
 	require.Equal(t, domain.StatusPending, resource.Status)
 	require.Equal(t, "pw", resource.Password)
 }
@@ -270,10 +270,10 @@ func TestProtoCommandPayloadIdempotencyRejectsChangedSecretRequest(t *testing.T)
 func TestProtoImportItemsExposeOnlySafeOutcomeFields(t *testing.T) {
 	s, _ := newProtoAsyncTestService(t)
 	ctx := context.Background()
-	id, _, err := s.CreateImport(ctx, 7, 7, domain.ErrorStrategySkip, "items-key", []byte("ok@proto.test----pw\ninvalid"))
+	id, _, err := s.CreateImport(ctx, 7, 7, domain.ErrorStrategySkip, "items-key", []byte("ok@proton.me----pw\ninvalid"))
 	require.NoError(t, err)
 	ids, err := func() ([]uint, error) {
-		if err := s.ProcessImport(ctx, id, 1, 7, domain.ErrorStrategySkip, []byte("ok@proto.test----pw\ninvalid")); err != nil {
+		if err := s.ProcessImport(ctx, id, 1, 7, domain.ErrorStrategySkip, []byte("ok@proton.me----pw\ninvalid")); err != nil {
 			return nil, err
 		}
 		return s.ListImportResourceIDs(ctx, id)

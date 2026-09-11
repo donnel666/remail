@@ -22,7 +22,7 @@ HTTP 会话独立复制微软客户端的设计，代码在 `internal/proto/infr
 
 ## 验证和密钥持久化
 
-旧 v1 的两段式导入格式为 `邮箱----密码`，不裁剪密码；当前还支持 PKL／裸用户名导入，详见新文档。以下为旧 v1 登录流程，持久化边界已按当前明文实现更新：
+旧 v1 的两段式导入格式为 `邮箱----密码`，不裁剪密码；当前还支持 Base64 PKL 导入，且必须填写 `@proton.me` 或 `@protonmail.com` 的完整邮箱，详见新文档。以下为旧 v1 登录流程，持久化边界已按当前明文实现更新：
 
 1. 短事务按根资源→Proto 资源领取维护任务，记录本次 attempt，校验归属、凭据 revision 和 validation generation。
 2. 退出事务后，调用 `/auth/v4/info` 与 `/auth/v4` 完成 SRP。验证签名 modulus 和服务器 proof，不把拿到 Token 当成充分的验证成功。

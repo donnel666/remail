@@ -68,13 +68,13 @@ function deferred<T>() {
 describe("Proto import feedback", () => {
   beforeEach(() => { vi.resetAllMocks(); sessionStorage.clear(); mocks.turnstile.mockResolvedValue("challenge"); });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
-  it.each([false, true])("shows bare-account completion and submits both formats verbatim for admin=%s", async (admin) => {
+  it.each([false, true])("requires full supported emails and submits both formats verbatim for admin=%s", async (admin) => {
     const importResources = admin ? mocks.importAdminResources : mocks.importResources;
     importResources.mockResolvedValue({ ...completed, imported: 3 });
-    const content = "first----  first password  \nsecond----  second password  ---- \tAAEC/w== \t\nthird@custom.example----  full email password  ----AAA=";
+    const content = "first@proton.me----  first password  \nsecond@protonmail.com----  second password  ---- \tAAEC/w== \t\nthird@proton.me----  full email password  ----AAA=";
     render(<ImportProtoEmailsModal admin={admin} open owners={owners} onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
     expect(screen.getByRole("textbox").getAttribute("placeholder")).toBe(PROTO_EMAIL_FORMAT_HINT);
-    expect(PROTO_EMAIL_FORMAT_HINT).toBe("email----password\nemail----password----base64(PKL)\naccount → account@proton.me");
+    expect(PROTO_EMAIL_FORMAT_HINT).toBe("email----password\nemail----password----base64(PKL)\nname@protonmail.com / name@proton.me");
     fireEvent.change(screen.getByRole("textbox"), { target: { value: content } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     await waitFor(() => expect(importResources).toHaveBeenCalledTimes(1));
@@ -92,13 +92,22 @@ describe("Proto import feedback", () => {
     }
     expect(mocks.error).not.toHaveBeenCalled();
   });
+  it.each(["bare----password", "person@proto.me----password----AA==", "person@example.test----password"])("does not upload an unsupported resource identity: %s", async (content) => {
+    render(<ImportProtoEmailsModal admin open owners={owners} onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: content } });
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith("No valid import entries."));
+    expect(mocks.importAdminResources).not.toHaveBeenCalled();
+    expect(mocks.importResources).not.toHaveBeenCalled();
+    expect(mocks.turnstile).not.toHaveBeenCalled();
+  });
   it("rejects malformed PKL without exposing credentials in feedback, storage or logs", async () => {
     const stored = vi.spyOn(Storage.prototype, "setItem");
     const logged = (["log", "warn", "error"] as const).map((method) => vi.spyOn(console, method).mockImplementation(() => undefined));
     const password = "sensitive password";
     const pkl = "AAEC/w==not-pkl";
     render(<ImportProtoEmailsModal admin open owners={owners} onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: `person@example.com----${password}----${pkl}` } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: `person@proton.me----${password}----${pkl}` } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     await waitFor(() => expect(mocks.error).toHaveBeenCalledWith("No valid import entries."));
     expect(mocks.importAdminResources).not.toHaveBeenCalled();
@@ -113,7 +122,7 @@ describe("Proto import feedback", () => {
     mocks.importResources.mockResolvedValue({ importId: 7, status: "failed", lastSafeError: "Invalid proto import format.", imported: 0, skipped: 0, failed: 1 });
     const onSuccess = vi.fn();
     render(<ImportProtoEmailsModal open onOpenChange={vi.fn()} onSuccess={onSuccess} />);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@example.com----secret" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@proton.me----secret" } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     await waitFor(() => expect(mocks.error).toHaveBeenCalledWith("Invalid proto import format."));
     expect(mocks.turnstile).toHaveBeenCalledWith("proto_resource_import", expect.any(AbortSignal));
@@ -122,7 +131,7 @@ describe("Proto import feedback", () => {
   });
   it("rejects malformed input before verification or upload", async () => {
     render(<ImportProtoEmailsModal open onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@example.com----secret----unexpected" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@proton.me----secret----unexpected" } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     await waitFor(() => expect(mocks.error).toHaveBeenCalled());
     expect(mocks.turnstile).not.toHaveBeenCalled();
@@ -132,7 +141,7 @@ describe("Proto import feedback", () => {
     mocks.importResources.mockResolvedValue({ importId: 8, status: "failed", lastSafeError: "Import interrupted.", imported: 1, skipped: 0, failed: 1 });
     const onSuccess = vi.fn();
     render(<ImportProtoEmailsModal open onOpenChange={vi.fn()} onSuccess={onSuccess} />);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@example.com----secret" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@proton.me----secret" } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     await waitFor(() => expect(mocks.error).toHaveBeenCalledWith("Import interrupted."));
     expect(onSuccess).toHaveBeenCalledTimes(1);
@@ -160,10 +169,10 @@ describe("Proto import feedback", () => {
     expect(screen.getByRole("button", { name: "TXT file" })).toBeTruthy();
     expect(screen.getByText("Proto resource entries", { exact: false })).toBeTruthy();
     expect(screen.getByText("Parsed entries")).toBeTruthy();
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@example.com----secret" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@proton.me----secret" } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
-    expect(mocks.importAdminResources.mock.calls[0][0]).toEqual({ content: "person@example.com----secret", ownerId: 31, longLived: true, errorStrategy: "skip" });
+    expect(mocks.importAdminResources.mock.calls[0][0]).toEqual({ content: "person@proton.me----secret", ownerId: 31, longLived: true, errorStrategy: "skip" });
     expect(mocks.turnstile).not.toHaveBeenCalled();
     expect(screen.queryByText("Import results")).toBeNull();
     expect(onOpenChange).not.toHaveBeenCalled();
@@ -174,7 +183,7 @@ describe("Proto import feedback", () => {
 
   it.each(["select", "drop"])("imports an administrator TXT file by %s without changing its content", async (method) => {
     mocks.importAdminResources.mockResolvedValue(completed);
-    const content = "bare----  password  ----AAEC/w==\r\nfull@proton.me---- next password \r\n";
+    const content = "file@protonmail.com----  password  ----AAEC/w==\r\nfull@proton.me---- next password \r\n";
     const bytes = new TextEncoder().encode(content);
     const file = new File([bytes], "proto-fixture.txt", { type: "text/plain" });
     Object.defineProperty(file, "arrayBuffer", { value: vi.fn().mockResolvedValue(bytes.buffer) });
@@ -206,7 +215,7 @@ describe("Proto import feedback", () => {
   it("clears the selected file when returning to manual input", async () => {
     render(<ImportProtoEmailsModal admin open owners={owners} onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "TXT file" }));
-    fireEvent.change(screen.getByLabelText("Select TXT file"), { target: { files: [new File(["bare----secret"], "old.txt")] } });
+    fireEvent.change(screen.getByLabelText("Select TXT file"), { target: { files: [new File(["file@protonmail.com----secret"], "old.txt")] } });
     expect(screen.getByText("old.txt")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Manual input" }));
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
@@ -218,9 +227,9 @@ describe("Proto import feedback", () => {
   });
 
   it.each(["select", "drop"])("rejects an oversized TXT by %s before reading and clears a previous file", async (method) => {
-    const valid = new File(["bare----secret"], "previous.txt");
-    const oversized = new File(["bare----secret"], "oversized.txt");
-    const read = vi.fn().mockResolvedValue(new TextEncoder().encode("bare----secret").buffer);
+    const valid = new File(["file@protonmail.com----secret"], "previous.txt");
+    const oversized = new File(["file@protonmail.com----secret"], "oversized.txt");
+    const read = vi.fn().mockResolvedValue(new TextEncoder().encode("file@protonmail.com----secret").buffer);
     Object.defineProperty(valid, "arrayBuffer", { value: read });
     Object.defineProperty(oversized, "arrayBuffer", { value: read });
     Object.defineProperty(oversized, "size", { value: 512 * 1024 * 1024 + 1 });
@@ -250,7 +259,7 @@ describe("Proto import feedback", () => {
 
   it("allows the hard-cap boundary without allocating a large test file", async () => {
     mocks.importAdminResources.mockResolvedValue(completed);
-    const content = "bare----secret";
+    const content = "file@protonmail.com----secret";
     const file = new File([content], "boundary.txt");
     const read = vi.fn().mockResolvedValue(new TextEncoder().encode(content).buffer);
     Object.defineProperty(file, "arrayBuffer", { value: read });
@@ -287,7 +296,7 @@ describe("Proto import feedback", () => {
 
   it("locks file selection while reading and ignores a read completed after unmount", async () => {
     const read = deferred<ArrayBuffer>();
-    const file = new File(["bare----secret"], "fixture.txt");
+    const file = new File(["file@protonmail.com----secret"], "fixture.txt");
     Object.defineProperty(file, "arrayBuffer", { value: () => read.promise });
     const view = render(<ImportProtoEmailsModal admin open owners={owners} onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "TXT file" }));
@@ -296,7 +305,7 @@ describe("Proto import feedback", () => {
     expect((screen.getByRole("button", { name: "Manual input" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByLabelText("Select TXT file") as HTMLInputElement).disabled).toBe(true);
     view.unmount();
-    await act(async () => read.resolve(new TextEncoder().encode("bare----secret").buffer));
+    await act(async () => read.resolve(new TextEncoder().encode("file@protonmail.com----secret").buffer));
     expect(mocks.importAdminResources).not.toHaveBeenCalled();
     expect(mocks.success).not.toHaveBeenCalled();
     expect(mocks.error).not.toHaveBeenCalled();
@@ -312,9 +321,9 @@ describe("Proto import feedback", () => {
 
   it("keeps entered content when administrator owners arrive late", () => {
     const view = render(<ImportProtoEmailsModal admin open onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@example.com----secret" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@proton.me----secret" } });
     view.rerender(<ImportProtoEmailsModal admin open owners={owners} onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
-    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("person@example.com----secret");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("person@proton.me----secret");
     expect((screen.getByLabelText("owner") as HTMLSelectElement).value).toBe("31");
   });
 
@@ -328,7 +337,7 @@ describe("Proto import feedback", () => {
     const onOpenChange = vi.fn();
     const onSuccess = vi.fn();
     render(<ImportProtoEmailsModal admin={admin} open owners={owners} onOpenChange={onOpenChange} onSuccess={onSuccess} />);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@example.com----secret" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@proton.me----secret" } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     await waitFor(() => expect(waitForImport).toHaveBeenCalledTimes(1));
     expect(screen.queryByText("Import results")).toBeNull();
@@ -358,13 +367,13 @@ describe("Proto import feedback", () => {
       </>;
     }
     render(<Harness />);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "first@example.com----secret" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "first@proton.me----secret" } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("textbox")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Reopen import" }));
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "second@example.com----secret" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "second@proton.me----secret" } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     await waitFor(() => expect(mocks.importAdminResources).toHaveBeenCalledTimes(2));
     const secondSignal = mocks.importAdminResources.mock.calls[1][1] as AbortSignal;
@@ -375,7 +384,7 @@ describe("Proto import feedback", () => {
     });
     expect(secondSignal.aborted).toBe(false);
     expect(onOpenChange.mock.calls).toEqual([[false]]);
-    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("second@example.com----secret");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("second@proton.me----secret");
     expect((screen.getByLabelText("owner") as HTMLSelectElement).value).toBe("31");
     expect(screen.getByRole("button", { name: "Import" }).getAttribute("aria-busy")).toBe("true");
     expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
@@ -386,7 +395,7 @@ describe("Proto import feedback", () => {
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(2));
     expect(onOpenChange.mock.calls).toEqual([[false], [false]]);
     expect(screen.queryByRole("textbox")).toBeNull();
-    expect(mocks.importAdminResources.mock.calls[1][0]).toMatchObject({ ownerId: 31, content: "second@example.com----secret" });
+    expect(mocks.importAdminResources.mock.calls[1][0]).toMatchObject({ ownerId: 31, content: "second@proton.me----secret" });
   });
 
   it("disables native administrator Cancel during POST and enables it during polling", async () => {
@@ -397,7 +406,7 @@ describe("Proto import feedback", () => {
     }));
     const onOpenChange = vi.fn();
     render(<ImportProtoEmailsModal admin open owners={owners} onOpenChange={onOpenChange} onSuccess={vi.fn()} />);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@example.com----secret" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@proton.me----secret" } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     await waitFor(() => expect(mocks.importAdminResources).toHaveBeenCalledTimes(1));
     expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
@@ -417,7 +426,7 @@ describe("Proto import feedback", () => {
     const challenge = deferred<string>();
     mocks.turnstile.mockReturnValue(challenge.promise);
     const view = render(<ImportProtoEmailsModal open onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@example.com----secret" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "person@proton.me----secret" } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     await waitFor(() => expect(mocks.turnstile).toHaveBeenCalledTimes(1));
     const signal = mocks.turnstile.mock.calls[0][1] as AbortSignal;
