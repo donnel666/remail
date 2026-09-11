@@ -232,11 +232,17 @@ func (a *MicrosoftFetchAdapter) finishFailure(ctx context.Context, req mailmatch
 	}
 	handleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), permanentFetchFailureTimeout)
 	defer cancel()
-	failureCount, countErr := a.incrementFailureCount(handleCtx, req.Scope.EmailResourceID)
-	if countErr != nil {
-		slog.Warn("microsoft fetch failure counter unavailable", "resource_id", req.Scope.EmailResourceID, "error", countErr)
-		failureCount = 0
+	var failureCount int64
+	if !failure.Retryable {
+		var countErr error
+		failureCount, countErr = a.incrementFailureCount(handleCtx, req.Scope.EmailResourceID)
+		if countErr != nil {
+			slog.Warn("microsoft fetch failure counter unavailable", "resource_id", req.Scope.EmailResourceID, "error", countErr)
+			failureCount = 0
+		}
 	}
+	// Persist rotated credentials on transient failures without marking the
+	// mailbox permanently unavailable and refunding its active orders.
 	handleErr := a.fetchFailures.HandlePermanentMicrosoftFetchFailure(handleCtx, mailmatchapp.PermanentMicrosoftFetchFailure{
 		ResourceID:         req.Scope.EmailResourceID,
 		CredentialRevision: req.Scope.CredentialRevision,

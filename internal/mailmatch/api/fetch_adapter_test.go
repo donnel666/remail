@@ -411,6 +411,46 @@ func TestMicrosoftFetchAdapterCountsThreeFailedTasksAndClearsOnSuccess(t *testin
 	require.False(t, server.Exists(key))
 }
 
+func TestMicrosoftFetchAdapterDoesNotCountRetryableFailuresAsPermanent(t *testing.T) {
+	for _, tc := range []struct {
+		category     string
+		proxyFailure bool
+	}{
+		{"request", false}, {"auth_timeout", false}, {"rate_limited", false}, {"oauth_invalid_grant", true},
+	} {
+		t.Run(tc.category, func(t *testing.T) {
+			server := miniredis.RunT(t)
+			redisClient := redis.NewClient(&redis.Options{Addr: server.Addr()})
+			t.Cleanup(func() { _ = redisClient.Close() })
+			results := make([]mailinfra.MicrosoftMailFetchResult, int(microsoftFetchFailureThreshold)*microsoftFetchAttempts)
+			for i := range results {
+				results[i] = mailinfra.MicrosoftMailFetchResult{
+					Category: tc.category, ProxyFailure: tc.proxyFailure, RefreshToken: "rotated-refresh-token",
+				}
+			}
+			failures := &permanentFetchFailurePortStub{}
+			adapter := &MicrosoftFetchAdapter{
+				client: &microsoftMessageFetchClientStub{results: results}, fetchFailures: failures, redis: redisClient,
+			}
+			req := mailmatchapp.FetchMessagesRequest{Scope: mailmatchapp.OrderScope{
+				EmailResourceID: 42, CredentialRevision: 7, MicrosoftRT: "original-refresh-token",
+			}}
+			for range microsoftFetchFailureThreshold {
+				_, err := adapter.FetchMicrosoftMessages(context.Background(), req)
+				var failure *mailmatchapp.MailFetchFailure
+				require.ErrorAs(t, err, &failure)
+				require.True(t, failure.Retryable)
+			}
+			require.False(t, server.Exists(microsoftFetchFailureKey(req.Scope.EmailResourceID)))
+			require.Len(t, failures.failures, int(microsoftFetchFailureThreshold))
+			for _, failure := range failures.failures {
+				require.Zero(t, failure.FailureCount)
+				require.Equal(t, "rotated-refresh-token", failure.RefreshToken)
+			}
+		})
+	}
+}
+
 func TestMicrosoftFetchAdapterRetriesWhenPermanentFailureHandlingFails(t *testing.T) {
 	result := mailinfra.MicrosoftMailFetchResult{Category: "oauth_invalid_grant"}
 	client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{result, result, result}}

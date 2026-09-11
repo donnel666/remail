@@ -223,6 +223,8 @@ P1-I3 补充：
 
 `ResourceValidationPort` 返回的 `request/auth_timeout` 分类只表示协议请求、代理、DNS、授权轮询超时或上游临时不可用。该分类由 Core 的 `ResourceValidation` 任务重试处理，不能作为资源账号或域名本体异常的证据。Microsoft 资源只有在无法获得权威可用 RT，或最终 RT 发生确定性收件失败时才允许 Core 写 `abnormal`；辅助邮箱掩码、外部域名、恢复超时、验证码错误和 Binding 持久化失败本身都不是资源异常证据。
 
+运行期 Microsoft 收件同样遵守该边界：只有 `MailFetchFailure.Retryable=false` 的失败才累计资源异常阈值；临时请求、超时、限流和代理失败不因重试次数达到阈值而触发资源异常、订单退款或取件 token 撤销。失败时上游已轮换的 RT 仍必须持久化，成功收件清空失败计数。
+
 P1-I3 Microsoft 验证流程使用同一个 `Binding` 实体承接辅助邮箱事实。Core 导入 TXT 时只把 `bindingAddress` 作为输入交给 MailTransport，MailTransport 写入 `pending` 绑定记录；完整 active 地址只能归属一个 Microsoft 资源，避免 SMTP RCPT 精确归属歧义，掩码不占用 concrete 地址唯一槽位。验证 worker 进入 Microsoft 页面流后复用该地址；没有输入时先读取 Microsoft Email proof，只有确认没有 proof 且页面流要求新增绑定时才生成系统地址。SMTP 入站只使用完整地址解析资源并写入 `InboundMail(resourceType=microsoft)`；掩码必须先推算或恢复为完整地址，`BindingCodeWaitPort` 再读取本机 RFC822 原文并沿用 ACL 的验证码提取规则。
 
 管理员修改辅助邮箱不是验证状态覆盖。`BindingAdminPort.SetAddress` 先校验空值/掩码/完整地址格式，只对完整 active 地址校验唯一性，并检查当前是否存在运行中的绑定/验证尝试；发生冲突返回 `409`。规范化后的地址与当前值相同时必须 no-op，保留 `verified`、验证时间和安全诊断；只有实际替换或清除地址才开启新一轮输入并置为 `pending`。owner 或主邮箱变化只同步当前 Binding 的身份字段，不重置地址协议状态。替换成功保留旧 InboundMail/审计事实，清除地址也不删除历史收码邮件。若同一个管理保存请求还修改 Core email/owner/凭据，Core 先完成全部业务校验并开启短事务，再通过 tx-bound context 调用 `BindingAdminPort`，任一写失败整体回滚。成功与失败 OperationLog 只记录固定安全摘要。
