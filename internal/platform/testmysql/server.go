@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -36,6 +37,22 @@ type Server struct {
 
 func New(prefix string) *Server {
 	return &Server{prefix: prefix}
+}
+
+// AllocationOrderNo keeps small integration fixtures reachable without relying
+// on a global allocation scan. It changes only the test order's hash bucket.
+func AllocationOrderNo(prefix string, projectID uint, kind string, bucket, bucketCount uint16) string {
+	if bucketCount == 0 || bucket >= bucketCount {
+		panic("invalid allocation fixture bucket")
+	}
+	for nonce := 0; ; nonce++ {
+		orderNo := fmt.Sprintf("%s-%d", prefix, nonce)
+		h := fnv.New64a()
+		_, _ = fmt.Fprintf(h, "%s|%d|%s", orderNo, projectID, kind)
+		if h.Sum64()%uint64(bucketCount) == uint64(bucket) {
+			return orderNo
+		}
+	}
 }
 
 func MigrationsThrough(t *testing.T, source string, maximum int) string {

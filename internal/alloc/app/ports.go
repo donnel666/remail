@@ -13,6 +13,7 @@ const GmailVariantInventory int64 = 1_000_000_000
 
 const (
 	MicrosoftBucketCount        = coredomain.MicrosoftAllocationBucketCount
+	MicrosoftExpansionBuckets   = 100
 	DomainBucketCount           = coredomain.DomainAllocationBucketCount
 	GmailDotMaxLocalCharacters  = 30
 	GeneratedMailboxBucketCount = coredomain.GeneratedMailboxBucketCount
@@ -458,7 +459,7 @@ type Repository interface {
 	LoadProductConfig(ctx context.Context, productID uint, buyerUserID uint, fulfillExistingOrder bool) (*ProductAllocationConfig, error)
 	ListProductSuffixInventory(ctx context.Context, config ProductAllocationConfig, buyerUserID uint, scope domain.SupplyScope) (map[string]int64, error)
 
-	ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, bucket *uint16, limit int, emailSuffix string) ([]MicrosoftCandidate, error)
+	ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, buckets []uint16, limit int, emailSuffix string) ([]MicrosoftCandidate, error)
 	ListGmailSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.GmailMailbox, after *GmailCandidate, limit int) ([]GmailCandidate, error)
 	ListICloudSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, requiredUntil time.Time, limit int) ([]ICloudCandidate, error)
 	ListDomainSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int, emailSuffix string) ([]DomainCandidate, error)

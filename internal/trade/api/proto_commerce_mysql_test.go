@@ -13,6 +13,7 @@ import (
 	allocinfra "github.com/donnel666/remail/internal/alloc/infra"
 	billinginfra "github.com/donnel666/remail/internal/billing/infra"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/platform/testmysql"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	tradedomain "github.com/donnel666/remail/internal/trade/domain"
 	tradeinfra "github.com/donnel666/remail/internal/trade/infra"
@@ -78,7 +79,7 @@ func TestProtoRecoveryAndAllocationIsolationMySQL(t *testing.T) {
 
 		repo := tradeinfra.NewRepo(db)
 		order, _, err := repo.LoadOrCreatePendingOrder(ctx, tradeapp.CreatePendingOrderCommand{
-			OrderNo: "MICROSOFT-AFTER-PAUSED-PROTO", UserID: 2, ProjectID: 10, ProjectProductID: 20,
+			OrderNo: testmysql.AllocationOrderNo("MICROSOFT-AFTER-PAUSED-PROTO", 10, "main", 1000, allocapp.MicrosoftBucketCount), UserID: 2, ProjectID: 10, ProjectProductID: 20,
 			ProductType: tradedomain.ProductTypeMicrosoft, ServiceMode: tradedomain.ServiceModeCode,
 			SupplyPolicy: tradedomain.SupplyPolicyPublicOnly, PayAmount: "1.00",
 			CodeWindowMinutes: 10, ActivationWindowMinutes: 60, WarrantyMinutes: 1440,

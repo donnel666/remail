@@ -153,7 +153,7 @@ VALUES (1000, 1, 'alias1000@example.com', 'normal')`).Error)
 	repo := NewRepo(db)
 	uc := allocapp.NewUseCase(repo)
 	mainAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-main-project-10", BuyerUserID: 2, ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
+		OrderNo: "ord-main-project-10-b1710", BuyerUserID: 2, ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
 	})
 	require.NoError(t, err)
 	require.Equal(t, "main", mainAllocation.Mailbox)
@@ -173,7 +173,7 @@ INSERT INTO project_products(
 	require.Equal(t, int64(1), project11Stats.Microsoft.MainAvailable)
 
 	aliasAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-alias-project-11", BuyerUserID: 2, ProjectProductID: 21, SupplyScope: domain.SupplyScopePublic,
+		OrderNo: "ord-alias-project-11-b3348", BuyerUserID: 2, ProjectProductID: 21, SupplyScope: domain.SupplyScopePublic,
 	})
 	require.NoError(t, err)
 	require.Equal(t, "main", aliasAllocation.Mailbox)
@@ -186,14 +186,14 @@ INSERT INTO project_products(
 	require.Zero(t, project11Stats.Microsoft.MainAvailable)
 
 	project10Alias, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-alias-project-10", BuyerUserID: 2, ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
+		OrderNo: "ord-alias-project-10-b2301", BuyerUserID: 2, ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
 	})
 	require.NoError(t, err)
 	require.Equal(t, "alias", project10Alias.Mailbox)
 	require.Equal(t, "alias1000@example.com", project10Alias.Email)
 
 	project11Alias, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-alias-project-11-second", BuyerUserID: 2, ProjectProductID: 21, SupplyScope: domain.SupplyScopePublic,
+		OrderNo: "ord-alias-project-11-second-b1660", BuyerUserID: 2, ProjectProductID: 21, SupplyScope: domain.SupplyScopePublic,
 	})
 	require.NoError(t, err)
 	require.Equal(t, "alias", project11Alias.Mailbox)
@@ -227,15 +227,32 @@ VALUES (1003, 'running', UTC_TIMESTAMP(3))`).Error)
 	require.Equal(t, []allocapp.ProductInventorySuffixTotal{{Suffix: "example.com", TotalAvailable: 2, PublicAvailable: 2}}, totals.Items[0].Suffixes)
 	uc := allocapp.NewUseCase(repo)
 	aliasMaintenanceAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-alias-maintenance", BuyerUserID: 2, ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
+		OrderNo: "ord-alias-maintenance-b1157", BuyerUserID: 2, ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
 	})
 	require.NoError(t, err)
 	require.Equal(t, uint(1003), aliasMaintenanceAllocation.ResourceID)
 	manualFetchAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-manual-fetch", BuyerUserID: 2, ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
+		OrderNo: "ord-manual-fetch-b359", BuyerUserID: 2, ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
 	})
 	require.NoError(t, err)
 	require.Equal(t, uint(1004), manualFetchAllocation.ResourceID)
+}
+
+func TestMicrosoftMaintenanceFilterUsesBlockingIndexMySQL(t *testing.T) {
+	db := newAllocMySQLTestDB(t)
+	seedAllocBase(t, db, "microsoft", 1, 0, 0)
+	seedMicrosoftResources(t, db, 1, 1000, 2048, true, "normal")
+	require.NoError(t, db.Exec(`
+INSERT INTO mailmatch_resource_fetch_states(email_resource_id, status, generation, operation_kind)
+SELECT id, 'normal', 1, 'resource_history' FROM microsoft_resources`).Error)
+	require.NoError(t, db.Exec(`
+UPDATE mailmatch_resource_fetch_states SET status = 'pending' WHERE email_resource_id = 1000`).Error)
+	require.NoError(t, db.Exec("ANALYZE TABLE mailmatch_resource_fetch_states").Error)
+	query := "SELECT COUNT(*) FROM microsoft_resources ms WHERE " + microsoftNotUnderBlockingMaintenanceCondition
+	var available int64
+	require.NoError(t, db.Raw(query).Scan(&available).Error)
+	require.EqualValues(t, 2047, available)
+	requireExplainTargetUsesIndex(t, db, query, "maintenance_fetch", "idx_mailmatch_fetch_state_blocking")
 }
 
 func TestGmailUnifiedAllocationInventoryMySQL(t *testing.T) {
@@ -423,7 +440,7 @@ func TestAllocationAllowsDelistedProductOnlyForExistingOrderMySQL(t *testing.T) 
 
 	uc := allocapp.NewUseCase(NewRepo(db))
 	_, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo:          "ord-delisted-product-new",
+		OrderNo:          "ord-delisted-product-new-b1039",
 		BuyerUserID:      2,
 		ProjectProductID: 20,
 		SupplyScope:      domain.SupplyScopePublic,
@@ -431,7 +448,7 @@ func TestAllocationAllowsDelistedProductOnlyForExistingOrderMySQL(t *testing.T) 
 	require.ErrorIs(t, err, domain.ErrProjectNotAllocatable)
 
 	allocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo:              "ord-delisted-product-existing",
+		OrderNo:              "ord-delisted-product-existing-b1247",
 		BuyerUserID:          2,
 		ProjectProductID:     20,
 		SupplyScope:          domain.SupplyScopePublic,
@@ -461,7 +478,7 @@ FOR UPDATE`).Scan(&rootID).Error)
 	allocationDone := make(chan error, 1)
 	go func() {
 		_, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-			OrderNo:          "ord-admin-root-first",
+			OrderNo:          "ord-admin-root-first-b2102",
 			BuyerUserID:      2,
 			ProjectProductID: 20,
 			SupplyScope:      domain.SupplyScopePublic,
@@ -595,14 +612,14 @@ func TestResourceAllocationGuardRequiresRootTransactionAndIgnoresReleasedMySQL(t
 
 	assertGuard(nil)
 	_, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo:          "ord-active-guard",
+		OrderNo:          "ord-active-guard-b7759",
 		BuyerUserID:      2,
 		ProjectProductID: 20,
 		SupplyScope:      domain.SupplyScopePublic,
 	})
 	require.NoError(t, err)
 	assertGuard(domain.ErrActiveAllocation)
-	_, err = uc.ReleaseByOrder(context.Background(), "ord-active-guard")
+	_, err = uc.ReleaseByOrder(context.Background(), "ord-active-guard-b7759")
 	require.NoError(t, err)
 	assertGuard(nil)
 }
@@ -619,7 +636,7 @@ INSERT INTO microsoft_resource_project_matches(
 ) VALUES (1000, 10, ?, ?, 1, ?)`, now, now, now).Error)
 
 	result, err := allocapp.NewUseCase(NewRepo(db)).Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo:          "ord-history-exclusion",
+		OrderNo:          "ord-history-exclusion-b14",
 		BuyerUserID:      2,
 		ProjectProductID: 20,
 		SupplyScope:      domain.SupplyScopePublic,
@@ -651,7 +668,7 @@ INSERT INTO microsoft_allocations(
     ('history-alias', 10, 20, 1000, 'public', 'alias', ?, 'used-alias@example.com', 'released', UTC_TIMESTAMP())`, usedAliasID).Error)
 
 	result, err := allocapp.NewUseCase(NewRepo(db)).Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo:          "ord-mailbox-history-exclusion",
+		OrderNo:          "ord-mailbox-history-exclusion-b3265",
 		BuyerUserID:      2,
 		ProjectProductID: 20,
 		SupplyScope:      domain.SupplyScopePublic,
@@ -722,7 +739,7 @@ func TestSameOrderConcurrentIsIdempotentMySQL(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			result, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-				OrderNo:          "ord-idempotent",
+				OrderNo:          "ord-idempotent-b203",
 				BuyerUserID:      2,
 				ProjectProductID: 20,
 				SupplyScope:      domain.SupplyScopePublic,
@@ -755,10 +772,10 @@ func TestSameOrderConcurrentIsIdempotentMySQL(t *testing.T) {
 	require.NotNil(t, first)
 
 	var guardCount int64
-	require.NoError(t, db.Raw("SELECT COUNT(*) FROM allocation_order_guards WHERE order_no = 'ord-idempotent'").Scan(&guardCount).Error)
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM allocation_order_guards WHERE order_no = 'ord-idempotent-b203'").Scan(&guardCount).Error)
 	require.Equal(t, int64(1), guardCount)
 	var allocationCount int64
-	require.NoError(t, db.Raw("SELECT COUNT(*) FROM microsoft_allocations WHERE order_no = 'ord-idempotent'").Scan(&allocationCount).Error)
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM microsoft_allocations WHERE order_no = 'ord-idempotent-b203'").Scan(&allocationCount).Error)
 	require.Equal(t, int64(1), allocationCount)
 }
 
@@ -770,7 +787,7 @@ func TestListActiveByRecipientMySQL(t *testing.T) {
 	repo := NewRepo(db)
 	uc := allocapp.NewUseCase(repo)
 	result, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo:          "ord-recipient",
+		OrderNo:          "ord-recipient-b3633",
 		BuyerUserID:      2,
 		ProjectProductID: 20,
 		SupplyScope:      domain.SupplyScopePublic,
@@ -796,16 +813,16 @@ func TestReleaseKeepsMicrosoftMainOutOfItsHistoricalProjectMySQL(t *testing.T) {
 
 	uc := allocapp.NewUseCase(NewRepo(db))
 	first, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo:          "ord-release-1",
+		OrderNo:          "ord-release-1-b937",
 		BuyerUserID:      2,
 		ProjectProductID: 20,
 		SupplyScope:      domain.SupplyScopePublic,
 	})
 	require.NoError(t, err)
-	_, err = uc.ReleaseByOrder(context.Background(), "ord-release-1")
+	_, err = uc.ReleaseByOrder(context.Background(), "ord-release-1-b937")
 	require.NoError(t, err)
 	_, err = uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo:          "ord-release-same-project",
+		OrderNo:          "ord-release-same-project-b75",
 		BuyerUserID:      2,
 		ProjectProductID: 20,
 		SupplyScope:      domain.SupplyScopePublic,
@@ -823,7 +840,7 @@ INSERT INTO project_products(
     main_weight, dot_weight, plus_weight
 ) VALUES (21, 11, 'microsoft', 'enabled', TRUE, FALSE, 1, 0, 0.5, 0, 10, 60, 60, 1, 0, 0)`).Error)
 	second, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo:          "ord-release-other-project",
+		OrderNo:          "ord-release-other-project-b988",
 		BuyerUserID:      2,
 		ProjectProductID: 21,
 		SupplyScope:      domain.SupplyScopePublic,
@@ -840,7 +857,7 @@ func TestPublicAllocationExcludesRegularUserResourceMySQL(t *testing.T) {
 
 	uc := allocapp.NewUseCase(NewRepo(db))
 	_, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo:          "ord-public-user-resource",
+		OrderNo:          "ord-public-user-resource-b736",
 		BuyerUserID:      2,
 		ProjectProductID: 20,
 		SupplyScope:      domain.SupplyScopePublic,
@@ -852,7 +869,7 @@ func TestPublicAllocationExcludesRegularUserResourceMySQL(t *testing.T) {
 		"status": "deleted",
 	}).Error)
 	_, err = uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo:          "ord-public-deleted-user-resource",
+		OrderNo:          "ord-public-deleted-user-resource-b4358",
 		BuyerUserID:      2,
 		ProjectProductID: 20,
 		SupplyScope:      domain.SupplyScopePublic,
@@ -868,7 +885,7 @@ func TestOwnedAllocationUsesOnlyBuyerPrivateResourceMySQL(t *testing.T) {
 
 	uc := allocapp.NewUseCase(NewRepo(db))
 	result, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo:          "ord-owned",
+		OrderNo:          "ord-owned-b3301",
 		BuyerUserID:      2,
 		ProjectProductID: 20,
 		SupplyScope:      domain.SupplyScopeOwned,
@@ -1092,7 +1109,7 @@ func TestAllocateRollbackOnInsufficientInventoryMySQL(t *testing.T) {
 
 	uc := allocapp.NewUseCase(NewRepo(db))
 	_, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo:          "ord-rollback",
+		OrderNo:          "ord-rollback-b1373",
 		BuyerUserID:      2,
 		ProjectProductID: 20,
 		SupplyScope:      domain.SupplyScopePublic,
@@ -1100,7 +1117,7 @@ func TestAllocateRollbackOnInsufficientInventoryMySQL(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
 
 	var guardCount int64
-	require.NoError(t, db.Raw("SELECT COUNT(*) FROM allocation_order_guards WHERE order_no = 'ord-rollback'").Scan(&guardCount).Error)
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM allocation_order_guards WHERE order_no = 'ord-rollback-b1373'").Scan(&guardCount).Error)
 	require.Zero(t, guardCount)
 }
 
@@ -1451,7 +1468,7 @@ func TestInventoryStatsExcludeReleasedProjectMainAndAliasHistoryMySQL(t *testing
 
 	assertInventory(1, 0, 1)
 	mainAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-inventory-main-history", BuyerUserID: 2, ProjectProductID: 20,
+		OrderNo: "ord-inventory-main-history-b517", BuyerUserID: 2, ProjectProductID: 20,
 		SupplyScope: domain.SupplyScopePublic,
 	})
 	require.NoError(t, err)
@@ -1466,7 +1483,7 @@ VALUES (1000, 1, 'available-alias@example.com', 'normal')`).Error)
 	assertInventory(0, 1, 1)
 
 	aliasAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-inventory-alias-history", BuyerUserID: 2, ProjectProductID: 20,
+		OrderNo: "ord-inventory-alias-history-b2037", BuyerUserID: 2, ProjectProductID: 20,
 		SupplyScope: domain.SupplyScopePublic,
 	})
 	require.NoError(t, err)
@@ -1488,7 +1505,7 @@ WHERE id = 1000`).Error)
 	repo := NewRepo(db)
 	uc := allocapp.NewUseCase(repo)
 	main, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-cross-suffix-main", BuyerUserID: 2, ProjectProductID: 20,
+		OrderNo: "ord-cross-suffix-main-b17", BuyerUserID: 2, ProjectProductID: 20,
 		SupplyScope: domain.SupplyScopePublic, EmailSuffix: "outlook.com",
 	})
 	require.NoError(t, err)
@@ -1514,7 +1531,7 @@ INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status) VALUES
 	require.Equal(t, map[string]int64{"hotmail.com": 1, "outlook.com": 1}, suffixInventory)
 
 	hotmailAllocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-cross-suffix-hotmail-alias", BuyerUserID: 2, ProjectProductID: 20,
+		OrderNo: "ord-cross-suffix-hotmail-alias-b1216", BuyerUserID: 2, ProjectProductID: 20,
 		SupplyScope: domain.SupplyScopePublic, EmailSuffix: "hotmail.com",
 	})
 	require.NoError(t, err)
@@ -1530,13 +1547,13 @@ INSERT INTO explicit_aliases(resource_id, owner_user_id, email, status) VALUES
 	}, totals.Items[0].Suffixes)
 
 	_, err = uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-cross-suffix-hotmail-exhausted", BuyerUserID: 2, ProjectProductID: 20,
+		OrderNo: "ord-cross-suffix-hotmail-exhausted-b3350", BuyerUserID: 2, ProjectProductID: 20,
 		SupplyScope: domain.SupplyScopePublic, EmailSuffix: "hotmail.com",
 	})
 	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
 
 	allocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-cross-suffix-outlook-alias", BuyerUserID: 2, ProjectProductID: 20,
+		OrderNo: "ord-cross-suffix-outlook-alias-b1257", BuyerUserID: 2, ProjectProductID: 20,
 		SupplyScope: domain.SupplyScopePublic, EmailSuffix: "@outlook.com",
 	})
 	require.NoError(t, err)
@@ -1577,7 +1594,7 @@ VALUES (10, 'outlook.com')`).Error)
 	require.Equal(t, map[string]int64{"hotmail.com": 1}, inventory)
 
 	allocation, err := allocapp.NewUseCase(repo).Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-blacklist-explicit-outlook", BuyerUserID: 2, ProjectProductID: 20,
+		OrderNo: "ord-blacklist-explicit-outlook-b1038", BuyerUserID: 2, ProjectProductID: 20,
 		SupplyScope: domain.SupplyScopePublic, EmailSuffix: "outlook.com",
 	})
 	require.NoError(t, err)
@@ -1610,7 +1627,7 @@ VALUES (1001, 1, 'high@hotmail.com', 'normal')`).Error)
 
 	candidates, err := NewRepo(db).ListMicrosoftSourceCandidates(
 		context.Background(), 10, 2, domain.SupplyScopePublic,
-		domain.MicrosoftMailboxMain, nil, 2, "hotmail.com",
+		domain.MicrosoftMailboxMain, []uint16{1000, 1001}, 2, "hotmail.com",
 	)
 	require.NoError(t, err)
 	require.Len(t, candidates, 2)
@@ -1630,7 +1647,14 @@ func (l *candidateSQLCapture) Trace(ctx context.Context, begin time.Time, fc fun
 	l.Interface.Trace(ctx, begin, func() (string, int64) { return sqlText, rows }, err)
 }
 
-func TestMicrosoftCandidateFullPlansShowBucketBoundAndGlobalSuffixScanMySQL(t *testing.T) {
+func TestMicrosoftCandidatesRequireBoundedBuckets(t *testing.T) {
+	for _, buckets := range [][]uint16{nil, {}, make([]uint16, 101), {allocapp.MicrosoftBucketCount}} {
+		_, err := NewRepo(nil).ListMicrosoftSourceCandidates(context.Background(), 10, 2, domain.SupplyScopePublic, domain.MicrosoftMailboxMain, buckets, 4, "example.com")
+		require.ErrorIs(t, err, domain.ErrInvalidAllocationRequest)
+	}
+}
+
+func TestMicrosoftCandidatePlansStayWithinRequestedBucketsMySQL(t *testing.T) {
 	db := newAllocMySQLTestDB(t)
 	seedAllocBase(t, db, "microsoft", 1, 0, 0)
 	const resources = 2048
@@ -1672,40 +1696,52 @@ func TestMicrosoftCandidateFullPlansShowBucketBoundAndGlobalSuffixScanMySQL(t *t
 	loggedDB := db.Session(&gorm.Session{Logger: capture})
 	repo := NewRepo(loggedDB)
 	bucket := coredomain.MicrosoftAllocationBucket(1000)
-	for _, selectedBucket := range []*uint16{&bucket, nil} {
+	expanded := make([]uint16, 100)
+	for i := range expanded {
+		expanded[i] = bucket + uint16(i+1)
+	}
+	for _, selectedBuckets := range [][]uint16{{bucket}, expanded} {
 		candidates, err := repo.ListMicrosoftSourceCandidates(
 			context.Background(), 10, 2, domain.SupplyScopePublic,
-			domain.MicrosoftMailboxMain, selectedBucket, 8, "example.com",
+			domain.MicrosoftMailboxMain, selectedBuckets, 8, "example.com",
 		)
 		require.NoError(t, err)
 		require.Empty(t, candidates)
 	}
-	require.Len(t, capture.queries, 4, "main and alias SQL must be captured for bucket and global fallback")
+	require.Len(t, capture.queries, 4, "main and alias SQL must be captured for the initial bucket and the expanded batch")
 
 	bucketMain, bucketAlias := capture.queries[0], capture.queries[1]
-	globalMain, globalAlias := capture.queries[2], capture.queries[3]
+	expandedMain, expandedAlias := capture.queries[2], capture.queries[3]
 	require.Contains(t, bucketMain, "FORCE INDEX (idx_microsoft_suffix_bucket)")
-	require.Contains(t, bucketMain, "ms.alloc_bucket =")
+	require.Contains(t, bucketMain, "ms.alloc_bucket IN")
 	require.Contains(t, bucketAlias, "FORCE INDEX (idx_explicit_aliases_suffix_bucket)")
-	require.Contains(t, bucketAlias, "ea.alloc_bucket =")
-	require.NotContains(t, globalMain, "FORCE INDEX")
-	require.NotContains(t, globalMain, "ms.alloc_bucket =")
-	require.NotContains(t, globalAlias, "FORCE INDEX")
-	require.NotContains(t, globalAlias, "ea.alloc_bucket =")
+	require.Contains(t, bucketAlias, "ea.alloc_bucket IN")
+	require.Contains(t, expandedMain, "ms.alloc_bucket IN")
+	require.Contains(t, expandedAlias, "ea.alloc_bucket IN")
 
 	requireExplainTargetUsesIndex(t, db, bucketMain, "ms", "idx_microsoft_suffix_bucket")
 	requireExplainTargetUsesIndex(t, db, bucketAlias, "ea", "idx_explicit_aliases_suffix_bucket")
-	requireExplainTargetUsesIndex(t, db, globalMain, "ms", "")
-	requireExplainTargetUsesIndex(t, db, globalAlias, "ea", "")
+	requireExplainTargetUsesIndex(t, db, expandedMain, "ms", "idx_microsoft_suffix_bucket")
+	requireExplainTargetUsesIndex(t, db, expandedAlias, "ea", "idx_explicit_aliases_suffix_bucket")
 
 	bucketMainWork := explainAnalyzeTargetWork(t, db, bucketMain, "ms")
 	bucketAliasWork := explainAnalyzeTargetWork(t, db, bucketAlias, "ea")
-	globalMainWork := explainAnalyzeTargetWork(t, db, globalMain, "ms")
-	globalAliasWork := explainAnalyzeTargetWork(t, db, globalAlias, "ea")
+	expandedMainWork := explainAnalyzeTargetWork(t, db, expandedMain, "ms")
+	expandedAliasWork := explainAnalyzeTargetWork(t, db, expandedAlias, "ea")
 	require.LessOrEqual(t, bucketMainWork, float64(2))
 	require.LessOrEqual(t, bucketAliasWork, float64(2))
-	require.GreaterOrEqual(t, globalMainWork, float64(resources))
-	require.GreaterOrEqual(t, globalAliasWork, float64(resources))
+	require.LessOrEqual(t, expandedMainWork, float64(100))
+	require.LessOrEqual(t, expandedAliasWork, float64(100))
+
+	capture.queries = nil
+	candidates, err := repo.ListMicrosoftSourceCandidates(context.Background(), 10, 2, domain.SupplyScopePublic, domain.MicrosoftMailboxMain, expanded, 8, "")
+	require.NoError(t, err)
+	require.Empty(t, candidates)
+	require.Len(t, capture.queries, 2)
+	for _, query := range capture.queries {
+		requireExplainTargetUsesIndex(t, db, query, "ms", "idx_microsoft_alloc_public")
+		require.LessOrEqual(t, explainAnalyzeTargetWork(t, db, query, "ms"), float64(100))
+	}
 }
 
 func TestDotInventoryCountsOnlyDistinctAllocatableVariantsMySQL(t *testing.T) {
@@ -1734,7 +1770,7 @@ WHERE id = 1000`).Error)
 		require.Equal(t, int64(len(wantAliases)), stats.Microsoft.DotCapacity)
 		require.Equal(t, int64(len(wantAliases))-allocated, stats.Microsoft.DotAvailable)
 		allocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-			OrderNo: fmt.Sprintf("ord-dot-inventory-%d", allocated), BuyerUserID: 2,
+			OrderNo: testmysql.AllocationOrderNo(fmt.Sprintf("ord-dot-inventory-%d", allocated), 10, "dot", 1000, allocapp.MicrosoftBucketCount), BuyerUserID: 2,
 			ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
 		})
 		require.NoError(t, err)
@@ -1748,7 +1784,7 @@ WHERE id = 1000`).Error)
 	require.NoError(t, err)
 	require.Zero(t, stats.Microsoft.DotAvailable)
 	_, err = uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-dot-inventory-exhausted", BuyerUserID: 2,
+		OrderNo: "ord-dot-inventory-exhausted-b2293", BuyerUserID: 2,
 		ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
 	})
 	require.ErrorIs(t, err, domain.ErrInsufficientInventory)
@@ -1778,7 +1814,7 @@ VALUES (1000, 'm.s1.0.00@example.com', 'normal')`).Error)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), productTotals.TotalAvailable)
 	allocation, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo: "ord-dot-inventory-imported", BuyerUserID: 2,
+		OrderNo: "ord-dot-inventory-imported-b1011", BuyerUserID: 2,
 		ProjectProductID: 20, SupplyScope: domain.SupplyScopePublic,
 	})
 	require.NoError(t, err)
@@ -1814,7 +1850,7 @@ func TestPlusDailyLimitConsumesPerResourceCounterMySQL(t *testing.T) {
 
 	uc := allocapp.NewUseCase(NewRepo(db))
 	first, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo:          "ord-plus-limit-1",
+		OrderNo:          "ord-plus-limit-1-b948",
 		BuyerUserID:      2,
 		ProjectProductID: 20,
 		SupplyScope:      domain.SupplyScopePublic,
@@ -1823,7 +1859,7 @@ func TestPlusDailyLimitConsumesPerResourceCounterMySQL(t *testing.T) {
 	require.Equal(t, "plus", first.Mailbox)
 
 	_, err = uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo:          "ord-plus-limit-2",
+		OrderNo:          "ord-plus-limit-2-b691",
 		BuyerUserID:      2,
 		ProjectProductID: 20,
 		SupplyScope:      domain.SupplyScopePublic,
@@ -1854,7 +1890,7 @@ func TestPlusDailyLimitConcurrentMySQL(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			_, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-				OrderNo:          fmt.Sprintf("ord-plus-concurrent-%03d", i),
+				OrderNo:          testmysql.AllocationOrderNo(fmt.Sprintf("ord-plus-concurrent-%03d", i), 10, "plus", 1000, allocapp.MicrosoftBucketCount),
 				BuyerUserID:      2,
 				ProjectProductID: 20,
 				SupplyScope:      domain.SupplyScopePublic,
@@ -1897,7 +1933,7 @@ WHERE resource_id = 1000 AND mailbox = 'plus' AND status = 'allocated'`).Scan(&a
 
 	for i := successes; i < dailyLimit; i++ {
 		_, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-			OrderNo:          fmt.Sprintf("ord-plus-topup-%03d", i),
+			OrderNo:          testmysql.AllocationOrderNo(fmt.Sprintf("ord-plus-topup-%03d", i), 10, "plus", 1000, allocapp.MicrosoftBucketCount),
 			BuyerUserID:      2,
 			ProjectProductID: 20,
 			SupplyScope:      domain.SupplyScopePublic,
@@ -1906,7 +1942,7 @@ WHERE resource_id = 1000 AND mailbox = 'plus' AND status = 'allocated'`).Scan(&a
 	}
 
 	_, err := uc.Allocate(context.Background(), allocapp.AllocateCommand{
-		OrderNo:          "ord-plus-over-limit",
+		OrderNo:          "ord-plus-over-limit-b646",
 		BuyerUserID:      2,
 		ProjectProductID: 20,
 		SupplyScope:      domain.SupplyScopePublic,
@@ -2214,6 +2250,8 @@ INSERT INTO project_mail_rules(project_id, rule_type, pattern, enabled) VALUES
 
 func seedMicrosoftResources(t *testing.T, db *gorm.DB, ownerID, startID, count int, forSale bool, status string) {
 	t.Helper()
+	// Small allocation fixtures use order-number suffixes chosen to start in
+	// bucket 1000, so unrelated business tests do not depend on global scans.
 	type emailResourceSeed struct {
 		ID          int
 		Type        string
@@ -2365,21 +2403,23 @@ func explainAnalyzeTargetWork(t *testing.T, db *gorm.DB, query, targetTable stri
 	work := float64(0)
 	plan := make([]string, 0)
 	for rows.Next() {
-		var line string
-		require.NoError(t, rows.Scan(&line))
-		plan = append(plan, line)
-		if !strings.Contains(line, " on "+targetTable) {
-			continue
+		var tree string
+		require.NoError(t, rows.Scan(&tree))
+		for _, line := range strings.Split(tree, "\n") {
+			plan = append(plan, line)
+			if !strings.Contains(line, " on "+targetTable+" ") {
+				continue
+			}
+			match := explainActualRowsPattern.FindStringSubmatch(line)
+			if len(match) != 3 {
+				continue
+			}
+			actualRows, parseErr := strconv.ParseFloat(match[1], 64)
+			require.NoError(t, parseErr)
+			loops, parseErr := strconv.ParseFloat(match[2], 64)
+			require.NoError(t, parseErr)
+			work = max(work, actualRows*loops)
 		}
-		match := explainActualRowsPattern.FindStringSubmatch(line)
-		if len(match) != 3 {
-			continue
-		}
-		actualRows, parseErr := strconv.ParseFloat(match[1], 64)
-		require.NoError(t, parseErr)
-		loops, parseErr := strconv.ParseFloat(match[2], 64)
-		require.NoError(t, parseErr)
-		work = max(work, actualRows*loops)
 	}
 	require.NoError(t, rows.Err())
 	require.Positive(t, work, "missing actual rows/loops for %s in plan:\n%s", targetTable, strings.Join(plan, "\n"))

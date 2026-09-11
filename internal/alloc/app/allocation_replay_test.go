@@ -12,20 +12,24 @@ import (
 
 type allocationReplayRaceRepo struct {
 	*allocationLockRepo
-	winner      *domain.UnifiedAllocation
-	scanned     bool
-	parentTx    bool
-	scanErr     error
-	lookupErr   error
-	rollbackErr error
-	replayReads int
-	replayInTx  bool
+	winner           *domain.UnifiedAllocation
+	scanned          bool
+	parentTx         bool
+	scanErr          error
+	lookupErr        error
+	rollbackErr      error
+	replayReads      int
+	replayInTx       bool
+	retryTransaction bool
 }
 
 func (r *allocationReplayRaceRepo) HasParentTx(context.Context) bool { return r.parentTx }
 
 func (r *allocationReplayRaceRepo) WithTx(ctx context.Context, fn func(context.Context) error) error {
 	err := r.allocationLockRepo.WithTx(ctx, fn)
+	if err != nil && r.retryTransaction {
+		err = r.allocationLockRepo.WithTx(ctx, fn)
+	}
 	if err != nil && r.rollbackErr != nil {
 		return errors.Join(err, r.rollbackErr)
 	}
@@ -47,14 +51,14 @@ func (r *allocationReplayRaceRepo) FindExistingAllocation(_ context.Context, ord
 	return nil, nil
 }
 
-func (r *allocationReplayRaceRepo) ListMicrosoftSourceCandidates(ctx context.Context, projectID, buyerID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, bucket *uint16, limit int, suffix string) ([]MicrosoftCandidate, error) {
+func (r *allocationReplayRaceRepo) ListMicrosoftSourceCandidates(ctx context.Context, projectID, buyerID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, buckets []uint16, limit int, suffix string) ([]MicrosoftCandidate, error) {
 	// The winner commits after this request's initial idempotency read. Its
-	// allocation consumes the only mailbox, so even the global scan is empty.
+	// allocation consumes the only mailbox, so every probed bucket is empty.
 	r.scanned = true
 	if r.scanErr != nil {
 		return nil, r.scanErr
 	}
-	return r.allocationLockRepo.ListMicrosoftSourceCandidates(ctx, projectID, buyerID, scope, mailbox, bucket, limit, suffix)
+	return r.allocationLockRepo.ListMicrosoftSourceCandidates(ctx, projectID, buyerID, scope, mailbox, buckets, limit, suffix)
 }
 
 func TestAllocationReplayAfterConcurrentWinnerCommit(t *testing.T) {
@@ -79,16 +83,16 @@ func TestAllocationReplayAfterConcurrentWinnerCommit(t *testing.T) {
 		rollbackErr error
 		wantErr     error
 	}{
-		{name: "reuse winner after definitive exhaustion", winner: winner},
+		{name: "reuse winner after bounded bucket miss", winner: winner},
 		{name: "reuse winner after temporary inventory miss", winner: winner, scanErr: domain.ErrInsufficientInventory},
 		{name: "reuse winner after allocation conflict", winner: winner, scanErr: domain.ErrAllocationConflict},
-		{name: "preserve genuine exhaustion", wantErr: domain.ErrDefinitiveInventoryExhausted},
-		{name: "parent transaction must retain its failure", winner: winner, parentTx: true, wantErr: domain.ErrDefinitiveInventoryExhausted},
+		{name: "preserve bounded bucket miss", wantErr: domain.ErrInsufficientInventory},
+		{name: "parent transaction must retain its failure", winner: winner, parentTx: true, wantErr: domain.ErrInsufficientInventory},
 		{name: "parent transaction must retain allocation conflict", winner: winner, parentTx: true, scanErr: domain.ErrAllocationConflict, wantErr: domain.ErrAllocationConflict},
 		{name: "do not hide unrelated query failure", winner: winner, scanErr: queryErr, wantErr: queryErr},
 		{name: "winner lookup failure stays an infrastructure error", winner: winner, lookupErr: lookupErr, wantErr: lookupErr},
-		{name: "released status is not a reusable winner", winner: &releasedStatus, wantErr: domain.ErrDefinitiveInventoryExhausted},
-		{name: "release timestamp is not a reusable winner", winner: &releasedTimestamp, wantErr: domain.ErrDefinitiveInventoryExhausted},
+		{name: "released status is not a reusable winner", winner: &releasedStatus, wantErr: domain.ErrInsufficientInventory},
+		{name: "release timestamp is not a reusable winner", winner: &releasedTimestamp, wantErr: domain.ErrInsufficientInventory},
 		{name: "joined rollback failure must not be hidden", winner: winner, rollbackErr: rollbackErr, wantErr: rollbackErr},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -106,9 +110,8 @@ func TestAllocationReplayAfterConcurrentWinnerCommit(t *testing.T) {
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("Allocate() error = %v, want %v; idempotency reads = %d", err, test.wantErr, repo.finds)
 			}
-			// Temporary misses/conflicts may use the existing fresh-transaction
-			// retry. Definitive exhaustion has no retry: its fallback must run
-			// after the failed transaction has ended, with txActive=false.
+			// Bounded misses do not retry: the winner lookup must run after the
+			// failed transaction has ended, with txActive=false.
 			if test.scanErr == nil && repo.replayInTx {
 				t.Fatal("winner fallback ran before the failed transaction ended")
 			}
@@ -118,7 +121,7 @@ func TestAllocationReplayAfterConcurrentWinnerCommit(t *testing.T) {
 			if test.lookupErr != nil && errors.Is(err, domain.ErrInsufficientInventory) {
 				t.Fatalf("winner lookup failure was classified as business inventory exhaustion: %v", err)
 			}
-			if test.rollbackErr != nil && !errors.Is(err, domain.ErrDefinitiveInventoryExhausted) {
+			if test.rollbackErr != nil && !errors.Is(err, domain.ErrInsufficientInventory) {
 				t.Fatalf("joined error lost its original allocation failure: %v", err)
 			}
 			if test.wantErr != nil {

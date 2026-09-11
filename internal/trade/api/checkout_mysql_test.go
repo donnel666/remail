@@ -57,7 +57,16 @@ func TestMain(m *testing.M) {
 
 func newTradeMySQLTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	return tradeAPIMySQLTestServer.Database(t, tradeMigrationsDir(t))
+	db := tradeAPIMySQLTestServer.Database(t, tradeMigrationsDir(t))
+	// Small business-rule fixtures pin the starting bucket. Routing/performance
+	// tests remove this callback and exercise the production UUID distribution.
+	require.NoError(t, db.Callback().Create().Before("gorm:create").Register("test:allocation_bucket", func(tx *gorm.DB) {
+		order, ok := tx.Statement.Dest.(*tradeinfra.OrderModel)
+		if ok && order.ProductType == string(tradedomain.ProductTypeMicrosoft) && len(order.OrderNo) == 34 && strings.HasPrefix(order.OrderNo, "OR") {
+			order.OrderNo = testmysql.AllocationOrderNo(order.OrderNo, order.ProjectID, "main", 1000, allocapp.MicrosoftBucketCount)
+		}
+	}))
+	return db
 }
 
 func newTradeLegacyMigrationTestDB(t *testing.T) (*gorm.DB, string) {
@@ -802,19 +811,24 @@ func TestCheckoutAllocatorExhaustionWithoutCacheCreatesNoDebitMySQL(t *testing.T
 
 type microsoftCandidateQueryLogger struct {
 	logger.Interface
-	calls int
+	calls     int
+	unbounded int
 }
 
 func (l *microsoftCandidateQueryLogger) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
 	sql, rows := fc()
 	if strings.Contains(sql, "ORDER BY ms.last_allocated_at ASC, ms.quality_score DESC, ms.id ASC") {
 		l.calls++
+		if !strings.Contains(sql, ".alloc_bucket IN (") {
+			l.unbounded++
+		}
 	}
 	l.Interface.Trace(ctx, begin, func() (string, int64) { return sql, rows }, err)
 }
 
-func TestCheckoutBatchDefinitiveMicrosoftMissRunsOneProbeSequenceMySQL(t *testing.T) {
+func TestCheckoutBatchMicrosoftMissUsesOnlyBoundedProbesMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
+	require.NoError(t, db.Callback().Create().Remove("test:allocation_bucket"))
 	seedTradeBase(t, db, "microsoft")
 	require.NoError(t, db.Table("project_products").Where("id = ?", 20).Update("code_price", "0.000000").Error)
 	queryLog := &microsoftCandidateQueryLogger{Interface: db.Logger}
@@ -841,17 +855,24 @@ func TestCheckoutBatchDefinitiveMicrosoftMissRunsOneProbeSequenceMySQL(t *testin
 		}
 	}
 
+	started := time.Now()
 	items, err := uc.CheckoutBatch(context.Background(), requests)
+	elapsed := time.Since(started)
+	t.Logf("100-item empty inventory batch: queries=%d elapsed=%s", queryLog.calls, elapsed)
 
 	require.NoError(t, err)
 	require.Len(t, items, len(requests))
 	for _, item := range items {
 		require.ErrorIs(t, item.Err, tradedomain.ErrInsufficientInventory)
+		require.NotNil(t, item.Result)
+		require.Regexp(t, "^OR[0-9A-F]{32}$", item.Result.Order.OrderNo)
 	}
-	require.Equal(t, 10, queryLog.calls, "four bucket probes plus one global confirmation execute main and alias SQL once")
+	require.Equal(t, 2*(4+1)*len(requests), queryLog.calls, "each order queries four single buckets and one batch of 100")
+	require.Less(t, elapsed, 10*time.Second)
+	require.Zero(t, queryLog.unbounded, "Microsoft misses must never issue an unbounded candidate query")
 	var orders int64
 	require.NoError(t, db.Table("orders").Count(&orders).Error)
-	require.EqualValues(t, len(requests), orders, "skipped allocator probes must still persist idempotent failed orders")
+	require.EqualValues(t, len(requests), orders, "bounded misses must still persist idempotent failed orders")
 }
 
 func TestCheckoutMarkFailedErrorPreservesPendingOrderForRetryMySQL(t *testing.T) {
@@ -1754,9 +1775,10 @@ func TestOrderRouteCreatesIndependentBatchWithStableIdempotencyMySQL(t *testing.
 
 func TestOrderRouteHundredItemBatchReturnsWithinTenSecondsMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
+	require.NoError(t, db.Callback().Create().Remove("test:allocation_bucket"))
 	seedTradeBase(t, db, "microsoft")
 	require.NoError(t, db.Table("project_products").Where("id = ?", 20).Update("code_price", "0.000000").Error)
-	seedTradeMicrosoftResources(t, db, 1, 1000, 100, true)
+	seedTradeMicrosoftResources(t, db, 1, 1000, int(allocapp.MicrosoftBucketCount), true)
 
 	openapiMod := openapiapi.NewModule(db)
 	key, err := openapiMod.UseCase.CreateAPIKey(context.Background(), openapiapp.CreateAPIKeyRequest{
@@ -1791,6 +1813,10 @@ func TestOrderRouteHundredItemBatchReturnsWithinTenSecondsMySQL(t *testing.T) {
 	var items CreateOrderBatchResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &items))
 	require.Len(t, items, 100)
+	for _, item := range items {
+		require.NotNil(t, item.Order)
+		require.Regexp(t, "^OR[0-9A-F]{32}$", item.Order.OrderNo)
+	}
 	facts := tradeCheckoutFactCounts(t, db)
 	replayed := request()
 	require.Equal(t, http.StatusOK, replayed.Code, replayed.Body.String())
@@ -1801,10 +1827,10 @@ func TestOrderRouteHundredItemBatchReturnsWithinTenSecondsMySQL(t *testing.T) {
 
 func TestOrderRouteConcurrentHundredItemBatchesForDifferentUsersHaveNoDeadlocksMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
+	require.NoError(t, db.Callback().Create().Remove("test:allocation_bucket"))
 	seedTradeBase(t, db, "microsoft")
 	require.NoError(t, db.Table("project_products").Where("id = ?", 20).Update("code_price", "0.000000").Error)
-	seedTradeMicrosoftResources(t, db, 1, 1000, 100, true)
-	seedTradeMicrosoftResources(t, db, 1, 1100, 100, true)
+	seedTradeMicrosoftResources(t, db, 1, 1000, int(allocapp.MicrosoftBucketCount), true)
 
 	openapiMod := openapiapi.NewModule(db)
 	keys := make(map[uint]string, 2)
@@ -1850,6 +1876,10 @@ func TestOrderRouteConcurrentHundredItemBatchesForDifferentUsersHaveNoDeadlocksM
 		var items CreateOrderBatchResponse
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &items))
 		require.Len(t, items, 100)
+		for _, item := range items {
+			require.NotNil(t, item.Order)
+			require.Regexp(t, "^OR[0-9A-F]{32}$", item.Order.OrderNo)
+		}
 	}
 	var orderCount, allocationCount int64
 	require.NoError(t, db.Table("orders").Count(&orderCount).Error)
@@ -2726,11 +2756,19 @@ INSERT INTO project_mail_rules(project_id, rule_type, pattern, enabled) VALUES
 
 func seedTradeMicrosoftResources(t *testing.T, db *gorm.DB, ownerID, startID, count int, forSale bool) {
 	t.Helper()
+	roots := make([]map[string]any, count)
+	resources := make([]map[string]any, count)
 	for i := 0; i < count; i++ {
 		id := startID + i
-		email := fmt.Sprintf("ms%d@example.com", id)
-		seedTradeMicrosoftResource(t, db, ownerID, id, email, "example.com", 100-i, forSale)
+		roots[i] = map[string]any{"id": id, "type": "microsoft", "owner_user_id": ownerID}
+		resources[i] = map[string]any{
+			"id": id, "email_address": fmt.Sprintf("ms%d@example.com", id), "email_domain": "example.com",
+			"password": "secret", "for_sale": forSale, "status": "normal", "quality_score": max(100-i, 0),
+			"alloc_bucket": id % int(allocapp.MicrosoftBucketCount),
+		}
 	}
+	require.NoError(t, db.Table("email_resources").CreateInBatches(roots, 1000).Error)
+	require.NoError(t, db.Table("microsoft_resources").CreateInBatches(resources, 1000).Error)
 }
 
 func seedTradeMicrosoftResource(t *testing.T, db *gorm.DB, ownerID int, id int, email string, domain string, quality int, forSale bool) {

@@ -68,7 +68,7 @@ sum by (allocation_type) (rate(remail_allocation_results_total{result="conflict"
 
 `succeeded` 只表示本次调用新创建了 Allocation；`existing` 表示按订单号命中已有 Allocation 的幂等返回。统计实际交付请求时应合并两者，评估候选分配效率时只使用 `succeeded`，避免幂等重放稀释候选尝试数。
 
-进入 global scan 的事件速率（Microsoft 会按实际 mailbox 探测路径分别计数）：
+进入全局候选扫描的事件速率（Microsoft 已取消此路径，新版本实例不应再产生 Microsoft 事件；滚动部署期间需区分旧实例）：
 
 ```promql
 sum by (allocation_type, reason) (rate(remail_allocation_bucket_fallbacks_total[5m]))

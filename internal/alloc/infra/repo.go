@@ -24,7 +24,7 @@ const (
 	gmailLocalSource                              = "local"
 	microsoftNotUnderBlockingMaintenanceCondition = `ms.token_refresh_status NOT IN ('pending', 'processing')
 			AND NOT EXISTS (
-				SELECT 1
+				SELECT /*+ INDEX(maintenance_fetch idx_mailmatch_fetch_state_blocking) */ 1
 				FROM mailmatch_resource_fetch_states maintenance_fetch
 				WHERE maintenance_fetch.email_resource_id = ms.id
 				  AND maintenance_fetch.operation_kind = 'resource_history'
@@ -604,8 +604,28 @@ func gmailSourceCandidateQuery(db *gorm.DB, projectID uint, buyerUserID uint, sc
 	return query.Where("gr.for_sale = TRUE AND owner.status = 'active' AND owner.role IN ('supplier', 'admin', 'super_admin')")
 }
 
-func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, bucket *uint16, limit int, emailSuffix string) ([]allocapp.MicrosoftCandidate, error) {
+func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, buckets []uint16, limit int, emailSuffix string) ([]allocapp.MicrosoftCandidate, error) {
+	if len(buckets) == 0 || len(buckets) > allocapp.MicrosoftExpansionBuckets || limit <= 0 {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
+	for _, bucket := range buckets {
+		if bucket >= allocapp.MicrosoftBucketCount {
+			return nil, domain.ErrInvalidAllocationRequest
+		}
+	}
 	suffix := normalizeCandidateSuffix(emailSuffix)
+	mainFrom := "microsoft_resources ms"
+	mainHint := ""
+	// Public supply starts at the bucket index. Owned supply can use the
+	// buyer's owner index instead, which often excludes every row immediately.
+	if scope != domain.SupplyScopeOwned {
+		index := "idx_microsoft_alloc_public"
+		if suffix != "" {
+			index = "idx_microsoft_suffix_bucket"
+		}
+		mainFrom += " FORCE INDEX (" + index + ")"
+		mainHint = "/*+ JOIN_ORDER(ms, er, u) */ "
+	}
 	if mailbox == domain.MicrosoftMailboxMain {
 		type candidateRow struct {
 			ResourceID      uint       `gorm:"column:resource_id"`
@@ -630,7 +650,10 @@ func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, projectID uint
 			return where, args
 		}
 		list := func(from string, distinct bool, where []string, args []any) ([]candidateRow, error) {
-			selectSQL := "SELECT "
+			selectSQL := "SELECT " + mainHint
+			if distinct && suffix != "" && scope != domain.SupplyScopeOwned {
+				selectSQL = "SELECT /*+ JOIN_ORDER(ea, ms, er, u) */ "
+			}
 			if distinct {
 				selectSQL += "DISTINCT "
 			}
@@ -658,14 +681,8 @@ LIMIT ?`
 		}
 		mainWhere = append(mainWhere, microsoftUnusedMainCondition)
 		mainArgs = append(mainArgs, projectID, projectID)
-		if bucket != nil {
-			mainWhere = append(mainWhere, "ms.alloc_bucket = ?")
-			mainArgs = append(mainArgs, *bucket)
-		}
-		mainFrom := "microsoft_resources ms"
-		if suffix != "" && bucket != nil {
-			mainFrom += " FORCE INDEX (idx_microsoft_suffix_bucket)"
-		}
+		mainWhere = append(mainWhere, "ms.alloc_bucket IN ?")
+		mainArgs = append(mainArgs, buckets)
 		rows, err := list(mainFrom, false, mainWhere, mainArgs)
 		if err != nil {
 			return nil, fmt.Errorf("list microsoft main source allocation candidates: %w", err)
@@ -689,19 +706,19 @@ LIMIT ?`
               AND active_alias.active_entity_id = ea.id
         )`)
 		aliasArgs = append(aliasArgs, projectID, projectID)
-		if bucket != nil {
-			if suffix != "" {
-				aliasWhere = append(aliasWhere, "ea.alloc_bucket = ?")
-			} else {
-				aliasWhere = append(aliasWhere, "ms.alloc_bucket = ?")
+		aliasFrom := mainFrom + " JOIN explicit_aliases ea ON ea.resource_id = ms.id"
+		if suffix != "" {
+			aliasWhere = append(aliasWhere, "ea.alloc_bucket IN ?")
+			aliasFrom = "explicit_aliases ea"
+			if scope != domain.SupplyScopeOwned {
+				aliasFrom += " FORCE INDEX (idx_explicit_aliases_suffix_bucket)"
 			}
-			aliasArgs = append(aliasArgs, *bucket)
+			aliasFrom += " JOIN microsoft_resources ms ON ms.id = ea.resource_id"
+		} else {
+			aliasWhere = append(aliasWhere, "ms.alloc_bucket IN ?")
 		}
-		aliasFrom := "explicit_aliases ea"
-		if suffix != "" && bucket != nil {
-			aliasFrom += " FORCE INDEX (idx_explicit_aliases_suffix_bucket)"
-		}
-		aliasRows, err := list(aliasFrom+" JOIN microsoft_resources ms ON ms.id = ea.resource_id", true, aliasWhere, aliasArgs)
+		aliasArgs = append(aliasArgs, buckets)
+		aliasRows, err := list(aliasFrom, true, aliasWhere, aliasArgs)
 		if err != nil {
 			return nil, fmt.Errorf("list microsoft explicit alias source allocation candidates: %w", err)
 		}
@@ -754,15 +771,13 @@ LIMIT ?`
 	default:
 		where = append(where, "ms.for_sale = TRUE", "u.status = 'active'", "u.role IN ('supplier', 'admin', 'super_admin')")
 	}
-	if bucket != nil {
-		where = append(where, "ms.alloc_bucket = ?")
-		args = append(args, *bucket)
-	}
+	where = append(where, "ms.alloc_bucket IN ?")
+	args = append(args, buckets)
 	args = append(args, limit)
 
 	query := `
-SELECT ms.id AS resource_id, ms.email_address AS email_address, ms.quality_score AS quality_score
-FROM microsoft_resources ms
+SELECT ` + mainHint + `ms.id AS resource_id, ms.email_address AS email_address, ms.quality_score AS quality_score
+FROM ` + mainFrom + `
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
 JOIN users u ON u.id = er.owner_user_id
 WHERE ` + strings.Join(where, " AND ") + `

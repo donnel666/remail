@@ -109,6 +109,8 @@ type allocationLockRepo struct {
 	rootUnavailable      map[uint]bool
 	candidateUnavailable map[uint]bool
 	emptyBuckets         map[uint16]bool
+	emptyScope           domain.SupplyScope
+	emptyMailbox         domain.MicrosoftMailbox
 	noCandidates         bool
 	explicitAlias        *AliasCandidate
 	writeConflict        bool
@@ -116,6 +118,7 @@ type allocationLockRepo struct {
 	finds                int
 	lists                int
 	listedBuckets        []int
+	listedBatchSizes     []int
 	listedSuffixes       []string
 	waiting              int
 	skipping             int
@@ -153,18 +156,16 @@ func (r *allocationLockRepo) ListProductSuffixInventory(context.Context, Product
 	return r.suffixInventory, nil
 }
 
-func (r *allocationLockRepo) ListMicrosoftSourceCandidates(_ context.Context, _ uint, _ uint, _ domain.SupplyScope, _ domain.MicrosoftMailbox, bucket *uint16, _ int, emailSuffix string) ([]MicrosoftCandidate, error) {
+func (r *allocationLockRepo) ListMicrosoftSourceCandidates(_ context.Context, _ uint, _ uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, buckets []uint16, _ int, emailSuffix string) ([]MicrosoftCandidate, error) {
 	r.lists++
 	r.listedSuffixes = append(r.listedSuffixes, emailSuffix)
-	if bucket == nil {
-		r.listedBuckets = append(r.listedBuckets, -1)
-	} else {
-		r.listedBuckets = append(r.listedBuckets, int(*bucket))
-		if r.emptyBuckets[*bucket] {
-			return nil, nil
-		}
+	r.listedBatchSizes = append(r.listedBatchSizes, len(buckets))
+	available := false
+	for _, bucket := range buckets {
+		r.listedBuckets = append(r.listedBuckets, int(bucket))
+		available = available || !r.emptyBuckets[bucket]
 	}
-	if r.noCandidates {
+	if !available || r.noCandidates || scope == r.emptyScope || mailbox == r.emptyMailbox {
 		return nil, nil
 	}
 	if len(r.candidates) == 0 {
@@ -314,46 +315,122 @@ func TestSpecifiedMicrosoftSuffixMissingFromSnapshotIsUnknown(t *testing.T) {
 	}
 }
 
-func TestSpecifiedSuffixProbesEveryBucketBeforeGlobalFallback(t *testing.T) {
-	buckets := bucketProbeSequence("order-1", 4, string(domain.MicrosoftMailboxPlus), MicrosoftBucketCount)
-	emptyBuckets := make(map[uint16]bool, len(buckets))
-	wantBuckets := make([]int, 0, len(buckets)+1)
-	for _, bucket := range buckets {
-		emptyBuckets[bucket] = true
-		wantBuckets = append(wantBuckets, int(bucket))
-	}
-	wantBuckets = append(wantBuckets, -1)
-
-	repo := &allocationLockRepo{emptyBuckets: emptyBuckets}
-	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
-		OrderNo: "order-1", BuyerUserID: 3, ProjectProductID: 5, EmailSuffix: "example.com",
-	})
-
-	if err != nil || result == nil {
-		t.Fatalf("Allocate() result = %#v, error = %v; want success", result, err)
-	}
-	if !slices.Equal(repo.listedBuckets, wantBuckets) {
-		t.Fatalf("listed buckets = %v, want all configured probes then global %v", repo.listedBuckets, wantBuckets)
+func TestSpecifiedMicrosoftSuffixExpandsBucketsAndStopsOnSuccess(t *testing.T) {
+	for _, extra := range []int{1, 100} {
+		t.Run(fmt.Sprintf("extra-bucket-%d", extra), func(t *testing.T) {
+			buckets := bucketProbeSequence("order-1", 4, string(domain.MicrosoftMailboxPlus), MicrosoftBucketCount)
+			emptyBuckets := make(map[uint16]bool)
+			wantBuckets := make([]int, len(buckets)+100)
+			for i := range wantBuckets {
+				bucket := (buckets[0] + uint16(i)) % MicrosoftBucketCount
+				wantBuckets[i] = int(bucket)
+				emptyBuckets[bucket] = i != len(buckets)+extra-1
+			}
+			repo := &allocationLockRepo{emptyBuckets: emptyBuckets}
+			result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+				OrderNo: "order-1", BuyerUserID: 3, ProjectProductID: 5, EmailSuffix: "example.com",
+			})
+			if err != nil || result == nil {
+				t.Fatalf("Allocate() result = %#v, error = %v; want success", result, err)
+			}
+			if !slices.Equal(repo.listedBuckets, wantBuckets) {
+				t.Fatalf("listed buckets = %v, want bounded probes %v", repo.listedBuckets, wantBuckets)
+			}
+			if repo.lists != len(buckets)+1 || repo.listedBatchSizes[len(buckets)] != 100 {
+				t.Fatalf("query batch sizes = %v, want initial single buckets then one batch of 100", repo.listedBatchSizes)
+			}
+		})
 	}
 }
 
-func TestMicrosoftEmptyGlobalFallbackIsDefinitive(t *testing.T) {
-	repo := &allocationLockRepo{
-		config: ProductAllocationConfig{
-			ProjectID: 4, ProductID: 5, ProductType: coredomain.ProductTypeMicrosoft, MainWeight: 1,
-		},
-		noCandidates: true,
-	}
-
-	result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
-		OrderNo: "order-empty", BuyerUserID: 3, ProjectProductID: 5, EmailSuffix: "missing.example",
+func TestMicrosoftProbeBudgetSurvivesMissesAndContention(t *testing.T) {
+	previous, existed := runtimeconfig.Snapshot()["bucket_probe_count"]
+	runtimeconfig.Set("bucket_probe_count", "8")
+	t.Cleanup(func() {
+		if existed {
+			runtimeconfig.Set("bucket_probe_count", previous)
+		} else {
+			runtimeconfig.Delete("bucket_probe_count")
+		}
 	})
-
-	if result != nil || !errors.Is(err, domain.ErrDefinitiveInventoryExhausted) {
-		t.Fatalf("Allocate() result = %#v, error = %v; want definitive exhaustion", result, err)
+	orderNo := ""
+	for i := 0; i < 10000; i++ {
+		candidate := fmt.Sprintf("order-wrap-%d", i)
+		if bucketProbeSequence(candidate, 4, string(domain.MicrosoftMailboxMain), MicrosoftBucketCount)[0] == MicrosoftBucketCount-1 {
+			orderNo = candidate
+			break
+		}
 	}
-	if repo.lists != bucketProbeCount+1 {
-		t.Fatalf("candidate queries = %d, want %d bucket probes plus one global confirmation", repo.lists, bucketProbeCount+1)
+	if orderNo == "" {
+		t.Fatal("could not find a wraparound order")
+	}
+	for _, name := range []string{"empty", "contended", "write conflict", "expanded write conflict", "transaction retry"} {
+		t.Run(name, func(t *testing.T) {
+			base := &allocationLockRepo{
+				config:       ProductAllocationConfig{ProjectID: 4, ProductID: 5, ProductType: coredomain.ProductTypeMicrosoft, MainWeight: 1},
+				noCandidates: name == "empty",
+			}
+			wantErr := domain.ErrInsufficientInventory
+			if name != "empty" {
+				wantErr = domain.ErrAllocationConflict
+				first := MicrosoftBucketCount - 1
+				if name == "expanded write conflict" {
+					first = (first + 107) % MicrosoftBucketCount
+				}
+				staleID, busyID := uint(first)+2048, uint(first)+4096
+				base.candidates = []MicrosoftCandidate{{ResourceID: staleID}, {ResourceID: busyID}}
+				base.emptyBuckets = make(map[uint16]bool)
+				for bucket := uint16(0); bucket < MicrosoftBucketCount; bucket++ {
+					base.emptyBuckets[bucket] = bucket != first
+				}
+				if name == "contended" {
+					base.candidateUnavailable = map[uint]bool{staleID: true}
+					base.rootUnavailable = map[uint]bool{busyID: true}
+				} else {
+					base.writeConflict = true
+				}
+			}
+			repo := &allocationReplayRaceRepo{allocationLockRepo: base, retryTransaction: name == "transaction retry"}
+			result, err := NewUseCase(repo).Allocate(context.Background(), AllocateCommand{
+				OrderNo: orderNo, BuyerUserID: 3, ProjectProductID: 5,
+			})
+			if result != nil || !errors.Is(err, wantErr) || errors.Is(err, domain.ErrDefinitiveInventoryExhausted) {
+				t.Fatalf("Allocate() result = %#v, error = %v; want %v without global exhaustion", result, err, wantErr)
+			}
+			if repo.lists != 9 || len(repo.listedBuckets) != 108 || repo.listedBatchSizes[8] != 100 {
+				t.Fatalf("queries=%d buckets=%d batches=%v, want 8 single queries plus one batch of 100", repo.lists, len(repo.listedBuckets), repo.listedBatchSizes)
+			}
+			for i, bucket := range repo.listedBuckets {
+				if want := (int(MicrosoftBucketCount) - 1 + i) % int(MicrosoftBucketCount); bucket != want {
+					t.Fatalf("probe %d used bucket %d, want %d", i, bucket, want)
+				}
+			}
+		})
+	}
+}
+
+func TestMicrosoftProbeWindowsKeepScopesAndMailboxesSeparate(t *testing.T) {
+	for _, name := range []string{"supply scopes", "mailboxes"} {
+		t.Run(name, func(t *testing.T) {
+			repo := &allocationLockRepo{config: ProductAllocationConfig{
+				ProjectID: 4, ProductID: 5, ProductType: coredomain.ProductTypeMicrosoft, MainWeight: 1,
+			}}
+			cmd := AllocateCommand{OrderNo: "separate-probe-windows", BuyerUserID: 3, ProjectProductID: 5}
+			if name == "supply scopes" {
+				repo.emptyScope = domain.SupplyScopeOwned
+				cmd.SupplyScopes = []domain.SupplyScope{domain.SupplyScopeOwned, domain.SupplyScopePublic}
+			} else {
+				repo.config.PlusWeight = 1
+				repo.emptyMailbox = microsoftMailboxPreferences(cmd.OrderNo, repo.config)[0]
+			}
+			result, err := NewUseCase(repo).Allocate(context.Background(), cmd)
+			if err != nil || result == nil {
+				t.Fatalf("Allocate() = %#v, %v; first empty path must not consume the next path's budget", result, err)
+			}
+			if repo.lists != bucketProbeCountValue()+2 {
+				t.Fatalf("candidate queries = %d, want one exhausted path then one successful bucket", repo.lists)
+			}
+		})
 	}
 }
 
