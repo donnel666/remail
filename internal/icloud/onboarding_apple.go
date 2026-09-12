@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -599,7 +600,7 @@ func (f *appleOnboardingFlow) submitAppleIDQuestions(secret iCloudOnboardingSecr
 	return nil
 }
 
-func (f *appleOnboardingFlow) prepareTrustedPhone(boundNumber string) error {
+func (f *appleOnboardingFlow) prepareTrustedPhone(boundNumber string, attempt int) error {
 	body, err := f.request(http.MethodGet, strings.TrimRight(f.state.ServiceURL, "/")+"/auth", nil, true, false, false, false, false, "text/html")
 	if err != nil {
 		return err
@@ -610,7 +611,7 @@ func (f *appleOnboardingFlow) prepareTrustedPhone(boundNumber string) error {
 	if len(phones) == 0 {
 		return &AppleOnboardingError{Category: "trusted_phone_missing", SafeMessage: "Apple did not return the trusted phone number."}
 	}
-	phone, lastTwo, err := selectAppleOnboardingTrustedPhone(phones, boundNumber)
+	phone, lastTwo, err := selectAppleOnboardingTrustedPhone(phones, boundNumber, attempt)
 	if err != nil {
 		return err
 	}
@@ -647,34 +648,47 @@ func appleOnboardingTrustedPhones(value any) []any {
 	return nil
 }
 
-func selectAppleOnboardingTrustedPhone(phones []any, boundNumber string) (map[string]any, string, error) {
+func selectAppleOnboardingTrustedPhone(phones []any, boundNumber string, attempt int) (map[string]any, string, error) {
 	boundDigits := appleOnboardingDigits(boundNumber)
 	if boundDigits == "" && len(phones) != 1 {
 		return nil, "", &AppleOnboardingError{Category: "phone_binding_ambiguous", SafeMessage: "Multiple Apple trusted phones require an explicit bound phone number."}
 	}
-	var selected map[string]any
-	lastTwo := ""
-	matches := 0
+	type phoneMatch struct {
+		phone   map[string]any
+		lastTwo string
+		id      uint64
+	}
+	var matches []phoneMatch
+	invalidID := false
 	for _, value := range phones {
 		candidate := appleOnboardingMap(value)
 		candidateLastTwo := appleOnboardingTrustedPhoneSuffix(candidate)
 		if candidateLastTwo == "" || (boundDigits != "" && !strings.HasSuffix(boundDigits, candidateLastTwo)) {
 			continue
 		}
-		selected = candidate
-		lastTwo = candidateLastTwo
-		matches++
+		id, err := strconv.ParseUint(appleOnboardingString(candidate["id"]), 10, 64)
+		invalidID = invalidID || err != nil
+		matches = append(matches, phoneMatch{phone: candidate, lastTwo: candidateLastTwo, id: id})
 	}
-	if matches == 0 {
+	if len(matches) == 0 {
 		if boundDigits == "" {
 			return nil, "", &AppleOnboardingError{Category: "invalid_response", SafeMessage: "Apple returned an invalid trusted phone.", Retryable: true}
 		}
 		return nil, "", &AppleOnboardingError{Category: "phone_binding_mismatch", SafeMessage: "The Apple trusted phones do not match the permanently bound phone number."}
 	}
-	if matches > 1 {
-		return nil, "", &AppleOnboardingError{Category: "phone_binding_ambiguous", SafeMessage: "Multiple Apple trusted phones match the permanently bound phone number."}
+	if len(matches) == 1 {
+		return matches[0].phone, matches[0].lastTwo, nil
 	}
-	return selected, lastTwo, nil
+	if invalidID {
+		return nil, "", &AppleOnboardingError{Category: "invalid_response", SafeMessage: "Apple returned an invalid trusted phone ID.", Retryable: true}
+	}
+	// Try matching Apple IDs in descending numeric order across SMS rounds.
+	sort.SliceStable(matches, func(i, j int) bool { return matches[i].id > matches[j].id })
+	if attempt >= len(matches) {
+		return nil, "", &AppleOnboardingError{Category: "phone_binding_exhausted", SafeMessage: "All matching Apple trusted phone IDs have been tried without successful verification."}
+	}
+	selected := matches[max(attempt, 0)]
+	return selected.phone, selected.lastTwo, nil
 }
 
 func appleOnboardingTrustedPhoneSuffix(phone map[string]any) string {

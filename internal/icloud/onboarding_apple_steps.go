@@ -52,7 +52,7 @@ func (f *appleOnboardingFlow) prepareICloud(request AppleOnboardingRequest) (_ A
 	needRepair := false
 	switch {
 	case status == http.StatusConflict && authType == "hsa2":
-		if err := f.prepareTrustedPhone(request.PhoneNumber); err != nil {
+		if err := f.prepareTrustedPhone(request.PhoneNumber, request.TrustedPhoneAttempt); err != nil {
 			return AppleOnboardingResponse{}, err
 		}
 		return AppleOnboardingResponse{Next: smsPurpose, CountryCode: f.state.AccountCountry, TrustedPhoneLastTwo: f.state.PendingPhoneLastTwo}, nil
@@ -330,7 +330,7 @@ func (f *appleOnboardingFlow) prepareFamily(request AppleOnboardingRequest) (App
 	authType := strings.ToLower(appleOnboardingString(complete["authType"]))
 	switch {
 	case status == http.StatusConflict && authType == "hsa2":
-		if err := f.prepareTrustedPhone(request.PhoneNumber); err != nil {
+		if err := f.prepareTrustedPhone(request.PhoneNumber, request.TrustedPhoneAttempt); err != nil {
 			return AppleOnboardingResponse{}, err
 		}
 		return AppleOnboardingResponse{Next: smsPurpose, TrustedPhoneLastTwo: f.state.PendingPhoneLastTwo}, nil
@@ -464,7 +464,7 @@ func (f *appleOnboardingFlow) prepareManage(request AppleOnboardingRequest) (App
 	authType := strings.ToLower(appleOnboardingString(complete["authType"]))
 	switch {
 	case status == http.StatusConflict && authType == "hsa2":
-		if err := f.prepareTrustedPhone(request.PhoneNumber); err != nil {
+		if err := f.prepareTrustedPhone(request.PhoneNumber, request.TrustedPhoneAttempt); err != nil {
 			return AppleOnboardingResponse{}, err
 		}
 		return AppleOnboardingResponse{Next: smsPurpose, TrustedPhoneLastTwo: f.state.PendingPhoneLastTwo}, nil
@@ -534,7 +534,7 @@ func (f *appleOnboardingFlow) fetchManage(request AppleOnboardingRequest) (Apple
 			return AppleOnboardingResponse{}, err
 		}
 	}
-	_, lastTwo, _ := selectAppleOnboardingTrustedPhone(appleOnboardingTrustedPhones(data), request.PhoneNumber)
+	_, lastTwo, _ := selectAppleOnboardingTrustedPhone(appleOnboardingTrustedPhones(data), request.PhoneNumber, 0)
 	return AppleOnboardingResponse{Next: "ready", CountryCode: f.state.AccountCountry, TrustedPhoneLastTwo: lastTwo}, nil
 }
 

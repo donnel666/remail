@@ -70,6 +70,7 @@ type AppleOnboardingRequest struct {
 	SMSPurpose           string
 	PhoneNumber          string
 	PhoneCountryCode     string
+	TrustedPhoneAttempt  int
 	Code                 string
 	FamilyInviteURL      string
 	FamilyOrganizerEmail string

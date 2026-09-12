@@ -735,7 +735,7 @@ func (s *Service) waitICloudOnboardingSMS(ctx context.Context, task *iCloudOnboa
 func (s *Service) verifyICloudOnboardingSMS(ctx context.Context, task *iCloudOnboardingTaskModel, secret iCloudOnboardingSecret) error {
 	code := strings.TrimSpace(task.ManualVerificationCode)
 	if code == "" {
-		return s.advanceICloudOnboardingTask(ctx, task, "sms_wait", nil, nil)
+		return s.advanceICloudOnboardingTask(ctx, task, "sms_wait", nil, map[string]any{"stage_attempts": task.StageAttempts})
 	}
 	next := map[string]string{
 		appleSMSICloudLogin: "icloud_finish", appleSMSPhoneEnrollment: "icloud_finish",
@@ -807,7 +807,7 @@ func (s *Service) recoverICloudOnboardingSMSVerification(ctx context.Context, ta
 	}
 	restart := appleOnboardingRestartStage(task.PendingSMSPurpose)
 	s.cancelICloudOnboardingSMSChallenge(context.WithoutCancel(ctx), task)
-	updates := map[string]any{"session_payload": iCloudOnboardingSessionCheckpoint(task), "manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil}
+	updates := map[string]any{"session_payload": iCloudOnboardingSessionCheckpoint(task), "manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil, "stage_attempts": task.StageAttempts}
 	if task.PendingSMSPurpose != appleSMSOldCookieLogin {
 		updates["pending_sms_purpose"] = ""
 	}
@@ -1378,6 +1378,7 @@ func (s *Service) executeICloudOnboardingApple(ctx context.Context, task *iCloud
 	request.Session = append(request.Session[:0], task.SessionPayload...)
 	request.PhoneNumber = firstNonEmpty(request.PhoneNumber, task.BoundPhoneNumber)
 	request.PhoneCountryCode = firstNonEmpty(request.PhoneCountryCode, task.BoundPhoneCountryCode)
+	request.TrustedPhoneAttempt = task.StageAttempts
 	if request.PhoneCountryCode == "" && isICloudOnboardingPhoneBindingPending(task) {
 		request.PhoneCountryCode = task.CountryCode
 	}
@@ -1416,7 +1417,7 @@ func (s *Service) handleICloudOnboardingAppleError(ctx context.Context, task *iC
 		default:
 			return s.failICloudOnboardingTask(ctx, task, "invalid_restart_stage", "Apple onboarding could not recover its authentication session.")
 		}
-		updates := map[string]any{"session_payload": iCloudOnboardingSessionCheckpoint(task), "manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil}
+		updates := map[string]any{"session_payload": iCloudOnboardingSessionCheckpoint(task), "manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil, "stage_attempts": task.StageAttempts}
 		if !isICloudOldCookieBackfill(task) {
 			updates["pending_sms_purpose"] = ""
 		}
@@ -1430,7 +1431,7 @@ func (s *Service) handleICloudOnboardingAppleError(ctx context.Context, task *iC
 			retryAt = &value
 		}
 		value := retryAt.UTC().Truncate(time.Millisecond)
-		return s.retryICloudOnboardingTask(ctx, task, task.Stage, &value, firstNonEmpty(appleErr.Category, "apple_retryable"), appleErr.SafeMessage, nil)
+		return s.retryICloudOnboardingTask(ctx, task, task.Stage, &value, firstNonEmpty(appleErr.Category, "apple_retryable"), appleErr.SafeMessage, map[string]any{"stage_attempts": task.StageAttempts})
 	}
 	category := strings.TrimSpace(appleErr.Category)
 	if category == "" {

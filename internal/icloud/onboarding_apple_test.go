@@ -401,7 +401,7 @@ func TestAppleOnboardingRejectsBadCodeAndMismatchedPermanentPhone(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = flow.prepareTrustedPhone("15550000034")
+	err = flow.prepareTrustedPhone("15550000034", 0)
 	providerErr, ok = err.(*AppleOnboardingError)
 	if !ok || providerErr.Category != "phone_binding_mismatch" {
 		t.Fatalf("unexpected phone mismatch: %#v", err)
@@ -656,12 +656,21 @@ func TestAppleOnboardingSelectsUniquePermanentlyBoundTrustedPhone(t *testing.T) 
 	tests := []struct {
 		name         string
 		phones       string
+		boundNumber  string
+		attempt      int
 		wantID       string
+		wantLastTwo  string
 		wantCategory string
 	}{
 		{name: "second phone", phones: `[{"id":1,"lastTwoDigits":"99"},{"id":2,"lastTwoDigits":"34"}]`, wantID: "2"},
 		{name: "no match", phones: `[{"id":1,"lastTwoDigits":"99"},{"id":2,"lastTwoDigits":"88"}]`, wantCategory: "phone_binding_mismatch"},
-		{name: "ambiguous", phones: `[{"id":1,"lastTwoDigits":"34"},{"id":2,"lastTwoDigits":"34"}]`, wantCategory: "phone_binding_ambiguous"},
+		{name: "largest matching id", phones: `[{"id":1,"lastTwoDigits":"34"},{"id":2,"lastTwoDigits":"34"}]`, wantID: "2"},
+		{name: "production masked phones select id 4", phones: `[{"id":4,"lastTwoDigits":"50","numberWithDialCode":"+1 (•••) •••-••50","obfuscatedNumber":"(•••) •••-••50"},{"id":1,"lastTwoDigits":"50","numberWithDialCode":"+1 (•••) •••-••50","obfuscatedNumber":"(•••) •••-••50"},{"id":99,"lastTwoDigits":"99"}]`, boundNumber: "15550000050", wantID: "4", wantLastTwo: "50"},
+		{name: "ids compare numerically", phones: `[{"id":"10","lastTwoDigits":"34"},{"id":9,"lastTwoDigits":"34"}]`, wantID: `"10"`},
+		{name: "next attempt selects next lower id", phones: `[{"id":1,"lastTwoDigits":"34"},{"id":4,"lastTwoDigits":"34"}]`, attempt: 1, wantID: "1"},
+		{name: "matching ids exhausted", phones: `[{"id":4,"lastTwoDigits":"34"},{"id":1,"lastTwoDigits":"34"}]`, attempt: 2, wantCategory: "phone_binding_exhausted"},
+		{name: "single candidate retains SMS retries", phones: `[{"id":4,"lastTwoDigits":"34"}]`, attempt: 2, wantID: "4"},
+		{name: "invalid matching id cannot be ranked", phones: `[{"id":2,"lastTwoDigits":"34"},{"id":"invalid","lastTwoDigits":"34"}]`, wantCategory: "invalid_response"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -671,7 +680,7 @@ func TestAppleOnboardingSelectsUniquePermanentlyBoundTrustedPhone(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = flow.prepareTrustedPhone("15550000034")
+			err = flow.prepareTrustedPhone(firstNonEmpty(test.boundNumber, "15550000034"), test.attempt)
 			if test.wantCategory != "" {
 				providerErr, ok := err.(*AppleOnboardingError)
 				if !ok || providerErr.Category != test.wantCategory {
@@ -679,8 +688,17 @@ func TestAppleOnboardingSelectsUniquePermanentlyBoundTrustedPhone(t *testing.T) 
 				}
 				return
 			}
-			if err != nil || string(flow.state.PendingTrustedPhoneID) != test.wantID || flow.state.PendingPhoneLastTwo != "34" {
+			if err != nil || string(flow.state.PendingTrustedPhoneID) != test.wantID || flow.state.PendingPhoneLastTwo != firstNonEmpty(test.wantLastTwo, "34") {
 				t.Fatalf("selected phone id=%s suffix=%q err=%v", flow.state.PendingTrustedPhoneID, flow.state.PendingPhoneLastTwo, err)
+			}
+			session.responses = append(session.responses, appleOnboardingScriptedResponse{status: http.StatusOK, body: `{}`})
+			if _, err := flow.sendSMS(AppleOnboardingRequest{SMSPurpose: appleSMSManageLogin}); err != nil {
+				t.Fatal(err)
+			}
+			payload := appleOnboardingMap(session.requestBodies[len(session.requestBodies)-1])
+			sentID, _ := json.Marshal(appleOnboardingMap(payload["phoneNumber"])["id"])
+			if string(sentID) != test.wantID {
+				t.Fatalf("SMS sent to phone id=%s, want %s", sentID, test.wantID)
 			}
 		})
 	}

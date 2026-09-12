@@ -1948,6 +1948,58 @@ func TestICloudOnboardingSMSRetryBudgetSurvivesFreshPrepare(t *testing.T) {
 	}
 }
 
+func TestICloudOnboardingSMSRetriesAdvanceTrustedPhoneSelection(t *testing.T) {
+	for _, stage := range []string{"sms_verify", "sms_wait"} {
+		t.Run(stage, func(t *testing.T) {
+			service, db, task, apple := newOnboardingStateTest(t)
+			service.smsPhones = &onboardingSMSUncertainPhone{status: kitesim.SMSChallengeExpired}
+			code := ""
+			if stage == "sms_verify" {
+				code = "000000"
+			}
+			if err := db.Model(task).Updates(map[string]any{
+				"stage": stage, "bound_phone_source": "manual", "kitesim_phone_id": 7,
+				"pending_sms_purpose": appleSMSICloudLogin, "manual_verification_code": code,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			processOnboardingStageForTest(t, service, db, task)
+			if task.Stage != "icloud_prepare" || task.StageAttempts != 1 {
+				t.Fatalf("SMS failure did not advance candidate: stage=%s attempt=%d", task.Stage, task.StageAttempts)
+			}
+			for _, retry := range []error{
+				&AppleOnboardingError{Category: "apple_unavailable", Retryable: true},
+				appleOnboardingRestart("icloud_prepare"),
+			} {
+				apple.prepareErr = retry
+				processOnboardingStageForTest(t, service, db, task)
+				if task.Stage != "icloud_prepare" || task.StageAttempts != 1 {
+					t.Fatalf("authentication retry reset candidate: stage=%s attempt=%d", task.Stage, task.StageAttempts)
+				}
+			}
+			capture := &onboardingRequestApple{}
+			service.onboardingApple = capture
+			processOnboardingStageForTest(t, service, db, task)
+			if capture.request.TrustedPhoneAttempt != 1 || capture.request.PhoneNumber != "14155550001" ||
+				task.KitesimPhoneID == nil || *task.KitesimPhoneID != 7 || task.BoundPhoneNumber != "14155550001" {
+				t.Fatalf("next attempt lost the candidate or permanent phone: attempt=%d phone=%s", capture.request.TrustedPhoneAttempt, capture.request.PhoneNumber)
+			}
+		})
+	}
+	t.Run("missing code", func(t *testing.T) {
+		service, db, task, _ := newOnboardingStateTest(t)
+		if err := db.Model(task).Updates(map[string]any{
+			"stage": "sms_verify", "stage_attempts": 1, "pending_sms_purpose": appleSMSICloudLogin,
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+		processOnboardingStageForTest(t, service, db, task)
+		if task.Stage != "sms_wait" || task.StageAttempts != 1 {
+			t.Fatalf("waiting for a missing code reset candidate: stage=%s attempt=%d", task.Stage, task.StageAttempts)
+		}
+	})
+}
+
 func TestICloudOnboardingConfirmsAcceptedSMSSend(t *testing.T) {
 	service, db, task, _ := newOnboardingStateTest(t)
 	phone := &onboardingSMSSuccessPhone{sentAt: service.now().UTC(), expiresAt: service.now().UTC().Add(2 * time.Minute)}
