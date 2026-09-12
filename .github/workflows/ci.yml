@@ -256,7 +256,7 @@ jobs:
             -p 9000:9000 \
             -e MINIO_ROOT_USER=remail \
             -e MINIO_ROOT_PASSWORD=remail_secret \
-            minio/minio:latest server /data --console-address ":9001"
+            quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data --console-address ":9001"
           for _ in $(seq 1 60); do
             if curl -sf http://127.0.0.1:9000/minio/health/live >/dev/null; then
               exit 0
