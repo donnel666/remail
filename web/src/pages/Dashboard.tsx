@@ -32,6 +32,7 @@ import {
 
 import { MailboxClientModal } from "./workbench/mailbox-client";
 import { ApplyProjectModal } from "./apply-project-modal";
+import { PROTO_EMAIL_SUFFIXES } from "./resources/proto-model";
 import {
   clearCheckoutAttempt,
   loadCheckoutAttempt,
@@ -118,7 +119,13 @@ function toWorkbenchSuffixProducts(
   baseProduct: WorkbenchProduct,
   suffixes: ProductInventoryTotal["suffixes"],
 ) {
-  const products = (suffixes ?? []).flatMap((suffix) => {
+  const sourceSuffixes = baseProduct.productType === "proto"
+    ? PROTO_EMAIL_SUFFIXES.map((suffix) => {
+        const inventory = suffixes?.find((item) => normalizeInventorySuffix(item.suffix) === suffix);
+        return { suffix, totalAvailable: inventory?.totalAvailable ?? 0, publicAvailable: inventory?.publicAvailable ?? 0 };
+      })
+    : suffixes ?? [];
+  const products = sourceSuffixes.flatMap((suffix) => {
     const emailSuffix = normalizeInventorySuffix(suffix.suffix);
     if (!emailSuffix) return [];
     return [
@@ -251,7 +258,7 @@ export function toWorkbenchProducts(
     warrantyHours: Math.max(1, Math.ceil(product.warrantyMinutes / 60)),
   };
   const suffixProducts =
-    product.type === "microsoft" || product.type === "domain"
+    product.type === "microsoft" || product.type === "domain" || product.type === "proto"
       ? toWorkbenchSuffixProducts(
           baseProduct,
           inventory?.suffixes ?? product.suffixes,
@@ -275,7 +282,13 @@ export function mergeProjectInventory(
     inventoryLoaded: true,
     products: baseProducts.flatMap((product) => {
       const inventoryItem = inventoryByProductType.get(product.productType);
-      if (!inventoryItem) return [product];
+      if (!inventoryItem) {
+        if (product.productType === "proto") {
+          const children = project.products.filter((item) => item.productType === "proto" && item.id !== item.productType);
+          return [product, ...(children.length ? children : toWorkbenchSuffixProducts(product, undefined))];
+        }
+        return [product];
+      }
       const totalAvailable = inventoryItem.totalAvailable ?? 0;
       const publicAvailable = inventoryItem.publicAvailable ?? 0;
       const baseProduct: WorkbenchProduct = {
@@ -289,7 +302,7 @@ export function mergeProjectInventory(
           inventoryItem.purchasePublicAvailable ?? publicAvailable,
       };
       const suffixProducts =
-        product.productType === "microsoft" || product.productType === "domain"
+        product.productType === "microsoft" || product.productType === "domain" || product.productType === "proto"
           ? toWorkbenchSuffixProducts(baseProduct, inventoryItem.suffixes)
           : [];
       return [baseProduct, ...suffixProducts];

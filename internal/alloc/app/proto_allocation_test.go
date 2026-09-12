@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,16 +35,26 @@ func (r *protoExistingAllocationRepo) ProtoAllocationReady(context.Context, stri
 type protoAllocationLockRepo struct {
 	*allocationLockRepo
 	protoCandidates []ProtoCandidate
+	listedSuffixes  []string
+	lockedSuffixes  []string
 	created         *domain.ProtoAllocation
 }
 
-func (r *protoAllocationLockRepo) ListProtoSourceCandidates(context.Context, uint, uint, domain.SupplyScope, *uint16, int) ([]ProtoCandidate, error) {
-	return r.protoCandidates, nil
+func (r *protoAllocationLockRepo) ListProtoSourceCandidates(_ context.Context, _, _ uint, _ domain.SupplyScope, _ *uint16, _ int, suffix string) ([]ProtoCandidate, error) {
+	r.listedSuffixes = append(r.listedSuffixes, suffix)
+	var candidates []ProtoCandidate
+	for _, candidate := range r.protoCandidates {
+		if suffix == "" || strings.HasSuffix(candidate.Email, "@"+suffix) {
+			candidates = append(candidates, candidate)
+		}
+	}
+	return candidates, nil
 }
 
-func (r *protoAllocationLockRepo) LockProtoCandidate(_ context.Context, resourceID, _, _ uint, _ domain.SupplyScope) (*ProtoCandidate, error) {
+func (r *protoAllocationLockRepo) LockProtoCandidate(_ context.Context, resourceID, _, _ uint, _ domain.SupplyScope, suffix string) (*ProtoCandidate, error) {
+	r.lockedSuffixes = append(r.lockedSuffixes, suffix)
 	for _, candidate := range r.protoCandidates {
-		if candidate.ResourceID == resourceID {
+		if candidate.ResourceID == resourceID && (suffix == "" || strings.HasSuffix(candidate.Email, "@"+suffix)) {
 			return &candidate, nil
 		}
 	}

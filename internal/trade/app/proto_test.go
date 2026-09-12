@@ -7,9 +7,407 @@ import (
 	"testing"
 	"time"
 
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/trade/domain"
 	"github.com/stretchr/testify/require"
 )
+
+type protoSuffixInventorySpy struct{ randomSuffixBatchInventorySpy }
+
+func (*protoSuffixInventorySpy) ProtoProtocolReady() bool { return true }
+
+func (*protoSuffixInventorySpy) ProtoAllocationReady(context.Context, string, uint) (bool, error) {
+	return true, nil
+}
+
+func TestProtoCheckoutSuffixSelectionAndReplay(t *testing.T) {
+	for _, productID := range []uint{0, 9} {
+		for _, mode := range []domain.ServiceMode{domain.ServiceModeCode, domain.ServiceModePurchase} {
+			for _, tc := range []struct {
+				selector string
+				suffix   string
+				random   int
+			}{
+				{selector: "proto", suffix: "proton.me", random: 1},
+				{selector: "proton.me", suffix: "proton.me"},
+				{selector: " @PROTONMAIL.COM ", suffix: "protonmail.com"},
+			} {
+				t.Run(fmt.Sprintf("%d/%s/%s", productID, mode, tc.selector), func(t *testing.T) {
+					repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+					inventory := &protoSuffixInventorySpy{randomSuffixBatchInventorySpy{
+						checkoutInventorySpy: checkoutInventorySpy{available: true},
+						allocationType:       domain.AllocationTypeProto, selectedSuffix: tc.suffix, successful: 1,
+					}}
+					wallet := &batchWalletSpy{}
+					uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeProto}, wallet, inventory,
+						&issuedOrderTokenSpy{tokens: map[string]*OrderToken{}})
+					request := batchRequest("proto-suffix", 1)
+					request.ProductID = productID
+					request.EmailSuffix = tc.selector
+					request.ServiceMode = string(mode)
+					request.SupplyPolicy = string(domain.SupplyPolicyPublicOnly)
+
+					result, err := uc.Checkout(context.Background(), request)
+					require.NoError(t, err)
+					require.Equal(t, domain.ProductTypeProto, result.Order.ProductType)
+					require.Equal(t, domain.AllocationTypeProto, *result.Order.AllocationType)
+					require.Equal(t, "batch-1@"+tc.suffix, result.Order.DeliveryEmail)
+					require.Equal(t, []string{tc.suffix}, inventory.allocationSuffixes)
+					require.Equal(t, tc.random, inventory.selectionCalls)
+					prepared, err := prepareCheckoutRequest(request)
+					require.NoError(t, err)
+					require.NoError(t, finalizeCheckoutProduct(&prepared, domain.ProductTypeProto))
+					require.Equal(t, prepared.fingerprint, result.Order.RequestFingerprint, "random resolution must not change the request fingerprint")
+
+					replayed, err := uc.Checkout(context.Background(), request)
+					require.NoError(t, err)
+					require.Equal(t, result.Order.OrderNo, replayed.Order.OrderNo)
+					require.Equal(t, result.Order.DeliveryEmail, replayed.Order.DeliveryEmail)
+					require.Equal(t, tc.random, inventory.selectionCalls, "replay must not select another suffix")
+					require.Equal(t, 1, inventory.allocationCalls)
+					require.Equal(t, 1, wallet.debits)
+				})
+			}
+		}
+	}
+}
+
+func TestProtoCheckoutBatchResolvesOneSuffixAndDoesNotRerollOnExhaustion(t *testing.T) {
+	for _, selector := range []string{coredomain.RandomProtoSuffixSelector, "protonmail.com"} {
+		t.Run(selector, func(t *testing.T) {
+			repo := &batchRepoSpy{orders: map[string]domain.Order{}}
+			inventory := &protoSuffixInventorySpy{randomSuffixBatchInventorySpy{
+				checkoutInventorySpy: checkoutInventorySpy{available: true},
+				allocationType:       domain.AllocationTypeProto, selectedSuffix: "protonmail.com", successful: 2,
+			}}
+			uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeProto}, &batchWalletSpy{}, inventory,
+				&issuedOrderTokenSpy{tokens: map[string]*OrderToken{}})
+			requests := make([]CheckoutRequest, 4)
+			for i := range requests {
+				requests[i] = batchRequest(fmt.Sprintf("proto-batch-%d", i), len(requests))
+				requests[i].ProductID = 0
+				requests[i].EmailSuffix = selector
+				requests[i].SupplyPolicy = string(domain.SupplyPolicyPublicOnly)
+			}
+
+			items, err := uc.CheckoutBatch(context.Background(), requests)
+			require.NoError(t, err)
+			require.Len(t, items, 4)
+			require.NoError(t, items[0].Err)
+			require.NoError(t, items[1].Err)
+			require.ErrorIs(t, items[2].Err, domain.ErrInsufficientInventory)
+			require.ErrorIs(t, items[3].Err, domain.ErrInsufficientInventory)
+			require.Equal(t, []string{"protonmail.com", "protonmail.com", "protonmail.com"}, inventory.allocationSuffixes)
+			if selector == coredomain.RandomProtoSuffixSelector {
+				require.Equal(t, 1, inventory.selectionCalls)
+				require.Equal(t, selector, inventory.lastSelection.Selector)
+			} else {
+				require.Zero(t, inventory.selectionCalls)
+			}
+		})
+	}
+}
+
+func TestProtoCheckoutRejectsUnsupportedSuffix(t *testing.T) {
+	for _, suffix := range []string{"gmail.com", "outlook", "domain", "proto.me", "buyer@proton.me"} {
+		for _, productID := range []uint{0, 9} {
+			request := batchRequest("proto-invalid", 1)
+			request.ProductID, request.EmailSuffix = productID, suffix
+			prepared, err := prepareCheckoutRequest(request)
+			if err == nil {
+				err = finalizeCheckoutProduct(&prepared, domain.ProductTypeProto)
+			}
+			require.ErrorIs(t, err, domain.ErrInvalidOrderRequest, suffix)
+		}
+	}
+}
+
+type protoReplayQuery struct {
+	channel                  domain.ClientChannel
+	userID, apiKey           uint
+	key, fingerprint, legacy string
+}
+
+type protoReplayRepo struct {
+	*batchPreloadRepoSpy
+	rechecking bool
+	queries    []protoReplayQuery
+}
+
+func (r *protoReplayRepo) FindOrderByIdempotency(ctx context.Context, channel domain.ClientChannel, userID uint, apiKeyID *uint, key, fingerprint, legacy string) (*domain.Order, error) {
+	if r.rechecking {
+		r.queries = append(r.queries, protoReplayQuery{channel, userID, apiKeyFingerprint(apiKeyID), key, fingerprint, legacy})
+	}
+	order, err := r.batchRepoSpy.FindOrderByIdempotency(ctx, channel, userID, apiKeyID, key, fingerprint, legacy)
+	if err != nil || order == nil {
+		return order, err
+	}
+	// Match the real repository: the generic batch spy deliberately ignores
+	// identity/fingerprints and would otherwise hide an unsafe replay lookup.
+	if order.UserID != userID || order.ClientChannel != channel || apiKeyFingerprint(order.APIKeyID) != apiKeyFingerprint(apiKeyID) {
+		return nil, nil
+	}
+	if order.ProductType == domain.ProductTypeLegacyRandom {
+		fingerprint = legacy
+	}
+	if order.RequestFingerprint != fingerprint {
+		return nil, domain.ErrIdempotencyConflict
+	}
+	return order, nil
+}
+
+type protoRandomMissInventory struct {
+	*protoSuffixInventorySpy
+	beforeMiss func(context.Context)
+}
+
+func (s *protoRandomMissInventory) SelectRandomSuffix(ctx context.Context, cmd RandomSuffixSelectionCommand) (string, error) {
+	selected, err := s.protoSuffixInventorySpy.SelectRandomSuffix(ctx, cmd)
+	if s.beforeMiss == nil {
+		return selected, err
+	}
+	beforeMiss := s.beforeMiss
+	s.beforeMiss = nil
+	beforeMiss(ctx)
+	return "", domain.ErrInsufficientInventory
+}
+
+func (s *protoRandomMissInventory) Allocate(ctx context.Context, cmd AllocationCommand) (*AllocationResult, error) {
+	// Like the real allocator, a persisted but unallocated pending order can
+	// still carry its original random selector into fulfillment.
+	if cmd.EmailSuffix == coredomain.RandomProtoSuffixSelector {
+		cmd.EmailSuffix = s.selectedSuffix
+	}
+	return s.protoSuffixInventorySpy.Allocate(ctx, cmd)
+}
+
+func TestProtoRandomInventoryMissReplaysConcurrentOrders(t *testing.T) {
+	for _, channel := range []domain.ClientChannel{domain.ClientChannelConsole, domain.ClientChannelAPIKey} {
+		for _, tc := range []struct {
+			name                         string
+			quantity, preloaded, winners int
+			productID                    uint
+		}{
+			{"single winner", 1, 0, 1, 0}, {"single true shortage", 1, 0, 0, 0},
+			{"single winner with product ID", 1, 0, 1, 9},
+			{"batch winners", 3, 1, 2, 0}, {"batch with one genuinely missing key", 3, 1, 1, 0},
+		} {
+			t.Run(string(channel)+"/"+tc.name, func(t *testing.T) {
+				base := &batchRepoSpy{orders: map[string]domain.Order{}}
+				repo := &protoReplayRepo{batchPreloadRepoSpy: &batchPreloadRepoSpy{batchRepoSpy: base}}
+				inventory := &protoRandomMissInventory{protoSuffixInventorySpy: &protoSuffixInventorySpy{randomSuffixBatchInventorySpy: randomSuffixBatchInventorySpy{
+					checkoutInventorySpy: checkoutInventorySpy{available: true}, allocationType: domain.AllocationTypeProto,
+					selectedSuffix: "protonmail.com", successful: tc.preloaded + tc.winners,
+				}}}
+				wallet, tokens := &batchWalletSpy{}, &issuedOrderTokenSpy{tokens: map[string]*OrderToken{}}
+				uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeProto}, wallet, inventory, tokens)
+				requests := make([]CheckoutRequest, tc.quantity)
+				for i := range requests {
+					requests[i] = batchRequest(fmt.Sprintf("proto-race-%d", i), tc.quantity)
+					requests[i].ProductID, requests[i].EmailSuffix, requests[i].ClientChannel = tc.productID, coredomain.RandomProtoSuffixSelector, channel
+					requests[i].SupplyPolicy = string(domain.SupplyPolicyPublicOnly)
+					if channel == domain.ClientChannelAPIKey {
+						keyID := uint(41)
+						requests[i].APIKeyID = &keyID
+					}
+				}
+				for _, request := range requests[:tc.preloaded] {
+					_, err := uc.Checkout(context.Background(), request)
+					require.NoError(t, err)
+				}
+				selectionsAfterWinner := 0
+				inventory.beforeMiss = func(ctx context.Context) {
+					// Real checkout calls commit between the loser's initial lookup
+					// and its zero-inventory result; no goroutine timing is needed.
+					for _, request := range requests[tc.preloaded : tc.preloaded+tc.winners] {
+						winner, err := uc.Checkout(ctx, request)
+						require.NoError(t, err)
+						require.Equal(t, domain.OrderStatusActive, winner.Order.Status)
+					}
+					selectionsAfterWinner = inventory.selectionCalls
+					repo.rechecking = true
+				}
+				var items []CheckoutBatchItem
+				if tc.quantity == 1 {
+					result, err := uc.Checkout(context.Background(), requests[0])
+					items = []CheckoutBatchItem{{Result: result, Err: err}}
+				} else {
+					var err error
+					items, err = uc.CheckoutBatch(context.Background(), requests)
+					require.NoError(t, err)
+				}
+				require.Len(t, items, tc.quantity)
+				for i, item := range items {
+					if i >= tc.preloaded+tc.winners {
+						require.ErrorIs(t, item.Err, domain.ErrInsufficientInventory)
+						require.Nil(t, item.Result)
+						continue
+					}
+					require.NoError(t, item.Err)
+					require.NotNil(t, item.Result)
+					require.Equal(t, base.orders[requests[i].IdempotencyKey].OrderNo, item.Result.Order.OrderNo)
+					require.Equal(t, "batch-"+fmt.Sprint(i+1)+"@protonmail.com", item.Result.Order.DeliveryEmail)
+					require.False(t, item.Result.Created)
+				}
+				var expectedQueries []protoReplayQuery
+				for _, request := range requests[tc.preloaded:] {
+					prepared, err := prepareCheckoutRequest(request)
+					require.NoError(t, err)
+					require.NoError(t, finalizeCheckoutProduct(&prepared, domain.ProductTypeProto))
+					expectedQueries = append(expectedQueries, protoReplayQuery{channel, request.UserID, apiKeyFingerprint(request.APIKeyID),
+						request.IdempotencyKey, prepared.fingerprint, checkoutPreparationFingerprint(prepared, "")})
+				}
+				require.Equal(t, expectedQueries, repo.queries)
+				require.Equal(t, selectionsAfterWinner, inventory.selectionCalls, "loser must not reroll")
+				require.Equal(t, tc.preloaded+tc.winners, inventory.allocationCalls)
+				require.Equal(t, tc.preloaded+tc.winners, wallet.debits)
+				require.Equal(t, tc.preloaded+tc.winners, tokens.issues)
+				require.Len(t, base.orders, tc.preloaded+tc.winners)
+			})
+		}
+	}
+}
+
+func TestProtoRandomInventoryMissPreservesRecheckFailures(t *testing.T) {
+	lookupErr := errors.New("winner lookup database error")
+	for _, tc := range []struct {
+		name                string
+		quantity, preloaded int
+		failure             string
+		wantErr             error
+	}{
+		{"single fingerprint conflict", 1, 0, "fingerprint", domain.ErrIdempotencyConflict},
+		{"batch base-key conflict", 2, 0, "fingerprint", domain.ErrIdempotencyConflict},
+		{"batch tail conflict preserves successful head", 2, 1, "fingerprint", domain.ErrIdempotencyConflict},
+		{"single database error", 1, 0, "database", lookupErr},
+		{"batch database error", 2, 1, "database", lookupErr},
+		{"recheck validates stored product", 1, 0, "product", domain.ErrInvalidOrderRequest},
+		{"another API key is not a matching replay", 1, 0, "api_key", domain.ErrInsufficientInventory},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := &batchRepoSpy{orders: map[string]domain.Order{}}
+			repo := &protoReplayRepo{batchPreloadRepoSpy: &batchPreloadRepoSpy{batchRepoSpy: base}}
+			inventory := &protoRandomMissInventory{protoSuffixInventorySpy: &protoSuffixInventorySpy{randomSuffixBatchInventorySpy: randomSuffixBatchInventorySpy{
+				checkoutInventorySpy: checkoutInventorySpy{available: true}, allocationType: domain.AllocationTypeProto,
+				selectedSuffix: "proton.me", successful: tc.preloaded + 1,
+			}}}
+			wallet, tokens := &batchWalletSpy{}, &issuedOrderTokenSpy{tokens: map[string]*OrderToken{}}
+			uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeProto}, wallet, inventory, tokens)
+			requests := make([]CheckoutRequest, tc.quantity)
+			keyID := uint(41)
+			for i := range requests {
+				requests[i] = batchRequest(fmt.Sprintf("proto-recheck-%d", i), tc.quantity)
+				requests[i].ProductID, requests[i].EmailSuffix = 0, coredomain.RandomProtoSuffixSelector
+				requests[i].ClientChannel, requests[i].APIKeyID = domain.ClientChannelAPIKey, &keyID
+				requests[i].SupplyPolicy = string(domain.SupplyPolicyPublicOnly)
+			}
+			for _, request := range requests[:tc.preloaded] {
+				_, err := uc.Checkout(context.Background(), request)
+				require.NoError(t, err)
+			}
+			selectionsAfterWinner := 0
+			inventory.beforeMiss = func(ctx context.Context) {
+				request := requests[tc.preloaded]
+				switch tc.failure {
+				case "fingerprint":
+					request.ServiceMode = string(domain.ServiceModeCode)
+				case "api_key":
+					otherKey := uint(42)
+					request.APIKeyID = &otherKey
+				}
+				winner, err := uc.Checkout(ctx, request)
+				require.NoError(t, err)
+				require.Equal(t, domain.OrderStatusActive, winner.Order.Status)
+				switch tc.failure {
+				case "database":
+					base.findErrors = map[string]error{request.IdempotencyKey: lookupErr}
+				case "product":
+					order := base.orders[request.IdempotencyKey]
+					order.ProductType = domain.ProductTypeGmail
+					base.orders[request.IdempotencyKey] = order
+				}
+				selectionsAfterWinner = inventory.selectionCalls
+				repo.rechecking = true
+			}
+			if tc.quantity == 1 {
+				result, err := uc.Checkout(context.Background(), requests[0])
+				require.ErrorIs(t, err, tc.wantErr)
+				require.Nil(t, result)
+				if tc.failure == "database" {
+					require.NotErrorIs(t, err, domain.ErrInsufficientInventory)
+				}
+			} else {
+				items, err := uc.CheckoutBatch(context.Background(), requests)
+				if tc.failure == "fingerprint" && tc.preloaded == 0 {
+					require.ErrorIs(t, err, domain.ErrIdempotencyConflict)
+					require.Nil(t, items)
+				} else {
+					require.NoError(t, err)
+					require.Len(t, items, tc.quantity)
+					for i, item := range items {
+						if tc.failure != "database" && i < tc.preloaded {
+							require.NoError(t, item.Err)
+							require.Equal(t, base.orders[requests[i].IdempotencyKey].OrderNo, item.Result.Order.OrderNo)
+						} else {
+							require.ErrorIs(t, item.Err, tc.wantErr)
+							require.NotErrorIs(t, item.Err, domain.ErrInsufficientInventory)
+							require.Nil(t, item.Result)
+						}
+					}
+				}
+			}
+			require.Len(t, repo.queries, 1)
+			require.Equal(t, selectionsAfterWinner, inventory.selectionCalls)
+			require.Equal(t, tc.preloaded+1, wallet.debits)
+			require.Equal(t, tc.preloaded+1, inventory.allocationCalls)
+			require.Equal(t, tc.preloaded+1, tokens.issues)
+			require.Len(t, base.orders, tc.preloaded+1)
+		})
+	}
+}
+
+func TestProtoRandomInventoryMissResumesTheStoredOrderState(t *testing.T) {
+	for _, status := range []domain.OrderStatus{domain.OrderStatusPendingPayment, domain.OrderStatusFailed} {
+		t.Run(string(status), func(t *testing.T) {
+			base := &batchRepoSpy{orders: map[string]domain.Order{}}
+			repo := &protoReplayRepo{batchPreloadRepoSpy: &batchPreloadRepoSpy{batchRepoSpy: base}}
+			inventory := &protoRandomMissInventory{protoSuffixInventorySpy: &protoSuffixInventorySpy{randomSuffixBatchInventorySpy: randomSuffixBatchInventorySpy{
+				checkoutInventorySpy: checkoutInventorySpy{available: true}, allocationType: domain.AllocationTypeProto,
+				selectedSuffix: "protonmail.com", successful: 1,
+			}}}
+			wallet := &batchWalletSpy{}
+			uc := NewUseCase(repo, &batchOrderingSpy{productType: domain.ProductTypeProto}, wallet, inventory, &issuedOrderTokenSpy{tokens: map[string]*OrderToken{}})
+			request := batchRequest("proto-stored-state", 1)
+			request.ProductID, request.EmailSuffix = 0, coredomain.RandomProtoSuffixSelector
+			inventory.beforeMiss = func(context.Context) {
+				prepared, err := prepareCheckoutRequest(request)
+				require.NoError(t, err)
+				require.NoError(t, finalizeCheckoutProduct(&prepared, domain.ProductTypeProto))
+				order := batchOrder(request.IdempotencyKey, status, domain.OrderFailureInsufficientBalance)
+				order.ProductType, order.RequestFingerprint = domain.ProductTypeProto, prepared.fingerprint
+				base.orders[request.IdempotencyKey] = order
+				repo.rechecking = true
+			}
+			result, err := uc.Checkout(context.Background(), request)
+			if status == domain.OrderStatusFailed {
+				require.ErrorIs(t, err, domain.ErrInsufficientBalance, "replay keeps the stored failure, not the random precheck error")
+				require.Equal(t, domain.OrderStatusFailed, result.Order.Status)
+				require.Zero(t, wallet.debits)
+				require.Zero(t, inventory.allocationCalls)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, domain.OrderStatusActive, result.Order.Status)
+				require.Equal(t, 1, wallet.debits)
+				require.Equal(t, 1, inventory.allocationCalls)
+			}
+			require.Equal(t, "order-"+request.IdempotencyKey, result.Order.OrderNo)
+			require.False(t, result.Created)
+			require.Len(t, base.orders, 1)
+			require.Len(t, repo.queries, 1)
+			require.Equal(t, 1, inventory.selectionCalls, "stored orders must not rerun the trade random precheck")
+		})
+	}
+}
 
 type protoRefundRepo struct{ *unavailableRefundRepoStub }
 

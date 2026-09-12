@@ -424,6 +424,133 @@ func TestInventoryReadsDoNotChangeRefreshSchedule(t *testing.T) {
 	require.ElementsMatch(t, []allocapp.InventoryCacheEntry{statsEntry, productsEntry}, claimed)
 }
 
+func TestProtoLegacySnapshotReadKeepsAlreadyDueRefreshEligible(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	cache, ctx := NewInventoryCache(client), context.Background()
+	entry := allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheProducts, ProjectID: 10}
+	key := inventoryCacheKey(entry.Kind, entry.ProjectID)
+	legacy := &allocapp.ProjectProductInventoryTotals{ProjectID: 10, TotalAvailable: 7,
+		Items: []allocapp.ProductInventoryTotal{{ProductID: 20, ProductType: coredomain.ProductTypeProto, TotalAvailable: 7, PublicAvailable: 7}}}
+	require.NoError(t, cache.SetProductInventoryTotals(ctx, 10, legacy, time.Hour))
+	cutoff := time.Now().Add(-time.Second)
+	due := float64(cutoff.Add(-time.Minute).UnixMilli())
+	require.NoError(t, client.ZAdd(ctx, inventoryCacheScheduleKey, redis.Z{Score: due, Member: key}).Err())
+	payload, err := client.Get(ctx, key).Result()
+	require.NoError(t, err)
+	ttl := server.TTL(key)
+	queue := &inventoryRefreshQueueStub{}
+	useCase := allocapp.NewUseCase(&inventoryCacheRepoStub{}, queue)
+	useCase.SetInventoryCache(cache)
+	useCase.SetProtoProtocolReady(true)
+
+	for range 2 {
+		snapshots, err := useCase.GetProductInventorySnapshots(ctx, []uint{10})
+		require.NoError(t, err)
+		require.EqualValues(t, 7, snapshots[10].TotalAvailable)
+		require.Empty(t, snapshots[10].Items[0].Suffixes)
+		require.Equal(t, due, client.ZScore(ctx, inventoryCacheScheduleKey, key).Val())
+	}
+	marked, err := useCase.MarkProductInventoryUnavailable(ctx, allocapp.ProductInventoryAvailabilityRequest{
+		ProjectID: 10, ProductID: 20, EmailSuffix: "proton.me", PublicOnly: true,
+	})
+	require.NoError(t, err)
+	require.False(t, marked)
+	require.Equal(t, due, client.ZScore(ctx, inventoryCacheScheduleKey, key).Val())
+	require.Equal(t, 3, queue.calls)
+	require.Equal(t, payload, client.Get(ctx, key).Val(), "request scheduling must not rewrite the snapshot")
+	require.Equal(t, ttl, server.TTL(key))
+	claimed, err := cache.ClaimDueInventory(ctx, cutoff, 5)
+	require.NoError(t, err)
+	require.Equal(t, []allocapp.InventoryCacheEntry{entry}, claimed)
+}
+
+func TestAdvanceInventoryMovesOnlyFutureScoresAndAddsMissingEntries(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	cache, ctx := NewInventoryCache(client), context.Background()
+	entries := []allocapp.InventoryCacheEntry{
+		{Kind: allocapp.InventoryCacheProducts, ProjectID: 10},
+		{Kind: allocapp.InventoryCacheProducts, ProjectID: 11},
+		{Kind: allocapp.InventoryCacheProducts, ProjectID: 12},
+	}
+	key := func(index int) string { return inventoryCacheKey(entries[index].Kind, entries[index].ProjectID) }
+	cutoff := time.Now().Add(-time.Second)
+	due := float64(cutoff.Add(-time.Minute).UnixMilli())
+	future := float64(time.Now().Add(time.Hour).UnixMilli())
+	require.NoError(t, client.ZAdd(ctx, inventoryCacheScheduleKey,
+		redis.Z{Score: due, Member: key(0)}, redis.Z{Score: future, Member: key(1)},
+	).Err())
+	before := float64(time.Now().UnixMilli())
+	require.NoError(t, cache.AdvanceInventory(ctx, entries))
+	after := float64(time.Now().UnixMilli())
+	require.Equal(t, due, client.ZScore(ctx, inventoryCacheScheduleKey, key(0)).Val())
+	for _, index := range []int{1, 2} {
+		score, err := client.ZScore(ctx, inventoryCacheScheduleKey, key(index)).Result()
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, score, before)
+		require.LessOrEqual(t, score, after)
+		require.Less(t, score, future)
+	}
+	claimed, err := cache.ClaimDueInventory(ctx, cutoff, 5)
+	require.NoError(t, err)
+	require.Equal(t, entries[:1], claimed)
+
+	// Unlike request-side AdvanceInventory, explicit/worker RequeueInventory
+	// intentionally postpones even an existing due member past this cutoff.
+	require.NoError(t, client.ZAdd(ctx, inventoryCacheScheduleKey, redis.Z{Score: due, Member: key(0)}).Err())
+	require.NoError(t, cache.RequeueInventory(ctx, entries[:1]))
+	require.Greater(t, client.ZScore(ctx, inventoryCacheScheduleKey, key(0)).Val(), float64(cutoff.UnixMilli()))
+	claimed, err = cache.ClaimDueInventory(ctx, cutoff, 5)
+	require.NoError(t, err)
+	require.Empty(t, claimed)
+}
+
+func TestInventoryWorkerFailureAndLockBusyRequeuePastFixedCutoff(t *testing.T) {
+	for _, busy := range []bool{false, true} {
+		name := "failure"
+		if busy {
+			name = "lock busy"
+		}
+		t.Run(name, func(t *testing.T) {
+			server := miniredis.RunT(t)
+			client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+			t.Cleanup(func() { require.NoError(t, client.Close()) })
+			cache, ctx := NewInventoryCache(client), context.Background()
+			entry := allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheStats, ProjectID: 1}
+			key := inventoryCacheKey(entry.Kind, entry.ProjectID)
+			cutoff := time.Now().Add(-time.Second)
+			require.NoError(t, client.ZAdd(ctx, inventoryCacheScheduleKey,
+				redis.Z{Score: float64(cutoff.Add(-time.Minute).UnixMilli()), Member: key},
+			).Err())
+			if busy {
+				_, acquired, err := cache.AcquireInventoryRefresh(ctx, entry, time.Minute)
+				require.NoError(t, err)
+				require.True(t, acquired)
+			}
+			useCase := allocapp.NewUseCase(&partialInventoryRefreshRepoStub{})
+			useCase.SetInventoryCache(cache)
+			result, err := useCase.RefreshInventoryCacheBefore(ctx, cutoff)
+			require.NoError(t, err)
+			require.Equal(t, 1, result.Attempted)
+			if busy {
+				require.Equal(t, 1, result.Skipped)
+			} else {
+				require.Equal(t, 1, result.Failed)
+			}
+			require.Greater(t, client.ZScore(ctx, inventoryCacheScheduleKey, key).Val(), float64(cutoff.UnixMilli()))
+			claimed, err := cache.ClaimDueInventory(ctx, cutoff, 5)
+			require.NoError(t, err)
+			require.Empty(t, claimed, "the worker must not repeat failed/busy entries in the same round")
+			claimed, err = cache.ClaimDueInventory(ctx, time.Now(), 5)
+			require.NoError(t, err)
+			require.Equal(t, []allocapp.InventoryCacheEntry{entry}, claimed)
+		})
+	}
+}
+
 func TestInventoryRefreshDiscoversAndRestoresBackendSchedule(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})

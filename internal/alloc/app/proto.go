@@ -94,8 +94,21 @@ func (uc *UseCase) protoInventoryTotals(totals *ProjectProductInventoryTotals) *
 	return result
 }
 
+func protoSuffixInventoryMissing(item ProductInventoryTotal) bool {
+	if item.ProductType != coredomain.ProductTypeProto {
+		return false
+	}
+	var total, public int64
+	for _, suffix := range item.Suffixes {
+		total += suffix.TotalAvailable
+		public += suffix.PublicAvailable
+	}
+	// A private overlay can add suffix rows while legacy public detail is absent.
+	return item.TotalAvailable > total || item.PublicAvailable > public
+}
+
 func (uc *UseCase) allocateProto(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig) (*domain.UnifiedAllocation, error) {
-	if cmd.EmailSuffix != "" || !domain.IsValidServiceMode(cmd.ServiceMode) {
+	if (cmd.EmailSuffix != "" && !coredomain.IsProtoEmailSuffix(cmd.EmailSuffix)) || !domain.IsValidServiceMode(cmd.ServiceMode) {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
 	if !uc.protoProtocolReady.Load() {
@@ -131,7 +144,7 @@ func (uc *UseCase) allocateProto(ctx context.Context, cmd AllocateCommand, confi
 		} else {
 			platform.RecordAllocationBucketFallback(string(domain.AllocationTypeProto), "probes_exhausted")
 		}
-		candidates, err := repo.ListProtoSourceCandidates(ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, bucket, limit)
+		candidates, err := repo.ListProtoSourceCandidates(ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, bucket, limit, cmd.EmailSuffix)
 		if err != nil {
 			return nil, err
 		}
@@ -149,7 +162,7 @@ func (uc *UseCase) allocateProto(ctx context.Context, cmd AllocateCommand, confi
 				resourceBusy = true
 				continue
 			}
-			locked, err := repo.LockProtoCandidate(ctx, candidate.ResourceID, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope)
+			locked, err := repo.LockProtoCandidate(ctx, candidate.ResourceID, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, cmd.EmailSuffix)
 			if err != nil {
 				return nil, err
 			}

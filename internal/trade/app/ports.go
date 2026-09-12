@@ -962,10 +962,10 @@ func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.P
 			}
 			prepared.emailSuffix = ""
 		case domain.ProductTypeProto:
-			if prepared.selectorSuffix != "proto" {
+			if prepared.selectorSuffix != coredomain.RandomProtoSuffixSelector && !coredomain.IsProtoEmailSuffix(prepared.selectorSuffix) {
 				return domain.ErrInvalidOrderRequest
 			}
-			prepared.emailSuffix = ""
+			prepared.emailSuffix = prepared.selectorSuffix
 		default:
 			return domain.ErrInvalidOrderRequest
 		}
@@ -1000,7 +1000,11 @@ func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.P
 				prepared.emailSuffix = normalized
 			}
 		}
-	case domain.ProductTypeLegacyRandom, domain.ProductTypeGmail, domain.ProductTypeGmailVariant, domain.ProductTypeICloud, domain.ProductTypeProto:
+	case domain.ProductTypeProto:
+		if prepared.emailSuffix != "" && prepared.emailSuffix != coredomain.RandomProtoSuffixSelector && !coredomain.IsProtoEmailSuffix(prepared.emailSuffix) {
+			return domain.ErrInvalidOrderRequest
+		}
+	case domain.ProductTypeLegacyRandom, domain.ProductTypeGmail, domain.ProductTypeGmailVariant, domain.ProductTypeICloud:
 		prepared.emailSuffix = ""
 	default:
 		return domain.ErrInvalidOrderRequest
@@ -1515,7 +1519,7 @@ func (uc *UseCase) resolveRandomCheckoutSuffixes(ctx context.Context, prepared [
 	for i := range prepared {
 		item := &prepared[i]
 		if item.prepareErr != nil || item.existing != nil || item.quote == nil ||
-			(item.emailSuffix != coredomain.RandomMicrosoftSuffixSelector && item.emailSuffix != coredomain.RandomDomainSuffixSelector) {
+			(item.emailSuffix != coredomain.RandomMicrosoftSuffixSelector && item.emailSuffix != coredomain.RandomDomainSuffixSelector && item.emailSuffix != coredomain.RandomProtoSuffixSelector) {
 			continue
 		}
 		key := selectionKey{
@@ -1538,6 +1542,30 @@ func (uc *UseCase) resolveRandomCheckoutSuffixes(ctx context.Context, prepared [
 		}
 		if selection.err != nil {
 			if errors.Is(selection.err, domain.ErrInsufficientInventory) {
+				// The same-key winner may have consumed the last stock after our
+				// initial lookup. Recover that order before rejecting this item;
+				// a shared failed selection still needs each item's own identity.
+				existing, findErr := uc.repo.FindOrderByIdempotency(ctx,
+					item.request.ClientChannel, item.request.UserID, item.request.APIKeyID,
+					item.idempotencyKey, item.fingerprint, checkoutPreparationFingerprint(*item, ""))
+				if errors.Is(findErr, domain.ErrIdempotencyConflict) {
+					item.prepareErr = findErr
+					if i == 0 {
+						return findErr
+					}
+					continue
+				}
+				if findErr != nil {
+					return findErr
+				}
+				if existing != nil {
+					if err := finalizeCheckoutProduct(item, existing.ProductType); err != nil {
+						item.prepareErr = err
+						continue
+					}
+					item.existing = existing
+					continue
+				}
 				item.prepareErr = selection.err
 				continue
 			}
@@ -3172,12 +3200,15 @@ func checkoutProductTypeForSuffix(suffix string) (domain.ProductType, error) {
 		return domain.ProductTypeGmailVariant, nil
 	case "icloud.com":
 		return domain.ProductTypeICloud, nil
-	case "proto":
+	case coredomain.RandomProtoSuffixSelector:
 		return domain.ProductTypeProto, nil
 	case coredomain.RandomMicrosoftSuffixSelector:
 		return domain.ProductTypeMicrosoft, nil
 	case coredomain.RandomDomainSuffixSelector:
 		return domain.ProductTypeDomain, nil
+	}
+	if coredomain.IsProtoEmailSuffix(suffix) {
+		return domain.ProductTypeProto, nil
 	}
 	if coredomain.IsMicrosoftEmailDomain("selector@" + suffix) {
 		return domain.ProductTypeMicrosoft, nil

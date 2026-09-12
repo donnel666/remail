@@ -26,15 +26,15 @@ func TestProtoMigrationAndTypedAllocationConstraintsMySQL(t *testing.T) {
 	var resourceID uint
 	require.NoError(t, db.Exec(`INSERT INTO email_resources(type, owner_user_id) VALUES ('proto', 1)`).Error)
 	require.NoError(t, db.Raw(`SELECT LAST_INSERT_ID()`).Scan(&resourceID).Error)
-	require.NoError(t, db.Exec(`INSERT INTO proto_resources(id, resource_type, owner_user_id, email_address, password, status) VALUES (?, 'proto', 1, 'one@proto.test', 'pw', 'normal')`, resourceID).Error)
+	require.NoError(t, db.Exec(`INSERT INTO proto_resources(id, resource_type, owner_user_id, email_address, email_domain, password, status) VALUES (?, 'proto', 1, 'one@proton.me', 'proton.me', 'pw', 'normal')`, resourceID).Error)
 	require.NoError(t, db.Exec(`INSERT INTO allocation_order_guards(order_no, type) VALUES ('PROTO-MIGRATION-1', 'proto')`).Error)
-	require.NoError(t, db.Exec(`INSERT INTO proto_allocations(order_no, project_id, product_id, resource_id, owner_user_id, guard_type, supply_scope, service_mode, mailbox, email) VALUES ('PROTO-MIGRATION-1', 10, 20, ?, 1, 'proto', 'public', 'code', 'main', 'one@proto.test')`, resourceID).Error)
+	require.NoError(t, db.Exec(`INSERT INTO proto_allocations(order_no, project_id, product_id, resource_id, owner_user_id, guard_type, supply_scope, service_mode, mailbox, email) VALUES ('PROTO-MIGRATION-1', 10, 20, ?, 1, 'proto', 'public', 'code', 'main', 'one@proton.me')`, resourceID).Error)
 
 	// A second active allocation for the same resource and project is rejected,
 	// while a released historical row remains representable.
 	require.NoError(t, db.Exec(`UPDATE proto_allocations SET status = 'released', released_at = CURRENT_TIMESTAMP WHERE order_no = 'PROTO-MIGRATION-1'`).Error)
 	require.NoError(t, db.Exec(`INSERT INTO allocation_order_guards(order_no, type) VALUES ('PROTO-MIGRATION-2', 'proto')`).Error)
-	require.NoError(t, db.Exec(`INSERT INTO proto_allocations(order_no, project_id, product_id, resource_id, owner_user_id, guard_type, supply_scope, service_mode, mailbox, email) VALUES ('PROTO-MIGRATION-2', 10, 20, ?, 1, 'proto', 'public', 'code', 'main', 'one@proto.test')`, resourceID).Error)
+	require.NoError(t, db.Exec(`INSERT INTO proto_allocations(order_no, project_id, product_id, resource_id, owner_user_id, guard_type, supply_scope, service_mode, mailbox, email) VALUES ('PROTO-MIGRATION-2', 10, 20, ?, 1, 'proto', 'public', 'code', 'main', 'one@proton.me')`, resourceID).Error)
 	require.NoError(t, db.Exec(`INSERT INTO allocation_order_guards(order_no, type) VALUES ('PROTO-MIGRATION-3', 'proto')`).Error)
-	require.Error(t, db.Exec(`INSERT INTO proto_allocations(order_no, project_id, product_id, resource_id, owner_user_id, guard_type, supply_scope, service_mode, mailbox, email) VALUES ('PROTO-MIGRATION-3', 10, 20, ?, 1, 'proto', 'public', 'code', 'main', 'one@proto.test')`, resourceID).Error)
+	require.Error(t, db.Exec(`INSERT INTO proto_allocations(order_no, project_id, product_id, resource_id, owner_user_id, guard_type, supply_scope, service_mode, mailbox, email) VALUES ('PROTO-MIGRATION-3', 10, 20, ?, 1, 'proto', 'public', 'code', 'main', 'one@proton.me')`, resourceID).Error)
 }

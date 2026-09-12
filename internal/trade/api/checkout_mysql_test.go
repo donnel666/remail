@@ -2731,7 +2731,7 @@ func seedTradeBaseFacts(t *testing.T, db *gorm.DB, productType string) {
 	dotWeight := 0
 	plusWeight := 0
 	codeWindowMinutes := 10
-	if productType == "microsoft" || productType == "gmail" {
+	if productType == "microsoft" || productType == "gmail" || productType == "proto" {
 		mainWeight = 1
 	}
 	if productType == "gmail" {

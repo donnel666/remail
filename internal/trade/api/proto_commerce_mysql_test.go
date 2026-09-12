@@ -11,7 +11,12 @@ import (
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	allocdomain "github.com/donnel666/remail/internal/alloc/domain"
 	allocinfra "github.com/donnel666/remail/internal/alloc/infra"
+	billingapp "github.com/donnel666/remail/internal/billing/app"
 	billinginfra "github.com/donnel666/remail/internal/billing/infra"
+	coreapp "github.com/donnel666/remail/internal/core/app"
+	coreinfra "github.com/donnel666/remail/internal/core/infra"
+	openapiapp "github.com/donnel666/remail/internal/openapi/app"
+	openapiinfra "github.com/donnel666/remail/internal/openapi/infra"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/platform/testmysql"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
@@ -19,6 +24,69 @@ import (
 	tradeinfra "github.com/donnel666/remail/internal/trade/infra"
 	"github.com/stretchr/testify/require"
 )
+
+func TestProtoSuffixCheckoutAndInventoryMySQL(t *testing.T) {
+	db := newTradeMySQLTestDB(t)
+	seedTradeBase(t, db, "proto")
+	creditBuyer(t, db, 2, "10.00")
+	require.NoError(t, db.Exec(`INSERT INTO email_resources(id, type, owner_user_id)
+		VALUES (3000, 'proto', 1), (3001, 'proto', 1), (3002, 'proto', 2)`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO proto_resources(id, resource_type, owner_user_id, email_address, email_domain, password, status, for_sale)
+		VALUES (3000, 'proto', 1, 'public@proton.me', 'proton.me', 'test-only', 'normal', TRUE),
+		       (3001, 'proto', 1, 'public@protonmail.com', 'protonmail.com', 'test-only', 'normal', TRUE),
+		       (3002, 'proto', 2, 'private@protonmail.com', 'protonmail.com', 'test-only', 'normal', FALSE)`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO proto_sessions(resource_id, credential_revision, version, payload)
+		VALUES (3000, 1, 1, '{}'), (3001, 1, 1, '{}'), (3002, 1, 1, '{}')`).Error)
+	allocation := allocapp.NewUseCase(allocinfra.NewRepo(db))
+	allocation.SetProtoProtocolReady(true)
+	uc := NewModule(db, coreapp.NewProjectUseCase(coreinfra.NewProjectRepo(db)),
+		billingapp.NewWalletUseCase(billinginfra.NewBillingRepo(db)), allocation,
+		openapiapp.NewUseCase(openapiinfra.NewRepo(db))).UseCase
+	ctx := context.Background()
+	totals, err := allocation.GetProductInventoryTotals(ctx, 10, 2)
+	require.NoError(t, err)
+	require.Len(t, totals.Items, 1)
+	require.EqualValues(t, 3, totals.Items[0].TotalAvailable)
+	require.EqualValues(t, 2, totals.Items[0].PublicAvailable)
+	require.ElementsMatch(t, []allocapp.ProductInventorySuffixTotal{
+		{Suffix: "proton.me", TotalAvailable: 1, PublicAvailable: 1},
+		{Suffix: "protonmail.com", TotalAvailable: 2, PublicAvailable: 1},
+	}, totals.Items[0].Suffixes)
+
+	request := tradeapp.CheckoutRequest{UserID: 2, ProjectID: 10, EmailSuffix: "protonmail.com",
+		ServiceMode: "code", SupplyPolicy: "public_only", ClientChannel: tradedomain.ClientChannelConsole,
+		IdempotencyKey: "proto-exact"}
+	exact, err := uc.Checkout(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, "public@protonmail.com", exact.Order.DeliveryEmail)
+	replay, err := uc.Checkout(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, exact.Order.OrderNo, replay.Order.OrderNo)
+	request.EmailSuffix = "proton.me"
+	_, err = uc.Checkout(ctx, request)
+	require.ErrorIs(t, err, tradedomain.ErrIdempotencyConflict)
+	request.EmailSuffix, request.IdempotencyKey = "protonmail.com", "proto-exact-empty"
+	_, err = uc.Checkout(ctx, request)
+	require.ErrorIs(t, err, tradedomain.ErrInsufficientInventory, "must not allocate the other public suffix or private stock")
+
+	request.EmailSuffix, request.IdempotencyKey, request.ServiceMode = "proto", "proto-random", "purchase"
+	random, err := uc.Checkout(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, "public@proton.me", random.Order.DeliveryEmail)
+	request.IdempotencyKey, request.SupplyPolicy = "proto-owned", "private_first"
+	owned, err := uc.Checkout(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, "private@protonmail.com", owned.Order.DeliveryEmail)
+	require.Equal(t, "0.00", owned.Order.PayAmount)
+	for _, result := range []*tradeapp.CheckoutResult{exact, random, owned} {
+		require.Equal(t, tradedomain.ProductTypeProto, result.Order.ProductType)
+		require.Equal(t, tradedomain.AllocationTypeProto, *result.Order.AllocationType)
+		require.NotZero(t, result.AllocationID)
+	}
+	var publicDebits int64
+	require.NoError(t, db.Table("wallet_transactions").Where("transaction_type = 'debit' AND amount < 0").Count(&publicDebits).Error)
+	require.EqualValues(t, 2, publicDebits, "replay, shortage and owned allocation must not add a public debit")
+}
 
 func TestProtoRecoveryAndAllocationIsolationMySQL(t *testing.T) {
 	db := newTradeMySQLTestDB(t)
@@ -144,9 +212,9 @@ func TestProtoRecoveryAndAllocationIsolationMySQL(t *testing.T) {
 	t.Run("different-resources-do-not-lock-their-shared-supplier", func(t *testing.T) {
 		require.NoError(t, db.Exec(`INSERT INTO email_resources(id, type, owner_user_id)
 			VALUES (3000, 'proto', 1), (3001, 'proto', 1)`).Error)
-		require.NoError(t, db.Exec(`INSERT INTO proto_resources(id, resource_type, owner_user_id, email_address, password, status, for_sale)
-			VALUES (3000, 'proto', 1, 'lock-one@example.com', 'secret', 'normal', TRUE),
-			       (3001, 'proto', 1, 'lock-two@example.com', 'secret', 'normal', TRUE)`).Error)
+		require.NoError(t, db.Exec(`INSERT INTO proto_resources(id, resource_type, owner_user_id, email_address, email_domain, password, status, for_sale)
+			VALUES (3000, 'proto', 1, 'lock-one@proton.me', 'proton.me', 'secret', 'normal', TRUE),
+			       (3001, 'proto', 1, 'lock-two@proton.me', 'proton.me', 'secret', 'normal', TRUE)`).Error)
 		require.NoError(t, db.Exec(`INSERT INTO proto_sessions(resource_id, credential_revision, version, payload)
 			VALUES (3000, 1, 1, 'test-only-encrypted-session'), (3001, 1, 1, 'test-only-encrypted-session')`).Error)
 		first := db.Begin()
@@ -156,7 +224,7 @@ func TestProtoRecoveryAndAllocationIsolationMySQL(t *testing.T) {
 		locked, err := allocRepo.LockResourceRoot(firstCtx, 3000, allocdomain.AllocationTypeProto)
 		require.NoError(t, err)
 		require.True(t, locked)
-		one, err := allocRepo.LockProtoCandidate(firstCtx, 3000, 10, 2, allocdomain.SupplyScopePublic)
+		one, err := allocRepo.LockProtoCandidate(firstCtx, 3000, 10, 2, allocdomain.SupplyScopePublic, "proton.me")
 		require.NoError(t, err)
 		require.NotNil(t, one)
 
@@ -167,10 +235,10 @@ func TestProtoRecoveryAndAllocationIsolationMySQL(t *testing.T) {
 		locked, err = allocRepo.LockResourceRoot(secondCtx, 3001, allocdomain.AllocationTypeProto)
 		require.NoError(t, err)
 		require.True(t, locked)
-		two, err := allocRepo.LockProtoCandidate(secondCtx, 3001, 10, 2, allocdomain.SupplyScopePublic)
+		two, err := allocRepo.LockProtoCandidate(secondCtx, 3001, 10, 2, allocdomain.SupplyScopePublic, "proton.me")
 		require.NoError(t, err)
 		require.NotNil(t, two, "another resource's lock must not hide this supplier's inventory")
-		busy, err := allocRepo.LockProtoCandidate(secondCtx, 3000, 10, 2, allocdomain.SupplyScopePublic)
+		busy, err := allocRepo.LockProtoCandidate(secondCtx, 3000, 10, 2, allocdomain.SupplyScopePublic, "proton.me")
 		require.NoError(t, err)
 		require.Nil(t, busy, "the selected Proto child must remain locked")
 

@@ -382,7 +382,7 @@ func containsSupplyScope(scopes []domain.SupplyScope, want domain.SupplyScope) b
 }
 
 func isRandomSuffixSelector(value string) bool {
-	return value == coredomain.RandomMicrosoftSuffixSelector || value == coredomain.RandomDomainSuffixSelector
+	return value == coredomain.RandomMicrosoftSuffixSelector || value == coredomain.RandomDomainSuffixSelector || value == coredomain.RandomProtoSuffixSelector
 }
 
 func randomSuffixMatchesProduct(selector string, productType coredomain.ProductType, suffix string) bool {
@@ -391,6 +391,8 @@ func randomSuffixMatchesProduct(selector string, productType coredomain.ProductT
 		return productType == coredomain.ProductTypeMicrosoft && coredomain.IsMicrosoftEmailDomain("selector@"+suffix)
 	case coredomain.RandomDomainSuffixSelector:
 		return productType == coredomain.ProductTypeDomain && suffix != ""
+	case coredomain.RandomProtoSuffixSelector:
+		return productType == coredomain.ProductTypeProto && coredomain.IsProtoEmailSuffix(suffix)
 	default:
 		return false
 	}
@@ -454,11 +456,16 @@ func (uc *UseCase) selectRandomInventorySuffix(ctx context.Context, config Produ
 	wantType := coredomain.ProductTypeMicrosoft
 	if selector == coredomain.RandomDomainSuffixSelector {
 		wantType = coredomain.ProductTypeDomain
+	} else if selector == coredomain.RandomProtoSuffixSelector {
+		wantType = coredomain.ProductTypeProto
 	} else if selector != coredomain.RandomMicrosoftSuffixSelector {
 		return "", domain.ErrInvalidAllocationRequest
 	}
 	if config.ProductType != wantType {
 		return "", domain.ErrInvalidAllocationRequest
+	}
+	if wantType == coredomain.ProductTypeProto && !uc.ProtoProtocolReady() {
+		return "", domain.ErrInsufficientInventory
 	}
 	for _, scope := range scopes {
 		inventory, err := uc.productSuffixInventoryForSelection(ctx, config, buyerUserID, scope)
@@ -483,6 +490,10 @@ func (uc *UseCase) productSuffixInventoryForSelection(ctx context.Context, confi
 		return nil, err
 	}
 	if totals.Cold {
+		if config.ProductType == coredomain.ProductTypeProto {
+			_, _ = uc.MarkProductInventoryUnavailable(ctx, ProductInventoryAvailabilityRequest{ProjectID: config.ProjectID, ProductID: config.ProductID})
+			return uc.repo.ListProductSuffixInventory(ctx, config, buyerUserID, scope)
+		}
 		return map[string]int64{}, nil
 	}
 	for _, item := range totals.Items {
@@ -491,6 +502,11 @@ func (uc *UseCase) productSuffixInventoryForSelection(ctx context.Context, confi
 		}
 		if item.ProductType != config.ProductType {
 			return nil, domain.ErrInvalidAllocationRequest
+		}
+		if protoSuffixInventoryMissing(item) {
+			// Old Proto snapshots have only an aggregate, not a known-zero suffix list.
+			// The snapshot reader already queued their missing detail for refresh.
+			return uc.repo.ListProductSuffixInventory(ctx, config, buyerUserID, scope)
 		}
 		inventory := make(map[string]int64, len(item.Suffixes))
 		for _, suffix := range item.Suffixes {
@@ -983,7 +999,7 @@ func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint
 	if err != nil {
 		return nil, err
 	}
-	var privateProto []PrivateSingletonInventoryTotal
+	var privateProto []PrivateProductInventoryTotal
 	if protoRepo, ok := uc.repo.(ProtoInventoryRepository); ok {
 		privateProto, err = protoRepo.ListPrivateProtoInventoryTotals(ctx, projectID, viewerUserID)
 		if err != nil {
@@ -998,7 +1014,7 @@ func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint
 	mergePrivateProductInventory(result, privateDomains, coredomain.ProductTypeDomain)
 	mergePrivateSingletonInventory(result, privateGmail, coredomain.ProductTypeGmail)
 	mergePrivateSingletonInventory(result, privateICloud, coredomain.ProductTypeICloud)
-	mergePrivateSingletonInventory(result, privateProto, coredomain.ProductTypeProto)
+	mergePrivateProductInventory(result, privateProto, coredomain.ProductTypeProto)
 	for i := range result.Items {
 		sort.Slice(result.Items[i].Suffixes, func(left, right int) bool {
 			return result.Items[i].Suffixes[left].Suffix < result.Items[i].Suffixes[right].Suffix
@@ -1149,8 +1165,24 @@ func (uc *UseCase) GetProductInventorySnapshot(ctx context.Context, projectID ui
 // and queued for asynchronous refresh.
 func (uc *UseCase) GetProductInventorySnapshots(ctx context.Context, projectIDs []uint) (result map[uint]*ProjectProductInventoryTotals, runErr error) {
 	defer func() {
+		var refresh []InventoryCacheEntry
+		refreshProto := uc.inventoryCache != nil && uc.ProtoProtocolReady()
 		for projectID, totals := range result {
 			result[projectID] = uc.protoInventoryTotals(totals)
+			if !refreshProto || totals == nil {
+				continue
+			}
+			for _, item := range totals.Items {
+				if protoSuffixInventoryMissing(item) {
+					refresh = append(refresh, InventoryCacheEntry{Kind: InventoryCacheProducts, ProjectID: projectID})
+					break
+				}
+			}
+		}
+		if len(refresh) > 0 {
+			if err := uc.inventoryCache.AdvanceInventory(ctx, refresh); err == nil {
+				_ = uc.ScheduleInventoryRefresh(ctx)
+			}
 		}
 	}()
 	projectIDs = uniqueInventoryProjectIDs(projectIDs)
@@ -1231,6 +1263,9 @@ func (uc *UseCase) HasProductInventory(ctx context.Context, req ProductInventory
 		return false, domain.ErrInvalidAllocationRequest
 	}
 	req.EmailSuffix = normalizeEmailSuffix(req.EmailSuffix)
+	if (req.EmailSuffix == coredomain.RandomProtoSuffixSelector || coredomain.IsProtoEmailSuffix(req.EmailSuffix)) && !uc.ProtoProtocolReady() {
+		return false, nil
+	}
 	if uc.inventoryCache == nil {
 		return true, nil
 	}
@@ -1259,6 +1294,10 @@ func (uc *UseCase) HasProductInventory(ctx context.Context, req ProductInventory
 		return true, err
 	}
 	if totals.Cold {
+		if req.EmailSuffix == coredomain.RandomProtoSuffixSelector || coredomain.IsProtoEmailSuffix(req.EmailSuffix) {
+			_, _ = uc.MarkProductInventoryUnavailable(ctx, req)
+			return true, nil
+		}
 		return false, nil
 	}
 	// The shared snapshot contains public supply only. A zero cannot prove that
@@ -1267,10 +1306,17 @@ func (uc *UseCase) HasProductInventory(ctx context.Context, req ProductInventory
 	if !req.PublicOnly {
 		return true, nil
 	}
+	totals = uc.protoInventoryTotals(totals)
 	available, known := productInventoryAvailable(totals, req)
 	if !known {
 		// A newly enabled product can predate its next inventory refresh. Fail open
 		// so a stale read model never overrides the allocator.
+		for _, item := range totals.Items {
+			if item.ProductID == req.ProductID && protoSuffixInventoryMissing(item) {
+				_, _ = uc.MarkProductInventoryUnavailable(ctx, req)
+				break
+			}
+		}
 		return true, nil
 	}
 	return available, nil
@@ -1292,6 +1338,9 @@ func productInventoryAvailable(totals *ProjectProductInventoryTotals, req Produc
 				return item.PublicAvailable > 0, true
 			}
 			return item.TotalAvailable > 0, true
+		}
+		if protoSuffixInventoryMissing(item) && (req.EmailSuffix == coredomain.RandomProtoSuffixSelector || coredomain.IsProtoEmailSuffix(req.EmailSuffix)) {
+			return false, false
 		}
 		if isRandomSuffixSelector(req.EmailSuffix) {
 			for _, suffix := range item.Suffixes {
@@ -1342,7 +1391,7 @@ func (uc *UseCase) MarkProductInventoryUnavailable(ctx context.Context, req Prod
 	// An allocator miss must never synchronously rebuild the project's full
 	// suffix inventory. The scheduled read model can correct the snapshot later;
 	// the indexed allocator remains the authoritative request-time check.
-	if err := uc.inventoryCache.RequeueInventory(ctx, []InventoryCacheEntry{{
+	if err := uc.inventoryCache.AdvanceInventory(ctx, []InventoryCacheEntry{{
 		Kind: InventoryCacheProducts, ProjectID: req.ProjectID,
 	}}); err != nil {
 		return false, err

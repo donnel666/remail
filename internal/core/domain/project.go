@@ -47,6 +47,7 @@ const (
 const (
 	RandomMicrosoftSuffixSelector = "outlook"
 	RandomDomainSuffixSelector    = "domain"
+	RandomProtoSuffixSelector     = "proto"
 )
 
 // MailRuleType identifies which part of a message a rule matches.
@@ -160,6 +161,11 @@ func IsValidProductType(productType ProductType) bool {
 	default:
 		return false
 	}
+}
+
+// IsProtoEmailSuffix reports whether a normalized suffix belongs to Proto inventory.
+func IsProtoEmailSuffix(suffix string) bool {
+	return suffix == "proton.me" || suffix == "protonmail.com"
 }
 
 func IsValidMailRuleType(ruleType MailRuleType) bool {

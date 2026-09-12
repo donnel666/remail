@@ -155,7 +155,7 @@ func TestProtoProjectHistoryDoesNotBlockLiveMailbox(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, live.Messages, 1)
 		require.Equal(t, "new-live-code", live.Messages[0].ID)
-		candidates, err := allocinfra.NewRepo(s.DB).ListProtoSourceCandidates(ctx, 99, 8, allocdomain.SupplyScopePublic, nil, 10)
+		candidates, err := allocinfra.NewRepo(s.DB).ListProtoSourceCandidates(ctx, 99, 8, allocdomain.SupplyScopePublic, nil, 10, "proton.me")
 		require.NoError(t, err)
 		require.Len(t, candidates, 1)
 		return proton.FetchResult{Complete: true}, nil

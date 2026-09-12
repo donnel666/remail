@@ -4,6 +4,8 @@
 
 2026-09-11 更新：导入必须填写 `@proton.me` 或 `@protonmail.com` 的完整邮箱，不再补全裸用户名；Base64 PKL 导入及明文会话流程不变。
 
+2026-09-12 更新：工作台商品按 `Proto → @proton.me / @protonmail.com` 展示。下单 `emailSuffix=proto` 按可用库存量加权随机后缀；`proton.me` 或 `protonmail.com` 只分配指定后缀，缺货不切换。沿用统一下单入口及 `private_first` 自有库存优先机制；批量下单只选择一次后缀，后续库存不足保留已有成功订单并返回剩余失败项。不新增商品类型、订单字段或数据库迁移，也不改变导入、PKL、验证和取件流程。
+
 ## 导入现成的 PKL
 
 一行一条，可在同一文件中混用：

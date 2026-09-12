@@ -336,6 +336,7 @@ type InventoryCache interface {
 	ClearInventoryRefreshFailure(ctx context.Context, entry InventoryCacheEntry) error
 	ClearInventoryRefreshFailures(ctx context.Context, entries []InventoryCacheEntry) error
 	ClaimDueInventory(ctx context.Context, before time.Time, limit int) ([]InventoryCacheEntry, error)
+	AdvanceInventory(ctx context.Context, entries []InventoryCacheEntry) error
 	RequeueInventory(ctx context.Context, entries []InventoryCacheEntry) error
 	DeleteInventory(ctx context.Context, entry InventoryCacheEntry) error
 	AcquireInventoryRefresh(ctx context.Context, entry InventoryCacheEntry, ttl time.Duration) (token string, acquired bool, err error)
@@ -520,12 +521,12 @@ type Repository interface {
 // ProtoRepository keeps the provider implementation separate from existing
 // allocation adapters. A missing Proto implementation is a configuration error.
 type ProtoRepository interface {
-	ListProtoSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int) ([]ProtoCandidate, error)
-	LockProtoCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope) (*ProtoCandidate, error)
+	ListProtoSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int, emailSuffix string) ([]ProtoCandidate, error)
+	LockProtoCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*ProtoCandidate, error)
 	CreateProtoAllocation(ctx context.Context, allocation *domain.ProtoAllocation) error
 	TouchProtoAllocated(ctx context.Context, resourceID uint, allocatedAt time.Time) error
 }
 
 type ProtoInventoryRepository interface {
-	ListPrivateProtoInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]PrivateSingletonInventoryTotal, error)
+	ListPrivateProtoInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]PrivateProductInventoryTotal, error)
 }

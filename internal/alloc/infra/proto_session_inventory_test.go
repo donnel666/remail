@@ -17,14 +17,14 @@ func TestProtoInventoryRequiresCurrentSession(t *testing.T) {
 	for _, statement := range []string{
 		`CREATE TABLE users (id INTEGER PRIMARY KEY, status TEXT, role TEXT)`,
 		`CREATE TABLE email_resources (id INTEGER PRIMARY KEY, type TEXT, owner_user_id INTEGER)`,
-		`CREATE TABLE proto_resources (id INTEGER PRIMARY KEY, resource_type TEXT, owner_user_id INTEGER, email_address TEXT, status TEXT, for_sale BOOLEAN, credential_revision INTEGER, alloc_bucket INTEGER, quality_score INTEGER, last_allocated_at DATETIME)`,
+		`CREATE TABLE proto_resources (id INTEGER PRIMARY KEY, resource_type TEXT, owner_user_id INTEGER, email_address TEXT, email_domain TEXT, status TEXT, for_sale BOOLEAN, credential_revision INTEGER, alloc_bucket INTEGER, quality_score INTEGER, last_allocated_at DATETIME)`,
 		`CREATE TABLE proto_sessions (resource_id INTEGER PRIMARY KEY, credential_revision INTEGER)`,
 		`CREATE TABLE proto_allocations (resource_id INTEGER, project_id INTEGER)`,
 		`CREATE TABLE projects (id INTEGER PRIMARY KEY, status TEXT)`,
 		`CREATE TABLE project_products (id INTEGER PRIMARY KEY, project_id INTEGER, type TEXT, status TEXT)`,
 		`INSERT INTO users VALUES (1, 'active', 'supplier')`,
 		`INSERT INTO email_resources VALUES (1, 'proto', 1), (2, 'proto', 1), (3, 'proto', 1)`,
-		`INSERT INTO proto_resources VALUES (1, 'proto', 1, 'one@proton.me', 'normal', TRUE, 2, 1, 100, NULL), (2, 'proto', 1, 'two@proton.me', 'normal', TRUE, 2, 2, 100, NULL), (3, 'proto', 1, 'three@proton.me', 'normal', TRUE, 2, 3, 100, NULL)`,
+		`INSERT INTO proto_resources VALUES (1, 'proto', 1, 'one@proton.me', 'proton.me', 'normal', TRUE, 2, 1, 100, NULL), (2, 'proto', 1, 'two@proton.me', 'proton.me', 'normal', TRUE, 2, 2, 100, NULL), (3, 'proto', 1, 'three@proton.me', 'proton.me', 'normal', TRUE, 2, 3, 100, NULL)`,
 		`INSERT INTO proto_sessions VALUES (2, 1), (3, 2)`,
 		`INSERT INTO projects VALUES (10, 'listed')`,
 		`INSERT INTO project_products VALUES (20, 10, 'proto', 'enabled')`,
@@ -33,12 +33,12 @@ func TestProtoInventoryRequiresCurrentSession(t *testing.T) {
 	}
 	repo := NewRepo(db)
 	ctx := context.Background()
-	rows, err := repo.ListProtoSourceCandidates(ctx, 10, 2, domain.SupplyScopePublic, nil, 10)
+	rows, err := repo.ListProtoSourceCandidates(ctx, 10, 2, domain.SupplyScopePublic, nil, 10, "")
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, uint(3), rows[0].ResourceID)
 	for _, id := range []uint{1, 2} {
-		row, err := repo.LockProtoCandidate(ctx, id, 10, 2, domain.SupplyScopePublic)
+		row, err := repo.LockProtoCandidate(ctx, id, 10, 2, domain.SupplyScopePublic, "")
 		require.NoError(t, err)
 		require.Nil(t, row)
 	}
@@ -46,6 +46,7 @@ func TestProtoInventoryRequiresCurrentSession(t *testing.T) {
 	private, err := repo.ListPrivateProtoInventoryTotals(ctx, 10, 1)
 	require.NoError(t, err)
 	require.Len(t, private, 1)
+	require.Equal(t, "proton.me", private[0].Suffix)
 	require.EqualValues(t, 1, private[0].Available)
 }
 

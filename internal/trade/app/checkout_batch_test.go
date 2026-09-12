@@ -397,6 +397,7 @@ type checkoutInventorySpy struct {
 
 type randomSuffixBatchInventorySpy struct {
 	checkoutInventorySpy
+	allocationType     domain.AllocationType
 	selectedSuffix     string
 	successful         int
 	selectionCalls     int
@@ -444,8 +445,12 @@ func (s *randomSuffixBatchInventorySpy) Allocate(_ context.Context, cmd Allocati
 	if s.allocationCalls > s.successful {
 		return nil, domain.ErrDefinitiveInventoryExhausted
 	}
+	allocationType := s.allocationType
+	if allocationType == "" {
+		allocationType = domain.AllocationTypeMicrosoft
+	}
 	return &AllocationResult{
-		OrderNo: cmd.OrderNo, Type: domain.AllocationTypeMicrosoft, ID: uint(s.allocationCalls),
+		OrderNo: cmd.OrderNo, Type: allocationType, ID: uint(s.allocationCalls),
 		Email: fmt.Sprintf("batch-%d@%s", s.allocationCalls, cmd.EmailSuffix), SupplyScope: SupplyScopePublic,
 	}, nil
 }
@@ -516,6 +521,9 @@ func TestCheckoutProductTypeForSuffix(t *testing.T) {
 		{suffix: "gmail.com", want: domain.ProductTypeGmail},
 		{suffix: "gmail_variant", want: domain.ProductTypeGmailVariant},
 		{suffix: "icloud.com", want: domain.ProductTypeICloud},
+		{suffix: coredomain.RandomProtoSuffixSelector, want: domain.ProductTypeProto},
+		{suffix: "proton.me", want: domain.ProductTypeProto},
+		{suffix: "protonmail.com", want: domain.ProductTypeProto},
 		{suffix: "outlook.com", want: domain.ProductTypeMicrosoft},
 		{suffix: "hotmail.com", want: domain.ProductTypeMicrosoft},
 		{suffix: coredomain.RandomMicrosoftSuffixSelector, want: domain.ProductTypeMicrosoft},
@@ -542,6 +550,7 @@ func TestFinalizeCheckoutProductKeepsRandomSuffixSelectors(t *testing.T) {
 	}{
 		{selector: coredomain.RandomMicrosoftSuffixSelector, productType: domain.ProductTypeMicrosoft},
 		{selector: coredomain.RandomDomainSuffixSelector, productType: domain.ProductTypeDomain},
+		{selector: coredomain.RandomProtoSuffixSelector, productType: domain.ProductTypeProto},
 	} {
 		prepared := checkoutPreparation{
 			selectedBySuffix: true,
@@ -672,6 +681,8 @@ func TestCheckoutFingerprintIgnoresSuffixForProductsWithoutSuffixSelection(t *te
 	}{
 		{productType: domain.ProductTypeMicrosoft, suffix: "outlook.com"},
 		{productType: domain.ProductTypeDomain, suffix: "com"},
+		{productType: domain.ProductTypeProto, suffix: "proton.me"},
+		{productType: domain.ProductTypeProto, suffix: "protonmail.com"},
 	} {
 		request := batchRequest("same-key", 1)
 		request.EmailSuffix = test.suffix

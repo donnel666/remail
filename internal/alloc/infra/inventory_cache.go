@@ -404,6 +404,23 @@ func (c *InventoryCache) ClaimDueInventory(ctx context.Context, before time.Time
 	return entries, nil
 }
 
+// AdvanceInventory makes request-side refreshes due without delaying work
+// already eligible for a running worker's fixed cutoff. LT also adds missing keys.
+func (c *InventoryCache) AdvanceInventory(ctx context.Context, entries []allocapp.InventoryCacheEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	now := float64(time.Now().UnixMilli())
+	members := make([]redis.Z, len(entries))
+	for i, entry := range entries {
+		members[i] = redis.Z{Score: now, Member: inventoryCacheKey(entry.Kind, entry.ProjectID)}
+	}
+	if err := c.redis.ZAddArgs(ctx, inventoryCacheScheduleKey, redis.ZAddArgs{LT: true, Members: members}).Err(); err != nil {
+		return fmt.Errorf("advance inventory cache refresh: %w", err)
+	}
+	return nil
+}
+
 func (c *InventoryCache) RequeueInventory(ctx context.Context, entries []allocapp.InventoryCacheEntry) error {
 	if len(entries) == 0 {
 		return nil

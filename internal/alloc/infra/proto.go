@@ -8,6 +8,7 @@ import (
 
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	"github.com/donnel666/remail/internal/alloc/domain"
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -89,11 +90,15 @@ func (r *Repo) ProtoAllocationReady(ctx context.Context, orderNo string, allocat
 	return (result.ID == 0 && allocationID == 0) || result.Ready, nil
 }
 
-func (r *Repo) ListProtoSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int) ([]allocapp.ProtoCandidate, error) {
-	if projectID == 0 || buyerUserID == 0 || limit <= 0 {
+func (r *Repo) ListProtoSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int, emailSuffix string) ([]allocapp.ProtoCandidate, error) {
+	suffix := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(emailSuffix)), "@")
+	if projectID == 0 || buyerUserID == 0 || limit <= 0 || (strings.TrimSpace(emailSuffix) != "" && !coredomain.IsProtoEmailSuffix(suffix)) {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
 	query := protoSourceCandidateQuery(r.dbFor(ctx), projectID, buyerUserID, scope)
+	if suffix != "" {
+		query = query.Where("pr.email_domain = ?", suffix)
+	}
 	if bucket != nil {
 		query = query.Where("pr.alloc_bucket = ?", *bucket)
 	}
@@ -108,6 +113,7 @@ func (r *Repo) ListProtoSourceCandidates(ctx context.Context, projectID uint, bu
 func protoSourceCandidateQuery(db *gorm.DB, projectID uint, buyerUserID uint, scope domain.SupplyScope) *gorm.DB {
 	query := db.Table("proto_resources AS pr").
 		Where("pr.resource_type = ? AND pr.status = ?", string(domain.AllocationTypeProto), "normal").
+		Where("pr.email_domain IN ?", []string{"proton.me", "protonmail.com"}).
 		Where("EXISTS (SELECT 1 FROM proto_sessions session WHERE session.resource_id = pr.id AND session.credential_revision = pr.credential_revision)").
 		Where("NOT EXISTS (SELECT 1 FROM proto_allocations history WHERE history.resource_id = pr.id AND history.project_id = ?)", projectID)
 	// Like Microsoft, keep owner checks outside the candidate's locking query.
@@ -124,13 +130,17 @@ func protoSourceCandidateQuery(db *gorm.DB, projectID uint, buyerUserID uint, sc
 	return query.Where("EXISTS (?)", owner)
 }
 
-func (r *Repo) LockProtoCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope) (*allocapp.ProtoCandidate, error) {
-	if resourceID == 0 || projectID == 0 || buyerUserID == 0 {
+func (r *Repo) LockProtoCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*allocapp.ProtoCandidate, error) {
+	suffix := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(emailSuffix)), "@")
+	if resourceID == 0 || projectID == 0 || buyerUserID == 0 || (strings.TrimSpace(emailSuffix) != "" && !coredomain.IsProtoEmailSuffix(suffix)) {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
 	query := protoSourceCandidateQuery(r.dbFor(ctx), projectID, buyerUserID, scope).
 		Where("pr.id = ?", resourceID).
 		Select("pr.id AS resource_id, pr.owner_user_id AS owner_user_id, pr.email_address AS email, pr.last_allocated_at AS last_allocated_at").Limit(1)
+	if suffix != "" {
+		query = query.Where("pr.email_domain = ?", suffix)
+	}
 	if r.dbFor(ctx).Name() == "mysql" {
 		query = query.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
 	}
@@ -198,31 +208,30 @@ func (r *Repo) HasProtoProjectHistory(ctx context.Context, resourceID, projectID
 	return count > 0, err
 }
 
-func (r *Repo) ListPrivateProtoInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]allocapp.PrivateSingletonInventoryTotal, error) {
-	var rows []allocapp.PrivateSingletonInventoryTotal
-	if err := r.dbFor(ctx).Raw(`
-SELECT pp.id AS product_id, pp.type AS product_type, COUNT(pr.id) AS available
-FROM project_products pp
-JOIN projects p ON p.id = pp.project_id AND p.status = 'listed'
-JOIN proto_resources pr ON pr.status = 'normal' AND pr.resource_type = 'proto'
-JOIN email_resources er ON er.id = pr.id AND er.type = 'proto'
-WHERE pp.project_id = ?
-  AND pp.type = 'proto'
-  AND pp.status = 'enabled'
-  AND er.owner_user_id = ?
-  AND pr.owner_user_id = er.owner_user_id
-  AND pr.for_sale = FALSE
-  AND EXISTS (
-      SELECT 1 FROM proto_sessions session
-      WHERE session.resource_id = pr.id AND session.credential_revision = pr.credential_revision
-  )
-  AND NOT EXISTS (
-      SELECT 1 FROM proto_allocations history
-      WHERE history.resource_id = pr.id AND history.project_id = pp.project_id
-  )
-GROUP BY pp.id, pp.type
-ORDER BY pp.id`, projectID, buyerUserID).Scan(&rows).Error; err != nil {
+func (r *Repo) ListPrivateProtoInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]allocapp.PrivateProductInventoryTotal, error) {
+	var rows []allocapp.PrivateProductInventoryTotal
+	if err := protoSourceCandidateQuery(r.dbFor(ctx), projectID, buyerUserID, domain.SupplyScopeOwned).
+		Joins("JOIN project_products pp ON pp.project_id = ? AND pp.type = 'proto' AND pp.status = 'enabled'", projectID).
+		Joins("JOIN projects p ON p.id = pp.project_id AND p.status = 'listed'").
+		Select("pp.id AS product_id, pr.email_domain AS suffix, COUNT(pr.id) AS available").
+		Group("pp.id, pr.email_domain").Order("pp.id, pr.email_domain").Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list private Proto inventory totals: %w", err)
 	}
 	return rows, nil
+}
+
+func (r *Repo) protoSuffixInventory(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope) (map[string]int64, error) {
+	var rows []struct {
+		Suffix string
+		Count  int64
+	}
+	if err := protoSourceCandidateQuery(r.dbFor(ctx), projectID, buyerUserID, scope).
+		Select("pr.email_domain AS suffix, COUNT(pr.id) AS count").Group("pr.email_domain").Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list Proto suffix inventory: %w", err)
+	}
+	result := map[string]int64{"proton.me": 0, "protonmail.com": 0}
+	for _, row := range rows {
+		result[normalizeCandidateSuffix(row.Suffix)] += row.Count
+	}
+	return result, nil
 }

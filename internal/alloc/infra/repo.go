@@ -2438,6 +2438,7 @@ JOIN users owner ON owner.id = er.owner_user_id
 WHERE pr.resource_type = 'proto'
   AND pr.owner_user_id = er.owner_user_id
   AND pr.status = 'normal'
+  AND pr.email_domain IN ('proton.me', 'protonmail.com')
   AND EXISTS (SELECT 1 FROM proto_sessions session WHERE session.resource_id = pr.id AND session.credential_revision = pr.credential_revision)
   AND pr.for_sale = TRUE
   AND owner.status = 'active'
@@ -2452,6 +2453,7 @@ JOIN users owner ON owner.id = er.owner_user_id
 WHERE pr.resource_type = 'proto'
   AND pr.owner_user_id = er.owner_user_id
   AND pr.status = 'normal'
+  AND pr.email_domain IN ('proton.me', 'protonmail.com')
   AND EXISTS (SELECT 1 FROM proto_sessions session WHERE session.resource_id = pr.id AND session.credential_revision = pr.credential_revision)
   AND pr.for_sale = TRUE
   AND owner.status = 'active'
@@ -2542,6 +2544,8 @@ func (r *Repo) ListProductSuffixInventory(ctx context.Context, config allocapp.P
 			scope, args = domainPrivateInventoryScopeSQL(buyerUserID)
 		}
 		return r.domainInventoryByScope(ctx, scope, args, "dr.domain_tld")
+	case coredomain.ProductTypeProto:
+		return r.protoSuffixInventory(ctx, config.ProjectID, buyerUserID, supplyScope)
 	default:
 		return nil, domain.ErrInvalidAllocationRequest
 	}
@@ -2592,6 +2596,17 @@ JOIN project_products pp ON pp.project_id = p.id
 		case coredomain.ProductTypeDomain:
 			item.Suffixes, err = r.domainProductInventorySuffixTotals(ctx)
 		case coredomain.ProductTypeGmail, coredomain.ProductTypeGmailVariant, coredomain.ProductTypeICloud, coredomain.ProductTypeProto:
+			if item.ProductType == coredomain.ProductTypeProto {
+				suffixes, suffixErr := r.protoSuffixInventory(ctx, projectID, 0, domain.SupplyScopePublic)
+				if suffixErr != nil {
+					return nil, suffixErr
+				}
+				for _, suffix := range []string{"proton.me", "protonmail.com"} {
+					item.Suffixes = append(item.Suffixes, allocapp.ProductInventorySuffixTotal{
+						Suffix: suffix, TotalAvailable: suffixes[suffix], PublicAvailable: suffixes[suffix],
+					})
+				}
+			}
 			codeAvailable, codePublicAvailable := item.TotalAvailable, item.PublicAvailable
 			purchaseAvailable, purchasePublicAvailable := item.TotalAvailable, item.PublicAvailable
 			item.CodeAvailable, item.CodePublicAvailable = &codeAvailable, &codePublicAvailable
