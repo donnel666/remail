@@ -106,7 +106,7 @@ func TestProtoValidationFailureBudgetAndInFlightCredentialFence(t *testing.T) {
 					require.Equal(t, domain.StatusPending, row.Status)
 					require.Equal(t, task.ValidationGeneration+1, row.ValidationGeneration)
 				} else {
-					require.Equal(t, domain.StatusValidationFailed, row.Status)
+					require.Equal(t, domain.StatusAbnormal, row.Status)
 					require.Equal(t, task.ValidationGeneration, row.ValidationGeneration)
 				}
 				require.True(t, row.ForSale)
@@ -116,10 +116,10 @@ func TestProtoValidationFailureBudgetAndInFlightCredentialFence(t *testing.T) {
 			}
 			queued, err := s.DispatchPendingValidations(ctx, &protoQueueStub{}, 10)
 			require.NoError(t, err)
-			require.Zero(t, queued, "exhausted failures must stop without becoming permanently abnormal")
+			require.Zero(t, queued, "exhausted failures must stop in abnormal")
 			var physical Resource
 			require.NoError(t, s.DB.First(&physical, id).Error)
-			require.Equal(t, domain.StatusPending, physical.Status)
+			require.Equal(t, domain.StatusAbnormal, physical.Status)
 			// A deliberate manual retry creates a fresh budget/generation; it is not
 			// blocked by the previous failed run or silently queued by a read.
 			_, err = s.ClaimForValidation(ctx, id, nil)
@@ -164,7 +164,7 @@ func TestProtoValidationFailureBudgetAndInFlightCredentialFence(t *testing.T) {
 	})
 }
 
-func TestProtoValidationOnlyPermanentCredentialFailuresBecomeAbnormal(t *testing.T) {
+func TestProtoValidationTerminalFailuresBecomeAbnormal(t *testing.T) {
 	for _, test := range []struct {
 		category  string
 		retryable bool
@@ -173,11 +173,13 @@ func TestProtoValidationOnlyPermanentCredentialFailuresBecomeAbnormal(t *testing
 	}{
 		{"invalid_credentials", true, domain.StatusAbnormal, 0},
 		{"identity_mismatch", true, domain.StatusAbnormal, 0},
-		{"action_required", true, domain.StatusValidationFailed, 0},
+		{"account_disabled", true, domain.StatusAbnormal, 0},
+		{"session_revoked", false, domain.StatusAbnormal, 0},
+		{"action_required", true, domain.StatusAbnormal, 0},
 		{"protocol", true, domain.StatusPending, 1},
-		{"protocol", false, domain.StatusValidationFailed, 0},
-		{"decryption", false, domain.StatusValidationFailed, 0},
-		{"invalid_session", false, domain.StatusValidationFailed, 0},
+		{"protocol", false, domain.StatusAbnormal, 0},
+		{"decryption", false, domain.StatusAbnormal, 0},
+		{"invalid_session", false, domain.StatusAbnormal, 0},
 	} {
 		t.Run(test.category+strconv.FormatBool(test.retryable), func(t *testing.T) {
 			s, _ := newProtoAsyncTestService(t)

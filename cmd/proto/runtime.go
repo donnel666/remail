@@ -147,7 +147,7 @@ func loginProxy(ctx context.Context, opts options, rt *commandRuntime) (string, 
 	err := rt.db.WithContext(ctx).Table("proxy_bindings AS b").Select("p.url").
 		Joins("JOIN proxies AS p ON p.id = b.proxy_id").
 		Joins("JOIN proxy_servers AS s ON s.id = p.proxy_server_id").
-		Where("b.bind_key = ? AND b.expire_at > ? AND b.ip_version IN ('ipv4', 'ipv6')", fmt.Sprintf("proto:%d", opts.ResourceID), now).
+		Where("b.bind_key = ? AND b.expire_at > ? AND b.ip_version = 'ipv4'", fmt.Sprintf("proto:%d", opts.ResourceID), now).
 		Where("p.pool = 'resource' AND p.status = 'normal' AND (p.expire_at IS NULL OR p.expire_at > ?)", now).
 		Where("s.health_status = 'healthy' AND s.admin_status IN ('online', 'draining')").
 		Order("b.last_used_at DESC, b.id DESC").Take(&proxy).Error

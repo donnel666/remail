@@ -353,7 +353,6 @@ export default function AdminProtoEmails() {
         normal: 0,
         pending: 0,
         validating: 0,
-        validation_failed: 0,
         identifying: 0,
       },
       suffixes: [],
@@ -960,7 +959,7 @@ export default function AdminProtoEmails() {
                 {t("Status")}
               </div>
               <div className="mb-2 space-y-1">
-                {(["all", "pending", "validating", "validation_failed", "identifying", "normal", "abnormal", "disabled", "deleted"] as StatusFilter[]).map(
+                {(["all", "pending", "validating", "identifying", "normal", "abnormal", "disabled", "deleted"] as StatusFilter[]).map(
                   (value) => (
                     <StatisticFilterOption
                       active={statusFilter === value}

@@ -122,6 +122,20 @@ func (s *Service) FetchMailbox(ctx context.Context, resourceID uint, revision ui
 		typed := errors.As(err, &failure)
 		revoked := typed && failure.Category == "session_revoked"
 		invalidPKL := typed && session != nil && session.Version == 2 && failure.Stage == "session" && (failure.Category == "protocol" || failure.Category == "identity_mismatch")
+		if typed && !failure.Retryable && !invalidPKL &&
+			(failure.Category == "account_disabled" || failure.Category == "invalid_credentials" || failure.Category == "identity_mismatch") {
+			cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer stop()
+			applied, commitErr := s.markPermanentFetchFailure(cleanup, resourceID, revision, row.ValidationGeneration, session,
+				safeSessionError(failure.Category+": "+failure.SafeMessage))
+			if commitErr != nil {
+				// An uncommitted provider failure must never trigger a caller's refund.
+				return proton.FetchResult{}, errors.Join(domain.ErrDependency, commitErr)
+			}
+			if !applied {
+				return proton.FetchResult{}, domain.ErrInvalidClaim
+			}
+		}
 		if (errors.Is(err, ErrSessionUnavailable) || revoked || invalidPKL) && (row.Status == domain.StatusNormal || row.Status == domain.StatusIdentifying) {
 			cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer stop()
@@ -197,7 +211,7 @@ func (s *Service) acquireProtocolProxy(ctx context.Context, resourceID uint, req
 		return &proxyapp.ProxyConfig{Direct: true}, nil
 	}
 	proxy, err := s.Proxies.Acquire(ctx, proxyapp.AcquireProxyRequest{
-		Key: fmt.Sprintf("proto:%d", resourceID), IPVersion: proxydomain.ProxyIPAuto,
+		Key: fmt.Sprintf("proto:%d", resourceID), IPVersion: proxydomain.ProxyIPv4,
 		Purpose: purpose, AllowSystemFallback: true, RequestID: strings.TrimSpace(requestID),
 	})
 	if err != nil || proxy == nil {

@@ -251,10 +251,10 @@ func assertNoAllocations(tx *gorm.DB, id uint) error {
 	return nil
 }
 
-// MarkPermanentFetchFailure fences the provider failure before Trade refunds
-// affected orders. Administrative disable/delete always remain authoritative.
-func (s *Service) MarkPermanentFetchFailure(ctx context.Context, id uint, revision uint64, safeMessage string) (bool, error) {
-	if id == 0 || revision == 0 || strings.TrimSpace(safeMessage) == "" {
+// Only the mailbox boundary has the generation and session observed by a read.
+// Fence and persist its failure before any caller can request compensation.
+func (s *Service) markPermanentFetchFailure(ctx context.Context, id uint, revision, generation uint64, observed *proton.Session, safeMessage string) (bool, error) {
+	if id == 0 || revision == 0 || generation == 0 || observed == nil || proton.SessionTokenIdentity(*observed) == "" || strings.TrimSpace(safeMessage) == "" {
 		return false, domain.ErrInvalidResource
 	}
 	applied := false
@@ -266,18 +266,39 @@ func (s *Service) MarkPermanentFetchFailure(ctx context.Context, id uint, revisi
 		if err != nil {
 			return err
 		}
-		if row.CredentialRevision != revision || row.Status == domain.StatusDisabled || row.Status == domain.StatusDeleted {
+		if row.CredentialRevision != revision || row.ValidationGeneration != generation ||
+			(row.Status != domain.StatusNormal && row.Status != domain.StatusIdentifying) {
 			return nil
 		}
-		if row.Status == domain.StatusAbnormal {
-			applied = true
+		stored, err := lockSessionTx(tx, id)
+		if errors.Is(err, ErrSessionUnavailable) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if stored.CredentialRevision != revision {
+			return nil
+		}
+		current, err := s.decodeSession(stored)
+		if errors.Is(err, ErrSessionUnavailable) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !sameSessionMailbox(current, observed) || current.AccessToken != observed.AccessToken ||
+			proton.SessionTokenIdentity(*current) != proton.SessionTokenIdentity(*observed) {
 			return nil
 		}
 		now := s.Now().UTC()
-		if err := cancelMaintenanceRunsTx(tx, id, "Superseded by a permanent mail fetch failure.", now); err != nil {
+		if err := cancelMaintenanceRunsTx(tx, id, safeMessage, now); err != nil {
 			return err
 		}
-		if err := tx.Model(&Resource{}).Where("id = ?", id).Updates(map[string]any{"status": domain.StatusAbnormal, "quality_score": 0, "validation_generation": row.ValidationGeneration + 1, "last_safe_error": strings.TrimSpace(safeMessage), "version": row.Version + 1, "updated_at": now}).Error; err != nil {
+		if err := deleteSessionTx(tx, id); err != nil {
+			return err
+		}
+		if err := tx.Model(&Resource{}).Where("id = ?", id).Updates(map[string]any{"status": domain.StatusAbnormal, "quality_score": 0, "validation_generation": row.ValidationGeneration + 1, "last_safe_error": safeSessionError(safeMessage), "last_checked_at": now, "version": row.Version + 1, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		if err := bumpRoot(tx, id, now); err != nil {

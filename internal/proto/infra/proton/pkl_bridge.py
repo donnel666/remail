@@ -292,6 +292,8 @@ def response_error(stage, status, code, action):
         return BridgeError(stage, "rate_limited", status, code, True)
     if status >= 500 or status == 408:
         return BridgeError(stage, "request", status, code, True)
+    if code == 10003:
+        return BridgeError(stage, "account_disabled", status, code)
     if code in (9001, 12087, 10004):
         return BridgeError(stage, "action_required", status, code)
     if code == 2028:

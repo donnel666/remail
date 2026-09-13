@@ -112,16 +112,12 @@ func importProtoHistory(orders *tradeapp.UseCase) func(context.Context, []protoi
 
 var _ mailmatchapp.ProtoMailFetchPort = protoMailFetchAdapter{}
 
-type protoFetchFailureAdapter struct {
-	resources *protoinfra.Service
-	orders    *tradeapp.UseCase
-}
+type protoFetchFailureAdapter struct{ orders *tradeapp.UseCase }
 
 func (a protoFetchFailureAdapter) HandlePermanentProtoFetchFailure(ctx context.Context, failure mailmatchapp.PermanentProtoFetchFailure) error {
-	applied, err := a.resources.MarkPermanentFetchFailure(ctx, failure.ResourceID, failure.CredentialRevision, failure.SafeMessage)
-	if err != nil || !applied {
-		return err
-	}
-	_, err = a.orders.RefundUnavailableProtoOrders(ctx, failure.ResourceID, failure.RequestID)
+	// FetchMailbox already fenced and committed the resource failure. Rewriting
+	// it here could invalidate a newer successful validation; Trade selects only
+	// orders whose resource is still abnormal.
+	_, err := a.orders.RefundUnavailableProtoOrders(ctx, failure.ResourceID, failure.RequestID)
 	return err
 }

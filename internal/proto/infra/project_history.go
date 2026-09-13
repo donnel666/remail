@@ -165,7 +165,7 @@ func (s *Service) processProjectHistory(ctx context.Context, task ProjectHistory
 			var failure *proton.Failure
 			unavailable := errors.Is(err, domain.ErrInvalidClaim) || errors.Is(err, domain.ErrResourceMissing) || errors.Is(err, ErrSessionUnavailable)
 			if errors.As(err, &failure) && !failure.Retryable {
-				unavailable = failure.Category == "invalid_credentials" || failure.Category == "session_revoked" || failure.Category == "identity_mismatch"
+				unavailable = failure.Category == "invalid_credentials" || failure.Category == "session_revoked" || failure.Category == "identity_mismatch" || failure.Category == "account_disabled"
 			}
 			if unavailable {
 				skipped, err = true, nil

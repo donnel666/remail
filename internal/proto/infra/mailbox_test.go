@@ -283,3 +283,84 @@ func TestProtoMailboxRefreshRejectsChangedKeyRing(t *testing.T) {
 	})
 	require.ErrorIs(t, err, domain.ErrInvalidClaim)
 }
+
+func TestProtoPermanentFetchFailureCannotOverwriteNewState(t *testing.T) {
+	for _, change := range []string{"revalidation", "session_refresh", "legacy_access_refresh", "disable"} {
+		t.Run(change, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newPKLValidatedProto
+			if change == "legacy_access_refresh" {
+				fixture = newValidatedProto
+			}
+			s, id := fixture(t)
+			before, err := s.GetResource(ctx, id, nil)
+			require.NoError(t, err)
+			require.NoError(t, s.CompleteHistorySuccess(ctx, id, before.ValidationGeneration))
+			var expected *Resource
+			var expectedSession *proton.Session
+			s.Protocol = protoMailboxClientStub{
+				protoValidationClientStub: protoValidationClientStub{login: func(_ context.Context, request proton.LoginRequest) (proton.Session, error) {
+					// Keep the same token to test the generation fence independently.
+					return testPKLSession(request.Email), nil
+				}},
+				fetch: func(context.Context, *proton.Session, proton.FetchRequest) (proton.FetchResult, error) {
+					switch change {
+					case "revalidation":
+						generation, err := s.ClaimForValidation(ctx, id, nil)
+						require.NoError(t, err)
+						require.NoError(t, s.ProcessValidation(ctx, protoValidationTask(t, s, id)))
+						require.NoError(t, s.CompleteHistorySuccess(ctx, id, generation))
+					case "session_refresh", "legacy_access_refresh":
+						require.NoError(t, s.WithSession(ctx, id, before.CredentialRevision, func(_ context.Context, current *proton.Session, save func(proton.Session) error) error {
+							if current.Version == 1 {
+								current.AccessToken = "new-access-with-the-same-refresh-token"
+							} else {
+								current.PKL = []byte("newly-refreshed-session")
+							}
+							return save(*current)
+						}))
+					case "disable":
+						require.NoError(t, s.SetStatus(ctx, id, nil, domain.StatusDisabled))
+					}
+					expected, err = s.GetResource(ctx, id, nil)
+					require.NoError(t, err)
+					expectedSession, err = s.ReadSession(ctx, id, before.CredentialRevision)
+					require.NoError(t, err)
+					return proton.FetchResult{}, &proton.Failure{Category: "account_disabled", Stage: "list", HTTPStatus: 422, APICode: 10003, SafeMessage: "Proton has disabled this account."}
+				},
+			}
+			_, err = s.FetchMailbox(ctx, id, before.CredentialRevision, proton.FetchRequest{})
+			require.ErrorIs(t, err, domain.ErrInvalidClaim)
+			var failure *proton.Failure
+			require.False(t, errors.As(err, &failure), "a stale failure must not reach order compensation")
+			after, err := s.GetResource(ctx, id, nil)
+			require.NoError(t, err)
+			require.Equal(t, expected, after)
+			session, err := s.ReadSession(ctx, id, before.CredentialRevision)
+			require.NoError(t, err)
+			require.Equal(t, expectedSession, session)
+		})
+	}
+}
+
+func TestProtoPermanentFetchFailureMustCommitBeforeCompensation(t *testing.T) {
+	ctx := context.Background()
+	s, id := newPKLValidatedProto(t)
+	require.NoError(t, s.CompleteHistorySuccess(ctx, id, 1))
+	before, err := s.GetResource(ctx, id, nil)
+	require.NoError(t, err)
+	require.NoError(t, s.DB.Exec(`CREATE TRIGGER reject_abnormal BEFORE UPDATE ON proto_resources
+        WHEN NEW.status = 'abnormal' BEGIN SELECT RAISE(FAIL, 'fixture write failure'); END`).Error)
+	s.Protocol = protoMailboxClientStub{fetch: func(context.Context, *proton.Session, proton.FetchRequest) (proton.FetchResult, error) {
+		return proton.FetchResult{}, &proton.Failure{Category: "account_disabled", SafeMessage: "Proton has disabled this account."}
+	}}
+	_, err = s.FetchMailbox(ctx, id, 1, proton.FetchRequest{})
+	require.ErrorIs(t, err, domain.ErrDependency)
+	var failure *proton.Failure
+	require.False(t, errors.As(err, &failure), "failed persistence must not expose a permanent refund trigger")
+	after, err := s.GetResource(ctx, id, nil)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	_, err = s.ReadSession(ctx, id, 1)
+	require.NoError(t, err, "session deletion rolls back with the failed state update")
+}

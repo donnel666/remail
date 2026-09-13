@@ -372,6 +372,8 @@ func TestExactRecipientsMIMEAndSafeFailures(t *testing.T) {
 		{401, 10013, "/auth/v4", "session_revoked"},
 		{401, 9999, "/auth/v4", "request"},
 		{422, 9001, "/auth/v4", "action_required"},
+		{422, 10003, "/auth/v4", "account_disabled"},
+		{422, 10003, "/core/v4/users", "account_disabled"},
 		{429, 2028, "/auth/v4", "rate_limited"},
 		{422, 8002, "/auth/v4", "invalid_credentials"},
 		{422, 6003, "/auth/v4/info", "invalid_credentials"},

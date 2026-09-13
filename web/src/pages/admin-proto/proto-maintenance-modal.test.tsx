@@ -58,7 +58,7 @@ const target: AdminProtoResourceItem = {
   suffix: "@proton.me",
   longLived: true,
   qualityScore: 0,
-  status: "validation_failed",
+  status: "abnormal",
   forSale: true,
   passwordConfigured: true,
   credentialRevision: 2,

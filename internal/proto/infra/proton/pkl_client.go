@@ -455,6 +455,12 @@ func pklFailure(event pklEvent, action string) *Failure {
 		message = "Proto rejected the account credentials."
 	case "identity_mismatch":
 		message = "The Proto session does not own the requested receiving address."
+	case "account_disabled":
+		if event.APICode != 10003 {
+			return bridgeProtocolFailure(bridgeErrorMetadata)
+		}
+		message = "Proton has disabled this account. Account recovery is required."
+		event.Retryable = false
 	case "session_revoked":
 		message = "The Proto session is no longer valid; revalidation is required."
 	case "action_required":

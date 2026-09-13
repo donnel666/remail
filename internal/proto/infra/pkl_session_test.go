@@ -214,7 +214,7 @@ func TestProtoPKLTemporaryHTTPFailureKeepsPreviouslyVerifiedSession(t *testing.T
 		if attempt < 3 {
 			require.Equal(t, domain.StatusPending, row.Status)
 		} else {
-			require.Equal(t, domain.StatusValidationFailed, row.Status)
+			require.Equal(t, domain.StatusAbnormal, row.Status)
 		}
 		after, err := s.ReadSession(ctx, id, 1)
 		require.NoError(t, err)

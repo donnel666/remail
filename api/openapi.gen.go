@@ -3908,14 +3908,13 @@ func (e ProtoOwnerSummaryRole) Valid() bool {
 
 // Defines values for ProtoResourceStatus.
 const (
-	ProtoResourceStatusAbnormal         ProtoResourceStatus = "abnormal"
-	ProtoResourceStatusDeleted          ProtoResourceStatus = "deleted"
-	ProtoResourceStatusDisabled         ProtoResourceStatus = "disabled"
-	ProtoResourceStatusIdentifying      ProtoResourceStatus = "identifying"
-	ProtoResourceStatusNormal           ProtoResourceStatus = "normal"
-	ProtoResourceStatusPending          ProtoResourceStatus = "pending"
-	ProtoResourceStatusValidating       ProtoResourceStatus = "validating"
-	ProtoResourceStatusValidationFailed ProtoResourceStatus = "validation_failed"
+	ProtoResourceStatusAbnormal    ProtoResourceStatus = "abnormal"
+	ProtoResourceStatusDeleted     ProtoResourceStatus = "deleted"
+	ProtoResourceStatusDisabled    ProtoResourceStatus = "disabled"
+	ProtoResourceStatusIdentifying ProtoResourceStatus = "identifying"
+	ProtoResourceStatusNormal      ProtoResourceStatus = "normal"
+	ProtoResourceStatusPending     ProtoResourceStatus = "pending"
+	ProtoResourceStatusValidating  ProtoResourceStatus = "validating"
 )
 
 // Valid indicates whether the value is a known member of the ProtoResourceStatus enum.
@@ -3934,8 +3933,6 @@ func (e ProtoResourceStatus) Valid() bool {
 	case ProtoResourceStatusPending:
 		return true
 	case ProtoResourceStatusValidating:
-		return true
-	case ProtoResourceStatusValidationFailed:
 		return true
 	default:
 		return false
@@ -5075,14 +5072,13 @@ func (e GetAdminMessageParamsType) Valid() bool {
 
 // Defines values for GetAdminProtoResourcesParamsStatus.
 const (
-	GetAdminProtoResourcesParamsStatusAbnormal         GetAdminProtoResourcesParamsStatus = "abnormal"
-	GetAdminProtoResourcesParamsStatusDeleted          GetAdminProtoResourcesParamsStatus = "deleted"
-	GetAdminProtoResourcesParamsStatusDisabled         GetAdminProtoResourcesParamsStatus = "disabled"
-	GetAdminProtoResourcesParamsStatusIdentifying      GetAdminProtoResourcesParamsStatus = "identifying"
-	GetAdminProtoResourcesParamsStatusNormal           GetAdminProtoResourcesParamsStatus = "normal"
-	GetAdminProtoResourcesParamsStatusPending          GetAdminProtoResourcesParamsStatus = "pending"
-	GetAdminProtoResourcesParamsStatusValidating       GetAdminProtoResourcesParamsStatus = "validating"
-	GetAdminProtoResourcesParamsStatusValidationFailed GetAdminProtoResourcesParamsStatus = "validation_failed"
+	GetAdminProtoResourcesParamsStatusAbnormal    GetAdminProtoResourcesParamsStatus = "abnormal"
+	GetAdminProtoResourcesParamsStatusDeleted     GetAdminProtoResourcesParamsStatus = "deleted"
+	GetAdminProtoResourcesParamsStatusDisabled    GetAdminProtoResourcesParamsStatus = "disabled"
+	GetAdminProtoResourcesParamsStatusIdentifying GetAdminProtoResourcesParamsStatus = "identifying"
+	GetAdminProtoResourcesParamsStatusNormal      GetAdminProtoResourcesParamsStatus = "normal"
+	GetAdminProtoResourcesParamsStatusPending     GetAdminProtoResourcesParamsStatus = "pending"
+	GetAdminProtoResourcesParamsStatusValidating  GetAdminProtoResourcesParamsStatus = "validating"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminProtoResourcesParamsStatus enum.
@@ -5101,8 +5097,6 @@ func (e GetAdminProtoResourcesParamsStatus) Valid() bool {
 	case GetAdminProtoResourcesParamsStatusPending:
 		return true
 	case GetAdminProtoResourcesParamsStatusValidating:
-		return true
-	case GetAdminProtoResourcesParamsStatusValidationFailed:
 		return true
 	default:
 		return false
@@ -6299,14 +6293,13 @@ func (e ConnectBotWebSocketParamsXBotChannel) Valid() bool {
 
 // Defines values for OpenListProtoResourcesParamsStatus.
 const (
-	OpenListProtoResourcesParamsStatusAbnormal         OpenListProtoResourcesParamsStatus = "abnormal"
-	OpenListProtoResourcesParamsStatusDeleted          OpenListProtoResourcesParamsStatus = "deleted"
-	OpenListProtoResourcesParamsStatusDisabled         OpenListProtoResourcesParamsStatus = "disabled"
-	OpenListProtoResourcesParamsStatusIdentifying      OpenListProtoResourcesParamsStatus = "identifying"
-	OpenListProtoResourcesParamsStatusNormal           OpenListProtoResourcesParamsStatus = "normal"
-	OpenListProtoResourcesParamsStatusPending          OpenListProtoResourcesParamsStatus = "pending"
-	OpenListProtoResourcesParamsStatusValidating       OpenListProtoResourcesParamsStatus = "validating"
-	OpenListProtoResourcesParamsStatusValidationFailed OpenListProtoResourcesParamsStatus = "validation_failed"
+	OpenListProtoResourcesParamsStatusAbnormal    OpenListProtoResourcesParamsStatus = "abnormal"
+	OpenListProtoResourcesParamsStatusDeleted     OpenListProtoResourcesParamsStatus = "deleted"
+	OpenListProtoResourcesParamsStatusDisabled    OpenListProtoResourcesParamsStatus = "disabled"
+	OpenListProtoResourcesParamsStatusIdentifying OpenListProtoResourcesParamsStatus = "identifying"
+	OpenListProtoResourcesParamsStatusNormal      OpenListProtoResourcesParamsStatus = "normal"
+	OpenListProtoResourcesParamsStatusPending     OpenListProtoResourcesParamsStatus = "pending"
+	OpenListProtoResourcesParamsStatusValidating  OpenListProtoResourcesParamsStatus = "validating"
 )
 
 // Valid indicates whether the value is a known member of the OpenListProtoResourcesParamsStatus enum.
@@ -6325,8 +6318,6 @@ func (e OpenListProtoResourcesParamsStatus) Valid() bool {
 	case OpenListProtoResourcesParamsStatusPending:
 		return true
 	case OpenListProtoResourcesParamsStatusValidating:
-		return true
-	case OpenListProtoResourcesParamsStatusValidationFailed:
 		return true
 	default:
 		return false
@@ -6635,14 +6626,13 @@ func (e GetProjectsParamsProductType) Valid() bool {
 
 // Defines values for ListProtoResourcesParamsStatus.
 const (
-	Abnormal         ListProtoResourcesParamsStatus = "abnormal"
-	Deleted          ListProtoResourcesParamsStatus = "deleted"
-	Disabled         ListProtoResourcesParamsStatus = "disabled"
-	Identifying      ListProtoResourcesParamsStatus = "identifying"
-	Normal           ListProtoResourcesParamsStatus = "normal"
-	Pending          ListProtoResourcesParamsStatus = "pending"
-	Validating       ListProtoResourcesParamsStatus = "validating"
-	ValidationFailed ListProtoResourcesParamsStatus = "validation_failed"
+	Abnormal    ListProtoResourcesParamsStatus = "abnormal"
+	Deleted     ListProtoResourcesParamsStatus = "deleted"
+	Disabled    ListProtoResourcesParamsStatus = "disabled"
+	Identifying ListProtoResourcesParamsStatus = "identifying"
+	Normal      ListProtoResourcesParamsStatus = "normal"
+	Pending     ListProtoResourcesParamsStatus = "pending"
+	Validating  ListProtoResourcesParamsStatus = "validating"
 )
 
 // Valid indicates whether the value is a known member of the ListProtoResourcesParamsStatus enum.
@@ -6661,8 +6651,6 @@ func (e ListProtoResourcesParamsStatus) Valid() bool {
 	case Pending:
 		return true
 	case Validating:
-		return true
-	case ValidationFailed:
 		return true
 	default:
 		return false
@@ -11829,7 +11817,7 @@ type ProtoResource struct {
 	PasswordConfigured bool               `json:"passwordConfigured"`
 	QualityScore       int                `json:"qualityScore"`
 
-	// Status validation_failed is a read-only projection of a stopped validation for the current credential revision and generation. It is not proof of permanently invalid credentials and never changes refund eligibility.
+	// Status Validation matches Microsoft resources. Retryable failures return to pending while attempts remain; non-retryable or exhausted validations become abnormal.
 	Status               ProtoResourceStatus `json:"status"`
 	Suffix               string              `json:"suffix"`
 	UpdatedAt            time.Time           `json:"updatedAt"`
@@ -11865,22 +11853,20 @@ type ProtoResourceFacets struct {
 	Normal      int64              `json:"normal"`
 	Pending     int64              `json:"pending"`
 	Status      struct {
-		Abnormal         int64 `json:"abnormal"`
-		All              int64 `json:"all"`
-		Deleted          int64 `json:"deleted"`
-		Disabled         int64 `json:"disabled"`
-		Identifying      int64 `json:"identifying"`
-		Normal           int64 `json:"normal"`
-		Pending          int64 `json:"pending"`
-		Validating       int64 `json:"validating"`
-		ValidationFailed int64 `json:"validation_failed"`
+		Abnormal    int64 `json:"abnormal"`
+		All         int64 `json:"all"`
+		Deleted     int64 `json:"deleted"`
+		Disabled    int64 `json:"disabled"`
+		Identifying int64 `json:"identifying"`
+		Normal      int64 `json:"normal"`
+		Pending     int64 `json:"pending"`
+		Validating  int64 `json:"validating"`
 	} `json:"status"`
 	Suffixes []struct {
 		Count int64  `json:"count"`
 		Key   string `json:"key"`
 	} `json:"suffixes"`
-	Validating       int64 `json:"validating"`
-	ValidationFailed int64 `json:"validation_failed"`
+	Validating int64 `json:"validating"`
 }
 
 // ProtoResourceFilter defines model for ProtoResourceFilter.
@@ -11892,7 +11878,7 @@ type ProtoResourceFilter struct {
 	OwnerId     *int64     `json:"ownerId,omitempty"`
 	Search      *string    `json:"search,omitempty"`
 
-	// Status validation_failed is a read-only projection of a stopped validation for the current credential revision and generation. It is not proof of permanently invalid credentials and never changes refund eligibility.
+	// Status Validation matches Microsoft resources. Retryable failures return to pending while attempts remain; non-retryable or exhausted validations become abnormal.
 	Status *ProtoResourceStatus `json:"status,omitempty"`
 	Suffix *string              `json:"suffix,omitempty"`
 }
@@ -11917,14 +11903,14 @@ type ProtoResourceMutationResponse struct {
 	ResourceId int64 `json:"resourceId"`
 	Reused     bool  `json:"reused"`
 
-	// Status validation_failed is a read-only projection of a stopped validation for the current credential revision and generation. It is not proof of permanently invalid credentials and never changes refund eligibility.
+	// Status Validation matches Microsoft resources. Retryable failures return to pending while attempts remain; non-retryable or exhausted validations become abnormal.
 	Status               ProtoResourceStatus `json:"status"`
 	Todo                 bool                `json:"todo"`
 	ValidationGeneration int64               `json:"validationGeneration"`
 	Version              int64               `json:"version"`
 }
 
-// ProtoResourceStatus validation_failed is a read-only projection of a stopped validation for the current credential revision and generation. It is not proof of permanently invalid credentials and never changes refund eligibility.
+// ProtoResourceStatus Validation matches Microsoft resources. Retryable failures return to pending while attempts remain; non-retryable or exhausted validations become abnormal.
 type ProtoResourceStatus string
 
 // ProtoValidationBatchResponse defines model for ProtoValidationBatchResponse.

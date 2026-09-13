@@ -103,9 +103,9 @@ describe("admin Proto mailbox toolbar", () => {
     expect(protoSource).toContain("setAdminProtoResourcesForSaleByFilter(\n              listFilter,");
   });
 
-  it("displays stopped validations as failures and exposes the same status filter", () => {
-    expect(protoMetaSource).toContain('validation_failed: { color: "red", label: "Validation failed" }');
-    expect(protoSource).toContain("validation_failed: 0");
-    expect(toolbar(protoSource)).toContain('"validation_failed"');
+  it("uses abnormal for stopped validations without an extra resource status", () => {
+    expect(protoMetaSource).not.toContain("validation_failed");
+    expect(protoSource).not.toContain("validation_failed");
+    expect(toolbar(protoSource)).toContain('"abnormal"');
   });
 });

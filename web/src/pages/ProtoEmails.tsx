@@ -81,7 +81,6 @@ type StatusFilter =
   | "all"
   | "pending"
   | "validating"
-  | "validation_failed"
   | "identifying"
   | "normal"
   | "abnormal"
@@ -277,7 +276,6 @@ export default function ProtoEmails() {
         normal: 0,
         pending: 0,
         validating: 0,
-        validation_failed: 0,
         identifying: 0,
       },
     };
@@ -948,13 +946,6 @@ export default function ProtoEmails() {
                   label={t("Identifying")}
                   onSelect={applyStatusFilter}
                   value="identifying"
-                />
-                <StatisticFilterOption
-                  active={statusFilter === "validation_failed"}
-                  count={resourceStats.status.validation_failed}
-                  label={t("Validation failed")}
-                  onSelect={applyStatusFilter}
-                  value="validation_failed"
                 />
                 <StatisticFilterOption
                   active={statusFilter === "abnormal"}

@@ -8,7 +8,8 @@ import (
 )
 
 // ProtoMailFetchPort reads credentials inside the Proto implementation. Only
-// the global resource ID and credential revision cross this boundary.
+// the global resource ID and credential revision cross this boundary. Permanent
+// failures are fenced and persisted by Proto before this port returns them.
 type ProtoMailFetchPort interface {
 	FetchProtoMessages(context.Context, FetchMessagesRequest) (*FetchMessagesResult, error)
 }
@@ -76,7 +77,7 @@ func permanentProtoCredentialFailure(failure *MailFetchFailure) bool {
 	// One unreadable historical message or an interactive challenge is not
 	// proof that every active order has lost its mailbox credentials.
 	switch failure.Category {
-	case "invalid_credentials", "identity_mismatch":
+	case "invalid_credentials", "identity_mismatch", "account_disabled":
 		return true
 	default:
 		return false

@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestProtoUncertainRevalidationPreservesPreviouslyVerifiedSession(t *testing.T) {
-	for _, category := range []string{"protocol", "request", "action_required", "invalid_credentials", "identity_mismatch"} {
+func TestProtoRevalidationPreservesKeysUnlessCredentialsAreInvalid(t *testing.T) {
+	for _, category := range []string{"protocol", "request", "action_required", "invalid_credentials", "identity_mismatch", "account_disabled"} {
 		t.Run(category, func(t *testing.T) {
 			s, id := newValidatedProto(t)
 			ctx := context.Background()
@@ -27,7 +27,7 @@ func TestProtoUncertainRevalidationPreservesPreviouslyVerifiedSession(t *testing
 			require.NoError(t, err)
 			require.NoError(t, s.ProcessValidation(ctx, protoValidationTask(t, s, id)))
 			current, err := s.ReadSession(ctx, id, row.CredentialRevision)
-			if category == "invalid_credentials" || category == "identity_mismatch" {
+			if category == "invalid_credentials" || category == "identity_mismatch" || category == "account_disabled" {
 				require.ErrorIs(t, err, ErrSessionUnavailable)
 			} else {
 				require.NoError(t, err)

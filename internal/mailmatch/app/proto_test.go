@@ -96,7 +96,7 @@ func TestProtoOnlyPermanentCredentialsTriggerOrderCompensation(t *testing.T) {
 		category string
 		want     int
 	}{
-		{"session_revoked", 0}, {"invalid_credentials", 1}, {"identity_mismatch", 1},
+		{"session_revoked", 0}, {"invalid_credentials", 1}, {"identity_mismatch", 1}, {"account_disabled", 1},
 		{"action_required", 0}, {"decryption", 0}, {"protocol", 0}, {"session_persistence", 0},
 	} {
 		t.Run(tc.category, func(t *testing.T) {
@@ -114,5 +114,18 @@ func TestProtoOnlyPermanentCredentialsTriggerOrderCompensation(t *testing.T) {
 			require.ErrorIs(t, err, failure)
 			require.Equal(t, tc.want, calls)
 		})
+	}
+}
+
+func TestProtoStaleAndUncommittedFailuresNeverTriggerCompensation(t *testing.T) {
+	for _, cause := range []error{domain.ErrResourceFetchCredentialChanged, &MailFetchFailure{Category: "request", Retryable: true}} {
+		uc := NewUseCase(nil, nil, nil, nil)
+		uc.SetProtoMailFetchPort(protoFetchFunc(func(context.Context, FetchMessagesRequest) (*FetchMessagesResult, error) { return nil, cause }))
+		uc.SetPermanentProtoFetchFailurePort(protoPermanentFailureFunc(func(context.Context, PermanentProtoFetchFailure) error {
+			t.Fatal("a stale or uncommitted failure must not request a refund")
+			return nil
+		}))
+		_, err := uc.fetchProtoMessages(context.Background(), FetchMessagesRequest{Scope: OrderScope{AllocationType: domain.ResourceTypeProto, EmailResourceID: 91, CredentialRevision: 7}})
+		require.ErrorIs(t, err, cause)
 	}
 }

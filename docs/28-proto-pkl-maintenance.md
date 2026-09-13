@@ -74,16 +74,17 @@ name@protonmail.com----password----base64(PKL)
 
 ## 验证重试与失败终态
 
-验证任务的失败不等于邮箱凭据已永久失效。此前资源保持 `pending`，当前维护任务却已经 `uncertain` 并停止调度，页面因此看起来一直在等待。
+2026-09-13：按业务要求与微软邮箱验证状态机对齐，移除 `validation_failed` 只读投影及其 API 枚举、列表筛选、统计和标签。
 
-- 可重试失败统一遵循 `Failure.Retryable` 和 `resource_validation_max_failures`，不再额外用类别白名单漏掉桥接 `protocol` 错误。配置为 3 表示最多执行 3 次；尚有预算时递增 generation，下一轮由原调度器领取。
-- 每次确定失败的验证任务记录为 `failed`。`action_required` 必须人工处理，不自动重试；只有明确的 `invalid_credentials / identity_mismatch` 才写入资源物理 `abnormal` 并撤销会话。
-- 选择复用现有维护事实：物理 `pending` 资源若存在相同资源 ID、generation 和 credential revision 的 `validation` 任务终态 `failed / uncertain`，Proto 的列表、详情、状态筛选和统计统一返回只读状态 `validation_failed`（“验证失败”）。它不写入数据库的资源状态列，也不会进入“待验证”筛选结果。
-- 不选择给所有错误写 `abnormal`：这会改变既有退款语义。也不增加数据库状态／字段：现有维护记录已足以判定流程是否停止，因而无需 DDL、数据回填或修改退款扫描器。
-- 旧版本留下的当前轮 `pending + uncertain` 会自动按该规则展示，无需修改历史记录。管理员明确重新验证时，原有命令递增 generation 并清零失败预算，旧终态不再影响新一轮。普通读取不会重新登录或自动复活已耗尽的任务。
-- 桥接失败记录固定安全原因，例如 `bridge_decode`、`bridge_missing_result`、`bridge_worker_exit`、`bridge_limit`、`bridge_session_metadata`。维护记录的安全文案同样区分这些原因；不再以统一的 “invalid or oversized” 文案暗示 PKL 一定超大。日志与返回值不包含原始输出、stderr、账号或 PKL。
-
-上述重试与状态投影变化仅作用于 Proto，不改变 PKL 刷新与订单分配、退款规则。API 增加了状态枚举值，部署后需要刷新浏览器加载支持 `validation_failed` 的新页面，旧标签页不保证能识别该值。只读状态本身不会改变钱款状态；本次会话存储格式的独立部署／回滚限制见上节。
+- 验证成功进入 `identifying`，历史识别成功后进入 `normal`。
+- 可重试错误在 `resource_validation_max_failures` 预算内递增 generation、回到 `pending`；默认最多执行 3 次。不可重试或预算耗尽统一持久化为 `abnormal`，维护任务记录为 `failed`。人机验证／额外账户操作不自动重试。
+- Proton API `10003` 明确记录为 `account_disabled`（账号被 Proton 禁用），不再泛化为“服务暂不可用”，也不自动重试。HTTP 429、408、5xx 仍优先视为临时失败。
+- 明确的 `invalid_credentials / identity_mismatch / account_disabled` 撤销会话。网络／协议故障保留原凭据供显式重验使用；导入 PKL 验证不会自动回退密码登录。
+- 取件过程中的明确永久失败由共享 `FetchMailbox` 处理，覆盖订单取件、资源历史识别、项目扫描和 CMD。写回事务同时核对凭据版本、验证 generation 和实际读取的会话标识，确认仍是当前结果后才转为 `abnormal`、撤销会话并结束旧维护任务。新验证、会话刷新或管理员操作已使观察过期时，丢弃旧结果；数据库提交失败时只返回可重试的依赖错误。退款入口不再重复改写邮箱状态，只处理当前仍异常的资源订单。
+- `00140` 数据迁移仅将当前 generation、credential revision 对应验证终态 `failed / uncertain` 的旧 `pending` 资源转为 `abnormal`，同步递增资源与根记录版本；保留原会话和维护事实，不触碰新一轮重试及正常／停用／删除状态。迁移可安全重复执行，回滚镜像不撤销已经确认的终态。
+- `abnormal` 按现有 Proto 规则禁止新分配，并进入现有异常资源订单退款流程。该状态是验证终态，不再承诺它只代表密码永久失效。
+- Proto 验证、取件及刷新统一申请 IPv4 代理；Proton 登录／邮箱域名当前无 IPv6 地址，IPv6 出口无法连接。CMD 默认复用绑定时也只接受 IPv4。
+- 桥接失败继续记录安全原因，例如 `bridge_decode`、`bridge_missing_result`、`bridge_worker_exit`、`bridge_limit`、`bridge_session_metadata`，不记录原始响应、账号或 PKL。
 
 ## CMD 使用
 

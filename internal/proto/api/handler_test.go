@@ -50,7 +50,7 @@ func TestProtoGetNeverReturnsPassword(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&protoTestRoot{}, &infra.Resource{}, &infra.MaintenanceRun{}))
 	require.NoError(t, db.Create(&protoTestRoot{ID: 1, Type: "proto", OwnerUserID: 7}).Error)
-	require.NoError(t, db.Create(&infra.Resource{ID: 1, ResourceType: "proto", OwnerUserID: 7, EmailAddress: "safe@proto.test", Password: "secret", Status: "pending", Version: 1, ValidationGeneration: 1, CredentialRevision: 1}).Error)
+	require.NoError(t, db.Create(&infra.Resource{ID: 1, ResourceType: "proto", OwnerUserID: 7, EmailAddress: "safe@proto.test", Password: "secret", Status: "abnormal", Version: 1, ValidationGeneration: 1, CredentialRevision: 1}).Error)
 	require.NoError(t, db.Create(&infra.MaintenanceRun{ResourceID: 1, ValidationGeneration: 1, CredentialRevision: 1, Kind: "validation", Status: "failed"}).Error)
 
 	item, err := infra.NewService(db).GetResource(context.Background(), 1, nil)
@@ -59,7 +59,7 @@ func TestProtoGetNeverReturnsPassword(t *testing.T) {
 	require.Empty(t, item.Password)
 	require.True(t, item.PasswordConfigured)
 	response := toResourceResponse(*item)
-	require.Equal(t, "validation_failed", response.Status)
+	require.Equal(t, "abnormal", response.Status)
 }
 
 func TestProtoRouteSurfaceIsProviderScoped(t *testing.T) {

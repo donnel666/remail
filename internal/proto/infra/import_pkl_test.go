@@ -172,7 +172,7 @@ func TestProtoImportedPKLFailureNeverFallsBackToPassword(t *testing.T) {
 		require.NoError(t, s.ProcessValidation(ctx, protoValidationTask(t, s, id)))
 		row, err := s.GetResource(ctx, id, nil)
 		require.NoError(t, err)
-		require.Equal(t, domain.StatusValidationFailed, row.Status)
+		require.Equal(t, domain.StatusAbnormal, row.Status)
 		encoded, err := json.Marshal(row)
 		require.NoError(t, err)
 		require.NotContains(t, string(encoded), string(raw))

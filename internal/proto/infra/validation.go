@@ -167,26 +167,21 @@ func (s *Service) commitValidation(ctx context.Context, task protoapp.Validation
 		} else {
 			maximum := min(runtimeconfig.Int("resource_validation_max_failures", 3, 1), 100)
 			failures, quality = min(resource.ValidationFailures+1, maximum), 0
-			status, runStatus = domain.StatusPending, maintenanceFailed
+			status, runStatus = domain.StatusAbnormal, maintenanceFailed
 			safeError = safeSessionError(failure.Category + ": " + failure.SafeMessage)
-			// A failed validation is not necessarily a permanently invalid account.
-			// Reads project pending + this generation's failed run as validation_failed;
-			// Trade's permanent-refund scanner continues to consume only abnormal.
+			// Match Microsoft: only a retry with remaining budget returns to pending.
 			switch failure.Category {
-			case "invalid_credentials", "identity_mismatch":
-				status = domain.StatusAbnormal
-			case "action_required":
-				// Human verification must not be retried automatically, even if an
-				// upstream adapter incorrectly marks this failure retryable.
+			case "invalid_credentials", "identity_mismatch", "account_disabled", "action_required":
+				// Explicit account failures and human actions never retry automatically.
 			default:
 				if failure.Retryable && failures < maximum {
+					status = domain.StatusPending
 					generation++
 				}
 			}
-			// A malformed response or temporary login failure does not invalidate
-			// previously verified keys used by existing orders. New allocations
-			// remain blocked by pending; credential edits already remove old keys.
-			if status == domain.StatusAbnormal {
+			// Retain credentials after transport/protocol failures for explicit retry,
+			// just as Microsoft retains its RT. Only confirmed invalidity revokes keys.
+			if failure.Category == "invalid_credentials" || failure.Category == "identity_mismatch" || failure.Category == "account_disabled" {
 				if err := deleteSessionTx(tx, resource.ID); err != nil {
 					return err
 				}

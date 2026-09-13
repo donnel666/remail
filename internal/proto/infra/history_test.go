@@ -199,6 +199,53 @@ func TestProtoHistoryPartialFetchNeverWritesUsageOrPromotes(t *testing.T) {
 	require.Zero(t, count)
 }
 
+func TestProtoHistoryDisabledAccountLeavesInventory(t *testing.T) {
+	for _, kind := range []string{"resource", "project"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx := context.Background()
+			s := newHistoryTestService(t)
+			id, _, err := s.ImportLine(ctx, 7, domain.ImportLine{Email: "disabled-history@proton.me", Password: "fixture"})
+			require.NoError(t, err)
+			require.NoError(t, s.ProcessValidation(ctx, protoValidationTask(t, s, id)))
+			require.NoError(t, s.SetForSale(ctx, id, nil, true))
+			before, err := s.GetResource(ctx, id, nil)
+			require.NoError(t, err)
+			s.Protocol = protoMailboxClientStub{fetch: func(context.Context, *proton.Session, proton.FetchRequest) (proton.FetchResult, error) {
+				return proton.FetchResult{}, &proton.Failure{Category: "account_disabled", Stage: "list", HTTPStatus: 422, APICode: 10003, SafeMessage: "Proton has disabled this account."}
+			}}
+			if kind == "resource" {
+				err := s.ProcessHistory(ctx, protoapp.HistoryTaskPayload{ResourceID: id, OwnerUserID: 7, CredentialRevision: before.CredentialRevision, ValidationGeneration: before.ValidationGeneration})
+				// The shared failure transition supersedes this task; the worker
+				// acknowledges ErrInvalidClaim instead of retrying old history.
+				require.ErrorIs(t, err, domain.ErrInvalidClaim)
+				run, err := s.FindMaintenanceRun(ctx, id, before.ValidationGeneration, maintenanceKindHistory)
+				require.NoError(t, err)
+				require.Equal(t, maintenanceCanceled, run.Status)
+			} else {
+				require.NoError(t, s.CompleteHistorySuccess(ctx, id, before.ValidationGeneration))
+				s.Queue = &protoQueueStub{}
+				require.NoError(t, s.ScheduleProjectHistory(ctx, 10, "disabled-history"))
+				require.NoError(t, s.ProcessProjectHistory(ctx, ProjectHistoryTask{ProjectID: 10, Generation: 1}))
+				require.NoError(t, s.ProcessProjectHistory(ctx, ProjectHistoryTask{ProjectID: 10, Generation: 1, AfterID: id}))
+				var state ProjectHistoryState
+				require.NoError(t, s.DB.First(&state, 10).Error)
+				require.Equal(t, "normal", state.Status)
+				require.Equal(t, 1, state.SkippedCount)
+			}
+			after, err := s.GetResource(ctx, id, nil)
+			require.NoError(t, err)
+			require.Equal(t, domain.StatusAbnormal, after.Status)
+			require.Contains(t, after.LastSafeError, "account_disabled")
+			require.Zero(t, after.QualityScore)
+			_, err = s.ReadSession(ctx, id, before.CredentialRevision)
+			require.ErrorIs(t, err, ErrSessionUnavailable)
+			page, err := s.ListResources(ctx, ResourceFilter{Status: domain.StatusNormal, Limit: 10})
+			require.NoError(t, err)
+			require.Zero(t, page.Total)
+		})
+	}
+}
+
 func TestProtoHistoryRejectsChangesDuringFetchAndRollsBackFailedTrade(t *testing.T) {
 	for _, change := range []string{"rules", "credentials", "owner", "trade"} {
 		t.Run(change, func(t *testing.T) {

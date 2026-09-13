@@ -141,6 +141,8 @@ func responseFailure(status, code int, path string) (failure *Failure) {
 		return &Failure{Category: "rate_limited", SafeMessage: "Proto temporarily limited account requests.", Retryable: true}
 	case status >= 500 || status == 408:
 		return &Failure{Category: "request", SafeMessage: "Proto service is temporarily unavailable.", Retryable: true}
+	case code == 10003:
+		return &Failure{Category: "account_disabled", SafeMessage: "Proton has disabled this account. Account recovery is required."}
 	case code == 9001 || code == 12087 || code == 10004:
 		return &Failure{Category: "action_required", SafeMessage: "Proto requires an additional account verification or account action."}
 	// Mail and refresh requests never carry a password, so their errors cannot

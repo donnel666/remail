@@ -424,10 +424,11 @@ func TestPKLClientKeepsLegacyV1FetchWithoutPython(t *testing.T) {
 
 func TestProtoHTTPFailuresOverridePermanentCredentialCodes(t *testing.T) {
 	for _, status := range []int{408, 429, 500, 503} {
-		for _, code := range []int{8002, 6003, 10013} {
+		for _, code := range []int{8002, 6003, 10013, 10003} {
 			failure := responseFailure(status, code, "/auth/v4")
 			require.NotEqual(t, "invalid_credentials", failure.Category)
 			require.NotEqual(t, "session_revoked", failure.Category)
+			require.NotEqual(t, "account_disabled", failure.Category)
 			require.True(t, failure.Retryable)
 			require.Equal(t, status, failure.HTTPStatus)
 			require.Equal(t, code, failure.APICode)
@@ -436,4 +437,13 @@ func TestProtoHTTPFailuresOverridePermanentCredentialCodes(t *testing.T) {
 			require.Equal(t, failure.Category, bridged.Category)
 		}
 	}
+}
+
+func TestPKLAccountDisabledIsExplicitAndNeverRetried(t *testing.T) {
+	failure := pklFailure(pklEvent{Stage: "auth", Category: "account_disabled", HTTPStatus: 422, APICode: 10003, Retryable: true}, "login")
+	require.Equal(t, "account_disabled", failure.Category)
+	require.Contains(t, failure.SafeMessage, "Proton has disabled this account")
+	require.False(t, failure.Retryable)
+	invalid := pklFailure(pklEvent{Stage: "auth", Category: "account_disabled", HTTPStatus: 422, APICode: 8002}, "login")
+	require.Equal(t, "protocol", invalid.Category)
 }

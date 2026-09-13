@@ -34,12 +34,6 @@ export function renderStatusTag(
         {t("Identifying")}
       </Tag>
     );
-  } else if (status === "validation_failed") {
-    tag = (
-      <Tag color="red" shape="circle" size="small">
-        {t("Validation failed")}
-      </Tag>
-    );
   } else if (status === "abnormal") {
     tag = (
       <Tag color="red" shape="circle" size="small">

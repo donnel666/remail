@@ -69,6 +69,7 @@ func TestProtoMailFetchAdapterRejectsPartialAndSanitizesFailure(t *testing.T) {
 	}{
 		{"partial history", nil, "incomplete_history", nil},
 		{"stale revision", protodomain.ErrInvalidClaim, "", mailmatchdomain.ErrResourceFetchCredentialChanged},
+		{"failure commit unavailable", protodomain.ErrDependency, "request", nil},
 		{"session busy", protoinfra.ErrSessionBusy, "session_busy", nil},
 		{"missing session", protoinfra.ErrSessionUnavailable, "session_unavailable", nil},
 		{"upstream", &proton.Failure{Category: "rate_limited", SafeMessage: "Proto service is rate limited.", Retryable: true, Cause: errors.New("secret-token-value")}, "rate_limited", nil},
