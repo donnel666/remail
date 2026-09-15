@@ -84,15 +84,15 @@ func TestServeEmbeddedFrontendDoesNotFallbackForAPIRoutes(t *testing.T) {
 		"index.html": {Data: []byte("<!doctype html><div id=\"root\"></div>")},
 	})
 
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v1/missing", nil)
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("expected status 404, got %d", w.Code)
-	}
-	if got := w.Body.String(); got == "<!doctype html><div id=\"root\"></div>" {
-		t.Fatalf("expected API 404, got SPA fallback body")
+	for _, path := range []string{"/v1/missing", "/sms/missing/invalid"} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("expected status 404 for %s, got %d", path, w.Code)
+		}
+		if got := w.Body.String(); got == "<!doctype html><div id=\"root\"></div>" {
+			t.Fatalf("expected API 404 for %s, got SPA fallback body", path)
+		}
 	}
 }
 

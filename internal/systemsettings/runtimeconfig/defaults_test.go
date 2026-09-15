@@ -50,6 +50,13 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 	require.Equal(t, "", keys[ICloudForwardingSuffixesKey])
 	require.Equal(t, "8", keys[ICloudCookieKeepaliveMinutesKey])
 	require.Equal(t, "10", keys[ICloudPhoneHourlySMSLimitKey])
+	require.Equal(t, "120", keys[KitesimSMSWindowSecondsKey])
+	for _, value := range []string{"0", "-1", "1.5", "86401", "invalid"} {
+		require.Error(t, Validate(KitesimSMSWindowSecondsKey, value))
+	}
+	for _, value := range []string{"1", "120", "300", "86400"} {
+		require.NoError(t, Validate(KitesimSMSWindowSecondsKey, value))
+	}
 	require.Equal(t, "30", keys[ICloudPhoneCooldownBaseSecondsKey])
 	require.Equal(t, "120", keys[ICloudPhoneCooldownMaxSecondsKey])
 	require.Equal(t, "3", keys[ICloudPhoneSendFailureThresholdKey])

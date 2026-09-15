@@ -14444,6 +14444,165 @@ paths:
         "502":
           $ref: "#/components/responses/BadGateway"
 
+  /sms/{token}:
+    get:
+      operationId: getKitesimSMSPickup
+      summary: Read the latest recent SMS through a Kitesim pickup link
+      description: >-
+        The link is a bearer credential scoped to one purchased phone record.
+        Returns SMS content followed by a pipe and the phone expiry date in Asia/Shanghai,
+        or No message followed by the same suffix. Split at the last pipe to preserve
+        pipes in SMS content. The receipt window is configured by kitesim_sms_window_seconds
+        (default 120, range 1–86400). Upstream sendTime, falling back to createTime when
+        absent, determines freshness; timestamps without a timezone use Asia/Shanghai.
+        The exact phone expiry instant and active status are checked before and after
+        fetching. Renewal updates the existing link after phone synchronization.
+        Requests do not consume messages. Poll no faster than once every 3 seconds.
+        Responses must not be cached. Invalid or revoked links return 404.
+      tags: [Core]
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 43
+            maxLength: 43
+      responses:
+        "200":
+          description: Latest recent SMS, or No message, followed by the phone expiry date
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Your code is 123456|2026-11-29"
+        "404":
+          description: Invalid URL|
+          content:
+            text/plain:
+              schema:
+                type: string
+        "410":
+          description: URL expired or phone unavailable, followed by the phone expiry date
+          content:
+            text/plain:
+              schema:
+                type: string
+        "429":
+          description: Polling too frequently; respect Retry-After. The IP limiter may return JSON.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            text/plain:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+        "502":
+          description: Service unavailable, followed by the phone expiry date
+          content:
+            text/plain:
+              schema:
+                type: string
+        "503":
+          description: Storage or expiry unavailable. The IP limiter may return JSON.
+          content:
+            text/plain:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+
+  /v1/admin/kitesim/phones/{phoneId}/sms-link:
+    parameters:
+      - name: phoneId
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      operationId: getAdminKitesimSMSLink
+      summary: Read Kitesim SMS link status and current phone expiry
+      description: Requires core:resource/operate and mailmatch:message/read. Never returns the existing token.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Link metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimSMSLink"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+    post:
+      operationId: postAdminKitesimSMSLink
+      summary: Generate or rotate a Kitesim SMS pickup link
+      description: >-
+        Requires core:resource/operate and mailmatch:message/read. The phone must be
+        active with a known future expiry. Replaces any previous token immediately.
+        The path is returned only by this operation; save it before closing the dialog.
+        Only the token hash is stored. Generation and rotation are audited.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Updated metadata and newly generated relative pickup path
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimSMSLink"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+    delete:
+      operationId: deleteAdminKitesimSMSLink
+      summary: Revoke a Kitesim SMS pickup link
+      description: Requires core:resource/operate and mailmatch:message/read. Revocation is audited.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Disabled link metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminKitesimSMSLink"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
   /v1/admin/kitesim/phones/{phoneId}/renewals:
     post:
       operationId: postAdminKitesimPhoneRenewal
@@ -26000,6 +26159,28 @@ components:
           type: integer
           minimum: 1
           maximum: 100
+      additionalProperties: false
+
+    AdminKitesimSMSLink:
+      type: object
+      required: [enabled, canGenerate, expiresAt, windowSeconds]
+      properties:
+        enabled:
+          type: boolean
+          description: A token exists; phone lifecycle checks still apply.
+        canGenerate:
+          type: boolean
+          description: Phone is active and its parsed expiry is in the future.
+        expiresAt:
+          type: string
+          description: Exact phone expiry as RFC3339 UTC, or empty when unavailable.
+        windowSeconds:
+          type: integer
+          minimum: 1
+          maximum: 86400
+        path:
+          type: string
+          description: Relative /sms/ path, returned only when generating or rotating the link.
       additionalProperties: false
 
     AdminKitesimMessage:

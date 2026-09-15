@@ -8350,6 +8350,22 @@ type AdminKitesimRenewalRequest struct {
 	ProductId    int    `json:"productId"`
 }
 
+// AdminKitesimSMSLink defines model for AdminKitesimSMSLink.
+type AdminKitesimSMSLink struct {
+	// CanGenerate Phone is active and its parsed expiry is in the future.
+	CanGenerate bool `json:"canGenerate"`
+
+	// Enabled A token exists; phone lifecycle checks still apply.
+	Enabled bool `json:"enabled"`
+
+	// ExpiresAt Exact phone expiry as RFC3339 UTC, or empty when unavailable.
+	ExpiresAt string `json:"expiresAt"`
+
+	// Path Relative /sms/ path, returned only when generating or rotating the link.
+	Path          *string `json:"path,omitempty"`
+	WindowSeconds int     `json:"windowSeconds"`
+}
+
 // AdminKitesimSyncRun defines model for AdminKitesimSyncRun.
 type AdminKitesimSyncRun struct {
 	Attempts      int                        `json:"attempts"`
@@ -13815,6 +13831,18 @@ type PostAdminKitesimPhoneRenewalParams struct {
 	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
 }
 
+// DeleteAdminKitesimSMSLinkParams defines parameters for DeleteAdminKitesimSMSLink.
+type DeleteAdminKitesimSMSLinkParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostAdminKitesimSMSLinkParams defines parameters for PostAdminKitesimSMSLink.
+type PostAdminKitesimSMSLinkParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // PutAdminKitesimUpstreamParams defines parameters for PutAdminKitesimUpstream.
 type PutAdminKitesimUpstreamParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -17468,6 +17496,9 @@ type ServerInterface interface {
 	// Readiness probe
 	// (GET /readyz)
 	Readyz(c *gin.Context)
+	// Read the latest recent SMS through a Kitesim pickup link
+	// (GET /sms/{token})
+	GetKitesimSMSPickup(c *gin.Context, token string)
 	// Check if first activation is needed
 	// (GET /v1/activation)
 	GetActivation(c *gin.Context)
@@ -17786,6 +17817,15 @@ type ServerInterface interface {
 	// Queue a one-time Kitesim phone renewal
 	// (POST /v1/admin/kitesim/phones/{phoneId}/renewals)
 	PostAdminKitesimPhoneRenewal(c *gin.Context, phoneId int, params PostAdminKitesimPhoneRenewalParams)
+	// Revoke a Kitesim SMS pickup link
+	// (DELETE /v1/admin/kitesim/phones/{phoneId}/sms-link)
+	DeleteAdminKitesimSMSLink(c *gin.Context, phoneId int, params DeleteAdminKitesimSMSLinkParams)
+	// Read Kitesim SMS link status and current phone expiry
+	// (GET /v1/admin/kitesim/phones/{phoneId}/sms-link)
+	GetAdminKitesimSMSLink(c *gin.Context, phoneId int)
+	// Generate or rotate a Kitesim SMS pickup link
+	// (POST /v1/admin/kitesim/phones/{phoneId}/sms-link)
+	PostAdminKitesimSMSLink(c *gin.Context, phoneId int, params PostAdminKitesimSMSLinkParams)
 	// List safe Kitesim packages for replenishment and renewal
 	// (GET /v1/admin/kitesim/products)
 	GetAdminKitesimProducts(c *gin.Context)
@@ -18719,6 +18759,31 @@ func (siw *ServerInterfaceWrapper) Readyz(c *gin.Context) {
 	}
 
 	siw.Handler.Readyz(c)
+}
+
+// GetKitesimSMSPickup operation middleware
+func (siw *ServerInterfaceWrapper) GetKitesimSMSPickup(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "token" -------------
+	var token string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "token", c.Param("token"), &token, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter token: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetKitesimSMSPickup(c, token)
 }
 
 // GetActivation operation middleware
@@ -25364,6 +25429,141 @@ func (siw *ServerInterfaceWrapper) PostAdminKitesimPhoneRenewal(c *gin.Context) 
 	}
 
 	siw.Handler.PostAdminKitesimPhoneRenewal(c, phoneId, params)
+}
+
+// DeleteAdminKitesimSMSLink operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAdminKitesimSMSLink(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "phoneId" -------------
+	var phoneId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "phoneId", c.Param("phoneId"), &phoneId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter phoneId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAdminKitesimSMSLinkParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteAdminKitesimSMSLink(c, phoneId, params)
+}
+
+// GetAdminKitesimSMSLink operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminKitesimSMSLink(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "phoneId" -------------
+	var phoneId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "phoneId", c.Param("phoneId"), &phoneId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter phoneId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminKitesimSMSLink(c, phoneId)
+}
+
+// PostAdminKitesimSMSLink operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminKitesimSMSLink(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "phoneId" -------------
+	var phoneId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "phoneId", c.Param("phoneId"), &phoneId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter phoneId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminKitesimSMSLinkParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminKitesimSMSLink(c, phoneId, params)
 }
 
 // GetAdminKitesimProducts operation middleware
@@ -39792,6 +39992,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/healthz", wrapper.Healthz)
 	router.GET(options.BaseURL+"/oauth/nodeloc", wrapper.GetNodeLocCallback)
 	router.GET(options.BaseURL+"/readyz", wrapper.Readyz)
+	router.GET(options.BaseURL+"/sms/:token", wrapper.GetKitesimSMSPickup)
 	router.GET(options.BaseURL+"/v1/activation", wrapper.GetActivation)
 	router.POST(options.BaseURL+"/v1/activation", wrapper.PostActivation)
 	router.GET(options.BaseURL+"/v1/admin/allocations", wrapper.GetAdminAllocations)
@@ -39898,6 +40099,9 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/kitesim/phones/enable", wrapper.PostAdminKitesimPhonesEnable)
 	router.GET(options.BaseURL+"/v1/admin/kitesim/phones/:phoneId/messages", wrapper.GetAdminKitesimPhoneMessages)
 	router.POST(options.BaseURL+"/v1/admin/kitesim/phones/:phoneId/renewals", wrapper.PostAdminKitesimPhoneRenewal)
+	router.DELETE(options.BaseURL+"/v1/admin/kitesim/phones/:phoneId/sms-link", wrapper.DeleteAdminKitesimSMSLink)
+	router.GET(options.BaseURL+"/v1/admin/kitesim/phones/:phoneId/sms-link", wrapper.GetAdminKitesimSMSLink)
+	router.POST(options.BaseURL+"/v1/admin/kitesim/phones/:phoneId/sms-link", wrapper.PostAdminKitesimSMSLink)
 	router.GET(options.BaseURL+"/v1/admin/kitesim/products", wrapper.GetAdminKitesimProducts)
 	router.GET(options.BaseURL+"/v1/admin/kitesim/upstream", wrapper.GetAdminKitesimUpstream)
 	router.PUT(options.BaseURL+"/v1/admin/kitesim/upstream", wrapper.PutAdminKitesimUpstream)

@@ -93,6 +93,14 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
+      "/sms": {
+        target: apiProxyTarget,
+        changeOrigin: true,
+        secure: true,
+        agent: proxyAgent,
+        proxyTimeout: apiProxyTimeoutMs,
+        timeout: apiProxyTimeoutMs,
+      },
       "/v1": {
         target: apiProxyTarget,
         changeOrigin: true,

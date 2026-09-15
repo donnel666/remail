@@ -103,6 +103,7 @@ type phoneModel struct {
 	SMSConsecutiveFailures uint       `gorm:"column:sms_consecutive_failures"`
 	SMSBlacklistedUntil    *time.Time `gorm:"column:sms_blacklisted_until"`
 	SMSLastUsedAt          *time.Time `gorm:"column:sms_last_used_at"`
+	SMSLinkTokenHash       *string    `gorm:"column:sms_link_token_hash;size:64;uniqueIndex:uk_kitesim_phones_sms_link_token"`
 	RawPayload             jsonText   `gorm:"column:raw_payload;type:json"`
 	CreatedAt              time.Time  `gorm:"column:created_at"`
 	UpdatedAt              time.Time  `gorm:"column:updated_at"`
@@ -623,7 +624,7 @@ func (s *Service) ImportAccounts(ctx context.Context, content string, meta Mutat
 			}
 			if err := tx.Model(&phoneModel{}).
 				Where("account_id = ? AND deleted_at IS NOT NULL", model.ID).
-				Updates(map[string]any{"disabled_at": nil, "deleted_at": nil}).Error; err != nil {
+				Updates(map[string]any{"disabled_at": nil, "deleted_at": nil, "sms_link_token_hash": nil}).Error; err != nil {
 				return fmt.Errorf("restore Kitesim phones: %w", err)
 			}
 		}
@@ -750,7 +751,7 @@ func (s *Service) DeletePhones(ctx context.Context, phoneIDs, emptyAccountIDs []
 		now := s.now().UTC().Truncate(time.Millisecond)
 		if len(ids) > 0 {
 			updated := tx.Model(&phoneModel{}).Where("id IN ? AND deleted_at IS NULL", ids).
-				Updates(map[string]any{"deleted_at": now, "disabled_at": now})
+				Updates(map[string]any{"deleted_at": now, "disabled_at": now, "sms_link_token_hash": nil})
 			if updated.Error != nil {
 				return fmt.Errorf("delete Kitesim phones: %w", updated.Error)
 			}

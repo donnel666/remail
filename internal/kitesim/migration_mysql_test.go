@@ -3,6 +3,7 @@ package kitesim
 import (
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/donnel666/remail/internal/platform"
@@ -13,6 +14,33 @@ import (
 )
 
 var kitesimMigrationMySQL = testmysql.New("remail_kitesim_migration")
+
+func TestKitesimSMSLinkMigrationMySQL(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	source := filepath.Clean(filepath.Join(filepath.Dir(file), "../..", "migrations"))
+	db := kitesimMigrationMySQL.Database(t, testmysql.MigrationsThrough(t, source, 107))
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, platform.RunMigrations(sqlDB, testmysql.MigrationsThrough(t, source, 140)))
+	require.NoError(t, db.Exec("INSERT INTO kitesim_accounts (account, password) VALUES ('links@example.com', 'password')").Error)
+	require.NoError(t, db.Exec(`INSERT INTO kitesim_phones (account_id, provider_order_id, order_no, phone_number, status, order_status, raw_payload)
+		VALUES (1, 'phone-1', 'order-1', '14165550001', 1, 1, JSON_OBJECT()),
+		       (1, 'phone-2', 'order-2', '14165550002', 1, 1, JSON_OBJECT())`).Error)
+	through141 := testmysql.MigrationsThrough(t, source, 141)
+	require.NoError(t, platform.RunMigrations(sqlDB, through141))
+	var count int64
+	require.NoError(t, db.Table("kitesim_phones").Where("sms_link_token_hash IS NULL").Count(&count).Error)
+	require.Equal(t, int64(2), count)
+	hash := strings.Repeat("a", 64)
+	require.NoError(t, db.Table("kitesim_phones").Where("id = 1").Update("sms_link_token_hash", hash).Error)
+	require.ErrorIs(t, db.Table("kitesim_phones").Where("id = 2").Update("sms_link_token_hash", hash).Error, gorm.ErrDuplicatedKey)
+	require.NoError(t, goose.DownTo(sqlDB, through141, 140))
+	require.False(t, db.Migrator().HasColumn("kitesim_phones", "sms_link_token_hash"))
+	require.NoError(t, platform.RunMigrations(sqlDB, through141))
+	require.NoError(t, db.Table("kitesim_phones").Count(&count).Error)
+	require.Equal(t, int64(2), count)
+}
 
 func TestKitesimRechargeGlobalLockMigrationMySQL(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)

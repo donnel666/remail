@@ -337,6 +337,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		kitesimService.SetProxyProvider(proxyMod.ProxyUseCase)
 		icloudMod.Service.SetICloudSMSPhoneService(kitesimService)
 		kitesim.RegisterRoutes(v1, kitesimService, iamSessionFetcher, iamMod.PermissionChecker)
+		kitesim.RegisterPublicRoutes(r, kitesimService, p.Redis)
 		kitesim.RegisterTaskHandlers(taskMux, kitesimService)
 		cleanupFuncs = append(cleanupFuncs, kitesim.StartOperationDispatcher(kitesimService))
 		// Trade module (unified console/API Key checkout and order query).
@@ -502,7 +503,7 @@ func serveEmbeddedFrontend(r *gin.Engine, feFS fs.FS) {
 
 	r.NoRoute(func(c *gin.Context) {
 		urlPath := c.Request.URL.Path
-		if strings.HasPrefix(urlPath, "/v1/") || strings.HasPrefix(urlPath, "/healthz") || strings.HasPrefix(urlPath, "/readyz") {
+		if strings.HasPrefix(urlPath, "/v1/") || strings.HasPrefix(urlPath, "/sms/") || strings.HasPrefix(urlPath, "/healthz") || strings.HasPrefix(urlPath, "/readyz") {
 			c.Status(http.StatusNotFound)
 			return
 		}

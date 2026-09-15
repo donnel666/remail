@@ -7,7 +7,8 @@ import (
 )
 
 const (
-	DefaultSettingsCount                         = 293
+	DefaultSettingsCount                         = 294
+	KitesimSMSWindowSecondsKey                   = "kitesim_sms_window_seconds"
 	NodeLocCallbackURL                           = "https://remail.aishop6.com/oauth/nodeloc"
 	RechargeTimeoutMinutesKey                    = "recharge_timeout_minutes"
 	MicrosoftPriceMultiplierKey                  = "product_price_multiplier_microsoft"
@@ -54,6 +55,7 @@ func DefaultSettings() []domain.Setting {
 }
 
 var defaultSettings = []domain.Setting{
+	{Key: KitesimSMSWindowSecondsKey, Value: "120"},
 	{Key: "register_enabled", Value: "true"},
 	{Key: "registration_email_whitelist", Value: "qq.com,foxmail.com,gmail.com,proton.me,protonmail.com,pm.me,mail.com"},
 	{Key: "registration_reward_amount", Value: "0"},

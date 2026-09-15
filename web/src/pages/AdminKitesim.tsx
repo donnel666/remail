@@ -49,6 +49,10 @@ import {
   importAdminKitesimAccounts,
   listAdminKitesimAccountTasks,
   listAdminKitesimMessages,
+  getAdminKitesimSMSLink,
+  createAdminKitesimSMSLink,
+  deleteAdminKitesimSMSLink,
+  type AdminKitesimSMSLink,
   listAdminKitesimPhones,
   syncAdminKitesimAccount,
   type AdminKitesimListFilter,
@@ -805,6 +809,77 @@ function KitesimDetailSheet({
   );
 }
 
+export function KitesimSMSLinkModal({ item, onCancel }: { item: AdminKitesimPhoneItem; onCancel: () => void }) {
+  const { t } = useTranslation();
+  const [link, setLink] = useState<AdminKitesimSMSLink | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    const controller = new AbortController();
+    setLink(null);
+    setLoading(true);
+    void getAdminKitesimSMSLink(item.phoneId!, controller.signal).then((next) => {
+      if (!controller.signal.aborted) setLink(next);
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) Toast.error(getIamErrorMessage(t, error, "Kitesim operation failed."));
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoading(false);
+    });
+    return () => { mounted.current = false; controller.abort(); };
+  }, [item.phoneId, t]);
+
+  const update = async (enabled: boolean) => {
+    setBusy(true);
+    try {
+      const next = await (enabled ? createAdminKitesimSMSLink : deleteAdminKitesimSMSLink)(item.phoneId!);
+      if (mounted.current) setLink(next);
+    } catch (error) {
+      if (mounted.current) {
+        // A failed response can still follow a committed rotation. Hide the
+        // previous credential until its replacement is generated.
+        setLink((current) => current ? { ...current, path: undefined } : null);
+        Toast.error(getIamErrorMessage(t, error, "Kitesim operation failed."));
+      }
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  };
+  const rotate = () => {
+    if (link?.enabled) {
+      Modal.confirm({
+        title: t("Reset SMS link"), content: t("The previous SMS link will stop working immediately."),
+        okText: t("Reset SMS link"), cancelText: t("Cancel"), onOk: () => update(true),
+      });
+    } else {
+      void update(true);
+    }
+  };
+  const url = link?.path ? new URL(link.path, window.location.origin).href : "";
+
+  return <Modal visible title={`${t("SMS pickup link")} · ${item.phoneNumber}`} onCancel={onCancel} footer={null} width={620}>
+    <div className="space-y-4">
+      <Text type="tertiary">{t("SMS link follows the phone expiry. Anyone with the link can read recent messages.")}</Text>
+      {link ? <div className="grid gap-3 sm:grid-cols-2">
+        <InfoItem label={t("Status")} value={t(link.enabled ? "Enabled" : "Disabled")} />
+        <InfoItem label={t("Expires at")} value={formatTime(link.expiresAt)} />
+        <InfoItem label={t("SMS receipt window (seconds)")} value={link.windowSeconds} />
+      </div> : null}
+      {url ? <div className="space-y-2">
+        <Input aria-label={t("SMS pickup link")} value={url} readOnly />
+        <Text type="tertiary" size="small">{t("Copy and save this link now. To retrieve it later, reset the link.")}</Text>
+      </div> : null}
+      <Space wrap>
+        <Button loading={loading || busy} disabled={!link?.canGenerate || busy} onClick={rotate} theme="solid">{t(link?.enabled ? "Reset SMS link" : "Generate SMS link")}</Button>
+        <Button disabled={!url || busy} onClick={() => void copyText(url).then(() => Toast.success(t("Copied"))).catch(() => Toast.error(t("Copy failed")))}>{t("Copy link")}</Button>
+        <Button disabled={!link?.enabled || busy} type="danger" onClick={() => void update(false)}>{t("Disable SMS link")}</Button>
+      </Space>
+    </div>
+  </Modal>;
+}
+
 export default function AdminKitesim() {
   const { t } = useTranslation();
   const { currentUser } = useAuth();
@@ -825,6 +900,7 @@ export default function AdminKitesim() {
   const [detail, setDetail] = useState<AdminKitesimPhoneItem | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("basic");
   const [renewalItem, setRenewalItem] = useState<AdminKitesimPhoneItem | null>(null);
+  const [smsLinkItem, setSMSLinkItem] = useState<AdminKitesimPhoneItem | null>(null);
   const [syncingAccountIds, setSyncingAccountIds] = useState<number[]>([]);
   const [rowMutation, setRowMutation] = useState<{ action: LifecycleAction; key: string } | null>(null);
   const [bulkMutation, setBulkMutation] = useState<LifecycleAction | null>(null);
@@ -1106,6 +1182,9 @@ export default function AdminKitesim() {
           <Button disabled={!canReadMessages || !item.phoneId || busy} onClick={() => openDetail(item, "mails")} size="small" type="tertiary">
             {t("Inbox")}
           </Button>
+          <Button disabled={!canOperate || !canReadMessages || !item.phoneId || busy} onClick={() => setSMSLinkItem(item)} size="small" type="tertiary">
+            {t("SMS pickup link")}
+          </Button>
           <Button disabled={!canRenew || !item.phoneId || busy || (item.status !== "active" && item.status !== "expired")} onClick={() => setRenewalItem(item)} size="small" type="tertiary">
             {t("Renew")}
           </Button>
@@ -1225,7 +1304,7 @@ export default function AdminKitesim() {
           fixed: "right",
           key: "operate",
           title: t("Action"),
-          width: 360,
+          width: 440,
           render: (_: unknown, item: AdminKitesimPhoneItem) => renderRowActions(item),
         },
       ] as any[],
@@ -1467,7 +1546,7 @@ export default function AdminKitesim() {
           pagination={false}
           rowKey={rowKey}
           rowSelection={rowSelection}
-          scroll={{ x: "max(100%, 1960px)", y: DESKTOP_TABLE_SCROLL_Y }}
+            scroll={{ x: "max(100%, 2040px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
       </CardPro>
@@ -1483,6 +1562,8 @@ export default function AdminKitesim() {
         onCancel={() => setRenewalItem(null)}
         onQueued={refresh}
       />
+
+      {smsLinkItem && canOperate && canReadMessages ? <KitesimSMSLinkModal key={smsLinkItem.phoneId} item={smsLinkItem} onCancel={() => setSMSLinkItem(null)} /> : null}
 
       <KitesimDetailSheet
         busy={detail ? syncingAccountIds.includes(detail.accountId) || rowMutation?.key === rowKey(detail) : false}

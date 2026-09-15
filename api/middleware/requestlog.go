@@ -24,7 +24,7 @@ func RequestLogger() gin.HandlerFunc {
 
 		attrs := []any{
 			"method", c.Request.Method,
-			"path", c.Request.URL.Path,
+			"path", requestLogPath(c.Request.URL.Path),
 			"route", c.FullPath(),
 			"status", c.Writer.Status(),
 			"latency_ms", elapsed.Seconds() * 1000,
@@ -39,6 +39,13 @@ func RequestLogger() gin.HandlerFunc {
 		}
 		logger.Info("http request", attrs...)
 	}
+}
+
+func requestLogPath(path string) string {
+	if strings.HasPrefix(path, "/sms/") {
+		return "/sms/:token"
+	}
+	return path
 }
 
 func shouldSkipRequestLog(requestPath string, elapsed time.Duration, slowThreshold time.Duration) bool {

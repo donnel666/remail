@@ -67,7 +67,7 @@ describe("admin Kitesim page layout", () => {
     expect(kitesimSource).toContain("const price = product.buyPrice;");
     expect(kitesimSource).toContain("const maxUnitPrice = selectedProduct.buyPrice;");
     expect(microsoftSource).toContain('scroll={{ x: "max(100%, 2030px)", y: DESKTOP_TABLE_SCROLL_Y }}');
-    expect(kitesimSource).toContain('scroll={{ x: "max(100%, 1960px)", y: DESKTOP_TABLE_SCROLL_Y }}');
+    expect(kitesimSource).toContain('scroll={{ x: "max(100%, 2040px)", y: DESKTOP_TABLE_SCROLL_Y }}');
     expect(kitesimSource).not.toContain('dataIndex: "orderNo"');
     expect(kitesimSource).not.toContain("window.setInterval(() => void refreshList()");
     expect(kitesimSource).not.toContain('<Tabs.TabPane itemKey="orders"');

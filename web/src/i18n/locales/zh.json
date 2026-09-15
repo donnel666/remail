@@ -3019,5 +3019,18 @@
   "No payouts yet": "暂无中奖结果",
   "Please enter an activity title.": "请输入活动标题。",
   "Untitled lottery": "未命名抽奖",
-  "Permission required: sensitive system settings": "需要敏感系统设置权限"
+  "Permission required: sensitive system settings": "需要敏感系统设置权限",
+  "SMS pickup link": "取件链接",
+  "Generate SMS link": "生成取件链接",
+  "Reset SMS link": "重置取件链接",
+  "Disable SMS link": "关闭取件链接",
+  "The previous SMS link will stop working immediately.": "重置后，旧取件链接立即失效。",
+  "SMS link follows the phone expiry. Anyone with the link can read recent messages.": "链接有效期跟随号码有效期，持有链接即可读取窗口内的最新短信。",
+  "Copy and save this link now. To retrieve it later, reset the link.": "请复制保存本次生成的链接；关闭弹窗后如需重新获取，请重置链接。",
+  "SMS receipt window (seconds)": "短信收件窗口（秒）",
+  "Kitesim SMS pickup": "Kitesim 短信取件",
+  "SMS links return the newest message within this window and follow the phone expiry.": "取件链接仅返回窗口内最新一条短信，有效期跟随号码。",
+  "Default: 120 seconds (2 minutes). Changes apply to subsequent requests.": "默认 120 秒（2 分钟），保存后新请求使用新窗口。",
+  "Copy failed": "复制失败",
+  "Save settings": "保存设置"
 }

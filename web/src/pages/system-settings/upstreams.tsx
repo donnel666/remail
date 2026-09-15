@@ -551,6 +551,30 @@ function KitesimUpstreamSection({
   );
 }
 
-export default function UpstreamsSection({ canSensitive, canWrite }: SectionProps) {
-  return <KitesimUpstreamSection canSensitive={canSensitive} canWrite={canWrite} />;
+export function KitesimSMSSettings({ options, onSave, canWrite }: Pick<SectionProps, "options" | "onSave" | "canWrite">) {
+  const { t } = useTranslation();
+  const saved = Number(options.find((option) => option.key === "kitesim_sms_window_seconds")?.value ?? 120);
+  const [seconds, setSeconds] = useState(saved);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setSeconds(saved), [saved]);
+  const valid = Number.isInteger(seconds) && seconds >= 1 && seconds <= 86400;
+  const save = async () => {
+    setSaving(true);
+    try { await onSave("kitesim_sms_window_seconds", String(seconds)); }
+    catch { /* The system settings page displays the save error. */ }
+    finally { setSaving(false); }
+  };
+  return <SettingsSection title={<SettingsCardHeader icon={<Smartphone size={16} />} title={t("Kitesim SMS pickup")} description={t("SMS links return the newest message within this window and follow the phone expiry.")} />}>
+    <SettingsAccessBoundary canWrite={canWrite && !saving}>
+      <SettingsFormGrid><SettingsNumberField label={t("SMS receipt window (seconds)")} description={t("Default: 120 seconds (2 minutes). Changes apply to subsequent requests.")} value={seconds} onChange={setSeconds} min={1} max={86400} precision={0} /></SettingsFormGrid>
+    </SettingsAccessBoundary>
+    <Button className="mt-4" theme="solid" loading={saving} disabled={!canWrite || !valid || seconds === saved} onClick={() => void save()}>{t("Save settings")}</Button>
+  </SettingsSection>;
+}
+
+export default function UpstreamsSection(props: SectionProps) {
+  return <div className="space-y-6">
+    <KitesimSMSSettings options={props.options} onSave={props.onSave} canWrite={props.canWrite} />
+    <KitesimUpstreamSection canSensitive={props.canSensitive} canWrite={props.canWrite} />
+  </div>;
 }

@@ -21,6 +21,7 @@ export type AdminKitesimSyncRunList =
   components["schemas"]["AdminKitesimSyncRunList"];
 export type AdminKitesimMessage =
   components["schemas"]["AdminKitesimMessage"];
+export type AdminKitesimSMSLink = components["schemas"]["AdminKitesimSMSLink"];
 export type AdminKitesimPhoneMutationResult =
   components["schemas"]["AdminKitesimPhoneMutationResult"];
 
@@ -145,4 +146,22 @@ export async function listAdminKitesimMessages(
     }),
   );
   return response.items;
+}
+
+export async function getAdminKitesimSMSLink(phoneId: number, signal?: AbortSignal): Promise<AdminKitesimSMSLink> {
+  return unwrap(await client.GET("/v1/admin/kitesim/phones/{phoneId}/sms-link", {
+    params: { path: { phoneId } }, signal,
+  }));
+}
+
+export async function createAdminKitesimSMSLink(phoneId: number): Promise<AdminKitesimSMSLink> {
+  return unwrap(await client.POST("/v1/admin/kitesim/phones/{phoneId}/sms-link", {
+    params: { path: { phoneId }, header: csrfHeader() },
+  }));
+}
+
+export async function deleteAdminKitesimSMSLink(phoneId: number): Promise<AdminKitesimSMSLink> {
+  return unwrap(await client.DELETE("/v1/admin/kitesim/phones/{phoneId}/sms-link", {
+    params: { path: { phoneId }, header: csrfHeader() },
+  }));
 }

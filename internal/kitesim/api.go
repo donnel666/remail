@@ -24,6 +24,12 @@ func RegisterRoutes(rg *gin.RouterGroup, service *Service, fetcher middleware.Se
 	admin.GET("/accounts/:accountId/tasks", middleware.PermissionRequired(checker, "core:resource", "read"), h.listAccountTasks)
 	admin.POST("/accounts/:accountId/sync", middleware.PermissionRequired(checker, "core:resource", "operate"), h.syncAccount)
 	admin.GET("/phones/:phoneId/messages", middleware.PermissionRequired(checker, "mailmatch:message", "read"), h.messages)
+	links := admin.Group("/phones/:phoneId/sms-link",
+		middleware.PermissionRequired(checker, "core:resource", "operate"),
+		middleware.PermissionRequired(checker, "mailmatch:message", "read"))
+	links.GET("", h.smsLink)
+	links.POST("", h.createSMSLink)
+	links.DELETE("", h.deleteSMSLink)
 	admin.POST(
 		"/phones/:phoneId/renewals",
 		middleware.PermissionRequired(checker, "core:resource", "operate"),

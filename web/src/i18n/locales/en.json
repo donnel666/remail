@@ -3019,5 +3019,18 @@
   "No payouts yet": "No payouts yet",
   "Please enter an activity title.": "Please enter an activity title.",
   "Untitled lottery": "Untitled lottery",
-  "Permission required: sensitive system settings": "Sensitive system settings permission is required"
+  "Permission required: sensitive system settings": "Sensitive system settings permission is required",
+  "SMS pickup link": "SMS pickup link",
+  "Generate SMS link": "Generate SMS link",
+  "Reset SMS link": "Reset SMS link",
+  "Disable SMS link": "Disable SMS link",
+  "The previous SMS link will stop working immediately.": "The previous SMS link will stop working immediately.",
+  "SMS link follows the phone expiry. Anyone with the link can read recent messages.": "SMS link follows the phone expiry. Anyone with the link can read recent messages.",
+  "Copy and save this link now. To retrieve it later, reset the link.": "Copy and save this link now. To retrieve it later, reset the link.",
+  "SMS receipt window (seconds)": "SMS receipt window (seconds)",
+  "Kitesim SMS pickup": "Kitesim SMS pickup",
+  "SMS links return the newest message within this window and follow the phone expiry.": "SMS links return the newest message within this window and follow the phone expiry.",
+  "Default: 120 seconds (2 minutes). Changes apply to subsequent requests.": "Default: 120 seconds (2 minutes). Changes apply to subsequent requests.",
+  "Copy failed": "Copy failed",
+  "Save settings": "Save settings"
 }

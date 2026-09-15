@@ -5401,6 +5401,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sms/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the latest recent SMS through a Kitesim pickup link
+         * @description The link is a bearer credential scoped to one purchased phone record. Returns SMS content followed by a pipe and the phone expiry date in Asia/Shanghai, or No message followed by the same suffix. Split at the last pipe to preserve pipes in SMS content. The receipt window is configured by kitesim_sms_window_seconds (default 120, range 1–86400). Upstream sendTime, falling back to createTime when absent, determines freshness; timestamps without a timezone use Asia/Shanghai. The exact phone expiry instant and active status are checked before and after fetching. Renewal updates the existing link after phone synchronization. Requests do not consume messages. Poll no faster than once every 3 seconds. Responses must not be cached. Invalid or revoked links return 404.
+         */
+        get: operations["getKitesimSMSPickup"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/kitesim/phones/{phoneId}/sms-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                phoneId: number;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read Kitesim SMS link status and current phone expiry
+         * @description Requires core:resource/operate and mailmatch:message/read. Never returns the existing token.
+         */
+        get: operations["getAdminKitesimSMSLink"];
+        put?: never;
+        /**
+         * Generate or rotate a Kitesim SMS pickup link
+         * @description Requires core:resource/operate and mailmatch:message/read. The phone must be active with a known future expiry. Replaces any previous token immediately. The path is returned only by this operation; save it before closing the dialog. Only the token hash is stored. Generation and rotation are audited.
+         */
+        post: operations["postAdminKitesimSMSLink"];
+        /**
+         * Revoke a Kitesim SMS pickup link
+         * @description Requires core:resource/operate and mailmatch:message/read. Revocation is audited.
+         */
+        delete: operations["deleteAdminKitesimSMSLink"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/kitesim/phones/{phoneId}/renewals": {
         parameters: {
             query?: never;
@@ -10382,6 +10432,17 @@ export interface components {
             succeeded: number;
             offset: number;
             limit: number;
+        };
+        AdminKitesimSMSLink: {
+            /** @description A token exists; phone lifecycle checks still apply. */
+            enabled: boolean;
+            /** @description Phone is active and its parsed expiry is in the future. */
+            canGenerate: boolean;
+            /** @description Exact phone expiry as RFC3339 UTC, or empty when unavailable. */
+            expiresAt: string;
+            windowSeconds: number;
+            /** @description Relative /sms/ path, returned only when generating or rotating the link. */
+            path?: string;
         };
         AdminKitesimMessage: {
             caller: string;
@@ -26657,6 +26718,161 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminKitesimMessageList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    getKitesimSMSPickup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Latest recent SMS, or No message, followed by the phone expiry date */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Invalid URL| */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description URL expired or phone unavailable, followed by the phone expiry date */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Polling too frequently; respect Retry-After. The IP limiter may return JSON. */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description Service unavailable, followed by the phone expiry date */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Storage or expiry unavailable. The IP limiter may return JSON. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    getAdminKitesimSMSLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                phoneId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Link metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimSMSLink"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    postAdminKitesimSMSLink: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                phoneId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Updated metadata and newly generated relative pickup path */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimSMSLink"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["BadGateway"];
+        };
+    };
+    deleteAdminKitesimSMSLink: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                phoneId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Disabled link metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminKitesimSMSLink"];
                 };
             };
             401: components["responses"]["Unauthorized"];

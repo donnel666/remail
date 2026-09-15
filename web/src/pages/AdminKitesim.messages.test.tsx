@@ -1,14 +1,19 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { InputHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   listMessages: vi.fn(),
   listPhones: vi.fn(),
   listTasks: vi.fn(),
+  getSMSLink: vi.fn(),
+  createSMSLink: vi.fn(),
+  deleteSMSLink: vi.fn(),
+  copyText: vi.fn(),
+  confirm: vi.fn(),
   toastError: vi.fn(),
   translate: (key: string) => key,
 }));
@@ -20,15 +25,15 @@ vi.mock("react-i18next", () => ({
 vi.mock("@douyinfe/semi-ui", () => {
   const Passthrough = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
   const Tabs = Object.assign(Passthrough, { TabPane: Passthrough });
-  const Modal = Object.assign(Passthrough, { confirm: vi.fn(), error: vi.fn() });
+  const Modal = Object.assign(Passthrough, { confirm: mocks.confirm, error: vi.fn() });
   return {
-    Button: ({ children, onClick }: { children?: ReactNode; onClick?: () => void }) => (
-      <button onClick={onClick} type="button">{children}</button>
+    Button: ({ children, onClick, disabled }: { children?: ReactNode; onClick?: () => void; disabled?: boolean }) => (
+      <button onClick={onClick} disabled={disabled} type="button">{children}</button>
     ),
     DatePicker: Passthrough,
     Dropdown: Passthrough,
     Empty: ({ description }: { description?: ReactNode }) => <div>{description}</div>,
-    Input: Passthrough,
+    Input: (props: InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
     Modal,
     Notification: { info: vi.fn(), close: vi.fn() },
     Select: Passthrough,
@@ -67,6 +72,9 @@ vi.mock("@/components/semi/copyable-table-text", () => ({
 }));
 
 vi.mock("@/lib/admin-kitesim-api", () => ({
+  getAdminKitesimSMSLink: mocks.getSMSLink,
+  createAdminKitesimSMSLink: mocks.createSMSLink,
+  deleteAdminKitesimSMSLink: mocks.deleteSMSLink,
   deleteAdminKitesimPhones: vi.fn(),
   disableAdminKitesimPhones: vi.fn(),
   enableAdminKitesimPhones: vi.fn(),
@@ -77,6 +85,8 @@ vi.mock("@/lib/admin-kitesim-api", () => ({
   syncAdminKitesimAccount: vi.fn(),
 }));
 
+vi.mock("@/lib/clipboard", () => ({ copyText: mocks.copyText }));
+
 vi.mock("./admin-microsoft/microsoft-detail-sheet", () => ({
   ServerPaginatedDrawerTable: ({ dataSource }: { dataSource: Array<Record<string, unknown>> }) => (
     <div>{dataSource.map((row) => <div key={String(row.taskId)}>{String(row.status)}</div>)}</div>
@@ -84,11 +94,48 @@ vi.mock("./admin-microsoft/microsoft-detail-sheet", () => ({
 }));
 
 import type { AdminKitesimPhoneItem } from "@/lib/admin-kitesim-api";
-import { KitesimMessagesPanel, KitesimTaskDiagnostics } from "./AdminKitesim";
+import { KitesimMessagesPanel, KitesimSMSLinkModal, KitesimTaskDiagnostics } from "./AdminKitesim";
 
 function phone(phoneId: number, phoneNumber: string) {
   return { phoneId, phoneNumber } as AdminKitesimPhoneItem;
 }
+
+describe("Kitesim SMS pickup link actions", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(cleanup);
+
+  it("generates, copies, rotates and disables a phone's link in the existing modal", async () => {
+    const metadata = { enabled: false, canGenerate: true, expiresAt: "2026-11-29T01:00:00Z", windowSeconds: 120 };
+    mocks.getSMSLink.mockResolvedValue(metadata);
+    mocks.createSMSLink.mockResolvedValueOnce({ ...metadata, enabled: true, path: "/sms/first-token" })
+      .mockResolvedValueOnce({ ...metadata, enabled: true, path: "/sms/second-token" });
+    mocks.deleteSMSLink.mockResolvedValue(metadata);
+    mocks.copyText.mockResolvedValue(undefined);
+    render(<KitesimSMSLinkModal item={phone(1, "+1 5488768536")} onCancel={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Generate SMS link" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Generate SMS link" }));
+    const input = await screen.findByRole("textbox", { name: "SMS pickup link" });
+    expect(input).toHaveValue(`${window.location.origin}/sms/first-token`);
+    expect(mocks.createSMSLink).toHaveBeenCalledWith(1);
+    fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
+    expect(mocks.copyText).toHaveBeenCalledWith(`${window.location.origin}/sms/first-token`);
+    fireEvent.click(screen.getByRole("button", { name: "Reset SMS link" }));
+    expect(mocks.confirm).toHaveBeenCalledTimes(1);
+    await act(async () => { await mocks.confirm.mock.calls[0][0].onOk(); });
+    expect(input).toHaveValue(`${window.location.origin}/sms/second-token`);
+    fireEvent.click(screen.getByRole("button", { name: "Disable SMS link" }));
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "SMS pickup link" })).not.toBeInTheDocument());
+    expect(mocks.deleteSMSLink).toHaveBeenCalledWith(1);
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeDisabled();
+  });
+
+  it("keeps generation disabled when phone status or expiry prevents it", async () => {
+    mocks.getSMSLink.mockResolvedValue({ enabled: true, canGenerate: false, expiresAt: "", windowSeconds: 120 });
+    render(<KitesimSMSLinkModal item={phone(1, "+1 5488768536")} onCancel={vi.fn()} />);
+    expect(await screen.findByRole("button", { name: "Reset SMS link" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Disable SMS link" })).toBeEnabled();
+  });
+});
 
 describe("KitesimMessagesPanel", () => {
   beforeEach(() => vi.clearAllMocks());

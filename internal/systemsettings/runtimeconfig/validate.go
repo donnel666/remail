@@ -30,7 +30,8 @@ type integerRange struct {
 func positive(maximum int64) integerRange { return integerRange{min: 1, max: maximum} }
 
 var integerRanges = map[string]integerRange{
-	"login_email_limit": positive(1000), "login_ip_limit": positive(10000), "login_window_seconds": positive(86400),
+	KitesimSMSWindowSecondsKey: positive(86400),
+	"login_email_limit":        positive(1000), "login_ip_limit": positive(10000), "login_window_seconds": positive(86400),
 	"email_code_email_limit": positive(1000), "email_code_ip_limit": positive(10000), "email_code_window_seconds": positive(86400), "captcha_rate_limit": positive(10000),
 	"email_code_ttl_seconds": positive(86400), "email_code_resend_gap_seconds": positive(3600), "email_code_digit_len": {min: 4, max: 10},
 	"bcrypt_cost": {min: 4, max: 16}, "session_max_age_seconds": {min: 300, max: 31_536_000},
