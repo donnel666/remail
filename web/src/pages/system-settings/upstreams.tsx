@@ -25,6 +25,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { getIamErrorMessage } from "@/lib/iam-errors";
+import { getAdminICloudDeviceBalance, rechargeAdminICloudDevice, type AdminICloudDeviceBalance } from "@/lib/admin-icloud-api";
 import {
 	getKitesimUpstream,
 	purchaseKitesimNumbers,
@@ -574,7 +575,86 @@ export function KitesimSMSSettings({ options, onSave, canWrite }: Pick<SectionPr
 
 export default function UpstreamsSection(props: SectionProps) {
   return <div className="space-y-6">
+    <AppleDeviceSettings {...props} />
     <KitesimSMSSettings options={props.options} onSave={props.onSave} canWrite={props.canWrite} />
     <KitesimUpstreamSection canSensitive={props.canSensitive} canWrite={props.canWrite} />
   </div>;
+}
+
+export function AppleDeviceSettings({ options, onBulkSave, canWrite, canSensitive }: SectionProps) {
+  const { t } = useTranslation();
+  const [baseURL, setBaseURL] = useState(options.find((o) => o.key === "icloud_device_base_url")?.value ?? "https://devices.orangeid.top:56133");
+  const [smsBaseURL, setSMSBaseURL] = useState(options.find((o) => o.key === "icloud_device_sms_base_url")?.value ?? "https://remail.aishop6.com");
+  const [key, setKey] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [balance, setBalance] = useState<AdminICloudDeviceBalance | null>(null);
+  const [balanceLoading, setBalanceLoading] = useState(false);
+  const [balanceError, setBalanceError] = useState("");
+  const [cardKey, setCardKey] = useState("");
+  const [recharging, setRecharging] = useState(false);
+  const balanceRequest = useRef<AbortController | null>(null);
+  const refreshBalance = useCallback(async () => {
+    balanceRequest.current?.abort();
+    const controller = new AbortController();
+    balanceRequest.current = controller;
+    setBalanceLoading(true);
+    setBalanceError("");
+    try {
+      const result = await getAdminICloudDeviceBalance(controller.signal);
+      if (!controller.signal.aborted) setBalance(result);
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setBalance(null);
+        setBalanceError(getIamErrorMessage(t, error, "Device balance load failed."));
+      }
+    } finally { if (!controller.signal.aborted) setBalanceLoading(false); }
+  }, [t]);
+  useEffect(() => { void refreshBalance(); return () => balanceRequest.current?.abort(); }, [refreshBalance]);
+  const recharge = async () => {
+    balanceRequest.current?.abort();
+    setBalanceLoading(false);
+    setRecharging(true);
+    setBalanceError("");
+    try {
+      setBalance(await rechargeAdminICloudDevice(cardKey.trim()));
+      setCardKey("");
+      Toast.success(t("Device tai points recharged."));
+    } catch (error) {
+      setBalance(null);
+      setBalanceError(getIamErrorMessage(t, error, "Device recharge failed. Refresh the balance before retrying."));
+    } finally { setRecharging(false); }
+  };
+  const save = async () => {
+    setSaving(true);
+    try {
+      const updates = [{ key: "icloud_device_base_url", value: baseURL.trim() }, { key: "icloud_device_sms_base_url", value: smsBaseURL.trim() }];
+      if (key.trim()) updates.push({ key: "icloud_device_api_key", value: key.trim() });
+      await onBulkSave(updates);
+      setKey("");
+      await refreshBalance();
+    } catch { /* Save errors are displayed by the settings page. */ }
+    finally { setSaving(false); }
+  };
+  return <SettingsSection title={<SettingsCardHeader icon={<Smartphone size={16} />} title={t("Apple device codes")} description={t("Bind the device after initial phone verification; later sign-ins and Cookie refresh use device codes.")} />}>
+    <div className="mb-5 flex flex-wrap items-center gap-3">
+      <Text strong>{t("Remaining tai points")}: {balance?.balance ?? "—"}</Text>
+      {balance && !balance.configured ? <Text type="tertiary">{t("Device API key is not configured.")}</Text> : null}
+      {balance?.checkedAt ? <Text type="tertiary" size="small">{t("Last checked")}: {formatTime(balance.checkedAt)}</Text> : null}
+      <Button loading={balanceLoading} disabled={recharging || saving} onClick={() => void refreshBalance()}>{t("Refresh balance")}</Button>
+      {balanceError ? <Text type="danger">{balanceError}</Text> : null}
+    </div>
+    <SettingsAccessBoundary canWrite={canWrite && canSensitive && !saving && !recharging}>
+      <SettingsFormGrid>
+        <SettingsTextField label={t("Device platform URL")} value={baseURL} onChange={setBaseURL} />
+        <SettingsTextField label={t("SMS callback public origin")} value={smsBaseURL} onChange={setSMSBaseURL} />
+        <SettingsTextField label="API Key" value={key} onChange={setKey} type="password" placeholder={t("Leave blank to keep the current key")} />
+      </SettingsFormGrid>
+    </SettingsAccessBoundary>
+    <Text type="tertiary" size="small">{t("UID 919; import after 30 seconds; check bindings every 10 seconds; stage delays 1–30 seconds.")}</Text>
+    <div className="mt-4"><Button theme="solid" loading={saving} disabled={!canWrite || !canSensitive || recharging} onClick={() => void save()}>{t("Save settings")}</Button></div>
+    <div className="mt-5">
+      <SettingsTextField label={t("Device recharge card")} type="password" value={cardKey} onChange={setCardKey} disabled={!canWrite || !canSensitive || recharging || saving} />
+      <Button className="mt-3" theme="solid" loading={recharging} disabled={!canWrite || !canSensitive || !balance?.configured || balanceLoading || saving || recharging || !cardKey.trim()} onClick={() => void recharge()}>{t("Redeem tai points")}</Button>
+    </div>
+  </SettingsSection>;
 }

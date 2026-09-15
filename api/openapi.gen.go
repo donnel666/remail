@@ -7801,6 +7801,23 @@ type AdminICloudBulkSelection struct {
 	union json.RawMessage
 }
 
+// AdminICloudDeviceBalance defines model for AdminICloudDeviceBalance.
+type AdminICloudDeviceBalance struct {
+	// Balance Vendor tai points preserved as a decimal string; null when no API key is configured.
+	Balance    *string    `json:"balance"`
+	CheckedAt  *time.Time `json:"checkedAt"`
+	Configured bool       `json:"configured"`
+}
+
+// AdminICloudDeviceBinding defines model for AdminICloudDeviceBinding.
+type AdminICloudDeviceBinding struct {
+	// CodeApi Sensitive device pickup URL, available after successful enrollment.
+	CodeApi   *string `json:"codeApi,omitempty"`
+	LastError *string `json:"lastError,omitempty"`
+	RemoteId  *string `json:"remoteId,omitempty"`
+	Status    string  `json:"status"`
+}
+
 // AdminICloudFacets defines model for AdminICloudFacets.
 type AdminICloudFacets struct {
 	ForSale AdminMicrosoftBooleanFacet `json:"forSale"`
@@ -7928,18 +7945,24 @@ type AdminICloudPhoneSource string
 
 // AdminICloudResourceDetail defines model for AdminICloudResourceDetail.
 type AdminICloudResourceDetail struct {
-	AccountRole             AdminICloudAccountRole                    `json:"accountRole"`
-	AliasCount              int                                       `json:"aliasCount"`
-	AliasLimit              AdminICloudResourceDetailAliasLimit       `json:"aliasLimit"`
-	AliasProvisioning       bool                                      `json:"aliasProvisioning"`
-	AliasRemaining          int                                       `json:"aliasRemaining"`
-	BoundPhoneCountryCode   *string                                   `json:"boundPhoneCountryCode,omitempty"`
-	BoundPhoneNumber        *string                                   `json:"boundPhoneNumber,omitempty"`
-	BoundPhoneSource        *AdminICloudPhoneSource                   `json:"boundPhoneSource,omitempty"`
-	CountryCode             string                                    `json:"countryCode"`
-	CreatedAt               time.Time                                 `json:"createdAt"`
-	CredentialRevision      int64                                     `json:"credentialRevision"`
-	CredentialUpdatedAt     time.Time                                 `json:"credentialUpdatedAt"`
+	AccountRole           AdminICloudAccountRole              `json:"accountRole"`
+	AliasCount            int                                 `json:"aliasCount"`
+	AliasLimit            AdminICloudResourceDetailAliasLimit `json:"aliasLimit"`
+	AliasProvisioning     bool                                `json:"aliasProvisioning"`
+	AliasRemaining        int                                 `json:"aliasRemaining"`
+	BoundPhoneCountryCode *string                             `json:"boundPhoneCountryCode,omitempty"`
+	BoundPhoneNumber      *string                             `json:"boundPhoneNumber,omitempty"`
+	BoundPhoneSource      *AdminICloudPhoneSource             `json:"boundPhoneSource,omitempty"`
+	CountryCode           string                              `json:"countryCode"`
+	CreatedAt             time.Time                           `json:"createdAt"`
+	CredentialRevision    int64                               `json:"credentialRevision"`
+	CredentialUpdatedAt   time.Time                           `json:"credentialUpdatedAt"`
+
+	// DeviceBindStatus Device enrollment status; empty or unbound means not enrolled.
+	DeviceBindStatus *string `json:"deviceBindStatus,omitempty"`
+
+	// DeviceCodeApiAvailable Whether a device pickup API is stored. The URL requires separate message permissions.
+	DeviceCodeApiAvailable  *bool                                     `json:"deviceCodeApiAvailable,omitempty"`
 	ExpireAt                time.Time                                 `json:"expireAt"`
 	FamilyChildCount        int                                       `json:"familyChildCount"`
 	FamilyChildLimit        AdminICloudResourceDetailFamilyChildLimit `json:"familyChildLimit"`
@@ -7988,13 +8011,19 @@ type AdminICloudResourceDetailFamilySyncStatus string
 
 // AdminICloudResourceItem Administrator-safe operational facts. Apple passwords, security answers, browser session payloads, Cookie values, DSID, host, client context, and provider request payloads are never returned.
 type AdminICloudResourceItem struct {
-	AccountRole             AdminICloudAccountRole                  `json:"accountRole"`
-	AliasCount              int                                     `json:"aliasCount"`
-	BoundPhoneCountryCode   *string                                 `json:"boundPhoneCountryCode,omitempty"`
-	BoundPhoneNumber        *string                                 `json:"boundPhoneNumber,omitempty"`
-	BoundPhoneSource        *AdminICloudPhoneSource                 `json:"boundPhoneSource,omitempty"`
-	CountryCode             string                                  `json:"countryCode"`
-	CreatedAt               time.Time                               `json:"createdAt"`
+	AccountRole           AdminICloudAccountRole  `json:"accountRole"`
+	AliasCount            int                     `json:"aliasCount"`
+	BoundPhoneCountryCode *string                 `json:"boundPhoneCountryCode,omitempty"`
+	BoundPhoneNumber      *string                 `json:"boundPhoneNumber,omitempty"`
+	BoundPhoneSource      *AdminICloudPhoneSource `json:"boundPhoneSource,omitempty"`
+	CountryCode           string                  `json:"countryCode"`
+	CreatedAt             time.Time               `json:"createdAt"`
+
+	// DeviceBindStatus Device enrollment status; empty or unbound means not enrolled.
+	DeviceBindStatus *string `json:"deviceBindStatus,omitempty"`
+
+	// DeviceCodeApiAvailable Whether a device pickup API is stored. The URL requires separate message permissions.
+	DeviceCodeApiAvailable  *bool                                   `json:"deviceCodeApiAvailable,omitempty"`
 	ExpireAt                time.Time                               `json:"expireAt"`
 	FamilyChildCount        int                                     `json:"familyChildCount"`
 	FamilyChildLimit        AdminICloudResourceItemFamilyChildLimit `json:"familyChildLimit"`
@@ -13426,6 +13455,17 @@ type PostAdminGmailResourceValidateParams struct {
 	IdempotencyKey AdminCommandIdempotencyKey `json:"Idempotency-Key"`
 }
 
+// PostAdminICloudDeviceRechargeJSONBody defines parameters for PostAdminICloudDeviceRecharge.
+type PostAdminICloudDeviceRechargeJSONBody struct {
+	CardKey string `json:"cardKey"`
+}
+
+// PostAdminICloudDeviceRechargeParams defines parameters for PostAdminICloudDeviceRecharge.
+type PostAdminICloudDeviceRechargeParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // GetAdminICloudResourcesParams defines parameters for GetAdminICloudResources.
 type GetAdminICloudResourcesParams struct {
 	Search      *string                    `form:"search,omitempty" json:"search,omitempty"`
@@ -13631,6 +13671,12 @@ type PostAdminICloudResourceCookieRefreshParams struct {
 
 	// IdempotencyKey Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op.
 	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminICloudDeviceBindingParams defines parameters for PostAdminICloudDeviceBinding.
+type PostAdminICloudDeviceBindingParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostAdminICloudResourceDisableParams defines parameters for PostAdminICloudResourceDisable.
@@ -16033,6 +16079,9 @@ type PatchAdminGmailResourceJSONRequestBody = AdminGmailResourceUpdateRequest
 // PutAdminGmailResourceCredentialsJSONRequestBody defines body for PutAdminGmailResourceCredentials for application/json ContentType.
 type PutAdminGmailResourceCredentialsJSONRequestBody = AdminGmailCredentialsReplaceRequest
 
+// PostAdminICloudDeviceRechargeJSONRequestBody defines body for PostAdminICloudDeviceRecharge for application/json ContentType.
+type PostAdminICloudDeviceRechargeJSONRequestBody PostAdminICloudDeviceRechargeJSONBody
+
 // PostAdminICloudResourcesCreateAliasesJSONRequestBody defines body for PostAdminICloudResourcesCreateAliases for application/json ContentType.
 type PostAdminICloudResourcesCreateAliasesJSONRequestBody = AdminICloudBulkCommandRequest
 
@@ -17496,6 +17545,9 @@ type ServerInterface interface {
 	// Readiness probe
 	// (GET /readyz)
 	Readyz(c *gin.Context)
+	// Temporary SMS callback used only during Apple device enrollment
+	// (GET /sms/icloud-device/{token})
+	GetICloudDeviceEnrollmentSMS(c *gin.Context, token string)
 	// Read the latest recent SMS through a Kitesim pickup link
 	// (GET /sms/{token})
 	GetKitesimSMSPickup(c *gin.Context, token string)
@@ -17670,6 +17722,12 @@ type ServerInterface interface {
 	// Queue validation for one Gmail resource
 	// (POST /v1/admin/gmail/resources/{resourceId}/validate)
 	PostAdminGmailResourceValidate(c *gin.Context, resourceId int, params PostAdminGmailResourceValidateParams)
+	// Read the device platform tai point balance
+	// (GET /v1/admin/icloud/device-platform/balance)
+	GetAdminICloudDeviceBalance(c *gin.Context)
+	// Redeem a card for device platform tai points
+	// (POST /v1/admin/icloud/device-platform/recharges)
+	PostAdminICloudDeviceRecharge(c *gin.Context, params PostAdminICloudDeviceRechargeParams)
 	// List administrator-safe iCloud resources
 	// (GET /v1/admin/icloud/resources)
 	GetAdminICloudResources(c *gin.Context, params GetAdminICloudResourcesParams)
@@ -17742,6 +17800,12 @@ type ServerInterface interface {
 	// Queue recovery for unavailable iCloud Cookie channels
 	// (POST /v1/admin/icloud/resources/{resourceId}/cookie-refresh)
 	PostAdminICloudResourceCookieRefresh(c *gin.Context, resourceId int, params PostAdminICloudResourceCookieRefreshParams)
+	// Read Apple device binding status and pickup API
+	// (GET /v1/admin/icloud/resources/{resourceId}/device)
+	GetAdminICloudDeviceBinding(c *gin.Context, resourceId int)
+	// Start or retry Apple device enrollment
+	// (POST /v1/admin/icloud/resources/{resourceId}/device)
+	PostAdminICloudDeviceBinding(c *gin.Context, resourceId int, params PostAdminICloudDeviceBindingParams)
 	// Disable one iCloud resource without changing existing allocations
 	// (POST /v1/admin/icloud/resources/{resourceId}/disable)
 	PostAdminICloudResourceDisable(c *gin.Context, resourceId int, params PostAdminICloudResourceDisableParams)
@@ -18759,6 +18823,31 @@ func (siw *ServerInterfaceWrapper) Readyz(c *gin.Context) {
 	}
 
 	siw.Handler.Readyz(c)
+}
+
+// GetICloudDeviceEnrollmentSMS operation middleware
+func (siw *ServerInterfaceWrapper) GetICloudDeviceEnrollmentSMS(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "token" -------------
+	var token string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "token", c.Param("token"), &token, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter token: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetICloudDeviceEnrollmentSMS(c, token)
 }
 
 // GetKitesimSMSPickup operation middleware
@@ -22456,6 +22545,66 @@ func (siw *ServerInterfaceWrapper) PostAdminGmailResourceValidate(c *gin.Context
 	siw.Handler.PostAdminGmailResourceValidate(c, resourceId, params)
 }
 
+// GetAdminICloudDeviceBalance operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminICloudDeviceBalance(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminICloudDeviceBalance(c)
+}
+
+// PostAdminICloudDeviceRecharge operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudDeviceRecharge(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudDeviceRechargeParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudDeviceRecharge(c, params)
+}
+
 // GetAdminICloudResources operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminICloudResources(c *gin.Context) {
 
@@ -23959,6 +24108,87 @@ func (siw *ServerInterfaceWrapper) PostAdminICloudResourceCookieRefresh(c *gin.C
 	}
 
 	siw.Handler.PostAdminICloudResourceCookieRefresh(c, resourceId, params)
+}
+
+// GetAdminICloudDeviceBinding operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminICloudDeviceBinding(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminICloudDeviceBinding(c, resourceId)
+}
+
+// PostAdminICloudDeviceBinding operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminICloudDeviceBinding(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminICloudDeviceBindingParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminICloudDeviceBinding(c, resourceId, params)
 }
 
 // PostAdminICloudResourceDisable operation middleware
@@ -39992,6 +40222,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/healthz", wrapper.Healthz)
 	router.GET(options.BaseURL+"/oauth/nodeloc", wrapper.GetNodeLocCallback)
 	router.GET(options.BaseURL+"/readyz", wrapper.Readyz)
+	router.GET(options.BaseURL+"/sms/icloud-device/:token", wrapper.GetICloudDeviceEnrollmentSMS)
 	router.GET(options.BaseURL+"/sms/:token", wrapper.GetKitesimSMSPickup)
 	router.GET(options.BaseURL+"/v1/activation", wrapper.GetActivation)
 	router.POST(options.BaseURL+"/v1/activation", wrapper.PostActivation)
@@ -40050,6 +40281,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/gmail/resources/:resourceId/recover", wrapper.PostAdminGmailResourceRecover)
 	router.POST(options.BaseURL+"/v1/admin/gmail/resources/:resourceId/unpublish", wrapper.PostAdminGmailResourceUnpublish)
 	router.POST(options.BaseURL+"/v1/admin/gmail/resources/:resourceId/validate", wrapper.PostAdminGmailResourceValidate)
+	router.GET(options.BaseURL+"/v1/admin/icloud/device-platform/balance", wrapper.GetAdminICloudDeviceBalance)
+	router.POST(options.BaseURL+"/v1/admin/icloud/device-platform/recharges", wrapper.PostAdminICloudDeviceRecharge)
 	router.GET(options.BaseURL+"/v1/admin/icloud/resources", wrapper.GetAdminICloudResources)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/batch/alias", wrapper.PostAdminICloudResourcesCreateAliases)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/batch/delete", wrapper.PostAdminICloudResourcesDelete)
@@ -40074,6 +40307,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/aliases", wrapper.GetAdminICloudResourceAliases)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/aliases", wrapper.PostAdminICloudResourceCreateAliases)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/cookie-refresh", wrapper.PostAdminICloudResourceCookieRefresh)
+	router.GET(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/device", wrapper.GetAdminICloudDeviceBinding)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/device", wrapper.PostAdminICloudDeviceBinding)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/disable", wrapper.PostAdminICloudResourceDisable)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/enable", wrapper.PostAdminICloudResourceEnable)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/icloud-activation", wrapper.PostAdminICloudResourceActivateICloud)

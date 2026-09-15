@@ -316,11 +316,11 @@ func TestLatestSMSMessageUsesProviderTimeAtResponse(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			messages := []MessageItem{{Content: "code", Time: tc.time}}
-			require.Equal(t, tc.want, latestSMSMessage(messages, now, 2*time.Minute) != nil)
+			require.Equal(t, tc.want, LatestSMSMessage(messages, now, 2*time.Minute) != nil)
 		})
 	}
 	messages := []MessageItem{{Content: "code", Time: now.Add(-119 * time.Second).Format(time.RFC3339)}}
-	require.NotNil(t, latestSMSMessage(messages, now, 2*time.Minute))
-	require.Nil(t, latestSMSMessage(messages, now.Add(2*time.Second), 2*time.Minute))
-	require.Nil(t, latestSMSMessage([]MessageItem{{Content: " \n", Time: now.Format(time.RFC3339)}}, now, 2*time.Minute))
+	require.NotNil(t, LatestSMSMessage(messages, now, 2*time.Minute))
+	require.Nil(t, LatestSMSMessage(messages, now.Add(2*time.Second), 2*time.Minute))
+	require.Nil(t, LatestSMSMessage([]MessageItem{{Content: " \n", Time: now.Format(time.RFC3339)}}, now, 2*time.Minute))
 }

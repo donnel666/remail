@@ -336,6 +336,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		kitesimService := kitesim.NewService(p.DB, kitesim.NewSyncQueue(p.Asynq))
 		kitesimService.SetProxyProvider(proxyMod.ProxyUseCase)
 		icloudMod.Service.SetICloudSMSPhoneService(kitesimService)
+		icloudapi.RegisterDeviceCallbackRoutes(r, icloudMod.Service, p.Redis)
 		kitesim.RegisterRoutes(v1, kitesimService, iamSessionFetcher, iamMod.PermissionChecker)
 		kitesim.RegisterPublicRoutes(r, kitesimService, p.Redis)
 		kitesim.RegisterTaskHandlers(taskMux, kitesimService)

@@ -1,9 +1,11 @@
 package icloud
 
 import (
+	"context"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/platform/testmysql"
@@ -12,6 +14,31 @@ import (
 )
 
 var iCloudOnboardingMigrationMySQL = testmysql.New("remail_icloud_onboarding_migration")
+
+func TestICloudDeviceCodeMigrationMySQL(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	source := filepath.Clean(filepath.Join(filepath.Dir(file), "../..", "migrations"))
+	db := iCloudOnboardingMigrationMySQL.Database(t, testmysql.MigrationsThrough(t, source, 110))
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, platform.RunMigrations(sqlDB, testmysql.MigrationsThrough(t, source, 141)))
+	through142 := testmysql.MigrationsThrough(t, source, 142)
+	require.NoError(t, platform.RunMigrations(sqlDB, through142))
+	for _, column := range []string{"device_code_api", "device_bind_status", "device_account_id"} {
+		require.True(t, db.Migrator().HasColumn("icloud_resources", column))
+	}
+	require.True(t, db.Migrator().HasTable("icloud_device_bindings"))
+	setDeviceTestSetting(t, "icloud_device_api_key", "migration-test-key")
+	service := NewService(db, nil, nil)
+	binding, err := service.EnsureDeviceBinding(context.Background(), "device-migration@example.com", "password", 1, "14165550001", nil, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, "pending", binding.Status)
+	require.NoError(t, goose.DownTo(sqlDB, through142, 141))
+	require.False(t, db.Migrator().HasTable("icloud_device_bindings"))
+	require.False(t, db.Migrator().HasColumn("icloud_resources", "device_code_api"))
+	require.NoError(t, platform.RunMigrations(sqlDB, through142))
+}
 
 func TestICloudOnboardingMigrationMySQL(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)

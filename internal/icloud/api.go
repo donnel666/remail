@@ -27,6 +27,9 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 		return
 	}
 	h := &handler{service: module.Service, checker: checker}
+	devicePlatform := rg.Group("/admin/icloud/device-platform", middleware.LoadSession(fetcher), middleware.AuthRequired(), middleware.CSRFRequired())
+	devicePlatform.GET("/balance", middleware.PermissionRequired(checker, "system:settings", "read"), h.devicePlatformBalance)
+	devicePlatform.POST("/recharges", middleware.PermissionRequired(checker, "system:settings", "write"), middleware.PermissionRequired(checker, "system:settings", "sensitive"), middleware.RateLimitPerUser(module.Service.deviceRedis, "icloud_device_recharge", 10, 60), h.devicePlatformBalance)
 	resources := rg.Group("/admin/icloud/resources")
 	resources.Use(middleware.LoadSession(fetcher), middleware.AuthRequired(), middleware.CSRFRequired())
 	resources.GET("", middleware.PermissionRequired(checker, "core:resource", "read"), h.listResources)
@@ -48,6 +51,9 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 	resources.POST("/batch/delete", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudDelete))
 	resources.POST("/batch/expiration", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudExpire))
 	resources.GET("/:resourceId", middleware.PermissionRequired(checker, "core:resource", "read"), h.getResource)
+	device := resources.Group("/:resourceId/device", middleware.PermissionRequired(checker, "core:resource", "operate"), middleware.PermissionRequired(checker, "mailmatch:message", "read"))
+	device.GET("", h.deviceBinding)
+	device.POST("", h.deviceBinding)
 	resources.GET("/:resourceId/aliases", middleware.PermissionRequired(checker, "core:resource", "read"), h.listAliases)
 	resources.POST("/:resourceId/aliases", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudAlias))
 	resources.PATCH("/:resourceId", middleware.PermissionRequired(checker, "core:resource", "write"), h.patchResource)
@@ -831,7 +837,7 @@ func writeICloudError(c *gin.Context, err error) {
 	case errors.Is(err, ErrICloudCookieRefreshUnavailable):
 		c.JSON(http.StatusConflict, gin.H{"message": "Old Cookie refresh requires a permanent eSIM phone, complete Apple credentials, and no active Cookie refresh task.", "requestId": requestID})
 	case errors.Is(err, ErrICloudCookieMaintenanceUnavailable):
-		c.JSON(http.StatusConflict, gin.H{"message": "No unavailable Cookie channel is eligible for refresh. Old Cookie recovery also requires iCloud to be opened; all refreshes require a permanent eSIM phone, complete Apple credentials, fewer than 750 aliases, and no active Cookie refresh task.", "requestId": requestID})
+		c.JSON(http.StatusConflict, gin.H{"message": "No unavailable Cookie channel is eligible for refresh. Old Cookie recovery also requires iCloud to be opened; all refreshes require a ready device API or permanent eSIM phone, complete Apple credentials, fewer than 750 aliases, and no active Cookie refresh task.", "requestId": requestID})
 	case errors.Is(err, ErrICloudResourceVersion):
 		c.JSON(http.StatusConflict, gin.H{"message": "iCloud resource was changed by another operation.", "requestId": requestID})
 	case errors.Is(err, ErrICloudResourceIdentity):
@@ -840,6 +846,10 @@ func writeICloudError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"message": "iCloud resource still has an active allocation.", "requestId": requestID})
 	case errors.Is(err, ErrICloudResourceOwner):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "iCloud resource owner is not eligible for public supply.", "requestId": requestID})
+	case errors.Is(err, errDeviceRechargeRejected):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": err.Error(), "requestId": requestID})
+	case errors.Is(err, errDeviceUnauthorized), errors.Is(err, errDeviceUnavailable), errors.Is(err, errDeviceResponse), errors.Is(err, errDeviceRechargeUncertain):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": err.Error(), "requestId": requestID})
 	case errors.Is(err, ErrICloudImportDependency), errors.Is(err, ErrICloudImportStorage), errors.Is(err, ErrICloudImportTemporary), errors.Is(err, ErrICloudOnboardingTemporary), errors.Is(err, ErrICloudValidationTemp), errors.Is(err, ErrICloudResourceQueryTemporary):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "iCloud resource service is temporarily unavailable.", "requestId": requestID})
 	default:

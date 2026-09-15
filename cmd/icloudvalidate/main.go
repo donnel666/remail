@@ -37,8 +37,8 @@ import (
 const (
 	separator                 = "----"
 	temporaryManageSessionTTL = 10 * time.Minute
-	phaseDelayMinimum         = 60 * time.Second
-	phaseDelayMaximum         = 200 * time.Second
+	phaseDelayMinimum         = time.Second
+	phaseDelayMaximum         = 30 * time.Second
 )
 
 var appleSMSCodePattern = regexp.MustCompile(`(?:^|[^0-9])([0-9]{6})(?:[^0-9]|$)`)
@@ -85,6 +85,10 @@ type savedPhoneBinding struct {
 }
 
 type accountCheckpoint struct {
+	DeviceCodeAPI          string                         `json:"deviceCodeApi,omitempty"`
+	DeviceAccountID        string                         `json:"deviceAccountId,omitempty"`
+	DeviceBindStatus       string                         `json:"deviceBindStatus,omitempty"`
+	PhoneConfirmedAt       time.Time                      `json:"phoneConfirmedAt,omitempty"`
 	Fingerprint            string                         `json:"fingerprint"`
 	Stage                  string                         `json:"stage,omitempty"`
 	PendingSMSPurpose      string                         `json:"pendingSmsPurpose,omitempty"`
@@ -599,6 +603,11 @@ func (d *debugger) run(binding *kitesim.SMSPhoneBinding, config options) error {
 	} else {
 		d.logf("checkpoint=skip stage=icloud_ready old_cookie=%t\n", channelReady(d.checkpoint.OldChannel))
 	}
+	if icloudCompleted || d.checkpoint.DeviceBindStatus != "" {
+		if err := d.ensureDeviceBinding(binding); err != nil {
+			return err
+		}
+	}
 	familyCompleted := false
 	if d.input.FamilyInviteURL != "" {
 		if d.checkpoint == nil || !d.checkpoint.FamilyJoined {
@@ -763,6 +772,7 @@ func (d *debugger) run(binding *kitesim.SMSPhoneBinding, config options) error {
 			accountRole = "unknown"
 		}
 		result, err := d.runtime.icloud.CommitStandaloneValidatedAccount(d.ctx, config.ownerUserID, icloud.StandaloneValidatedAccount{
+			DeviceCodeAPI: d.checkpoint.DeviceCodeAPI, DeviceAccountID: d.checkpoint.DeviceAccountID,
 			Email: d.input.Email, Region: d.input.Region, CountryCode: firstNonEmpty(d.checkpoint.CountryCode, d.input.CountryCode),
 			AccountRole: accountRole, ICloudOpened: d.checkpoint.ICloudOpened,
 			FamilyInviteURL: d.input.FamilyInviteURL,
@@ -872,6 +882,9 @@ func (d *debugger) authWithRequest(request icloud.AppleOnboardingRequest, label 
 }
 
 func (d *debugger) checkSMSPhoneBeforePhase(binding *kitesim.SMSPhoneBinding, phase string) error {
+	if d.checkpoint != nil && d.checkpoint.DeviceCodeAPI != "" {
+		return nil
+	}
 	if binding == nil {
 		return nil
 	}
@@ -890,6 +903,9 @@ func (d *debugger) waitForNextPhase(binding *kitesim.SMSPhoneBinding, phase stri
 }
 
 func (d *debugger) waitForSMSPhoneUntil(binding *kitesim.SMSPhoneBinding, phase string, deadline time.Time) error {
+	if d.checkpoint != nil && d.checkpoint.DeviceCodeAPI != "" {
+		return d.waitUntil(deadline)
+	}
 	if binding == nil {
 		return d.waitUntil(deadline)
 	}
@@ -949,6 +965,9 @@ func waitContextUntil(ctx context.Context, deadline time.Time) error {
 }
 
 func (d *debugger) smsRound(purpose, label string, binding *kitesim.SMSPhoneBinding) (icloud.AppleOnboardingResponse, error) {
+	if d.checkpoint != nil && d.checkpoint.DeviceCodeAPI != "" {
+		return d.deviceRound(purpose)
+	}
 	var reservation kitesim.SMSReservation
 	reserved := false
 	if binding != nil {
@@ -1033,6 +1052,9 @@ func (d *debugger) smsRound(purpose, label string, binding *kitesim.SMSPhoneBind
 	if err := d.markCheckpoint(func(cp *accountCheckpoint) {
 		cp.PendingSMSPurpose = ""
 		cp.Stage = "sms_verified"
+		if cp.PhoneConfirmedAt.IsZero() {
+			cp.PhoneConfirmedAt = time.Now().UTC()
+		}
 		if purpose == icloud.AppleSMSPhoneEnrollment {
 			cp.ApplePhoneBound = true
 		}
@@ -1116,6 +1138,8 @@ func (d *debugger) prompt(label string) (string, error) {
 }
 
 func (d *debugger) execute(request icloud.AppleOnboardingRequest) (icloud.AppleOnboardingResponse, error) {
+	request.UseDeviceCode = d.checkpoint != nil && d.checkpoint.DeviceCodeAPI != ""
+	request.SkipPhoneEnrollment = request.SkipPhoneEnrollment || request.UseDeviceCode
 	request.Email = d.input.Email
 	request.Secret = d.input.Secret
 	request.PhoneNumber = d.input.PhoneNumber

@@ -85,6 +85,9 @@ import {
   listAdminICloudOnboardingImports,
   listAdminICloudOwners,
   listAdminICloudResources,
+  getAdminICloudDeviceBinding,
+  bindAdminICloudDevice,
+  type AdminICloudDeviceBinding,
   listAdminICloudTasks,
   normalizeICloudImportContent,
   publishAdminICloudResource,
@@ -118,6 +121,7 @@ import {
   type AdminICloudUpdateRequest,
 } from "@/lib/admin-icloud-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
+import { copyText } from "@/lib/clipboard";
 import {
   listAdminKitesimPhones,
   type AdminKitesimPhoneItem,
@@ -2015,8 +2019,7 @@ export function ICloudMaintenanceModal({
       description: "Use this after enabling iCloud manually. The existing refresh workflow logs in with the permanent eSIM phone and stores the old V2 Cookie.",
       disabled:
         rowDisabled ||
-        !target.item.boundPhoneNumber ||
-        !target.item.kitesimPhoneId ||
+        (!target.item.deviceCodeApiAvailable && (!target.item.boundPhoneNumber || !target.item.kitesimPhoneId)) ||
         (target.item.icloudOpened && target.item.oldSession?.status === "valid"),
       icon: CloudDownload,
       key: "oldCookie",
@@ -2359,7 +2362,7 @@ export function ICloudTasksPanel({
   const automationTaskActive = [item.onboardingTask, item.refreshTask].some(
     (task) => task?.status === "processing" || task?.status === "waiting",
   );
-  const cookieRefreshPhoneBlacklisted = item.refreshTask?.lastErrorCategory === "phone_blacklisted";
+  const cookieRefreshPhoneBlacklisted = !item.deviceCodeApiAvailable && item.refreshTask?.lastErrorCategory === "phone_blacklisted";
 
   return (
     <div>
@@ -2389,7 +2392,7 @@ export function ICloudTasksPanel({
             {t("Create alias")}
           </Button>
           <Button
-            disabled={item.status === "deleted" || item.status === "disabled" || item.aliasCount >= item.aliasLimit || !item.boundPhoneNumber || !item.kitesimPhoneId || !cookieRefreshEligible || cookieRefreshPhoneBlacklisted || automationTaskActive || busy !== null || awaitingVersionRefresh}
+            disabled={item.status === "deleted" || item.status === "disabled" || item.aliasCount >= item.aliasLimit || (!item.deviceCodeApiAvailable && (!item.boundPhoneNumber || !item.kitesimPhoneId)) || !cookieRefreshEligible || cookieRefreshPhoneBlacklisted || automationTaskActive || busy !== null || awaitingVersionRefresh}
             icon={<RefreshCw size={14} />}
             loading={busy === "cookieRefresh"}
             onClick={() => void runAction("cookieRefresh")}
@@ -3765,6 +3768,10 @@ export default function AdminICloudEmails() {
         ),
       },
       {
+        key: "deviceCodeApi", title: t("Device code API"), width: 180,
+        render: (_: unknown, item: AdminICloudResourceItem) => <ICloudDeviceActions item={item} />,
+      },
+      {
         dataIndex: "region",
         key: "region",
         title: t("Region"),
@@ -4277,4 +4284,36 @@ export default function AdminICloudEmails() {
       />
     </div>
   );
+}
+
+export function ICloudDeviceActions({ item }: { item: AdminICloudResourceItem }) {
+  const { t } = useTranslation();
+  const { currentUser } = useAuth();
+  const canManage = hasPermissionKey(currentUser, permissionKey("core:resource", "operate")) && hasPermissionKey(currentUser, permissionKey("mailmatch:message", "read"));
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState<AdminICloudDeviceBinding | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = async (bind = false) => {
+    setBusy(true);
+    try { setView(await (bind ? bindAdminICloudDevice(item.id) : getAdminICloudDeviceBinding(item.id))); }
+    catch (error) { Toast.error(getIamErrorMessage(t, error, "Device binding request failed.")); }
+    finally { setBusy(false); }
+  };
+  const statuses: Record<string,string> = { unbound: "Device not bound", pending: "Device binding queued", binding: "Device binding in progress", success: "Device bound", failed: "Device binding failed" };
+  const status = view ? (view.codeApi ? "success" : view.status) : (item.deviceCodeApiAvailable ? "success" : item.deviceBindStatus || "unbound");
+  return <>
+    <Button size="small" type="tertiary" disabled={!canManage || item.status === "deleted"} onClick={() => { setOpen(true); void load(); }}>{t(statuses[status] ?? "Device not bound")}</Button>
+    {open && canManage ? <Modal visible title={`${t("Device code API")} · ${item.primaryEmail}`} onCancel={() => setOpen(false)} footer={null} width={600}>
+      <div className="space-y-4">
+        <Text>{t(statuses[status] ?? "Device not bound")}</Text>
+        {view?.codeApi ? <Input aria-label={t("Device code API")} value={view.codeApi} readOnly /> : null}
+        {view?.lastError ? <Text type="danger">{view.lastError}</Text> : null}
+        <Space wrap>
+          <Button loading={busy} disabled={!canManage || busy || status === "success" || status === "pending" || status === "binding"} onClick={() => void load(true)}>{t("Bind or retry device")}</Button>
+          <Button disabled={busy} onClick={() => void load()}>{t("Refresh")}</Button>
+          <Button disabled={!view?.codeApi || busy} onClick={() => void copyText(view!.codeApi!).then(() => Toast.success(t("Copied"))).catch(() => Toast.error(t("Copy failed")))}>{t("Copy link")}</Button>
+        </Space>
+      </div>
+    </Modal> : null}
+  </>;
 }

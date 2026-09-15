@@ -136,6 +136,15 @@ func Validate(key, value string) error {
 		return nil
 	}
 	switch key {
+	case ICloudDeviceBaseURLKey, ICloudDeviceSMSBaseURLKey:
+		parsed, err := url.Parse(value)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || strings.Trim(parsed.Path, "/") != "" {
+			return domain.ErrInvalidValue
+		}
+	case ICloudDeviceAPIKey:
+		if len(value) > 4096 || strings.ContainsAny(rawValue, "\r\n\x00") || value != rawValue {
+			return domain.ErrInvalidValue
+		}
 	case "announcements":
 		return validateAnnouncements(rawValue)
 	case "faq_list":

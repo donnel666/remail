@@ -89,6 +89,9 @@ func iCloudCookieChannelNeedsRecoveryTx(ctx context.Context, tx *gorm.DB, resour
 // provision pass. A changed credential revision is an explicit new recovery
 // signal and clears this fence when the next task is created.
 func iCloudCookieRecoveryTerminallyFailed(resource iCloudResourceModel) bool {
+	if resource.DeviceCodeAPI != "" && resource.WorkflowLastErrorCategory == "phone_blacklisted" {
+		return false
+	}
 	return resource.WorkflowTaskKind == iCloudCookieRecoveryTaskKind &&
 		resource.OnboardingStatus == iCloudOnboardingFailed &&
 		resource.WorkflowExpectedCredential == resource.CredentialRevision &&
@@ -107,7 +110,7 @@ func (s *Service) ensureICloudCookieRecoveryTx(ctx context.Context, tx *gorm.DB,
 		return false, err
 	}
 	if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || resource.AliasCount >= iCloudMaxAliases ||
-		strings.TrimSpace(resource.BoundPhoneNumber) == "" || resource.KitesimPhoneID == nil {
+		(resource.DeviceCodeAPI == "" && (strings.TrimSpace(resource.BoundPhoneNumber) == "" || resource.KitesimPhoneID == nil)) {
 		return false, nil
 	}
 	appleNeedsRecovery, _, err := iCloudCookieChannelNeedsRecoveryTx(ctx, tx, resourceID, iCloudChannelAppleAccount)
@@ -241,7 +244,7 @@ func (s *Service) recoverICloudAppleCookie(ctx context.Context, task *iCloudOnbo
 		return ErrICloudOnboardingTemporary
 	}
 	if !isICloudCookieRecoveryTask(task) || task.ResourceID == nil ||
-		task.KitesimPhoneID == nil || strings.TrimSpace(task.BoundPhoneNumber) == "" {
+		(task.DeviceCodeAPI == "" && (task.KitesimPhoneID == nil || strings.TrimSpace(task.BoundPhoneNumber) == "")) {
 		return s.failICloudOnboardingTask(ctx, task, "invalid_cookie_recovery_state", "Apple Account cookie recovery state is invalid.")
 	}
 	response, err := s.executeICloudOnboardingApple(ctx, task, secret, AppleOnboardingRequest{Operation: appleOnboardingExport, SkipPrivateAlias: true})
@@ -273,8 +276,7 @@ func (s *Service) recoverICloudAppleCookie(ctx context.Context, task *iCloudOnbo
 			return err
 		}
 		if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled ||
-			resource.CredentialRevision != locked.ExpectedCredentialRevision || resource.KitesimPhoneID == nil ||
-			*resource.KitesimPhoneID != *locked.KitesimPhoneID || !sameICloudPhoneNumber(resource.BoundPhoneNumber, locked.BoundPhoneNumber) {
+			!iCloudRefreshSnapshotMatches(resource, &locked) {
 			return errICloudRefreshStale
 		}
 		if err := upsertICloudImportChannelsTx(tx, resource.ID, []iCloudImportChannel{appleOnboardingImportChannel(*response.NewChannel)}, false, now); err != nil {

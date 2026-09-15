@@ -4336,6 +4336,92 @@ export interface paths {
         patch: operations["patchAdminICloudResource"];
         trace?: never;
     };
+    "/v1/admin/icloud/device-platform/balance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the device platform tai point balance
+         * @description Requires system:settings/read. Queries the vendor /api/auth/me endpoint with the configured Bearer key and returns only balance metadata. A missing key returns configured=false and a null balance.
+         */
+        get: operations["getAdminICloudDeviceBalance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/device-platform/recharges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redeem a card for device platform tai points
+         * @description Requires system:settings/write and system:settings/sensitive. Submits card_key to /api/balance/recharge/card once, without automatic retries, and returns the resulting balance. The card is never persisted or logged. If the outcome is uncertain, query the balance before retrying.
+         */
+        post: operations["postAdminICloudDeviceRecharge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/{resourceId}/device": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read Apple device binding status and pickup API
+         * @description Requires core:resource/operate and mailmatch:message/read. The pickup URL is sensitive and must not be cached or logged.
+         */
+        get: operations["getAdminICloudDeviceBinding"];
+        put?: never;
+        /**
+         * Start or retry Apple device enrollment
+         * @description Requires core:resource/operate and mailmatch:message/read. An active phone is required for enrollment. Repeated calls preserve pending and successful enrollments. Failed enrollments get a new generation and SMS callback. The shared worker imports after 30 seconds and checks all pending accounts every 10 seconds.
+         */
+        post: operations["postAdminICloudDeviceBinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sms/icloud-device/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Temporary SMS callback used only during Apple device enrollment
+         * @description Bound to one enrollment generation and phone, expires on completion, cancellation, or timeout. Returns only SMS received after submission and within the configured Kitesim receipt window. Never logs the token. Poll at most once per 3 seconds.
+         */
+        get: operations["getICloudDeviceEnrollmentSMS"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/icloud/resources/{resourceId}/aliases": {
         parameters: {
             query?: never;
@@ -9410,8 +9496,26 @@ export interface components {
             role: "user" | "supplier" | "admin" | "super_admin";
             enabled: boolean;
         };
+        AdminICloudDeviceBalance: {
+            configured: boolean;
+            /** @description Vendor tai points preserved as a decimal string; null when no API key is configured. */
+            balance: string | null;
+            /** Format: date-time */
+            checkedAt: string | null;
+        };
+        AdminICloudDeviceBinding: {
+            status: string;
+            /** @description Sensitive device pickup URL, available after successful enrollment. */
+            codeApi?: string;
+            remoteId?: string;
+            lastError?: string;
+        };
         /** @description Administrator-safe operational facts. Apple passwords, security answers, browser session payloads, Cookie values, DSID, host, client context, and provider request payloads are never returned. */
         AdminICloudResourceItem: {
+            /** @description Device enrollment status; empty or unbound means not enrolled. */
+            deviceBindStatus?: string;
+            /** @description Whether a device pickup API is stored. The URL requires separate message permissions. */
+            deviceCodeApiAvailable?: boolean;
             id: number;
             version: number;
             /** Format: email */
@@ -24601,6 +24705,192 @@ export interface operations {
             409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
             503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminICloudDeviceBalance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current vendor balance or unconfigured state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudDeviceBalance"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Device balance unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    postAdminICloudDeviceRecharge: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    cardKey: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Balance after successful redemption */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudDeviceBalance"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+            /** @description Too many recharge requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Recharge unavailable or outcome uncertain */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getAdminICloudDeviceBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Device binding metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudDeviceBinding"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postAdminICloudDeviceBinding: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Existing or queued device binding */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudDeviceBinding"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            /** @description Device enrollment temporarily unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getICloudDeviceEnrollmentSMS: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recent SMS or No message followed by callback expiry */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Invalid or expired callback */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description SMS upstream unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Callback service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     getAdminICloudResourceAliases: {

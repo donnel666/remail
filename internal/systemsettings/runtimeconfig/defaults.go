@@ -7,7 +7,10 @@ import (
 )
 
 const (
-	DefaultSettingsCount                         = 294
+	DefaultSettingsCount                         = 297
+	ICloudDeviceBaseURLKey                       = "icloud_device_base_url"
+	ICloudDeviceAPIKey                           = "icloud_device_api_key"
+	ICloudDeviceSMSBaseURLKey                    = "icloud_device_sms_base_url"
 	KitesimSMSWindowSecondsKey                   = "kitesim_sms_window_seconds"
 	NodeLocCallbackURL                           = "https://remail.aishop6.com/oauth/nodeloc"
 	RechargeTimeoutMinutesKey                    = "recharge_timeout_minutes"
@@ -55,6 +58,9 @@ func DefaultSettings() []domain.Setting {
 }
 
 var defaultSettings = []domain.Setting{
+	{Key: ICloudDeviceBaseURLKey, Value: "https://devices.orangeid.top:56133"},
+	{Key: ICloudDeviceAPIKey, Value: ""},
+	{Key: ICloudDeviceSMSBaseURLKey, Value: "https://remail.aishop6.com"},
 	{Key: KitesimSMSWindowSecondsKey, Value: "120"},
 	{Key: "register_enabled", Value: "true"},
 	{Key: "registration_email_whitelist", Value: "qq.com,foxmail.com,gmail.com,proton.me,protonmail.com,pm.me,mail.com"},

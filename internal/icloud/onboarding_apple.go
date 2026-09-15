@@ -600,6 +600,20 @@ func (f *appleOnboardingFlow) submitAppleIDQuestions(secret iCloudOnboardingSecr
 	return nil
 }
 
+func (f *appleOnboardingFlow) prepareVerification(request AppleOnboardingRequest) error {
+	if !request.UseDeviceCode {
+		return f.prepareTrustedPhone(request.PhoneNumber, request.TrustedPhoneAttempt)
+	}
+	_, err := f.request(http.MethodGet, strings.TrimRight(f.state.ServiceURL, "/")+"/auth", nil, true, false, false, false, false, "text/html")
+	if err != nil {
+		return err
+	}
+	if f.state.Status != http.StatusOK {
+		return appleOnboardingRestart(appleOnboardingOperationRestartStage(request))
+	}
+	return nil
+}
+
 func (f *appleOnboardingFlow) prepareTrustedPhone(boundNumber string, attempt int) error {
 	body, err := f.request(http.MethodGet, strings.TrimRight(f.state.ServiceURL, "/")+"/auth", nil, true, false, false, false, false, "text/html")
 	if err != nil {

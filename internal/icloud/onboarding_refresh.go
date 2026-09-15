@@ -49,7 +49,7 @@ func (s *Service) ensureICloudCookieRefreshTx(ctx context.Context, tx *gorm.DB, 
 		}
 		return false, err
 	}
-	if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || resource.AliasCount >= iCloudMaxAliases || strings.TrimSpace(resource.BoundPhoneNumber) == "" || resource.KitesimPhoneID == nil {
+	if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || resource.AliasCount >= iCloudMaxAliases || (resource.DeviceCodeAPI == "" && (strings.TrimSpace(resource.BoundPhoneNumber) == "" || resource.KitesimPhoneID == nil)) {
 		return false, nil
 	}
 	if iCloudCookieRefreshTerminallyFailed(resource) {
@@ -158,8 +158,13 @@ func omitICloudOldCookieSafeError(task *iCloudOnboardingTaskModel, updates map[s
 func iCloudRefreshSnapshotMatches(resource iCloudResourceModel, task *iCloudOnboardingTaskModel) bool {
 	if task == nil || task.ResourceID == nil || resource.ID != *task.ResourceID ||
 		resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled ||
-		resource.CredentialRevision != task.ExpectedCredentialRevision || resource.KitesimPhoneID == nil || task.KitesimPhoneID == nil ||
-		*resource.KitesimPhoneID != *task.KitesimPhoneID {
+		resource.CredentialRevision != task.ExpectedCredentialRevision {
+		return false
+	}
+	if resource.DeviceCodeAPI != "" {
+		return resource.DeviceCodeAPI == task.DeviceCodeAPI
+	}
+	if resource.KitesimPhoneID == nil || task.KitesimPhoneID == nil || *resource.KitesimPhoneID != *task.KitesimPhoneID {
 		return false
 	}
 	resourcePhone, taskPhone := onboardingPhoneDigits(resource.BoundPhoneNumber), onboardingPhoneDigits(task.BoundPhoneNumber)
@@ -167,6 +172,9 @@ func iCloudRefreshSnapshotMatches(resource iCloudResourceModel, task *iCloudOnbo
 }
 
 func iCloudCookieRefreshTerminallyFailed(resource iCloudResourceModel) bool {
+	if resource.DeviceCodeAPI != "" {
+		return false
+	}
 	return resource.WorkflowTaskKind == "refresh" &&
 		resource.OnboardingStatus == iCloudOnboardingFailed &&
 		resource.WorkflowExpectedCredential == resource.CredentialRevision &&
@@ -174,6 +182,9 @@ func iCloudCookieRefreshTerminallyFailed(resource iCloudResourceModel) bool {
 }
 
 func iCloudCookiePhoneBlacklistedTerminallyFailed(resource iCloudResourceModel) bool {
+	if resource.DeviceCodeAPI != "" {
+		return false
+	}
 	if resource.WorkflowTaskKind != "refresh" && resource.WorkflowTaskKind != iCloudCookieRecoveryTaskKind {
 		return false
 	}

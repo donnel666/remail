@@ -12,6 +12,7 @@ import (
 
 	"github.com/donnel666/remail/internal/icloud"
 	"github.com/donnel666/remail/internal/kitesim"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 func TestParseLine(t *testing.T) {
@@ -185,6 +186,9 @@ func TestRestartAtClearsOnlyTheAffectedAppleSession(t *testing.T) {
 }
 
 func TestCompletedPhasesResumeAtManage(t *testing.T) {
+	old := runtimeconfig.String(runtimeconfig.ICloudDeviceAPIKey, "")
+	runtimeconfig.Set(runtimeconfig.ICloudDeviceAPIKey, "configured-for-new-accounts")
+	t.Cleanup(func() { runtimeconfig.Set(runtimeconfig.ICloudDeviceAPIKey, old) })
 	stop := errors.New("stop after observing the first operation")
 	provider := &recordingAppleProvider{err: stop}
 	cp := accountCheckpoint{

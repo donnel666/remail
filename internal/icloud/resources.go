@@ -52,6 +52,8 @@ type AdminICloudSessionView struct {
 }
 
 type AdminICloudResourceView struct {
+	DeviceBindStatus        string                  `json:"deviceBindStatus"`
+	DeviceCodeAPIAvailable  bool                    `json:"deviceCodeApiAvailable"`
 	ID                      uint                    `json:"id"`
 	Version                 uint64                  `json:"version"`
 	PrimaryEmail            string                  `json:"primaryEmail"`
@@ -104,6 +106,8 @@ type AdminICloudResourceDetail struct {
 }
 
 type adminICloudResourceRow struct {
+	DeviceBindStatus        string     `gorm:"column:device_bind_status"`
+	DeviceCodeAPI           string     `gorm:"column:device_code_api"`
 	ID                      uint       `gorm:"column:id"`
 	Version                 uint64     `gorm:"column:version"`
 	PrimaryEmail            string     `gorm:"column:primary_email"`
@@ -167,7 +171,7 @@ type adminICloudResourceRow struct {
 }
 
 const adminICloudResourceSelect = `
-	ir.id, er.version, ir.primary_email, ir.account_role, ir.family_primary_resource_id,
+	ir.device_code_api, ir.device_bind_status, ir.id, er.version, ir.primary_email, ir.account_role, ir.family_primary_resource_id,
 	COALESCE(family_primary.primary_email, '') AS family_primary_email,
 	ir.family_remote_member_count AS family_child_count,
 	ir.family_sync_status, ir.family_synced_at, ir.family_sync_error_category,
@@ -341,6 +345,7 @@ func adminICloudResourceView(row adminICloudResourceRow) AdminICloudResourceView
 		safeError = &value
 	}
 	return AdminICloudResourceView{
+		DeviceBindStatus: firstNonEmpty(row.DeviceBindStatus, "unbound"), DeviceCodeAPIAvailable: row.DeviceCodeAPI != "",
 		ID: row.ID, Version: row.Version, PrimaryEmail: row.PrimaryEmail,
 		AccountRole: firstNonEmpty(row.AccountRole, "unknown"), FamilyPrimaryResourceID: row.FamilyPrimaryResourceID,
 		FamilyPrimaryEmail: row.FamilyPrimaryEmail, FamilyChildCount: row.FamilyChildCount, FamilyChildLimit: iCloudFamilyChildLimit,

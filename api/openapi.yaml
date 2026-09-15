@@ -11965,6 +11965,155 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /v1/admin/icloud/device-platform/balance:
+    get:
+      operationId: getAdminICloudDeviceBalance
+      summary: Read the device platform tai point balance
+      description: Requires system:settings/read. Queries the vendor /api/auth/me endpoint with the configured Bearer key and returns only balance metadata. A missing key returns configured=false and a null balance.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Current vendor balance or unconfigured state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudDeviceBalance"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          description: Device balance unavailable
+
+  /v1/admin/icloud/device-platform/recharges:
+    post:
+      operationId: postAdminICloudDeviceRecharge
+      summary: Redeem a card for device platform tai points
+      description: Requires system:settings/write and system:settings/sensitive. Submits card_key to /api/balance/recharge/card once, without automatic retries, and returns the resulting balance. The card is never persisted or logged. If the outcome is uncertain, query the balance before retrying.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cardKey]
+              properties:
+                cardKey:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+              additionalProperties: false
+      responses:
+        "200":
+          description: Balance after successful redemption
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudDeviceBalance"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          description: Too many recharge requests
+        "503":
+          description: Recharge unavailable or outcome uncertain
+
+  /v1/admin/icloud/resources/{resourceId}/device:
+    parameters:
+      - name: resourceId
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      operationId: getAdminICloudDeviceBinding
+      summary: Read Apple device binding status and pickup API
+      description: Requires core:resource/operate and mailmatch:message/read. The pickup URL is sensitive and must not be cached or logged.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Device binding metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudDeviceBinding"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: postAdminICloudDeviceBinding
+      summary: Start or retry Apple device enrollment
+      description: Requires core:resource/operate and mailmatch:message/read. An active phone is required for enrollment. Repeated calls preserve pending and successful enrollments. Failed enrollments get a new generation and SMS callback. The shared worker imports after 30 seconds and checks all pending accounts every 10 seconds.
+      tags: [Core]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Existing or queued device binding
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudDeviceBinding"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          description: Device enrollment temporarily unavailable
+
+  /sms/icloud-device/{token}:
+    get:
+      operationId: getICloudDeviceEnrollmentSMS
+      summary: Temporary SMS callback used only during Apple device enrollment
+      description: Bound to one enrollment generation and phone, expires on completion, cancellation, or timeout. Returns only SMS received after submission and within the configured Kitesim receipt window. Never logs the token. Poll at most once per 3 seconds.
+      tags: [Core]
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 43
+            maxLength: 43
+      responses:
+        "200":
+          description: Recent SMS or No message followed by callback expiry
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Invalid or expired callback
+        "429":
+          description: Rate limit exceeded
+        "502":
+          description: SMS upstream unavailable
+        "503":
+          description: Callback service unavailable
+
   /v1/admin/icloud/resources/{resourceId}/aliases:
     get:
       operationId: getAdminICloudResourceAliases
@@ -23671,6 +23820,37 @@ components:
         enabled:
           type: boolean
       additionalProperties: false
+    AdminICloudDeviceBalance:
+      type: object
+      required: [configured, balance, checkedAt]
+      properties:
+        configured:
+          type: boolean
+        balance:
+          type: string
+          nullable: true
+          description: Vendor tai points preserved as a decimal string; null when no API key is configured.
+        checkedAt:
+          type: string
+          format: date-time
+          nullable: true
+      additionalProperties: false
+
+    AdminICloudDeviceBinding:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+        codeApi:
+          type: string
+          description: Sensitive device pickup URL, available after successful enrollment.
+        remoteId:
+          type: string
+        lastError:
+          type: string
+      additionalProperties: false
+
     AdminICloudResourceItem:
       type: object
       description: Administrator-safe operational facts. Apple passwords, security answers, browser session payloads, Cookie values, DSID, host, client context, and provider request payloads are never returned.
@@ -23706,6 +23886,12 @@ components:
         - createdAt
         - updatedAt
       properties:
+        deviceBindStatus:
+          type: string
+          description: Device enrollment status; empty or unbound means not enrolled.
+        deviceCodeApiAvailable:
+          type: boolean
+          description: Whether a device pickup API is stored. The URL requires separate message permissions.
         id:
           type: integer
           minimum: 1

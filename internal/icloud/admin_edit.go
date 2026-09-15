@@ -237,6 +237,11 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 		}
 
 		updates := make(map[string]any)
+		if phoneChanged {
+			updates["device_code_api"] = ""
+			updates["device_bind_status"] = ""
+			updates["device_account_id"] = ""
+		}
 		nextCredentialRevision := resource.CredentialRevision
 		// The permanently bound phone is part of the maintenance credential
 		// snapshot. Changing it must invalidate a prior blacklist fence and any

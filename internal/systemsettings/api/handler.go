@@ -314,6 +314,8 @@ func (h *Handler) Delete(c *gin.Context) {
 
 func isSensitiveKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "icloud_device_api_key", "icloud_device_base_url", "icloud_device_sms_base_url":
+		return true
 	case "github_client_id", "github_client_secret", "github_callback_url",
 		"linuxdo_client_id", "linuxdo_client_secret", "linuxdo_callback_url",
 		"nodeloc_client_id", "nodeloc_client_secret", "nodeloc_callback_url",
@@ -327,6 +329,8 @@ func isSensitiveKey(key string) bool {
 
 func isWriteOnlyKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "icloud_device_api_key":
+		return true
 	case "epay_merchant_key", "epay_private_key", "epusdt_api_key", "epusdt_api_secret", "github_client_id", "github_client_secret", "linuxdo_client_id", "linuxdo_client_secret", "nodeloc_client_id", "nodeloc_client_secret", "points_unit_migration_v1":
 		return true
 	default:

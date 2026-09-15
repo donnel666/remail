@@ -85,6 +85,9 @@ type iCloudOnboardingTaskModel struct {
 	BoundPhoneCountryCode       string     `gorm:"column:bound_phone_country_code"`
 	BoundPhoneSource            string     `gorm:"column:bound_phone_source"`
 	KitesimPhoneID              *uint      `gorm:"column:kitesim_phone_id"`
+	DeviceCodeAPI               string     `gorm:"column:device_code_api"`
+	DeviceBindStatus            string     `gorm:"column:device_bind_status"`
+	DeviceAccountID             string     `gorm:"column:device_account_id"`
 	ExpireAt                    time.Time  `gorm:"column:expire_at"`
 	SecretPayload               iCloudJSON `gorm:"column:secret_payload;type:json;serializer:json"`
 	SessionPayload              iCloudJSON `gorm:"column:session_payload;type:json;serializer:json"`

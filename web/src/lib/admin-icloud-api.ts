@@ -4,6 +4,24 @@ import type { components } from "./openapi/schema";
 
 export type AdminICloudResourceStatus =
   components["schemas"]["AdminICloudResourceStatus"];
+export type AdminICloudDeviceBinding = components["schemas"]["AdminICloudDeviceBinding"];
+export type AdminICloudDeviceBalance = components["schemas"]["AdminICloudDeviceBalance"];
+
+export async function getAdminICloudDeviceBalance(signal?: AbortSignal): Promise<AdminICloudDeviceBalance> {
+  return unwrap(await client.GET("/v1/admin/icloud/device-platform/balance", { signal }));
+}
+
+export async function rechargeAdminICloudDevice(cardKey: string): Promise<AdminICloudDeviceBalance> {
+  return unwrap(await client.POST("/v1/admin/icloud/device-platform/recharges", { body: { cardKey }, params: { header: csrfHeader() } }));
+}
+
+export async function getAdminICloudDeviceBinding(resourceId: number, signal?: AbortSignal): Promise<AdminICloudDeviceBinding> {
+  return unwrap(await client.GET("/v1/admin/icloud/resources/{resourceId}/device", { params: { path: { resourceId } }, signal }));
+}
+
+export async function bindAdminICloudDevice(resourceId: number): Promise<AdminICloudDeviceBinding> {
+  return unwrap(await client.POST("/v1/admin/icloud/resources/{resourceId}/device", { params: { path: { resourceId }, header: csrfHeader() } }));
+}
 export type AdminICloudSessionStatus =
   components["schemas"]["AdminICloudSessionStatus"];
 export type AdminICloudAliasStatus =

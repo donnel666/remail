@@ -91,6 +91,8 @@ type Service struct {
 	appleRoutes         *appleRouteManager
 	onboardingApple     AppleOnboardingProvider
 	smsPhones           SMSPhoneService
+	device              *deviceClient
+	deviceRedis         redis.UniversalClient
 	now                 func() time.Time
 	validateImportOwner func(context.Context, uint) (bool, error)
 	backgroundExecution BackgroundExecutionGate
@@ -98,6 +100,10 @@ type Service struct {
 
 func NewService(db *gorm.DB, queue *asynq.Client, files governanceapp.FilePort, redisClients ...redis.UniversalClient) *Service {
 	appleRoutes := newAppleRouteManager(redisClients...)
+	var deviceRedis redis.UniversalClient
+	if len(redisClients) > 0 {
+		deviceRedis = redisClients[0]
+	}
 	return &Service{
 		db:              db,
 		queue:           queue,
@@ -109,6 +115,8 @@ func NewService(db *gorm.DB, queue *asynq.Client, files governanceapp.FilePort, 
 		family:          newRoutedICloudFamilyClient(appleRoutes),
 		appleRoutes:     appleRoutes,
 		onboardingApple: newRoutedAppleOnboardingProvider(appleRoutes),
+		device:          newDeviceClient(),
+		deviceRedis:     deviceRedis,
 		now:             time.Now,
 	}
 }
@@ -185,6 +193,9 @@ type iCloudResourceModel struct {
 	BoundPhoneCountryCode   string     `gorm:"column:bound_phone_country_code"`
 	BoundPhoneSource        string     `gorm:"column:bound_phone_source"`
 	KitesimPhoneID          *uint      `gorm:"column:kitesim_phone_id"`
+	DeviceCodeAPI           string     `gorm:"column:device_code_api"`
+	DeviceBindStatus        string     `gorm:"column:device_bind_status"`
+	DeviceAccountID         string     `gorm:"column:device_account_id"`
 	FamilyInviteURL         string     `gorm:"column:family_invite_url"`
 	FamilyID                string     `gorm:"column:family_id"`
 	FamilyOrganizerDSID     string     `gorm:"column:family_organizer_dsid"`

@@ -210,14 +210,15 @@ func RegisterPublicRoutes(r *gin.Engine, service *Service, rdb redis.UniversalCl
 			return
 		}
 		content := "No message"
-		if latest := latestSMSMessage(messages, service.now(), time.Duration(smsWindowSeconds())*time.Second); latest != nil {
+		if latest := LatestSMSMessage(messages, service.now(), time.Duration(smsWindowSeconds())*time.Second); latest != nil {
 			content = latest.Content
 		}
 		c.String(http.StatusOK, "%s|%s", content, expires)
 	})
 }
 
-func latestSMSMessage(messages []MessageItem, now time.Time, window time.Duration) *MessageItem {
+// LatestSMSMessage selects the newest nonempty provider message within the window.
+func LatestSMSMessage(messages []MessageItem, now time.Time, window time.Duration) *MessageItem {
 	var latest *MessageItem
 	var latestAt time.Time
 	for i := range messages {

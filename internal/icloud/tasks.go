@@ -257,6 +257,9 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		_ = service.ScheduleICloudOnboardingDispatcher(context.WithoutCancel(ctx), 0)
 		return nil
 	})
+	mux.HandleFunc(typeICloudDeviceSync, func(ctx context.Context, _ *asynq.Task) error {
+		return service.syncDeviceBindings(ctx)
+	})
 	mux.HandleFunc(typeICloudProvision, func(ctx context.Context, task *asynq.Task) error {
 		var payload iCloudProvisionTask
 		if task == nil || json.Unmarshal(task.Payload(), &payload) != nil || payload.ResourceID == 0 {
@@ -319,16 +322,23 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		_ = service.ScheduleICloudValidationDispatcher(callCtx, 0)
 		_ = service.ScheduleICloudProvisionDispatcher(callCtx, 0)
 		_ = service.ScheduleICloudOnboardingDispatcher(callCtx, 0)
+		_ = service.ScheduleDeviceBindingSync(callCtx)
 	}
 	go func() {
 		defer close(done)
 		seed()
 		ticker := time.NewTicker(iCloudDispatcherPeriod)
 		defer ticker.Stop()
+		deviceTicker := time.NewTicker(deviceBindingPoll)
+		defer deviceTicker.Stop()
 		for {
 			select {
 			case <-ticker.C:
 				seed()
+			case <-deviceTicker.C:
+				callCtx, callCancel := context.WithTimeout(ctx, 5*time.Second)
+				_ = service.ScheduleDeviceBindingSync(callCtx)
+				callCancel()
 			case <-ctx.Done():
 				return
 			}

@@ -14,6 +14,9 @@ import type {
 } from "@/lib/admin-icloud-api";
 
 const mocks = vi.hoisted(() => ({
+  getDevice: vi.fn(),
+  bindDevice: vi.fn(),
+  copyText: vi.fn(),
   activate: vi.fn(),
   alias: vi.fn(),
   batchByFilter: vi.fn(),
@@ -189,6 +192,8 @@ vi.mock("@/hooks/use-is-mobile", () => ({ useIsMobile: () => false }));
 vi.mock("@/hooks/use-shared-page-size", () => ({ useSharedPageSize: () => [20, vi.fn()] }));
 vi.mock("@/lib/admin-icloud-api", async (importOriginal) => ({
   ...(await importOriginal<any>()),
+  getAdminICloudDeviceBinding: mocks.getDevice,
+  bindAdminICloudDevice: mocks.bindDevice,
   activateAdminICloudResource: mocks.activate,
   batchAdminICloudResourcesByFilter: mocks.batchByFilter,
   batchAdminICloudResourcesByIds: mocks.batchByIds,
@@ -259,6 +264,7 @@ import {
   default as AdminICloudEmails,
   EditICloudModal,
   ICloudDetailSheet,
+  ICloudDeviceActions,
   ICloudMaintenanceModal,
   ICloudOnboardingModal,
   ICloudOnboardingTaskAction,
@@ -1562,5 +1568,41 @@ describe("admin iCloud modal workflows", () => {
         }),
       ),
     );
+  });
+});
+
+vi.mock("@/lib/clipboard", () => ({ copyText: mocks.copyText }));
+
+describe("Apple device code actions", () => {
+  beforeEach(() => { vi.clearAllMocks(); mocks.permissions = {}; });
+  afterEach(cleanup);
+  it("recognizes an existing device API without a separate binding status", () => {
+    render(<ICloudDeviceActions item={{ ...resource(), deviceCodeApiAvailable: true, deviceBindStatus: undefined }} />);
+    expect(screen.getByRole("button", { name: "Device bound" })).toBeEnabled();
+    expect(mocks.bindDevice).not.toHaveBeenCalled();
+  });
+  it("binds, refreshes and copies the device API from the resource row", async () => {
+    const url = "https://devices.example/api/free/v4/getcode?id=1";
+    mocks.getDevice.mockResolvedValueOnce({ status: "unbound" }).mockResolvedValueOnce({ status: "success", codeApi: url });
+    mocks.bindDevice.mockResolvedValue({ status: "pending" });
+    mocks.copyText.mockResolvedValue(undefined);
+    const item = resource();
+    render(<ICloudDeviceActions item={item} />);
+    fireEvent.click(screen.getByRole("button", { name: "Device not bound" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Bind or retry device" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Bind or retry device" }));
+    await waitFor(() => expect(mocks.bindDevice).toHaveBeenCalledWith(item.id));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await screen.findByDisplayValue(url);
+    fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
+    expect(mocks.copyText).toHaveBeenCalledWith(url);
+    expect(screen.getByRole("button", { name: "Bind or retry device" })).toBeDisabled();
+  });
+  it("requires message permission to retrieve the device API", () => {
+    mocks.permissions["mailmatch:message/read"] = false;
+    render(<ICloudDeviceActions item={resource()} />);
+    expect(screen.getByRole("button", { name: "Device not bound" })).toBeDisabled();
+    expect(mocks.getDevice).not.toHaveBeenCalled();
   });
 });

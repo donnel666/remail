@@ -25,8 +25,8 @@ const (
 	iCloudOnboardingSMSDeadline       = 2 * time.Minute
 	iCloudOnboardingFamilyRetry       = 5 * time.Minute
 	iCloudOnboardingForwardRetry      = 4 * time.Second
-	iCloudOnboardingStageDelayMinimum = 60 * time.Second
-	iCloudOnboardingStageDelayMaximum = 200 * time.Second
+	iCloudOnboardingStageDelayMinimum = time.Second
+	iCloudOnboardingStageDelayMaximum = 30 * time.Second
 	iCloudFamilyChildLimit            = 5
 	iCloudPhoneBlacklistedMessage     = "The permanently bound phone number is in the SMS blacklist (小黑屋)."
 )
@@ -252,6 +252,12 @@ func (s *Service) processICloudOnboardingStage(ctx context.Context, task *iCloud
 	var secret iCloudOnboardingSecret
 	if err := json.Unmarshal(task.SecretPayload, &secret); err != nil || strings.TrimSpace(secret.Password) == "" {
 		return s.failICloudOnboardingTask(ctx, task, "invalid_credentials", "Stored Apple credentials are invalid.")
+	}
+	if deviceRequired(task) && (task.TaskKind != "onboarding" || iCloudOnboardingTaskPhase(task) > 1 || task.DeviceCodeAPI != "" || task.DeviceBindStatus != "" && task.Stage != "icloud_finish") {
+		ready, err := s.ensureOnboardingDevice(ctx, task, secret)
+		if err != nil || !ready {
+			return err
+		}
 	}
 	switch task.Stage {
 	case "icloud_prepare", "old_cookie_prepare", "icloud_cookie_prepare", "family_prepare", "manage_prepare":
@@ -497,6 +503,9 @@ func (s *Service) prepareICloudOnboardingAppleWithInvite(ctx context.Context, ta
 }
 
 func (s *Service) checkICloudOnboardingSMSPhone(ctx context.Context, task *iCloudOnboardingTaskModel) (bool, error) {
+	if task != nil && task.DeviceCodeAPI != "" {
+		return true, nil
+	}
 	if task == nil || task.KitesimPhoneID == nil {
 		return true, nil
 	}
@@ -567,6 +576,9 @@ func (s *Service) bindICloudOnboardingTrustedPhone(ctx context.Context, task *iC
 }
 
 func (s *Service) sendICloudOnboardingSMS(ctx context.Context, task *iCloudOnboardingTaskModel, secret iCloudOnboardingSecret) error {
+	if task.DeviceCodeAPI != "" {
+		return s.advanceICloudOnboardingTask(ctx, task, "sms_wait", nil, map[string]any{"manual_verification_code": "", "sms_sent_at": s.now().UTC(), "sms_poll_deadline": s.now().Add(iCloudOnboardingSMSDeadline), "stage_attempts": task.StageAttempts})
+	}
 	purpose := strings.TrimSpace(task.PendingSMSPurpose)
 	if purpose == "" {
 		return s.failICloudOnboardingTask(ctx, task, "invalid_sms_state", "Apple SMS verification state is invalid.")
@@ -691,6 +703,9 @@ func (s *Service) sendICloudOnboardingSMS(ctx context.Context, task *iCloudOnboa
 }
 
 func (s *Service) waitICloudOnboardingSMS(ctx context.Context, task *iCloudOnboardingTaskModel) error {
+	if task.DeviceCodeAPI != "" {
+		return s.waitOnboardingDeviceCode(ctx, task)
+	}
 	if strings.TrimSpace(task.ManualVerificationCode) != "" {
 		return s.advanceICloudOnboardingTask(ctx, task, "sms_verify", nil, map[string]any{"stage_attempts": task.StageAttempts})
 	}
@@ -769,12 +784,14 @@ func (s *Service) verifyICloudOnboardingSMS(ctx context.Context, task *iCloudOnb
 	if len(response.Session) > 0 {
 		updates["session_payload"] = iCloudJSON(response.Session)
 	}
+	// Device enrollment starts from the persisted icloud_finish stage so a
+	// local binding failure cannot discard Apple's accepted verification.
 	if err := s.advanceICloudOnboardingTask(ctx, task, next, nil, updates); err != nil {
 		return err
 	}
 	// Apple has accepted the code and the workflow is already advanced. A
 	// transient local completion error must not replay the Apple verification.
-	if task.KitesimPhoneID != nil && s.smsPhones != nil {
+	if task.DeviceCodeAPI == "" && task.KitesimPhoneID != nil && s.smsPhones != nil {
 		if challenge, lookupErr := s.smsPhones.GetSMSChallengeByOwner(context.WithoutCancel(ctx), iCloudOnboardingSMSOwner(task)); lookupErr == nil {
 			_ = s.smsPhones.CompleteSMSChallenge(context.WithoutCancel(ctx), challenge.ID)
 		}
@@ -860,6 +877,9 @@ func (s *Service) retryICloudOnboardingSMSRoundAt(ctx context.Context, task *iCl
 }
 
 func (s *Service) cancelICloudOnboardingSMSChallenge(ctx context.Context, task *iCloudOnboardingTaskModel) {
+	if task != nil && task.DeviceCodeAPI != "" {
+		return
+	}
 	if s.smsPhones == nil || task == nil || task.KitesimPhoneID == nil || strings.TrimSpace(task.PendingSMSPurpose) == "" {
 		return
 	}
@@ -874,6 +894,11 @@ func iCloudOnboardingSMSOwner(task *iCloudOnboardingTaskModel) string {
 }
 
 func (s *Service) finishICloudOnboardingICloud(ctx context.Context, task *iCloudOnboardingTaskModel, secret iCloudOnboardingSecret, afterFamily bool) error {
+	if !afterFamily && task.TaskKind == "onboarding" {
+		if err := s.startOnboardingDevice(ctx, task, secret); err != nil {
+			return err
+		}
+	}
 	operation := appleOnboardingFinishICloud
 	if afterFamily {
 		operation = appleOnboardingFinishICloudCookie
@@ -1384,6 +1409,8 @@ func (s *Service) executeICloudOnboardingApple(ctx context.Context, task *iCloud
 	}
 	request.SkipPhoneEnrollment = request.SkipPhoneEnrollment || task.TaskKind == "refresh" || isICloudCookieRecoveryTask(task) ||
 		(task.AccountRole == "primary" && strings.TrimSpace(task.BoundPhoneNumber) == "")
+	request.UseDeviceCode = task.DeviceCodeAPI != ""
+	request.SkipPhoneEnrollment = request.SkipPhoneEnrollment || request.UseDeviceCode
 	return s.onboardingApple.Execute(ctx, request)
 }
 

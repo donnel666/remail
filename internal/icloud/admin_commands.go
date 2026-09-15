@@ -526,6 +526,14 @@ func mutateAdminICloudResourceTx(
 			return nil, false, err
 		}
 		updates["status"] = iCloudResourceDeleted
+		updates["device_code_api"] = ""
+		updates["device_bind_status"] = ""
+		updates["device_account_id"] = ""
+		if resource.DeviceBindStatus != "" || resource.DeviceCodeAPI != "" {
+			if err := tx.Model(&deviceBindingModel{}).Where("email = ?", strings.ToLower(resource.PrimaryEmail)).Updates(map[string]any{"status": "failed", "identity_hash": "", "code_api": "", "password": "", "callback_token": nil, "generation": gorm.Expr("generation + 1"), "last_error": "Device binding canceled because the resource was deleted."}).Error; err != nil {
+				return nil, false, err
+			}
+		}
 		updates["for_sale"] = false
 		updates["next_validation_at"] = nil
 		updates["next_provision_at"] = nil

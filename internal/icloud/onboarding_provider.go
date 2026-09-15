@@ -79,6 +79,7 @@ type AppleOnboardingRequest struct {
 	SkipPhoneEnrollment  bool
 	SkipOldChannel       bool
 	SkipPrivateAlias     bool
+	UseDeviceCode        bool
 }
 
 // AppleSecurityAnswer and AppleOnboardingSecret expose only the input shape

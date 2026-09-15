@@ -19,6 +19,8 @@ import (
 // is deliberately the same credential/channel shape used by the normal
 // iCloud import path, so the resource workers can take over after the commit.
 type StandaloneValidatedAccount struct {
+	DeviceCodeAPI        string
+	DeviceAccountID      string
 	Email                string
 	Region               string
 	CountryCode          string
@@ -155,7 +157,7 @@ func (s *Service) CommitStandaloneValidatedAccount(
 				}
 				return err
 			}
-			resource = iCloudResourceModel{ID: root.ID, ResourceType: "icloud", PrimaryEmail: email,
+			resource = iCloudResourceModel{DeviceCodeAPI: account.DeviceCodeAPI, DeviceAccountID: account.DeviceAccountID, DeviceBindStatus: standaloneDeviceStatus(account.DeviceCodeAPI), ID: root.ID, ResourceType: "icloud", PrimaryEmail: email,
 				AccountRole: account.AccountRole, Region: strings.TrimSpace(account.Region),
 				FamilyPrimaryResourceID: familyPrimaryID, FamilyInviteURL: strings.TrimSpace(account.FamilyInviteURL),
 				CountryCode: strings.ToUpper(strings.TrimSpace(account.CountryCode)), ICloudOpened: account.ICloudOpened,
@@ -235,6 +237,11 @@ func (s *Service) CommitStandaloneValidatedAccount(
 				"next_attempt_at": nil, "last_error_category": "", "started_at": nil, "finished_at": nil,
 				"icloud_activation_confirmed_at": nil, "onboarding_operator_user_id": 0, "onboarding_request_id": "",
 				"onboarding_idempotency_key": "", "onboarding_request_fingerprint": "",
+			}
+			if account.DeviceCodeAPI != "" {
+				updates["device_code_api"] = account.DeviceCodeAPI
+				updates["device_account_id"] = account.DeviceAccountID
+				updates["device_bind_status"] = "success"
 			}
 			if invite := strings.TrimSpace(account.FamilyInviteURL); invite != "" {
 				updates["family_invite_url"] = invite
@@ -329,4 +336,11 @@ func standaloneChannel(channel AppleOnboardingChannel, expectedKind string) *iCl
 		Referer: channel.Referer, UserAgent: channel.UserAgent, FDClientInfo: channel.FDClientInfo, APIKey: channel.APIKey,
 		DSID: channel.DSID, ClientID: channel.ClientID, ClientBuildNumber: channel.ClientBuildNumber,
 		ClientMasteringNumber: channel.ClientMasteringNumber, Scnt: channel.Scnt}
+}
+
+func standaloneDeviceStatus(api string) string {
+	if api != "" {
+		return "success"
+	}
+	return ""
 }
