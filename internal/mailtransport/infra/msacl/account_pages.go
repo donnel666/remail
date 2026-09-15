@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -679,6 +680,194 @@ func handlePasskeyInterrupt(session *Session, page, rawURL string) (string, stri
 	return "", "", false, nil
 }
 
+func handleCredentialActionInterrupt(session *Session, page, rawURL, proxy, accountEmail, preferredBindingAddress string) (string, string, string, error) {
+	serverData, err := extractPasswordRecoveryServerData(page)
+	if err != nil {
+		return "", "", "", newAuthError("Microsoft credential-action page is incomplete.", AuthStatusAuthTimeout)
+	}
+	initial := asMap(serverData["acmaInitialResponse"])
+	config := asMap(serverData["acmaInitialConfig"])
+	if initial == nil || config == nil ||
+		!strings.EqualFold(asString(initial["state"]), "interactionRequired") ||
+		!strings.EqualFold(asString(initial["action"]), "enroll") ||
+		!strings.EqualFold(asString(initial["infoType"]), "email") {
+		return "", "", "", newAuthError("Microsoft credential action is not supported.", AuthStatusAuthTimeout)
+	}
+
+	var emailMethod map[string]any
+	if embedded := asMap(initial["_embedded"]); embedded != nil {
+		for _, rawMethod := range asSlice(embedded["methods"]) {
+			method := asMap(rawMethod)
+			if method != nil && strings.EqualFold(asString(method["type"]), "email") {
+				emailMethod = method
+				break
+			}
+		}
+	}
+	link := func(payload map[string]any, name string) map[string]any {
+		if payload == nil {
+			return nil
+		}
+		links := asMap(payload["_links"])
+		if links == nil {
+			return nil
+		}
+		return asMap(links[name])
+	}
+	enrollLink := link(emailMethod, "enroll")
+	if enrollLink == nil || asString(enrollLink["href"]) == "" || asString(initial["continuationToken"]) == "" {
+		return "", "", "", newAuthError("Microsoft credential-action enrollment is incomplete.", AuthStatusAuthTimeout)
+	}
+
+	mailbox, err := createTempMailbox(session.context(), accountEmail, preferredBindingAddress)
+	if err != nil {
+		return "", "", "", err
+	}
+	lease, err := claimCodeMailLease(session.context(), mailbox, mailbox)
+	if err != nil {
+		return "", "", "", err
+	}
+	defer lease.releaseIfUnsent(session.context())
+	seenKeys, err := snapshotMailboxKeys(session.context(), mailbox, proxy)
+	if err != nil {
+		return "", "", "", wrapAuthError(fmt.Sprintf("读取辅助邮箱基线失败: %s", err), AuthStatusRequestError, err, mailbox)
+	}
+	watcher := startCodeWatcher(session.context(), mailbox, proxy, 0, seenKeys)
+
+	requestConfig := asMap(config["request"])
+	canary := firstNonEmpty(asString(config["canary"]), asString(serverData["apiCanary"]), asString(serverData["sCanary"]))
+	baseURL := rawURL
+	if navigation := asMap(config["navigation"]); navigation != nil {
+		baseURL = firstNonEmpty(asString(navigation["baseRouteUri"]), baseURL)
+	}
+	headers := corsHeaders(session, map[string]string{
+		"Accept":            "application/json",
+		"Content-Type":      "application/json; charset=utf-8",
+		"Origin":            "https://account.live.com",
+		"Referer":           rawURL,
+		"canary":            canary,
+		"correlationId":     asString(requestConfig["correlationId"]),
+		"client-request-id": asString(requestConfig["correlationId"]),
+		"sessionId":         asString(requestConfig["sessionId"]),
+		"hpgid":             firstNonEmpty(asString(serverData["hpgid"]), "0"),
+		"hpgact":            firstNonEmpty(asString(serverData["hpgact"]), "0"),
+	})
+	postAPI := func(rawTarget, label string, payload map[string]any) (map[string]any, error) {
+		target := resolveURL(baseURL, rawTarget)
+		parsed, parseErr := url.Parse(target)
+		if parseErr != nil || !strings.EqualFold(parsed.Scheme, "https") ||
+			!strings.EqualFold(parsed.Hostname(), "account.live.com") ||
+			!strings.HasPrefix(strings.ToLower(parsed.Path), "/api/v1.0/auth/") {
+			return nil, newAuthError("Microsoft credential-action target is invalid.", AuthStatusRequestError, mailbox)
+		}
+		resp, requestErr := session.Post(target, requestOptions{JSON: payload, Headers: headers})
+		if requestErr != nil {
+			return nil, wrapAuthError(fmt.Sprintf("%s 请求异常: %s", label, requestErr), AuthStatusRequestError, requestErr, mailbox)
+		}
+		if resp.StatusCode == 429 {
+			return nil, newAuthError("Microsoft credential action is rate limited.", AuthStatusRateLimited, mailbox)
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, newAuthError(fmt.Sprintf("%s 请求失败 (HTTP %d)", label, resp.StatusCode), AuthStatusRequestError, mailbox)
+		}
+		var result map[string]any
+		if decodeErr := resp.JSON(&result); decodeErr != nil {
+			return nil, newAuthError(fmt.Sprintf("%s returned an invalid response.", label), AuthStatusRequestError, mailbox)
+		}
+		if rawError := asMap(result["error"]); rawError != nil {
+			status := AuthStatusRequestError
+			code := strings.ToLower(asString(rawError["code"]))
+			if strings.Contains(code, "toomany") || strings.Contains(code, "rate") {
+				status = AuthStatusRateLimited
+			} else if strings.Contains(code, "otp") || strings.Contains(code, "code") {
+				status = AuthStatusVerifyCodeError
+			}
+			return nil, newAuthError(fmt.Sprintf("%s was rejected.", label), status, mailbox)
+		}
+		if refreshed := asString(result["apiCanary"]); refreshed != "" {
+			canary = refreshed
+			headers["canary"] = refreshed
+		}
+		logDebug("%s response: state=%s action=%s keys=%v", label, asString(result["state"]), asString(result["action"]), sortedAnyKeys(result))
+		return result, nil
+	}
+
+	if err := lease.markSent(session.context()); err != nil {
+		return "", "", "", err
+	}
+	logInfo("Microsoft credential action: 绑定辅助邮箱")
+	enrolled, err := postAPI(asString(enrollLink["href"]), "CredentialAction enroll", map[string]any{
+		"email":             mailbox,
+		"continuationToken": asString(initial["continuationToken"]),
+	})
+	if err != nil {
+		return "", "", "", err
+	}
+	activateLink := link(enrolled, "activate")
+	if !strings.EqualFold(asString(enrolled["action"]), "activate") ||
+		!strings.EqualFold(asString(enrolled["type"]), "email") ||
+		activateLink == nil || asString(activateLink["href"]) == "" {
+		return "", "", "", newAuthError("Microsoft credential-action activation is incomplete.", AuthStatusAuthTimeout, mailbox)
+	}
+	code, err := watcher.getCode(0)
+	if err != nil {
+		status := AuthStatusRequestError
+		if authErr, ok := err.(*AuthError); ok && authErr.Status != "" {
+			status = authErr.Status
+		}
+		return "", "", "", newAuthError(fmt.Sprintf("辅助邮箱收码失败: %s", err), status, mailbox)
+	}
+	logInfo("Microsoft credential action: 收到验证码")
+	activated, err := postAPI(asString(activateLink["href"]), "CredentialAction activate", map[string]any{
+		"activationDetails": map[string]any{
+			"displayName": firstNonEmpty(asString(enrolled["hint"]), mailbox),
+			"id":          asString(enrolled["id"]),
+			"otp":         code,
+		},
+		"otp":               code,
+		"continuationToken": asString(enrolled["continuationToken"]),
+	})
+	if err != nil {
+		return "", "", "", err
+	}
+	continueLink := link(activated, "continue")
+	if continueLink == nil || asString(continueLink["href"]) == "" {
+		return "", "", "", newAuthError("Microsoft credential-action continuation is incomplete.", AuthStatusAuthTimeout, mailbox)
+	}
+	releaseCompletedCodeMailLease(session.context(), lease)
+
+	continueURL := resolveURL(baseURL, asString(continueLink["href"]))
+	if !isMicrosoftAccountRelayURL(continueURL) {
+		return "", "", "", newAuthError("Microsoft credential-action continuation target is invalid.", AuthStatusRequestError, mailbox)
+	}
+	fields := map[string]string{}
+	for key, value := range asMap(continueLink["params"]) {
+		fields[key] = asString(value)
+	}
+	fields["canary"] = canary
+	fields["continuationToken"] = asString(activated["continuationToken"])
+	for _, rawHint := range asSlice(activated["clientHints"]) {
+		if hint := asString(rawHint); strings.HasPrefix(hint, "slt=") {
+			fields["slt"] = strings.TrimPrefix(hint, "slt=")
+		}
+	}
+	resp, err := session.Post(continueURL, requestOptions{
+		Data: fields,
+		Headers: navHeaders(session, map[string]string{
+			"Content-Type": "application/x-www-form-urlencoded",
+			"Origin":       "https://account.live.com",
+			"Referer":      rawURL,
+		}),
+		AllowRedirects:    true,
+		HasAllowRedirects: true,
+	})
+	if err != nil {
+		return "", "", "", wrapAuthError(fmt.Sprintf("CredentialAction continue 请求异常: %s", err), AuthStatusRequestError, err, mailbox)
+	}
+	logInfo("Microsoft credential action: 辅助邮箱绑定完成")
+	return resp.Body, resp.URL, mailbox, nil
+}
+
 func extractEmailProofValue(page, mailbox string) string {
 	mailbox = strings.ToLower(strings.TrimSpace(mailbox))
 	if mailbox == "" {
@@ -694,7 +883,11 @@ func extractEmailProofValue(page, mailbox string) string {
 			attrs := extractTagAttrs(tag)
 			name := attrs["name"]
 			value := attrs["value"]
-			if name == preferredName && strings.Contains(strings.ToLower(value), mailbox) && strings.Contains(strings.ToLower(value), "||email||") {
+			if name != preferredName || !strings.Contains(strings.ToLower(value), "||email||") {
+				continue
+			}
+			parts := strings.Split(value, "||")
+			if strings.Contains(strings.ToLower(value), mailbox) || (len(parts) > 2 && mailboxMatchesMasked(parts[1], mailbox)) {
 				return value
 			}
 		}
@@ -922,6 +1115,221 @@ func trySkipProofsPage(session *Session, page, rawURL, action string) (string, s
 	return resp.Body, resp.URL, nil
 }
 
+func extractLegacyProofPageString(page, key string) string {
+	pattern := fmt.Sprintf(`(?is)\b%s\s*:\s*'((?:\\.|[^'])*)'`, regexp.QuoteMeta(key))
+	match := regexp.MustCompile(pattern).FindStringSubmatch(page)
+	if len(match) < 2 {
+		return ""
+	}
+	value, err := strconv.Unquote(`"` + strings.ReplaceAll(match[1], `"`, `\"`) + `"`)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+func extractConfigInt(page, key string) int {
+	pattern := fmt.Sprintf(`(?is)"%s"\s*:\s*(\d+)`, regexp.QuoteMeta(key))
+	match := regexp.MustCompile(pattern).FindStringSubmatch(page)
+	if len(match) < 2 {
+		return 0
+	}
+	value, _ := strconv.Atoi(match[1])
+	return value
+}
+
+func firstLegacyEmailProofValue(page string) string {
+	formHTML := extractFormHTML(page, "frmVerifyProof")
+	if formHTML == "" {
+		return ""
+	}
+	for _, tag := range regexp.MustCompile(`(?is)<input\b[^>]*>`).FindAllString(formHTML, -1) {
+		attrs := extractTagAttrs(tag)
+		if strings.EqualFold(attrs["name"], "proof") && strings.Contains(strings.ToLower(attrs["value"]), "||email||") {
+			return attrs["value"]
+		}
+	}
+	return ""
+}
+
+func legacyProofDestination(page, proofValue string) string {
+	parts := strings.Split(proofValue, "||")
+	if len(parts) < 4 {
+		return ""
+	}
+	index, err := strconv.Atoi(parts[3])
+	proofData := strings.Split(extractLegacyProofPageString(page, "sProofData"), "||")
+	if err != nil || index < 0 || index >= len(proofData) {
+		return ""
+	}
+	decoded, err := url.PathUnescape(proofData[index])
+	if err != nil {
+		return ""
+	}
+	return strings.SplitN(decoded, "|", 2)[0]
+}
+
+func verifyLegacyProofPage(session *Session, page, rawURL, proxy, accountEmail, preferredBindingAddress string) (string, string, string, error) {
+	proofValue := extractEmailProofValue(page, preferredBindingAddress)
+	if proofValue == "" {
+		proofValue = firstLegacyEmailProofValue(page)
+	}
+	parts := strings.Split(proofValue, "||")
+	if len(parts) < 4 {
+		return "", "", "", newAuthError("Microsoft proof-verification page has no usable email proof.", AuthStatusUnknownMailbox)
+	}
+	maskedMailbox := cleanProofDisplay(parts[1])
+	if !UsesActiveAuxiliaryDomain(maskedMailbox) {
+		return "", "", "", alreadyBoundError(maskedMailbox, "")
+	}
+	destination := legacyProofDestination(page, proofValue)
+	if destination == "" {
+		return "", "", "", newAuthError("Microsoft proof-verification page is incomplete.", AuthStatusAuthTimeout)
+	}
+
+	mailbox := ""
+	if !strings.Contains(maskedMailbox, "*") {
+		mailbox = normalizeRecoveryMailbox(maskedMailbox)
+	} else {
+		mailbox = lookupRealMailbox(session.context(), maskedMailbox, accountEmail, proxy, preferredBindingAddress)
+	}
+	resolveByRecipient := mailbox == ""
+	lease, err := claimCodeMailLease(session.context(), maskedMailbox, mailbox)
+	if err != nil {
+		return "", "", "", err
+	}
+	defer lease.releaseIfUnsent(session.context())
+
+	var seenKeys map[string]struct{}
+	var maskedSince time.Time
+	var maskedAfterID uint64
+	if resolveByRecipient {
+		maskedSince = maskedMailboxWindowStart()
+		seenKeys, maskedAfterID, err = snapshotMaskedMailboxKeys(session.context(), maskedMailbox, maskedSince)
+	} else {
+		seenKeys, err = snapshotMailboxKeys(session.context(), mailbox, proxy)
+	}
+	if err != nil {
+		return "", "", "", wrapAuthError(fmt.Sprintf("读取辅助邮箱基线失败: %s", err), AuthStatusRequestError, err, firstNonEmpty(mailbox, maskedMailbox))
+	}
+	var watcher *MailWatcher
+	if !resolveByRecipient {
+		watcher = startCodeWatcher(session.context(), mailbox, proxy, 0, seenKeys)
+	}
+	if err := lease.markSent(session.context()); err != nil {
+		return "", "", "", err
+	}
+	logInfo("安全证明页: 发送辅助邮箱验证码")
+	uaid := extractConfigString(page, "uaid")
+	uiflvr := extractConfigInt(page, "uiflvr")
+	scid := extractConfigInt(page, "scid")
+	hpgid := extractConfigInt(page, "hpgid")
+	resp, err := session.Post("https://account.live.com/API/Proofs/SendOtt", requestOptions{
+		JSON: map[string]any{
+			"destination":      destination,
+			"channel":          "Email",
+			"proofCountry":     "",
+			"proofCountryCode": "",
+			"action":           extractLegacyProofPageString(page, "sAction"),
+			"netid":            extractLegacyProofPageString(page, "sNetId"),
+			"cxt":              extractLegacyProofPageString(page, "sContext"),
+			"uiflvr":           uiflvr,
+			"uaid":             uaid,
+			"scid":             scid,
+			"hpgid":            hpgid,
+		},
+		Headers: corsHeaders(session, map[string]string{
+			"Accept":              "application/json",
+			"Content-Type":        "application/json; charset=utf-8",
+			"Origin":              "https://account.live.com",
+			"Referer":             rawURL,
+			"canary":              extractConfigString(page, "apiCanary"),
+			"eipt":                extractConfigString(page, "eipt"),
+			"x-ms-apiVersion":     "2",
+			"x-ms-apiTransport":   "xhr",
+			"x-ms-correlation-id": firstNonEmpty(extractConfigString(page, "correlationId"), uaid),
+			"client-request-id":   uaid,
+			"uiflvr":              strconv.Itoa(uiflvr),
+			"scid":                strconv.Itoa(scid),
+			"hpgid":               strconv.Itoa(hpgid),
+		}),
+	})
+	if err != nil {
+		return "", "", "", wrapAuthError(fmt.Sprintf("SendOtt 请求异常: %s", err), AuthStatusRequestError, err, firstNonEmpty(mailbox, maskedMailbox))
+	}
+	logInfo("安全证明页 SendOtt 响应: status=%d", resp.StatusCode)
+	if resp.StatusCode == 429 {
+		return "", "", "", newAuthError("Microsoft proof verification is rate limited.", AuthStatusRateLimited, firstNonEmpty(mailbox, maskedMailbox))
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", "", "", newAuthError(fmt.Sprintf("SendOtt 请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError, firstNonEmpty(mailbox, maskedMailbox))
+	}
+	if strings.TrimSpace(resp.Body) != "" {
+		var result map[string]any
+		if err := resp.JSON(&result); err != nil {
+			return "", "", "", newAuthError("SendOtt returned an invalid response.", AuthStatusRequestError, firstNonEmpty(mailbox, maskedMailbox))
+		}
+		if asMap(result["error"]) != nil {
+			return "", "", "", newAuthError("SendOtt was rejected.", AuthStatusRequestError, firstNonEmpty(mailbox, maskedMailbox))
+		}
+	}
+
+	var code string
+	if resolveByRecipient {
+		code, mailbox, err = mailWaitMaskedCode(session.context(), maskedMailbox, maskedSince, maskedAfterID, 0, seenKeys)
+	} else {
+		code, err = watcher.getCode(0)
+	}
+	if err != nil {
+		status := AuthStatusRequestError
+		if authErr, ok := err.(*AuthError); ok && authErr.Status != "" {
+			status = authErr.Status
+		}
+		return "", "", "", newAuthError(fmt.Sprintf("安全证明页收码失败: %s", err), status, firstNonEmpty(mailbox, maskedMailbox))
+	}
+	logInfo("安全证明页: 收到验证码")
+	verifyURL := resolveURL(rawURL, extractFormActionByID(page, "frmVerifyProof"))
+	parsedVerifyURL, parseErr := url.Parse(verifyURL)
+	if parseErr != nil || !strings.EqualFold(parsedVerifyURL.Scheme, "https") || !strings.EqualFold(parsedVerifyURL.Hostname(), "account.live.com") || !strings.EqualFold(parsedVerifyURL.Path, "/proofs/Verify") {
+		return "", "", "", newAuthError("Microsoft proof-verification target is invalid.", AuthStatusRequestError, mailbox)
+	}
+	fields := extractFormFields(page, "frmVerifyProof")
+	delete(fields, "proof")
+	fields["iProofOptions"] = proofValue
+	fields["iOttText"] = code
+	fields["action"] = "VerifyProof"
+	fields["GeneralVerify"] = "0"
+	resp, err = session.Post(verifyURL, requestOptions{
+		Data: fields,
+		Headers: navHeaders(session, map[string]string{
+			"Content-Type": "application/x-www-form-urlencoded",
+			"Origin":       "https://account.live.com",
+			"Referer":      rawURL,
+		}),
+		AllowRedirects:    true,
+		HasAllowRedirects: true,
+	})
+	if err != nil {
+		return "", "", "", wrapAuthError(fmt.Sprintf("VerifyProof 请求异常: %s", err), AuthStatusRequestError, err, mailbox)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", "", "", newAuthError(fmt.Sprintf("VerifyProof 请求失败 (HTTP %d)", resp.StatusCode), AuthStatusRequestError, mailbox)
+	}
+	nextPage, nextURL, submitted, err := submitSLTFormIfPresent(session, resp.Body, resp.URL, mailbox, "VerifyProof")
+	if err != nil {
+		return "", "", "", err
+	}
+	if submitted {
+		releaseCompletedCodeMailLease(session.context(), lease)
+		return nextPage, nextURL, mailbox, nil
+	}
+	if extractFormHTML(resp.Body, "frmVerifyProof") != "" {
+		return "", "", "", newAuthError("VerifyProof was not accepted.", AuthStatusVerifyCodeError, mailbox)
+	}
+	releaseCompletedCodeMailLease(session.context(), lease)
+	return resp.Body, resp.URL, mailbox, nil
+}
+
 func handleProofsPage(session *Session, page, rawURL, action, proxy string, alreadyBound bool, email string, preferredBindingAddress string) (string, string, string, error) {
 	if action != "" && action != "#" {
 		action = resolveURL(rawURL, action)
@@ -934,6 +1342,9 @@ func handleProofsPage(session *Session, page, rawURL, action, proxy string, alre
 			return "", "", "", err
 		}
 		return resp.Body, resp.URL, "", nil
+	}
+	if extractFormHTML(page, "frmVerifyProof") != "" && strings.Contains(page, "SendOtt") {
+		return verifyLegacyProofPage(session, page, rawURL, proxy, email, preferredBindingAddress)
 	}
 
 	isAddEmail := isAddEmailPage(page, action)
@@ -1051,6 +1462,18 @@ func handleAccountPagesWithOptions(session *Session, page, rawURL, proxy string,
 			continue
 		}
 
+		if strings.EqualFold(extractConfigString(page, "sPageId"), "Account_CredentialActionInterruptPage_Client") {
+			nextPage, nextURL, tempMail, err := handleCredentialActionInterrupt(session, page, rawURL, proxy, email, preferredBindingAddress)
+			if err != nil {
+				return "", "", "", err
+			}
+			page, rawURL = nextPage, nextURL
+			if tempMail != "" {
+				boundMailbox = tempMail
+			}
+			continue
+		}
+
 		if (strings.Contains(low, "/interrupt/") || strings.Contains(low, "passkey")) && strings.Contains(low, "account.live.com") {
 			nextPage, nextURL, ok, err := handlePasskeyInterrupt(session, page, rawURL)
 			if err != nil {
@@ -1062,7 +1485,7 @@ func handleAccountPagesWithOptions(session *Session, page, rawURL, proxy string,
 			}
 		}
 
-		if isAuto && !isInterrupt {
+		if isAuto && (!isInterrupt || extractFormHTML(page, "fmHF") != "") {
 			if action != "" && strings.Contains(strings.ToLower(action), "identity/confirm") {
 				logInfo("自动跳转: 进入 identity/confirm 获取 OTP 上下文")
 				nextPage, nextURL, err := handleAutoSubmit(session, page, rawURL, action)

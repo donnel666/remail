@@ -28,6 +28,169 @@ func TestMicrosoftConsentManageRecognizesLocalizedEmptyState(t *testing.T) {
 	require.False(t, isMicrosoftConsentManagePage(`<script>var ServerData={"sPageId":"i6148"};</script>`))
 }
 
+func TestHandleAccountPagesCompletesCredentialActionEmailEnrollment(t *testing.T) {
+	const (
+		currentURL  = "https://account.live.com/interrupt/credentialaction"
+		enrollURL   = "https://account.live.com/api/v1.0/auth/methods/email"
+		activateURL = "https://account.live.com/api/v1.0/auth/methods/email/method-id/activate"
+		continueURL = "https://login.live.com/ppsecure/post.srf"
+		returnURL   = "https://login.live.com/oauth20_remoteconnect.srf"
+	)
+	page := `<script>var ServerData={"sPageId":"Account_CredentialActionInterruptPage_Client","hpgid":123,"hpgact":0,"acmaInitialConfig":{"canary":"api-canary","navigation":{"baseRouteUri":"https://account.live.com"},"request":{"correlationId":"correlation-id","sessionId":"session-id"}},"acmaInitialResponse":{"continuationToken":"initial-token","state":"interactionRequired","action":"enroll","infoType":"email","_embedded":{"methods":[{"id":"","type":"email","hint":"","_links":{"enroll":{"href":"/api/v1.0/auth/methods/email"}}}],"user":[{"displayName":"owner"}]}}};</script>`
+	finishedPage := `<html>finished</html>`
+	previousReader := activeMailboxReader()
+	reader := &sequencedMailboxReader{watcherStarted: make(chan struct{}), sendStarted: make(chan struct{})}
+	SetMailboxReader(reader)
+	defer SetMailboxReader(previousReader)
+	previousDomains := activeAuxiliaryDomains()
+	SetAuxiliaryDomains([]string{"recovery.test"})
+	defer SetAuxiliaryDomains(previousDomains)
+
+	session, client := newScriptedSession(t,
+		func(req *http.Request, follow bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, enrollURL)
+			require.True(t, follow)
+			select {
+			case <-reader.watcherStarted:
+			case <-time.After(time.Second):
+				require.FailNow(t, "mail watcher did not start before credential enrollment")
+			}
+			close(reader.sendStarted)
+			payload := decodeJSONRequest(t, req)
+			require.Equal(t, "proof@recovery.test", payload["email"])
+			require.Equal(t, "initial-token", payload["continuationToken"])
+			require.Equal(t, "api-canary", req.Header.Get("canary"))
+			return scriptedResponse(req, 200, enrollURL, `{"continuationToken":"activate-token","state":"interactionRequired","action":"activate","id":"method-id","type":"email","hint":"proof@recovery.test","_links":{"activate":{"href":"/api/v1.0/auth/methods/email/method-id/activate"}}}`, nil), nil
+		},
+		func(req *http.Request, follow bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, activateURL)
+			require.True(t, follow)
+			payload := decodeJSONRequest(t, req)
+			require.Equal(t, "654321", payload["otp"])
+			details := asMap(payload["activationDetails"])
+			require.Equal(t, "method-id", details["id"])
+			require.Equal(t, "proof@recovery.test", details["displayName"])
+			return scriptedResponse(req, 200, activateURL, `{"continuationToken":"continue-token","state":"continue","action":"externalRedirect","clientHints":["slt=slt-value"],"_links":{"continue":{"href":"https://login.live.com/ppsecure/post.srf","params":{"ipt":"relay-token"}}}}`, nil), nil
+		},
+		func(req *http.Request, follow bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, continueURL)
+			require.True(t, follow)
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			fields, err := url.ParseQuery(string(body))
+			require.NoError(t, err)
+			require.Equal(t, "relay-token", fields.Get("ipt"))
+			require.Equal(t, "continue-token", fields.Get("continuationToken"))
+			require.Equal(t, "slt-value", fields.Get("slt"))
+			return scriptedResponse(req, 200, returnURL, finishedPage, nil), nil
+		},
+	)
+
+	gotPage, gotURL, mailbox, err := handleAccountPagesWithOptions(session, page, currentURL, "", 10, "owner@outlook.com", nil, false, "proof@recovery.test")
+
+	require.NoError(t, err)
+	require.Equal(t, finishedPage, gotPage)
+	require.Equal(t, returnURL, gotURL)
+	require.Equal(t, "proof@recovery.test", mailbox)
+	client.requireDone()
+}
+
+func TestHandleAccountPagesSubmitsProofRelayWithoutSkipFields(t *testing.T) {
+	const (
+		action    = "https://account.live.com/proofs/Verify"
+		returnURL = "https://account.live.com/consent/Manage"
+	)
+	page := `<form id="fmHF" action="` + action + `" method="post"><input type="hidden" name="ipt" value="proof-token"><input type="hidden" name="pprid" value="proof-request"><input type="hidden" name="uaid" value="uaid-value"></form><script>DoSubmit()</script>`
+	finishedPage := `<html>finished</html>`
+	session, client := newScriptedSession(t,
+		func(req *http.Request, follow bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, action)
+			require.True(t, follow)
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			fields, err := url.ParseQuery(string(body))
+			require.NoError(t, err)
+			require.Equal(t, "proof-token", fields.Get("ipt"))
+			require.Empty(t, fields.Get("action"))
+			require.Empty(t, fields.Get("iProofOptions"))
+			return scriptedResponse(req, 200, returnURL, finishedPage, nil), nil
+		},
+	)
+
+	gotPage, gotURL, _, err := handleAccountPagesWithOptions(session, page, "https://login.live.com/ppsecure/post.srf", "", 10, "owner@outlook.com", nil, true, "")
+
+	require.NoError(t, err)
+	require.Equal(t, finishedPage, gotPage)
+	require.Equal(t, returnURL, gotURL)
+	client.requireDone()
+}
+
+func TestHandleProofsPageSendsAndVerifiesExistingEmailProof(t *testing.T) {
+	const (
+		action    = "https://account.live.com/proofs/Verify"
+		returnURL = "https://login.live.com/oauth20_remoteconnect.srf"
+		proof     = "OTT||proof@recovery.test||Email||0||a"
+	)
+	page := `<script>var $Config={"apiCanary":"api-canary","eipt":"eipt-value","correlationId":"correlation-id","uaid":"uaid-value","uiflvr":1001,"scid":100146,"hpgid":201028};</script>
+<script>var ServerData = {sContext:'CatB',sAction:'Compliance',sNetId:'net\x2did',sProofData:'destination\x2dtoken\x7cnull'}; SendOtt</script>
+<form id="frmVerifyProof" method="post" action="` + action + `"><input type="radio" name="proof" value="` + proof + `"><input type="hidden" name="iProofOptions" value=""><input type="hidden" name="canary" value="form-canary"><input type="hidden" name="action" value="VerifyProof"><input name="iOttText"></form>`
+	previousReader := activeMailboxReader()
+	reader := &sequencedMailboxReader{watcherStarted: make(chan struct{}), sendStarted: make(chan struct{})}
+	SetMailboxReader(reader)
+	defer SetMailboxReader(previousReader)
+	previousDomains := activeAuxiliaryDomains()
+	SetAuxiliaryDomains([]string{"recovery.test"})
+	defer SetAuxiliaryDomains(previousDomains)
+
+	session, client := newScriptedSession(t,
+		func(req *http.Request, follow bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, "https://account.live.com/API/Proofs/SendOtt")
+			require.True(t, follow)
+			select {
+			case <-reader.watcherStarted:
+			case <-time.After(time.Second):
+				require.FailNow(t, "mail watcher did not start before SendOtt")
+			}
+			close(reader.sendStarted)
+			payload := decodeJSONRequest(t, req)
+			require.Equal(t, "destination-token", payload["destination"])
+			require.Equal(t, "Compliance", payload["action"])
+			require.Equal(t, "net-id", payload["netid"])
+			require.Equal(t, "CatB", payload["cxt"])
+			require.Equal(t, 1001, asInt(payload["uiflvr"]))
+			require.Equal(t, 100146, asInt(payload["scid"]))
+			require.Equal(t, 201028, asInt(payload["hpgid"]))
+			require.Equal(t, "uaid-value", payload["uaid"])
+			require.Equal(t, "api-canary", req.Header.Get("canary"))
+			require.Equal(t, "eipt-value", req.Header.Get("eipt"))
+			require.Equal(t, "2", req.Header.Get("x-ms-apiVersion"))
+			require.Equal(t, "xhr", req.Header.Get("x-ms-apiTransport"))
+			require.Equal(t, "correlation-id", req.Header.Get("x-ms-correlation-id"))
+			return scriptedResponse(req, 200, req.URL.String(), `{}`, nil), nil
+		},
+		func(req *http.Request, follow bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, action)
+			require.True(t, follow)
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			fields, err := url.ParseQuery(string(body))
+			require.NoError(t, err)
+			require.Equal(t, proof, fields.Get("iProofOptions"))
+			require.Equal(t, "654321", fields.Get("iOttText"))
+			require.Equal(t, "0", fields.Get("GeneralVerify"))
+			return scriptedResponse(req, 200, returnURL, `<html>finished</html>`, nil), nil
+		},
+	)
+
+	gotPage, gotURL, mailbox, err := handleProofsPage(session, page, action, action, "", false, "owner@outlook.com", "pending@recovery.test")
+
+	require.NoError(t, err)
+	require.Equal(t, `<html>finished</html>`, gotPage)
+	require.Equal(t, returnURL, gotURL)
+	require.Equal(t, "proof@recovery.test", mailbox)
+	client.requireDone()
+}
+
 func TestProofsAddActionIsBindingPageWithoutRenderedInputs(t *testing.T) {
 	require.True(t, isAddEmailPage(`<html><div id="app"></div></html>`, "https://account.live.com/proofs/Add?mkt=ZH-CN"))
 	require.False(t, isAddEmailPage(`<html><script>AddProof EmailAddress</script></html>`, "https://account.live.com/proofs/Verify"))
