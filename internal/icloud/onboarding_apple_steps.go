@@ -470,8 +470,8 @@ func (f *appleOnboardingFlow) joinFamily(request AppleOnboardingRequest) (AppleO
 }
 
 func (f *appleOnboardingFlow) familyJoinResponse() (AppleOnboardingResponse, error) {
-	// Accept/update completion is the family-join success signal. The familyws
-	// session is not needed by onboarding and must not gate the next stage.
+	// Stage 2 pauses for manual sharing after accept/update. Stage 3 verifies
+	// membership again with its own authenticated session before creating aliases.
 	return AppleOnboardingResponse{Next: "ready"}, nil
 }
 
@@ -574,13 +574,39 @@ func (f *appleOnboardingFlow) fetchManage(request AppleOnboardingRequest) (Apple
 	if f.state.APIKey == "" {
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "api_key_missing", SafeMessage: "Apple Account profile did not return an API key.", Retryable: true}
 	}
+	familyID := ""
+	if strings.TrimSpace(request.FamilyInviteURL) != "" {
+		familyID, err = f.verifyOwnFamilyMembership(request.Email)
+		if err != nil {
+			return AppleOnboardingResponse{}, err
+		}
+	}
 	if !request.SkipPrivateAlias {
 		if err := f.ensurePrivateAlias(); err != nil {
 			return AppleOnboardingResponse{}, err
 		}
 	}
 	_, lastTwo, _ := selectAppleOnboardingTrustedPhone(appleOnboardingTrustedPhones(data), request.PhoneNumber, 0)
-	return AppleOnboardingResponse{Next: "ready", CountryCode: f.state.AccountCountry, TrustedPhoneLastTwo: lastTwo}, nil
+	return AppleOnboardingResponse{Next: "ready", CountryCode: f.state.AccountCountry, TrustedPhoneLastTwo: lastTwo, FamilyID: familyID}, nil
+}
+
+func (f *appleOnboardingFlow) verifyOwnFamilyMembership(email string) (string, error) {
+	body, err := f.request(http.MethodGet, iCloudFamilyMembersEndpoint, nil, false, false, false, false, true, "application/json")
+	if err != nil {
+		return "", err
+	}
+	if f.state.Status == http.StatusUnauthorized || f.state.Status == http.StatusForbidden {
+		return "", &AppleOnboardingError{Category: "family_session_invalid", SafeMessage: "Apple family membership query rejected the current session.", RestartStage: "manage_prepare"}
+	}
+	var payload iCloudFamilyMembersResponse
+	if f.state.Status != http.StatusOK || json.Unmarshal(body, &payload) != nil {
+		return "", &AppleOnboardingError{Category: "family_membership_unavailable", SafeMessage: "Apple family membership could not be loaded; phase 3 cannot continue.", Retryable: true}
+	}
+	snapshot, err := validateICloudFamilyMembers(payload)
+	if err != nil || !snapshot.Linked || !snapshot.Member || !strings.EqualFold(strings.TrimSpace(email), snapshot.CurrentUserAppleID) || snapshot.CurrentDSID == snapshot.OrganizerDSID {
+		return "", &AppleOnboardingError{Category: "family_membership_unconfirmed", SafeMessage: "Apple has not confirmed this account as a member of the family; phase 3 cannot continue.", Retryable: true}
+	}
+	return snapshot.FamilyID, nil
 }
 
 func (f *appleOnboardingFlow) addForward(request AppleOnboardingRequest) (AppleOnboardingResponse, error) {

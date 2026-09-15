@@ -44,18 +44,20 @@ const (
 var appleSMSCodePattern = regexp.MustCompile(`(?:^|[^0-9])([0-9]{6})(?:[^0-9]|$)`)
 
 var errRestartValidation = errors.New("restart Apple validation from checkpoint")
+var errFamilySharingRequired = errors.New("manual family sharing confirmation is required")
 
 type options struct {
-	rawLine      string
-	filePath     string
-	forwardTo    string
-	forwardCode  string
-	statePath    string
-	resetState   bool
-	legacyCommit bool
-	ownerUserID  uint
-	expireDays   int
-	timeout      time.Duration
+	rawLine                string
+	filePath               string
+	forwardTo              string
+	forwardCode            string
+	statePath              string
+	resetState             bool
+	legacyCommit           bool
+	familySharingConfirmed bool
+	ownerUserID            uint
+	expireDays             int
+	timeout                time.Duration
 }
 
 type accountInput struct {
@@ -104,6 +106,7 @@ type accountCheckpoint struct {
 	ICloudOpened           bool                           `json:"icloudOpened,omitempty"`
 	FamilyAuthenticated    bool                           `json:"familyAuthenticated,omitempty"`
 	FamilyJoined           bool                           `json:"familyJoined,omitempty"`
+	FamilySharingConfirmed bool                           `json:"familySharingConfirmed,omitempty"`
 	ManageAuthenticated    bool                           `json:"manageAuthenticated,omitempty"`
 	ManageReady            bool                           `json:"manageReady,omitempty"`
 	ManageSessionExpiresAt time.Time                      `json:"manageSessionExpiresAt,omitempty"`
@@ -141,7 +144,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
+		if errors.Is(err, flag.ErrHelp) || errors.Is(err, errFamilySharingRequired) {
 			return
 		}
 		fmt.Fprintln(os.Stderr, "icloudvalidate:", err)
@@ -322,6 +325,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	flags.StringVar(&config.statePath, "state", ".icloudvalidate-state.json", "0600 resumable checkpoint path")
 	flags.BoolVar(&config.resetState, "reset-state", false, "discard this email's checkpoint before starting")
 	flags.BoolVar(&config.legacyCommit, "legacy-commit", false, "commit completed credentials using legacy import semantics")
+	flags.BoolVar(&config.familySharingConfirmed, "family-sharing-confirmed", false, "confirm the organizer has manually enabled family sharing before phase 3")
 	flags.UintVar(&config.ownerUserID, "owner-user-id", 1, "database owner user ID for the committed iCloud resource")
 	flags.IntVar(&config.expireDays, "expire-days", 30, "resource expiry in days")
 	flags.DurationVar(&config.timeout, "timeout", 15*time.Minute, "overall validation timeout")
@@ -530,7 +534,7 @@ func openRuntime(ctx context.Context, email string) (*runtime, error) {
 	if err != nil {
 		return fail(fmt.Errorf("open proxy module: %w", err))
 	}
-	sms := kitesim.NewService(services.DB, kitesim.NewSyncQueue(services.Asynq))
+	sms := kitesim.NewService(services.DB, kitesim.NewSyncQueue(services.Asynq), services.Redis)
 	sms.SetProxyProvider(proxies.ProxyUseCase)
 	files := governanceinfra.NewMinIOFileStore(services.MinIO, services.MinIOBucket)
 	icloudService := icloud.NewService(services.DB, services.Asynq, files, services.Redis)
@@ -603,6 +607,11 @@ func (d *debugger) run(binding *kitesim.SMSPhoneBinding, config options) error {
 	} else {
 		d.logf("checkpoint=skip stage=icloud_ready old_cookie=%t\n", channelReady(d.checkpoint.OldChannel))
 	}
+	if binding != nil && d.runtime.sms != nil && !d.checkpoint.PhoneConfirmedAt.IsZero() {
+		if err := d.runtime.sms.ConfirmICloudPhoneBinding(d.ctx, d.input.Email, binding.PhoneID, d.checkpoint.PhoneConfirmedAt); err != nil {
+			return fmt.Errorf("record phone binding confirmation: %w", err)
+		}
+	}
 	if icloudCompleted || d.checkpoint.DeviceBindStatus != "" {
 		if err := d.ensureDeviceBinding(binding); err != nil {
 			return err
@@ -644,6 +653,27 @@ func (d *debugger) run(binding *kitesim.SMSPhoneBinding, config options) error {
 		}
 	}
 	formalCookiesReady := d.checkpoint != nil && d.checkpoint.CookiesReady && channelReady(d.checkpoint.NewChannel)
+	if d.input.FamilyInviteURL != "" && d.checkpoint.FamilyJoined && !d.checkpoint.FamilySharingConfirmed && !formalCookiesReady {
+		// Match the web workflow: discard temporary authentication while the
+		// operator enables sharing, keeping completed phases and device binding.
+		if err := d.restartAt("manage_prepare"); err != nil {
+			return err
+		}
+		if err := d.markCheckpoint(func(cp *accountCheckpoint) {
+			cp.FamilySharingConfirmed = config.familySharingConfirmed
+			if !cp.FamilySharingConfirmed {
+				cp.Stage = "waiting_family_sharing"
+			}
+		}); err != nil {
+			return err
+		}
+		if !config.familySharingConfirmed {
+			d.logf("family_sharing=waiting stage=waiting_family_sharing action=enable_sharing_then_rerun_with_-family-sharing-confirmed\n")
+			return errFamilySharingRequired
+		}
+		d.logf("family_sharing=confirmed\n")
+		familyCompleted = true
+	}
 	forwardTo := firstNonEmpty(config.forwardTo, d.checkpoint.ForwardTo)
 	if !formalCookiesReady {
 		if familyCompleted || (icloudCompleted && d.input.FamilyInviteURL == "") {
@@ -675,9 +705,12 @@ func (d *debugger) run(binding *kitesim.SMSPhoneBinding, config options) error {
 			d.logf("checkpoint=resume stage=manage_authenticated expires_at=%s\n", d.checkpoint.ManageSessionExpiresAt.UTC().Format(time.RFC3339))
 		}
 		if d.checkpoint == nil || !d.checkpoint.ManageReady {
-			profile, err := d.execute(icloud.AppleOnboardingRequest{Operation: icloud.AppleOnboardingFetchManage})
+			profile, err := d.execute(icloud.AppleOnboardingRequest{Operation: icloud.AppleOnboardingFetchManage, FamilyInviteURL: d.input.FamilyInviteURL})
 			if err != nil {
 				return err
+			}
+			if profile.FamilyID != "" {
+				d.logf("family_membership=verified family_id=%s\n", profile.FamilyID)
 			}
 			if err := d.markCheckpoint(func(cp *accountCheckpoint) {
 				cp.ManageReady = true
@@ -1052,7 +1085,7 @@ func (d *debugger) smsRound(purpose, label string, binding *kitesim.SMSPhoneBind
 	if err := d.markCheckpoint(func(cp *accountCheckpoint) {
 		cp.PendingSMSPurpose = ""
 		cp.Stage = "sms_verified"
-		if cp.PhoneConfirmedAt.IsZero() {
+		if cp.PhoneConfirmedAt.IsZero() && (purpose == icloud.AppleSMSPhoneEnrollment || purpose == icloud.AppleSMSICloudLogin) {
 			cp.PhoneConfirmedAt = time.Now().UTC()
 		}
 		if purpose == icloud.AppleSMSPhoneEnrollment {

@@ -6,8 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/glebarez/sqlite"
+	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -139,7 +142,7 @@ func TestSMSBlacklistOverridesActiveChallenge(t *testing.T) {
 }
 
 func TestBindICloudSMSPhoneBalancesAndRemainsPermanent(t *testing.T) {
-	service, db, _ := newSMSPoolTestService(t)
+	service, db, clock := newSMSPoolTestService(t)
 	ctx := context.Background()
 	first, err := service.BindICloudSMSPhone(ctx, "first@example.com", "")
 	if err != nil {
@@ -159,6 +162,10 @@ func TestBindICloudSMSPhoneBalancesAndRemainsPermanent(t *testing.T) {
 	if _, err := service.BindICloudSMSPhone(ctx, "first@example.com", second.PhoneNumber); !errors.Is(err, ErrSMSPhoneBindingConflict) {
 		t.Fatalf("binding conflict error = %v", err)
 	}
+	if _, err := service.BindICloudSMSPhone(ctx, "manual@example.com", "4165550002"); !errors.Is(err, ErrSMSPhoneExclusive) {
+		t.Fatalf("another account bypassed the 48-hour hold: %v", err)
+	}
+	*clock = clock.Add(iCloudPhoneExclusiveDuration)
 	matched, err := service.BindICloudSMSPhone(ctx, "manual@example.com", "4165550002")
 	if err != nil || matched.PhoneID != second.PhoneID || matched.Source != "matched" {
 		t.Fatalf("manual match = %+v err=%v", matched, err)
@@ -181,20 +188,20 @@ func TestBindICloudSMSPhoneBalancesAndRemainsPermanent(t *testing.T) {
 }
 
 func TestBindICloudSMSPhoneHonorsICloudExclusivity(t *testing.T) {
-	service, db, _ := newSMSPoolTestService(t)
+	service, db, clock := newSMSPoolTestService(t)
 	var phones []phoneModel
 	if err := db.Order("id ASC").Find(&phones).Error; err != nil || len(phones) != 2 {
 		t.Fatalf("load phones: phones=%+v err=%v", phones, err)
 	}
 	if err := db.Exec(`CREATE TABLE icloud_resources (
 		id INTEGER PRIMARY KEY, primary_email TEXT, kitesim_phone_id INTEGER,
-		bound_phone_number TEXT, status TEXT, alias_count INTEGER
+		bound_phone_number TEXT, status TEXT, alias_count INTEGER, created_at DATETIME
 	)`).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Exec(
-		"INSERT INTO icloud_resources(id, primary_email, kitesim_phone_id, status, alias_count) VALUES (?, ?, ?, ?, ?)",
-		1, "owner@example.com", phones[0].ID, "normal", 749,
+		"INSERT INTO icloud_resources(id, primary_email, kitesim_phone_id, status, alias_count, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+		1, "owner@example.com", phones[0].ID, "normal", 749, *clock,
 	).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -213,12 +220,128 @@ func TestBindICloudSMSPhoneHonorsICloudExclusivity(t *testing.T) {
 	if err != nil || owner.PhoneID != phones[0].ID {
 		t.Fatalf("owner binding = %+v err=%v", owner, err)
 	}
-	if err := db.Exec("UPDATE icloud_resources SET alias_count = 750 WHERE id = 1").Error; err != nil {
+	if err := db.Exec("UPDATE icloud_resources SET status = 'invalid' WHERE id = 1").Error; err != nil {
 		t.Fatal(err)
 	}
+	*clock = clock.Add(iCloudPhoneExclusiveDuration)
 	released, err := service.BindICloudSMSPhone(ctx, "released@example.com", phones[0].PhoneNumber)
 	if err != nil || released.PhoneID != phones[0].ID {
 		t.Fatalf("released binding = %+v err=%v", released, err)
+	}
+}
+
+func TestICloudPhoneHoldExpires48HoursAfterConfirmation(t *testing.T) {
+	s, db, clock := newSMSPoolTestService(t)
+	red := miniredis.RunT(t)
+	red.SetTime(*clock)
+	s.redis = redis.NewClient(&redis.Options{Addr: red.Addr()})
+	t.Cleanup(func() { _ = s.redis.Close() })
+	ctx := context.Background()
+	createdAt := *clock
+	require.NoError(t, db.Model(&phoneModel{}).Where("id = 2").Update("disabled_at", createdAt).Error)
+	binding, err := s.BindICloudSMSPhone(ctx, "owner@example.com", "")
+	require.NoError(t, err)
+	*clock = clock.Add(2 * time.Minute)
+	red.SetTime(*clock)
+	confirmedAt := *clock
+	require.NoError(t, s.ConfirmICloudPhoneBinding(ctx, "owner@example.com", binding.PhoneID, confirmedAt))
+	require.Equal(t, 48*time.Hour, red.TTL(iCloudPhoneHoldKey(binding.PhoneID)))
+	require.NoError(t, db.Exec("CREATE TABLE icloud_resources (id INTEGER PRIMARY KEY, primary_email TEXT, kitesim_phone_id INTEGER, status TEXT, alias_count INTEGER, created_at DATETIME)").Error)
+	require.NoError(t, db.Exec("INSERT INTO icloud_resources VALUES (1, 'owner@example.com', ?, 'invalid', 12, ?)", binding.PhoneID, createdAt).Error)
+	*clock = confirmedAt.Add(48*time.Hour - time.Millisecond)
+	red.FastForward(48*time.Hour - time.Millisecond)
+	red.SetTime(*clock)
+	// A later checkpoint or Cookie refresh cannot restart the 48-hour timer.
+	require.NoError(t, s.ConfirmICloudPhoneBinding(ctx, "owner@example.com", binding.PhoneID, *clock))
+	require.Equal(t, time.Millisecond, red.TTL(iCloudPhoneHoldKey(binding.PhoneID)))
+	_, err = s.BindICloudSMSPhone(ctx, "other@example.com", binding.PhoneNumber)
+	require.ErrorIs(t, err, ErrSMSPhoneExclusive)
+	_, err = s.BindICloudSMSPhoneBySuffix(ctx, "suffix@example.com", "0001")
+	require.ErrorIs(t, err, ErrSMSPhoneExclusive)
+	_, err = s.BindICloudSMSPhone(ctx, "automatic@example.com", "")
+	require.ErrorIs(t, err, ErrSMSPhoneUnavailable)
+	list, err := s.ListPhones(ctx, PhoneListFilter{Limit: 20, Status: AdminPhoneExclusive})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, list.Total)
+	*clock = confirmedAt.Add(48 * time.Hour)
+	red.FastForward(time.Millisecond)
+	red.SetTime(*clock)
+	require.NoError(t, s.ConfirmICloudPhoneBinding(ctx, "owner@example.com", binding.PhoneID, confirmedAt))
+	require.False(t, red.Exists(iCloudPhoneHoldKey(binding.PhoneID)))
+	list, err = s.ListPhones(ctx, PhoneListFilter{Limit: 20, Status: AdminPhoneExclusive})
+	require.NoError(t, err)
+	require.Zero(t, list.Total)
+	released, err := s.BindICloudSMSPhone(ctx, "automatic@example.com", "")
+	require.NoError(t, err)
+	require.Equal(t, binding.PhoneID, released.PhoneID)
+	var original phoneBindingModel
+	require.NoError(t, db.Where("consumer_key = ?", "owner@example.com").Take(&original).Error)
+	require.Equal(t, binding.PhoneID, original.PhoneID)
+	require.False(t, db.Migrator().HasColumn(&phoneBindingModel{}, "phone_confirmed_at"))
+	// Restoring a checkpoint uses only the remaining TTL and cannot take a
+	// phone that has since been allocated to another account.
+	require.ErrorIs(t, s.ConfirmICloudPhoneBinding(ctx, "owner@example.com", binding.PhoneID, *clock), ErrSMSPhoneExclusive)
+	require.NoError(t, s.ConfirmICloudPhoneBinding(ctx, "automatic@example.com", binding.PhoneID, clock.Add(-time.Hour)))
+	require.Equal(t, 47*time.Hour, red.TTL(iCloudPhoneHoldKey(binding.PhoneID)))
+	red.Close()
+	_, err = s.BindICloudSMSPhone(ctx, "unavailable@example.com", binding.PhoneNumber)
+	require.Error(t, err)
+}
+
+func TestLegacyCookieFailureCannotPermanentlyOwnPhone(t *testing.T) {
+	s, db, clock := newSMSPoolTestService(t)
+	require.NoError(t, db.Exec("CREATE TABLE icloud_resources (id INTEGER PRIMARY KEY, primary_email TEXT, kitesim_phone_id INTEGER, status TEXT, alias_count INTEGER, created_at DATETIME)").Error)
+	require.NoError(t, db.Exec("INSERT INTO icloud_resources VALUES (1, 'legacy@example.com', 1, 'invalid', 25, ?)", clock.Add(-49*time.Hour)).Error)
+	binding, err := s.BindICloudSMSPhone(context.Background(), "new@example.com", "4165550001")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, binding.PhoneID)
+}
+
+func TestRestoredICloudPhoneBindingKeepsHistoricalTime(t *testing.T) {
+	for _, method := range []string{"number", "suffix", "admin", "number-only", "new-onboarding", "different-phone"} {
+		t.Run(method, func(t *testing.T) {
+			s, db, clock := newSMSPoolTestService(t)
+			createdAt := clock.Add(-30 * 24 * time.Hour)
+			require.NoError(t, db.Exec("CREATE TABLE icloud_resources (primary_email TEXT, kitesim_phone_id INTEGER, bound_phone_number TEXT, status TEXT, created_at DATETIME, task_kind TEXT, onboarding_status TEXT)").Error)
+			var phoneID any = 1
+			switch method {
+			case "number-only":
+				phoneID = nil
+			case "different-phone":
+				phoneID = 2
+			}
+			kind, status := "refresh", "processing"
+			if method == "new-onboarding" {
+				kind = "onboarding"
+			}
+			require.NoError(t, db.Exec("INSERT INTO icloud_resources VALUES ('legacy@example.com', ?, '14165550001', 'normal', ?, ?, ?)", phoneID, createdAt, kind, status).Error)
+			ctx := context.Background()
+			before, err := s.ListPhones(ctx, PhoneListFilter{Limit: 20, Status: AdminPhoneExclusive})
+			require.NoError(t, err)
+			require.Zero(t, before.Total)
+			switch method {
+			case "suffix":
+				_, err = s.BindICloudSMSPhoneBySuffix(ctx, "legacy@example.com", "0001")
+			case "admin":
+				_, err = s.RebindICloudSMSPhoneByID(ctx, "legacy@example.com", 1, "14165550001")
+			default:
+				_, err = s.BindICloudSMSPhone(ctx, "legacy@example.com", "14165550001")
+			}
+			require.NoError(t, err)
+			var binding phoneBindingModel
+			require.NoError(t, db.Where("consumer_key = ?", "legacy@example.com").Take(&binding).Error)
+			after, err := s.ListPhones(ctx, PhoneListFilter{Limit: 20, Status: AdminPhoneExclusive})
+			require.NoError(t, err)
+			if method == "new-onboarding" || method == "different-phone" {
+				require.True(t, binding.CreatedAt.Equal(*clock))
+				require.EqualValues(t, 1, after.Total)
+			} else {
+				require.True(t, binding.CreatedAt.Equal(createdAt))
+				require.Zero(t, after.Total)
+				_, err = s.BindICloudSMSPhone(ctx, "new@example.com", "14165550001")
+				require.NoError(t, err)
+			}
+		})
 	}
 }
 

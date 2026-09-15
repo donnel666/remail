@@ -17,6 +17,7 @@ import (
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/kitesim"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"gorm.io/gorm"
@@ -457,13 +458,9 @@ func (s *Service) validateICloudOnboardingPhoneExclusivityTx(
 	existingByEmail map[string]iCloudOnboardingExistingResource,
 ) error {
 	if tx == nil || len(lines) == 0 || !tx.Migrator().HasTable("kitesim_phones") ||
-		!tx.Migrator().HasTable("icloud_resources") ||
-		!tx.Migrator().HasColumn("kitesim_phones", "deleted_at") ||
-		!tx.Migrator().HasColumn("icloud_resources", "alias_count") ||
-		!tx.Migrator().HasColumn("icloud_resources", "kitesim_phone_id") {
+		!tx.Migrator().HasColumn("kitesim_phones", "deleted_at") {
 		return nil
 	}
-	hasBoundPhone := tx.Migrator().HasColumn("icloud_resources", "bound_phone_number")
 	hasBlacklisted := tx.Migrator().HasColumn("kitesim_phones", "sms_blacklisted_until")
 	phoneSelect := "id, phone_code, phone_number"
 	if hasBlacklisted {
@@ -476,18 +473,18 @@ func (s *Service) validateICloudOnboardingPhoneExclusivityTx(
 		return err
 	}
 	claims := make(map[uint][]struct {
-		phone      string
-		resourceID uint
+		phone       string
+		exemptEmail string
 	})
 	for _, line := range lines {
 		requested := strings.TrimSpace(line.PhoneNumber)
 		if requested == "" {
 			continue
 		}
-		resourceID := uint(0)
+		exemptEmail := ""
 		if existing, ok := existingByEmail[iCloudImportEmailKey(line.PrimaryEmail)]; ok &&
 			(existing.KitesimPhoneID != nil || sameICloudPhoneNumber(existing.BoundPhoneNumber, requested)) {
-			resourceID = existing.ID
+			exemptEmail = line.PrimaryEmail
 		}
 		for _, phone := range phones {
 			if !sameICloudPhoneNumber(phone.PhoneCode+phone.PhoneNumber, requested) &&
@@ -495,9 +492,9 @@ func (s *Service) validateICloudOnboardingPhoneExclusivityTx(
 				continue
 			}
 			claims[phone.ID] = append(claims[phone.ID], struct {
-				phone      string
-				resourceID uint
-			}{phone: requested, resourceID: resourceID})
+				phone       string
+				exemptEmail string
+			}{phone: requested, exemptEmail: exemptEmail})
 		}
 	}
 	phoneIDs := make([]uint, 0, len(claims))
@@ -519,51 +516,14 @@ func (s *Service) validateICloudOnboardingPhoneExclusivityTx(
 		if hasBlacklisted && phone.SMSBlacklistedUntil != nil && phone.SMSBlacklistedUntil.After(s.now().UTC()) {
 			return fmt.Errorf("%w: %s", ErrICloudOnboardingPhoneBlacklisted, phoneClaims[0].phone)
 		}
-		allowed := make(map[uint]struct{}, len(phoneClaims))
-		for _, claim := range phoneClaims {
-			if claim.resourceID != 0 {
-				allowed[claim.resourceID] = struct{}{}
-			}
-		}
 		if len(phoneClaims) > 1 {
 			return fmt.Errorf("%w: %s", ErrICloudOnboardingPhoneExclusive, phoneClaims[0].phone)
 		}
-		var occupied []struct {
-			ID               uint   `gorm:"column:id"`
-			KitesimPhoneID   *uint  `gorm:"column:kitesim_phone_id"`
-			BoundPhoneNumber string `gorm:"column:bound_phone_number"`
-			AliasCount       uint   `gorm:"column:alias_count"`
-		}
-		// The phone row lock serializes competing imports; avoid locking resource
-		// rows here because onboarding workers lock the resource first.
-		resourceQuery := tx.Table("icloud_resources").
-			Select("id, kitesim_phone_id, alias_count")
-		if hasBoundPhone {
-			resourceQuery = resourceQuery.Select("id, kitesim_phone_id, bound_phone_number, alias_count").
-				Where("status <> ? AND (kitesim_phone_id = ? OR (kitesim_phone_id IS NULL AND bound_phone_number <> ''))", iCloudResourceDeleted, phoneID)
-		} else {
-			resourceQuery = resourceQuery.Where("status <> ? AND kitesim_phone_id = ?", iCloudResourceDeleted, phoneID)
-		}
-		if err := resourceQuery.Find(&occupied).Error; err != nil {
+		if err := kitesim.CheckICloudPhoneExclusiveTx(tx, phoneID, phoneClaims[0].exemptEmail, s.now().UTC(), s.deviceRedis); err != nil {
+			if errors.Is(err, kitesim.ErrSMSPhoneExclusive) {
+				return fmt.Errorf("%w: %s", ErrICloudOnboardingPhoneExclusive, phoneClaims[0].phone)
+			}
 			return err
-		}
-		for _, resource := range occupied {
-			if resource.KitesimPhoneID == nil &&
-				!sameICloudPhoneNumber(resource.BoundPhoneNumber, phone.PhoneCode+phone.PhoneNumber) &&
-				!sameICloudPhoneNumber(resource.BoundPhoneNumber, phone.PhoneNumber) {
-				continue
-			}
-			if resource.AliasCount >= platform.ICloudMaxAliases {
-				continue
-			}
-			if _, ok := allowed[resource.ID]; ok {
-				continue
-			}
-			requested := phone.PhoneCode + phone.PhoneNumber
-			if len(phoneClaims) > 0 {
-				requested = phoneClaims[0].phone
-			}
-			return fmt.Errorf("%w: %s", ErrICloudOnboardingPhoneExclusive, requested)
 		}
 	}
 	return nil

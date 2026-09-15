@@ -5,11 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,7 +25,6 @@ var (
 	errDeviceImportRejected    = errors.New("device platform rejected account import; check its account diagnostics")
 	errDeviceRechargeRejected  = errors.New("device platform rejected the recharge card")
 	errDeviceRechargeUncertain = errors.New("device recharge result is uncertain; refresh the balance before retrying")
-	deviceCodePattern          = regexp.MustCompile(`^\s*AppleID登录验证码\s*[:：]\s*([0-9]{6})\s*$`)
 )
 
 type deviceClient struct{ http *http.Client }
@@ -151,7 +150,7 @@ func (c *deviceClient) request(ctx context.Context, method, path string, payload
 		return nil, errDeviceUnauthorized
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, errDeviceUnavailable
+		return nil, fmt.Errorf("%w (HTTP %d)", errDeviceUnavailable, response.StatusCode)
 	}
 	body, err = io.ReadAll(io.LimitReader(response.Body, (2<<20)+1))
 	if err != nil || len(body) > 2<<20 {
@@ -257,7 +256,7 @@ func (s *Service) FetchDeviceCode(ctx context.Context, codeAPI string) (string, 
 	if err != nil {
 		return "", err
 	}
-	if match := deviceCodePattern.FindSubmatch(body); len(match) == 2 {
+	if match := appleSMSCodePattern.FindSubmatch(body); len(match) == 2 {
 		return string(match[1]), nil
 	}
 	// TODO(device-platform): verify live offline/expired/no-code response formats.

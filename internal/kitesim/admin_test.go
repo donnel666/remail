@@ -434,7 +434,7 @@ func TestListPhonesIncludesLinkedICloudAccountCount(t *testing.T) {
 	}
 }
 
-func TestListPhonesDerivesExclusiveStatusFromICloudAliasCapacity(t *testing.T) {
+func TestListPhonesDerivesExclusiveStatusFromICloudBindingAge(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -456,7 +456,7 @@ func TestListPhonesDerivesExclusiveStatusFromICloudAliasCapacity(t *testing.T) {
 	if err := db.Create(&phones).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec("CREATE TABLE icloud_resources (id INTEGER PRIMARY KEY, primary_email TEXT, kitesim_phone_id INTEGER, bound_phone_number TEXT, status TEXT, alias_count INTEGER)").Error; err != nil {
+	if err := db.Exec("CREATE TABLE icloud_resources (id INTEGER PRIMARY KEY, primary_email TEXT, kitesim_phone_id INTEGER, bound_phone_number TEXT, status TEXT, alias_count INTEGER, created_at DATETIME)").Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Exec("INSERT INTO icloud_resources (id, primary_email, kitesim_phone_id, bound_phone_number, status, alias_count) VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)",
@@ -464,6 +464,13 @@ func TestListPhonesDerivesExclusiveStatusFromICloudAliasCapacity(t *testing.T) {
 		2, "full@example.com", phones[0].ID, "", "pending", 750,
 		3, "deleted@example.com", phones[1].ID, "", "deleted", 0,
 	).Error; err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Exec("UPDATE icloud_resources SET created_at = ? WHERE id = 1", now.Add(-time.Hour)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("UPDATE icloud_resources SET created_at = ? WHERE id <> 1", now.Add(-49*time.Hour)).Error; err != nil {
 		t.Fatal(err)
 	}
 	service := NewService(db, nil)

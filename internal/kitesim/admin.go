@@ -15,6 +15,7 @@ import (
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -135,6 +136,7 @@ type MutationMeta struct {
 
 type Service struct {
 	db            *gorm.DB
+	redis         redis.UniversalClient
 	client        *Client
 	queue         SyncQueue
 	proxies       ProxyProvider
@@ -144,11 +146,15 @@ type Service struct {
 	smsConsumed   map[string]time.Time
 }
 
-func NewService(db *gorm.DB, queue SyncQueue) *Service {
-	return &Service{
+func NewService(db *gorm.DB, queue SyncQueue, redisClients ...redis.UniversalClient) *Service {
+	s := &Service{
 		db: db, client: NewClient(nil), queue: queue, logs: governanceinfra.NewOperationLogRepo(db),
 		now: func() time.Time { return time.Now().UTC() },
 	}
+	if len(redisClients) > 0 {
+		s.redis = redisClients[0]
+	}
+	return s
 }
 
 type PhoneListFilter struct {
@@ -237,12 +243,12 @@ func (s *Service) ListPhones(ctx context.Context, filter PhoneListFilter) (*Phon
 	if filter.Offset < 0 || filter.Limit < 1 || filter.Limit > 100 {
 		return nil, ErrInvalidInput
 	}
-	usage, err := loadICloudPhoneUsage(s.db.WithContext(ctx), "")
+	now := s.now().UTC()
+	usage, err := loadICloudPhoneUsage(s.db.WithContext(ctx), "", now, s.redis)
 	if err != nil {
 		return nil, fmt.Errorf("load iCloud phone usage: %w", err)
 	}
 	exclusivePhoneIDs := iCloudExclusivePhoneIDs(usage.exclusive)
-	now := s.now().UTC()
 	query := s.filteredPhoneQuery(ctx, filter, exclusivePhoneIDs, now)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {

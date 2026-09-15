@@ -425,7 +425,10 @@ func (onboardingProvidedPhone) ClaimAppleSMSMessage(context.Context, uint64) (*k
 	return nil, errors.New("unexpected polling")
 }
 func (onboardingProvidedPhone) CompleteSMSChallenge(context.Context, uint64) error { return nil }
-func (onboardingProvidedPhone) CancelSMSChallenge(context.Context, uint64) error   { return nil }
+func (onboardingProvidedPhone) ConfirmICloudPhoneBinding(context.Context, string, uint, time.Time) error {
+	return nil
+}
+func (onboardingProvidedPhone) CancelSMSChallenge(context.Context, uint64) error { return nil }
 
 type onboardingBindingConflictPhone struct{ onboardingProvidedPhone }
 
@@ -496,6 +499,7 @@ type onboardingSMSSuccessPhone struct {
 	onboardingProvidedPhone
 	sentAt      time.Time
 	expiresAt   time.Time
+	finishedAt  *time.Time
 	confirmed   bool
 	completeErr error
 }
@@ -510,10 +514,18 @@ func (p *onboardingSMSSuccessPhone) ConfirmSMSAttemptSent(context.Context, uint6
 }
 
 func (p *onboardingSMSSuccessPhone) GetSMSChallengeByOwner(context.Context, string) (kitesim.SMSChallenge, error) {
-	return kitesim.SMSChallenge{ID: 10, PhoneID: 7, Status: kitesim.SMSChallengeSent, SentAt: &p.sentAt, ExpiresAt: p.expiresAt}, nil
+	status := kitesim.SMSChallengeSent
+	if p.finishedAt != nil {
+		status = kitesim.SMSChallengeCompleted
+	}
+	return kitesim.SMSChallenge{ID: 10, PhoneID: 7, Status: status, SentAt: &p.sentAt, ExpiresAt: p.expiresAt, FinishedAt: p.finishedAt}, nil
 }
 
 func (p *onboardingSMSSuccessPhone) CompleteSMSChallenge(context.Context, uint64) error {
+	if p.completeErr == nil && p.finishedAt == nil {
+		completed := p.sentAt
+		p.finishedAt = &completed
+	}
 	return p.completeErr
 }
 

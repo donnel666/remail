@@ -778,7 +778,10 @@ func (s *Service) verifyICloudOnboardingSMS(ctx context.Context, task *iCloudOnb
 		return s.handleICloudOnboardingAppleError(ctx, task, err)
 	}
 	updates := map[string]any{"manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil}
-	if task.PendingSMSPurpose != appleSMSOldCookieLogin {
+	if task.DeviceCodeAPI == "" && isICloudPhoneHoldPending(task) {
+		// Keep the completed challenge's owner until its Redis hold is written.
+		updates["stage_attempts"] = task.StageAttempts
+	} else if task.PendingSMSPurpose != appleSMSOldCookieLogin {
 		updates["pending_sms_purpose"] = ""
 	}
 	if len(response.Session) > 0 {
@@ -794,6 +797,9 @@ func (s *Service) verifyICloudOnboardingSMS(ctx context.Context, task *iCloudOnb
 	if task.DeviceCodeAPI == "" && task.KitesimPhoneID != nil && s.smsPhones != nil {
 		if challenge, lookupErr := s.smsPhones.GetSMSChallengeByOwner(context.WithoutCancel(ctx), iCloudOnboardingSMSOwner(task)); lookupErr == nil {
 			_ = s.smsPhones.CompleteSMSChallenge(context.WithoutCancel(ctx), challenge.ID)
+		}
+		if err := s.confirmICloudOnboardingPhoneHold(context.WithoutCancel(ctx), task); err != nil {
+			return ErrICloudOnboardingTemporary
 		}
 	}
 	return nil
@@ -893,7 +899,45 @@ func iCloudOnboardingSMSOwner(task *iCloudOnboardingTaskModel) string {
 	return fmt.Sprintf("icloud-onboarding:%d:%s:%d", task.ID, strings.TrimSpace(task.PendingSMSPurpose), task.StageAttempts)
 }
 
+func isICloudPhoneHoldPending(task *iCloudOnboardingTaskModel) bool {
+	return task.TaskKind == "onboarding" && task.KitesimPhoneID != nil &&
+		(task.PendingSMSPurpose == appleSMSPhoneEnrollment || task.PendingSMSPurpose == appleSMSICloudLogin)
+}
+
+func (s *Service) confirmICloudOnboardingPhoneHold(ctx context.Context, task *iCloudOnboardingTaskModel) error {
+	if !isICloudPhoneHoldPending(task) {
+		return nil
+	}
+	if s.smsPhones == nil {
+		return ErrICloudOnboardingTemporary
+	}
+	challenge, err := s.smsPhones.GetSMSChallengeByOwner(ctx, iCloudOnboardingSMSOwner(task))
+	if err != nil || challenge.PhoneID != *task.KitesimPhoneID {
+		return ErrICloudOnboardingTemporary
+	}
+	if challenge.Status != kitesim.SMSChallengeCompleted {
+		if err := s.smsPhones.CompleteSMSChallenge(ctx, challenge.ID); err != nil {
+			return err
+		}
+		challenge, err = s.smsPhones.GetSMSChallengeByOwner(ctx, iCloudOnboardingSMSOwner(task))
+		if err != nil {
+			return err
+		}
+	}
+	if challenge.Status != kitesim.SMSChallengeCompleted || challenge.FinishedAt == nil {
+		return ErrICloudOnboardingTemporary
+	}
+	// SMS completion already has a durable timestamp; retries never use now().
+	return s.smsPhones.ConfirmICloudPhoneBinding(ctx, task.PrimaryEmail, *task.KitesimPhoneID, *challenge.FinishedAt)
+}
+
 func (s *Service) finishICloudOnboardingICloud(ctx context.Context, task *iCloudOnboardingTaskModel, secret iCloudOnboardingSecret, afterFamily bool) error {
+	if !afterFamily {
+		if err := s.confirmICloudOnboardingPhoneHold(ctx, task); err != nil {
+			retryAt := s.now().Add(10 * time.Second)
+			return s.waitICloudOnboardingTask(ctx, task, &retryAt, "pending", "Waiting to save the verified phone's exclusive hold.")
+		}
+	}
 	if !afterFamily && task.TaskKind == "onboarding" {
 		if err := s.startOnboardingDevice(ctx, task, secret); err != nil {
 			return err
@@ -915,6 +959,9 @@ func (s *Service) finishICloudOnboardingICloud(ctx context.Context, task *iCloud
 		}
 	}
 	updates := map[string]any{}
+	if isICloudPhoneHoldPending(task) {
+		updates["pending_sms_purpose"] = ""
+	}
 	if len(response.Session) > 0 {
 		updates["session_payload"] = iCloudJSON(response.Session)
 	}
@@ -999,9 +1046,13 @@ func (s *Service) joinICloudOnboardingFamily(ctx context.Context, task *iCloudOn
 }
 
 func (s *Service) fetchICloudOnboardingManage(ctx context.Context, task *iCloudOnboardingTaskModel, secret iCloudOnboardingSecret) error {
-	response, err := s.executeICloudOnboardingApple(ctx, task, secret, AppleOnboardingRequest{
+	request := AppleOnboardingRequest{
 		Operation: appleOnboardingFetchManage, SkipPrivateAlias: task.TaskKind == "refresh" || isICloudCookieRecoveryTask(task),
-	})
+	}
+	if task.TaskKind == "onboarding" && task.AccountRole == "child" {
+		request.FamilyInviteURL = task.FamilyInviteURL
+	}
+	response, err := s.executeICloudOnboardingApple(ctx, task, secret, request)
 	if err != nil {
 		return s.handleICloudOnboardingAppleError(ctx, task, err)
 	}

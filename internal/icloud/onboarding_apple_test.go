@@ -767,6 +767,48 @@ func TestAppleOnboardingFetchManageCreatesPrivateAliasBeforeForwarding(t *testin
 	}
 }
 
+func TestAppleOnboardingChecksOwnFamilyBeforePrivateAliases(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		allowed    bool
+	}{
+		{"member", testICloudFamilyResponse, true},
+		{"not joined", `{"isLinkedToFamily":false,"isMemberOfFamily":false}`, false},
+		{"another account", strings.ReplaceAll(testICloudFamilyResponse, "child@example.com", "other@example.com"), false},
+		{"incomplete membership", `{"isLinkedToFamily":true,"isMemberOfFamily":true}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session := &appleOnboardingScriptedSession{cookies: []msacl.SessionCookie{{Name: "myacinfo", Value: "current-session", Domain: ".apple.com", Host: "appleid.apple.com"}}, responses: []appleOnboardingScriptedResponse{
+				{status: http.StatusOK, body: `{}`},
+				{status: http.StatusOK, body: `{"apiKey":"api","countryCode":"US"}`},
+				{status: http.StatusOK, body: tc.body},
+			}}
+			if tc.allowed {
+				session.responses = append(session.responses, appleOnboardingScriptedResponse{status: http.StatusOK, body: `{"privateEmailList":[{"emailAddress":"ready@icloud.com"}],"inactivePrivateEmailList":[]}`})
+			}
+			response, err := appleOnboardingTestClient(time.Now(), session).Execute(context.Background(), AppleOnboardingRequest{
+				Operation: appleOnboardingFetchManage, Email: "child@example.com", FamilyInviteURL: "https://setup.icloud.com/family/messages?inviteCode=test", Session: appleOnboardingTestState(t, nil),
+			})
+			if tc.allowed {
+				if err != nil || response.FamilyID != "family-1" || len(session.requests) != 4 {
+					t.Fatalf("verified family did not continue: response=%+v err=%v", response, err)
+				}
+			} else {
+				var providerErr *AppleOnboardingError
+				if !errors.As(err, &providerErr) || providerErr.Category != "family_membership_unconfirmed" || len(session.requests) != 3 {
+					t.Fatalf("unverified family reached private aliases: err=%v requests=%v", err, session.requests)
+				}
+			}
+			if session.requests[2] != "GET "+iCloudFamilyMembersEndpoint {
+				t.Fatalf("family preflight request = %q", session.requests[2])
+			}
+			if !strings.Contains(session.requestHeaders[2]["Cookie"], "myacinfo=current-session") {
+				t.Fatal("family query did not receive the authenticated account cookie")
+			}
+		})
+	}
+}
+
 func TestAppleOnboardingExportsNewAndPreservedOldChannels(t *testing.T) {
 	now := time.Date(2026, 8, 16, 10, 0, 0, 0, time.UTC)
 	old := &AppleOnboardingChannel{Kind: iCloudChannelWeb, Host: "p1-maildomainws.icloud.com", Cookie: "old=value"}

@@ -215,6 +215,51 @@ func TestDeviceCodeAuthenticationNeverDispatchesSMS(t *testing.T) {
 	}
 }
 
+func TestDeviceCodeUsesSMSCodeExtraction(t *testing.T) {
+	for _, tc := range []struct{ body, code string }{
+		{"AppleID 登录验证码:000123", "000123"},
+		{"AppleID登录验证码:123456", "123456"},
+		{"Your verification code is 234567.", "234567"},
+		{"345678", "345678"},
+		{"AppleID 登录验证码:1234567", ""},
+		{"No message", ""},
+	} {
+		t.Run(tc.body, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = fmt.Fprint(w, tc.body) }))
+			t.Cleanup(server.Close)
+			setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, server.URL)
+			s := &Service{device: newDeviceClient()}
+			s.device.http.Transport = server.Client().Transport
+			code, err := s.FetchDeviceCode(context.Background(), server.URL)
+			if tc.code == "" {
+				require.ErrorIs(t, err, errDeviceNoCode)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, tc.code, code)
+		})
+	}
+}
+
+func TestDeviceOnboardingStillWaitsForManualFamilySharing(t *testing.T) {
+	s, db, task, apple := newOnboardingStateTest(t)
+	require.NoError(t, db.Model(task).Updates(map[string]any{
+		"device_code_api": "https://devices.orangeid.top:56133/code", "device_bind_status": "success",
+		"stage": "family_join_apply", "family_invite_url": "https://setup.icloud.com/family/messages?inviteCode=test",
+	}).Error)
+	processOnboardingStageForTest(t, s, db, task)
+	require.Equal(t, iCloudOnboardingStageFamilySharing, task.Stage)
+	require.Equal(t, "waiting", task.DispatchStatus)
+	require.Nil(t, task.NextAttemptAt)
+	require.Equal(t, []string{appleOnboardingJoinFamily + ":"}, apple.operations)
+	// A queued wakeup must not advance an unconfirmed manual checkpoint.
+	require.NoError(t, db.Model(task).Update("dispatch_status", "pending").Error)
+	processOnboardingStageForTest(t, s, db, task)
+	require.Equal(t, iCloudOnboardingStageFamilySharing, task.Stage)
+	require.Equal(t, "waiting", task.DispatchStatus)
+	require.Len(t, apple.operations, 1)
+}
+
 func TestDeviceBindingTimeoutRetryAndStaleResults(t *testing.T) {
 	s, db, task, apple := newOnboardingStateTest(t)
 	require.NoError(t, db.AutoMigrate(&deviceBindingModel{}))
@@ -258,7 +303,7 @@ func TestDeviceWorkflowCoversMultipleCodesAndCookieRecovery(t *testing.T) {
 			s, db, task, _ := newOnboardingStateTest(t)
 			phones := &deviceTestPhones{}
 			s.smsPhones = phones
-			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = fmt.Fprint(w, "AppleID登录验证码:123456") }))
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = fmt.Fprint(w, "AppleID 登录验证码:123456") }))
 			defer server.Close()
 			setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, server.URL)
 			s.device.http.Transport = server.Client().Transport

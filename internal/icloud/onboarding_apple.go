@@ -371,6 +371,16 @@ func (f *appleOnboardingFlow) headers(rawURL string, html, profile, sendHashcash
 		headers["Origin"] = f.endpoints.ICloud
 		headers["Referer"] = strings.TrimRight(f.endpoints.ICloud, "/") + "/"
 	}
+	if appleOnboardingURLWithin(rawURL, iCloudFamilyMembersBase) {
+		cookies, err := f.http.SnapshotCookies(iCloudFamilyMembersBase, f.endpoints.Account, f.endpoints.AppleID)
+		if err != nil {
+			return nil, err
+		}
+		headers["Cookie"] = appleOnboardingCookieString(cookies, "apple.com")
+		headers["Referer"] = iCloudFamilyMembersBase + "/members?wid=d&env=idms_prod_account&theme=light&locale=zh_CN"
+		headers["Cache-Control"] = "no-cache"
+		headers["Pragma"] = "no-cache"
+	}
 	if appleOnboardingURLWithin(rawURL, f.endpoints.Account) && f.state.InviteToken != "" {
 		headers["Referer"] = strings.TrimRight(f.endpoints.Account, "/") + "/family/invite?token=" + url.QueryEscape(f.state.InviteToken)
 		if f.state.GSToken != "" {

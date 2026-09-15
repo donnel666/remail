@@ -859,7 +859,7 @@ export function KitesimSMSLinkModal({ item, onCancel }: { item: AdminKitesimPhon
   };
   const url = link?.path ? new URL(link.path, window.location.origin).href : "";
 
-  return <Modal visible title={`${t("SMS pickup link")} · ${item.phoneNumber}`} onCancel={onCancel} footer={null} width={620}>
+  return <Modal visible title={`${t("SMS pickup link")} · ${item.phoneNumber}`} onCancel={onCancel} footer={null} width={620} height={400}>
     <div className="space-y-4">
       <Text type="tertiary">{t("SMS link follows the phone expiry. Anyone with the link can read recent messages.")}</Text>
       {link ? <div className="grid gap-3 sm:grid-cols-2">

@@ -228,7 +228,7 @@ func TestDeviceInitializationFailurePreservesAcceptedSMS(t *testing.T) {
 			processOnboardingStageForTest(t, s, db, task)
 			require.Equal(t, "icloud_finish", task.Stage)
 			require.JSONEq(t, `{"flow":"ok"}`, string(task.SessionPayload))
-			require.Empty(t, task.PendingSMSPurpose)
+			require.Equal(t, purpose, task.PendingSMSPurpose)
 			require.Empty(t, task.ManualVerificationCode)
 
 			ctx := context.Background()
@@ -244,11 +244,72 @@ func TestDeviceInitializationFailurePreservesAcceptedSMS(t *testing.T) {
 			require.NoError(t, db.First(task, task.ID).Error)
 			processOnboardingStageForTest(t, s, db, task)
 			require.Equal(t, "family_prepare", task.Stage)
+			require.Empty(t, task.PendingSMSPurpose)
 			require.Equal(t, "pending", task.DeviceBindStatus)
 			require.Equal(t, []string{appleOnboardingVerifySMS + ":" + purpose, appleOnboardingFinishICloud + ":"}, apple.operations)
 			var binding deviceBindingModel
 			require.NoError(t, db.Where("email = ?", task.PrimaryEmail).Take(&binding).Error)
 			require.Equal(t, s.now().Add(deviceBindingDelay), binding.SubmitAt)
+		})
+	}
+}
+
+type phoneHoldRecoveryPhone struct {
+	onboardingSMSSuccessPhone
+	confirmedAt []time.Time
+	owners      []string
+}
+
+func (p *phoneHoldRecoveryPhone) GetSMSChallengeByOwner(ctx context.Context, owner string) (kitesim.SMSChallenge, error) {
+	p.owners = append(p.owners, owner)
+	return p.onboardingSMSSuccessPhone.GetSMSChallengeByOwner(ctx, owner)
+}
+
+func (p *phoneHoldRecoveryPhone) ConfirmICloudPhoneBinding(_ context.Context, _ string, _ uint, confirmedAt time.Time) error {
+	p.confirmedAt = append(p.confirmedAt, confirmedAt)
+	if len(p.confirmedAt) <= 2 {
+		return errors.New("temporary Redis failure")
+	}
+	return nil
+}
+
+func TestPhoneHoldRecoveryKeepsFirstVerificationTime(t *testing.T) {
+	for _, purpose := range []string{appleSMSPhoneEnrollment, appleSMSICloudLogin} {
+		t.Run(purpose, func(t *testing.T) {
+			s, db, task, apple := newOnboardingStateTest(t)
+			setDeviceTestSetting(t, runtimeconfig.ICloudDeviceAPIKey, "")
+			confirmedAt := s.now()
+			clock := confirmedAt
+			s.now = func() time.Time { return clock }
+			phone := &phoneHoldRecoveryPhone{onboardingSMSSuccessPhone: onboardingSMSSuccessPhone{sentAt: confirmedAt, expiresAt: confirmedAt.Add(time.Minute)}}
+			s.smsPhones = phone
+			require.NoError(t, db.Model(task).Updates(map[string]any{
+				"stage": "sms_verify", "stage_attempts": 2, "kitesim_phone_id": 7,
+				"pending_sms_purpose": purpose, "manual_verification_code": "123456",
+				"family_invite_url": "https://setup.icloud.com/family/messages?inviteCode=test",
+			}).Error)
+			payload := iCloudOnboardingTask{TaskID: task.ID, Generation: task.Generation}
+			require.ErrorIs(t, s.ProcessICloudOnboardingTask(context.Background(), payload), ErrICloudOnboardingTemporary)
+			require.NoError(t, db.First(task, task.ID).Error)
+			require.Equal(t, "icloud_finish", task.Stage)
+			require.Empty(t, task.ManualVerificationCode)
+			require.Equal(t, purpose, task.PendingSMSPurpose)
+			require.JSONEq(t, `{"flow":"ok"}`, string(task.SessionPayload))
+			clock = clock.Add(time.Hour)
+			processOnboardingStageForTest(t, s, db, task)
+			require.Equal(t, "icloud_finish", task.Stage)
+			require.Equal(t, "pending", task.DispatchStatus)
+			require.Zero(t, task.Attempts)
+			require.Equal(t, []string{appleOnboardingVerifySMS + ":" + purpose}, apple.operations)
+			clock = clock.Add(time.Hour)
+			processOnboardingStageForTest(t, s, db, task)
+			require.Equal(t, "family_prepare", task.Stage)
+			require.Empty(t, task.PendingSMSPurpose)
+			require.Equal(t, []time.Time{confirmedAt, confirmedAt, confirmedAt}, phone.confirmedAt)
+			for _, owner := range phone.owners {
+				require.Equal(t, fmt.Sprintf("icloud-onboarding:%d:%s:2", task.ID, purpose), owner)
+			}
+			require.Equal(t, []string{appleOnboardingVerifySMS + ":" + purpose, appleOnboardingFinishICloud + ":"}, apple.operations)
 		})
 	}
 }

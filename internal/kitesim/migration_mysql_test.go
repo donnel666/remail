@@ -1,10 +1,12 @@
 package kitesim
 
 import (
+	"context"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/platform/testmysql"
@@ -14,6 +16,61 @@ import (
 )
 
 var kitesimMigrationMySQL = testmysql.New("remail_kitesim_migration")
+
+func TestICloudPhoneAllocationExclusivityMySQL(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	source := filepath.Clean(filepath.Join(filepath.Dir(file), "../..", "migrations"))
+	server := testmysql.New("remail_phone_exclusivity")
+	t.Cleanup(func() { require.NoError(t, server.Close(context.Background())) })
+	db := server.Database(t, testmysql.MigrationsThrough(t, source, 142))
+	require.NoError(t, db.Exec("INSERT INTO kitesim_accounts (account, password) VALUES ('hold@example.com', 'test')").Error)
+	require.NoError(t, db.Exec(`INSERT INTO kitesim_phones (account_id, provider_order_id, order_no, phone_number, status, order_status, raw_payload)
+		VALUES (1, 'hold-1', 'hold-1', '14165550001', 1, 1, JSON_OBJECT()),
+		       (1, 'hold-2', 'hold-2', '14165550002', 1, 1, JSON_OBJECT())`).Error)
+	require.NoError(t, db.Exec("INSERT INTO kitesim_phone_bindings (phone_id, consumer_type, consumer_key, source) VALUES (1, 'icloud', 'hold@example.com', 'matched')").Error)
+	var binding phoneBindingModel
+	require.NoError(t, db.Where("consumer_key = ?", "hold@example.com").Take(&binding).Error)
+	s := NewService(db, nil)
+
+	// Both allocators establish their snapshot before either takes the phone lock.
+	ready, release := make(chan struct{}, 2), make(chan struct{})
+	require.NoError(t, db.Callback().Query().After("gorm:query").Register("phone_hold_race", func(tx *gorm.DB) {
+		_, locked := tx.Statement.Clauses["FOR"]
+		if tx.Statement.Table == "kitesim_phones" && len(tx.Statement.Selects) == 3 && !locked {
+			ready <- struct{}{}
+			<-release
+		}
+	}))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	results := make(chan error, 2)
+	for _, email := range []string{"race-a@example.com", "race-b@example.com"} {
+		go func() { _, err := s.BindICloudSMSPhone(ctx, email, "14165550002"); results <- err }()
+	}
+	arrived := 0
+	for arrived < 2 {
+		select {
+		case <-ready:
+			arrived++
+		case <-ctx.Done():
+			close(release)
+			t.Fatal("allocators did not reach the phone lock")
+		}
+	}
+	close(release)
+	first, second := <-results, <-results
+	if first != nil {
+		first, second = second, first
+	}
+	require.NoError(t, first)
+	require.ErrorIs(t, second, ErrSMSPhoneExclusive)
+	require.NoError(t, db.Callback().Query().Remove("phone_hold_race"))
+	require.False(t, db.Migrator().HasColumn("kitesim_phone_bindings", "phone_confirmed_at"))
+	var count int64
+	require.NoError(t, db.Table("kitesim_phone_bindings").Count(&count).Error)
+	require.EqualValues(t, 2, count)
+}
 
 func TestKitesimSMSLinkMigrationMySQL(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)

@@ -192,7 +192,7 @@ func TestCompletedPhasesResumeAtManage(t *testing.T) {
 	stop := errors.New("stop after observing the first operation")
 	provider := &recordingAppleProvider{err: stop}
 	cp := accountCheckpoint{
-		ICloudReady: true, FamilyJoined: true,
+		ICloudReady: true, FamilyJoined: true, FamilySharingConfirmed: true,
 		Session: json.RawMessage(`{"mode":"family"}`),
 	}
 	d := &debugger{
@@ -208,6 +208,70 @@ func TestCompletedPhasesResumeAtManage(t *testing.T) {
 	}
 	if provider.request.Operation != icloud.AppleOnboardingPrepareManage {
 		t.Fatalf("first resumed operation = %q, want %q", provider.request.Operation, icloud.AppleOnboardingPrepareManage)
+	}
+}
+
+func TestFamilySharingPauseSurvivesResume(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		joined    bool
+		deviceAPI string
+	}{
+		{name: "legacy SMS checkpoint", joined: true},
+		{name: "device checkpoint", joined: true, deviceAPI: "https://devices.orangeid.top:56133/code"},
+		{name: "newly joined device account", deviceAPI: "https://devices.orangeid.top:56133/code"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cp := accountCheckpoint{ICloudReady: true, FamilyAuthenticated: true, FamilyJoined: tc.joined,
+				DeviceCodeAPI: tc.deviceAPI, ManageAuthenticated: true, ManageReady: true,
+				ManageSessionExpiresAt: time.Now().Add(temporaryManageSessionTTL), Session: json.RawMessage(`{"mode":"manage"}`)}
+			state := checkpointFile{Version: 1, Accounts: map[string]accountCheckpoint{}}
+			provider := &recordingAppleProvider{response: icloud.AppleOnboardingResponse{Next: "ready"}}
+			d := &debugger{ctx: context.Background(), input: accountInput{Email: "example@example.com", CountryCode: "US", FamilyInviteURL: "https://setup.icloud.com/family/messages?inviteCode=test"},
+				runtime: &runtime{apple: provider}, checkpoint: &cp, state: &state, stateKey: "example@example.com",
+				statePath: filepath.Join(t.TempDir(), "checkpoint.json"), session: cp.Session}
+			if err := d.run(nil, options{}); !errors.Is(err, errFamilySharingRequired) {
+				t.Fatalf("unconfirmed sharing error = %v", err)
+			}
+			wantCalls := 0
+			if !tc.joined {
+				wantCalls = 1
+			}
+			if provider.calls != wantCalls || (!tc.joined && provider.request.Operation != icloud.AppleOnboardingJoinFamily) {
+				t.Fatalf("unexpected Apple calls before sharing confirmation: %d, %s", provider.calls, provider.request.Operation)
+			}
+			loaded, err := loadCheckpoint(d.statePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cp = loaded.Accounts[d.stateKey]
+			if cp.Stage != "waiting_family_sharing" || cp.FamilySharingConfirmed || !cp.ICloudReady || !cp.FamilyJoined || cp.DeviceCodeAPI != tc.deviceAPI || cp.ManageAuthenticated || cp.ManageReady || len(cp.Session) != 0 || !cp.ManageSessionExpiresAt.IsZero() {
+				t.Fatalf("invalid sharing checkpoint: %+v", cp)
+			}
+			if err := d.run(nil, options{}); !errors.Is(err, errFamilySharingRequired) || provider.calls != wantCalls {
+				t.Fatalf("resume bypassed sharing pause: err=%v calls=%d", err, provider.calls)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			d.ctx = ctx
+			if err := d.run(nil, options{familySharingConfirmed: true}); !errors.Is(err, context.Canceled) {
+				t.Fatalf("confirmation should persist before the phase delay: %v", err)
+			}
+			loaded, err = loadCheckpoint(d.statePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cp = loaded.Accounts[d.stateKey]
+			if !cp.FamilySharingConfirmed || cp.Stage != "manage_prepare" {
+				t.Fatalf("confirmation was lost: %+v", cp)
+			}
+			d.ctx = context.Background()
+			stop := errors.New("stop at manage login")
+			provider.err = stop
+			if err := d.run(nil, options{}); !errors.Is(err, stop) || provider.request.Operation != icloud.AppleOnboardingPrepareManage || provider.request.UseDeviceCode != (tc.deviceAPI != "") {
+				t.Fatalf("confirmed resume = err=%v request=%+v", err, provider.request)
+			}
+		})
 	}
 }
 

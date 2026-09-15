@@ -60,6 +60,7 @@ func (d *debugger) deviceRound(purpose string) (icloud.AppleOnboardingResponse, 
 		return icloud.AppleOnboardingResponse{}, errors.New("device codes cannot enroll the initial phone")
 	}
 	deadline := time.Now().Add(2 * time.Minute)
+	previousError := ""
 	for time.Now().Before(deadline) {
 		code, err := d.runtime.icloud.FetchDeviceCode(d.ctx, d.checkpoint.DeviceCodeAPI)
 		if err == nil {
@@ -71,6 +72,10 @@ func (d *debugger) deviceRound(purpose string) (icloud.AppleOnboardingResponse, 
 				return icloud.AppleOnboardingResponse{}, err
 			}
 			return response, nil
+		}
+		if err.Error() != previousError {
+			previousError = err.Error()
+			d.logf("device_code=waiting reason=%q\n", previousError)
 		}
 		if err := d.waitUntil(time.Now().Add(4 * time.Second)); err != nil {
 			return icloud.AppleOnboardingResponse{}, err

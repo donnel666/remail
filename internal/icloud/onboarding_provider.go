@@ -89,6 +89,7 @@ type AppleSecurityAnswer = iCloudSecurityAnswer
 type AppleOnboardingSecret = iCloudOnboardingSecret
 
 type AppleOnboardingResponse struct {
+	FamilyID            string
 	Session             json.RawMessage
 	HTTPStatus          int
 	Next                string
@@ -160,6 +161,7 @@ type SMSPhoneService interface {
 	GetSMSChallengeByOwner(context.Context, string) (kitesim.SMSChallenge, error)
 	ClaimAppleSMSMessage(context.Context, uint64) (*kitesim.MessageItem, error)
 	CompleteSMSChallenge(context.Context, uint64) error
+	ConfirmICloudPhoneBinding(context.Context, string, uint, time.Time) error
 	CancelSMSChallenge(context.Context, uint64) error
 }
 
