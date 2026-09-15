@@ -143,21 +143,10 @@ func (s *Service) ScheduleDeviceBindingSync(ctx context.Context) error {
 	if s.queue == nil {
 		return nil
 	}
-	_, err := s.queue.EnqueueContext(ctx, asynq.NewTask(typeICloudDeviceSync, nil), asynq.TaskID(typeICloudDeviceSync),
-		asynq.Queue(platform.QueueDefault), asynq.Timeout(30*time.Second), asynq.MaxRetry(0), asynq.Retention(0))
-	if errors.Is(err, asynq.ErrTaskIDConflict) && s.deviceRedis != nil {
-		inspector := asynq.NewInspectorFromRedisClient(s.deviceRedis)
-		info, lookupErr := inspector.GetTaskInfo(platform.QueueDefault, typeICloudDeviceSync)
-		if lookupErr == nil && (info.State == asynq.TaskStateArchived || info.State == asynq.TaskStateCompleted) {
-			// A timed-out singleton must not occupy its TaskID forever. Durable
-			// submission markers keep recovery from replaying an ambiguous import.
-			if deleteErr := inspector.DeleteTask(platform.QueueDefault, typeICloudDeviceSync); deleteErr != nil {
-				return deleteErr
-			}
-			return s.ScheduleDeviceBindingSync(ctx)
-		}
-	}
-	if errors.Is(err, asynq.ErrTaskIDConflict) || errors.Is(err, asynq.ErrDuplicateTask) {
+	_, err := s.queue.EnqueueContext(ctx, asynq.NewTask(typeICloudDeviceSync, nil),
+		asynq.Queue(platform.QueueDefault), asynq.Unique(iCloudDispatcherTaskTimeout),
+		asynq.Timeout(iCloudDispatcherTaskTimeout), asynq.MaxRetry(0), asynq.Retention(0))
+	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return nil
 	}
 	return err

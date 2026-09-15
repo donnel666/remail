@@ -14,6 +14,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/donnel666/remail/internal/kitesim"
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
@@ -178,9 +179,22 @@ func TestDeviceBindingDelaySharedPollingAndPersistence(t *testing.T) {
 	require.NoError(t, s.ScheduleDeviceBindingSync(ctx))
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: redisServer.Addr()})
 	t.Cleanup(func() { _ = inspector.Close() })
-	info, err := inspector.GetTaskInfo("default", typeICloudDeviceSync)
+	pending, err := inspector.ListPendingTasks(platform.QueueDefault)
 	require.NoError(t, err)
-	require.Equal(t, typeICloudDeviceSync, info.Type)
+	require.Len(t, pending, 1, "multiple callers share one pending device poll")
+	require.Equal(t, typeICloudDeviceSync, pending[0].Type)
+	require.NotEqual(t, typeICloudDeviceSync, pending[0].ID)
+	previousID := pending[0].ID
+	require.NoError(t, inspector.ArchiveTask(platform.QueueDefault, previousID))
+	advance(iCloudDispatcherTaskTimeout + time.Second)
+	require.NoError(t, s.ScheduleDeviceBindingSync(ctx))
+	pending, err = inspector.ListPendingTasks(platform.QueueDefault)
+	require.NoError(t, err)
+	require.Len(t, pending, 1, "an archived poll cannot permanently block scheduling")
+	require.NotEqual(t, previousID, pending[0].ID)
+	archived, err := inspector.GetTaskInfo(platform.QueueDefault, previousID)
+	require.NoError(t, err)
+	require.Equal(t, asynq.TaskStateArchived, archived.State)
 }
 
 func TestDeviceCodeAuthenticationNeverDispatchesSMS(t *testing.T) {
