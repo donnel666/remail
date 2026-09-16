@@ -627,6 +627,54 @@ func (e AdminICloudAliasStatus) Valid() bool {
 	}
 }
 
+// Defines values for AdminICloudFamilyAliasLimit.
+const (
+	AdminICloudFamilyAliasLimitN750 AdminICloudFamilyAliasLimit = 750
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudFamilyAliasLimit enum.
+func (e AdminICloudFamilyAliasLimit) Valid() bool {
+	switch e {
+	case AdminICloudFamilyAliasLimitN750:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminICloudFamilyState.
+const (
+	AdminICloudFamilyStateFailed    AdminICloudFamilyState = "failed"
+	AdminICloudFamilyStateIdle      AdminICloudFamilyState = "idle"
+	AdminICloudFamilyStateLoggingIn AdminICloudFamilyState = "logging_in"
+	AdminICloudFamilyStateQuerying  AdminICloudFamilyState = "querying"
+	AdminICloudFamilyStateQueued    AdminICloudFamilyState = "queued"
+	AdminICloudFamilyStateReady     AdminICloudFamilyState = "ready"
+	AdminICloudFamilyStateWaiting   AdminICloudFamilyState = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudFamilyState enum.
+func (e AdminICloudFamilyState) Valid() bool {
+	switch e {
+	case AdminICloudFamilyStateFailed:
+		return true
+	case AdminICloudFamilyStateIdle:
+		return true
+	case AdminICloudFamilyStateLoggingIn:
+		return true
+	case AdminICloudFamilyStateQuerying:
+		return true
+	case AdminICloudFamilyStateQueued:
+		return true
+	case AdminICloudFamilyStateReady:
+		return true
+	case AdminICloudFamilyStateWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminICloudFilterSelectionMode.
 const (
 	AdminICloudFilterSelectionModeFilter AdminICloudFilterSelectionMode = "filter"
@@ -881,13 +929,13 @@ func (e AdminICloudResourceItemFamilySyncStatus) Valid() bool {
 
 // Defines values for AdminICloudResourceListResponseAliasLimit.
 const (
-	AdminICloudResourceListResponseAliasLimitN750 AdminICloudResourceListResponseAliasLimit = 750
+	N750 AdminICloudResourceListResponseAliasLimit = 750
 )
 
 // Valid indicates whether the value is a known member of the AdminICloudResourceListResponseAliasLimit enum.
 func (e AdminICloudResourceListResponseAliasLimit) Valid() bool {
 	switch e {
-	case AdminICloudResourceListResponseAliasLimitN750:
+	case N750:
 		return true
 	default:
 		return false
@@ -6821,19 +6869,19 @@ func (e GetTicketsParamsTicketType) Valid() bool {
 
 // Defines values for GetTicketsParamsStatus.
 const (
-	GetTicketsParamsStatusClosed     GetTicketsParamsStatus = "closed"
-	GetTicketsParamsStatusOpen       GetTicketsParamsStatus = "open"
-	GetTicketsParamsStatusProcessing GetTicketsParamsStatus = "processing"
+	Closed     GetTicketsParamsStatus = "closed"
+	Open       GetTicketsParamsStatus = "open"
+	Processing GetTicketsParamsStatus = "processing"
 )
 
 // Valid indicates whether the value is a known member of the GetTicketsParamsStatus enum.
 func (e GetTicketsParamsStatus) Valid() bool {
 	switch e {
-	case GetTicketsParamsStatusClosed:
+	case Closed:
 		return true
-	case GetTicketsParamsStatusOpen:
+	case Open:
 		return true
-	case GetTicketsParamsStatusProcessing:
+	case Processing:
 		return true
 	default:
 		return false
@@ -7822,6 +7870,35 @@ type AdminICloudDeviceBinding struct {
 type AdminICloudFacets struct {
 	ForSale AdminMicrosoftBooleanFacet `json:"forSale"`
 	Status  AdminICloudStatusFacet     `json:"status"`
+}
+
+// AdminICloudFamily defines model for AdminICloudFamily.
+type AdminICloudFamily struct {
+	AliasLimit        AdminICloudFamilyAliasLimit `json:"aliasLimit"`
+	CanRefresh        bool                        `json:"canRefresh"`
+	FamilyId          string                      `json:"familyId"`
+	FullCount         int                         `json:"fullCount"`
+	ImportedCount     int                         `json:"importedCount"`
+	LastError         string                      `json:"lastError"`
+	Members           []AdminICloudFamilyMember   `json:"members"`
+	State             AdminICloudFamilyState      `json:"state"`
+	SyncedAt          *time.Time                  `json:"syncedAt"`
+	UnavailableReason string                      `json:"unavailableReason"`
+}
+
+// AdminICloudFamilyAliasLimit defines model for AdminICloudFamily.AliasLimit.
+type AdminICloudFamilyAliasLimit int
+
+// AdminICloudFamilyState defines model for AdminICloudFamily.State.
+type AdminICloudFamilyState string
+
+// AdminICloudFamilyMember defines model for AdminICloudFamilyMember.
+type AdminICloudFamilyMember struct {
+	AliasCount *int   `json:"aliasCount"`
+	Current    bool   `json:"current"`
+	Email      string `json:"email"`
+	Organizer  bool   `json:"organizer"`
+	ResourceId *int   `json:"resourceId"`
 }
 
 // AdminICloudFilterSelection defines model for AdminICloudFilterSelection.
@@ -13703,6 +13780,12 @@ type PostAdminICloudResourceEnableParams struct {
 	IdempotencyKey AdminStateCommandIdempotencyKey `json:"Idempotency-Key"`
 }
 
+// RefreshAdminICloudFamilyParams defines parameters for RefreshAdminICloudFamily.
+type RefreshAdminICloudFamilyParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // PostAdminICloudResourceActivateICloudParams defines parameters for PostAdminICloudResourceActivateICloud.
 type PostAdminICloudResourceActivateICloudParams struct {
 	// Version Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write.
@@ -17812,6 +17895,12 @@ type ServerInterface interface {
 	// Enable one disabled iCloud resource and queue validation
 	// (POST /v1/admin/icloud/resources/{resourceId}/enable)
 	PostAdminICloudResourceEnable(c *gin.Context, resourceId int, params PostAdminICloudResourceEnableParams)
+	// Get cached family members and current local alias counts
+	// (GET /v1/admin/icloud/resources/{resourceId}/family)
+	GetAdminICloudFamily(c *gin.Context, resourceId int)
+	// Queue a family refresh using Cookie or device authentication
+	// (POST /v1/admin/icloud/resources/{resourceId}/family/refresh)
+	RefreshAdminICloudFamily(c *gin.Context, resourceId int, params RefreshAdminICloudFamilyParams)
 	// Fetch the old iCloud V2 Cookie after iCloud was enabled manually
 	// (POST /v1/admin/icloud/resources/{resourceId}/icloud-activation)
 	PostAdminICloudResourceActivateICloud(c *gin.Context, resourceId int, params PostAdminICloudResourceActivateICloudParams)
@@ -24357,6 +24446,87 @@ func (siw *ServerInterfaceWrapper) PostAdminICloudResourceEnable(c *gin.Context)
 	}
 
 	siw.Handler.PostAdminICloudResourceEnable(c, resourceId, params)
+}
+
+// GetAdminICloudFamily operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminICloudFamily(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminICloudFamily(c, resourceId)
+}
+
+// RefreshAdminICloudFamily operation middleware
+func (siw *ServerInterfaceWrapper) RefreshAdminICloudFamily(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RefreshAdminICloudFamilyParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RefreshAdminICloudFamily(c, resourceId, params)
 }
 
 // PostAdminICloudResourceActivateICloud operation middleware
@@ -40311,6 +40481,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/device", wrapper.PostAdminICloudDeviceBinding)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/disable", wrapper.PostAdminICloudResourceDisable)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/enable", wrapper.PostAdminICloudResourceEnable)
+	router.GET(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/family", wrapper.GetAdminICloudFamily)
+	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/family/refresh", wrapper.RefreshAdminICloudFamily)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/icloud-activation", wrapper.PostAdminICloudResourceActivateICloud)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/publish", wrapper.PostAdminICloudResourcePublish)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/:resourceId/recover", wrapper.PostAdminICloudResourceRecover)

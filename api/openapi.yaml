@@ -12028,6 +12028,56 @@ paths:
         "503":
           description: Recharge unavailable or outcome uncertain
 
+  /v1/admin/icloud/resources/{resourceId}/family:
+    get:
+      operationId: getAdminICloudFamily
+      summary: Get cached family members and current local alias counts
+      description: Requires core:resource/read. Family snapshots and refresh progress are stored in Redis. Members absent from non-deleted local resources have a null aliasCount.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Family details and refresh eligibility
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminICloudFamily" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
+  /v1/admin/icloud/resources/{resourceId}/family/refresh:
+    post:
+      operationId: refreshAdminICloudFamily
+      summary: Queue a family refresh using Cookie or device authentication
+      description: Requires core:resource/read and core:resource/operate. Deduplicates active refreshes and reuses successful snapshots for one minute. Device login never sends SMS and is allowed at the alias limit. Returned state also describes cached or unavailable results.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "202":
+          description: Refresh state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminICloudFamily" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
   /v1/admin/icloud/resources/{resourceId}/device:
     parameters:
       - name: resourceId
@@ -23836,6 +23886,35 @@ components:
           nullable: true
       additionalProperties: false
 
+    AdminICloudFamilyMember:
+      type: object
+      required: [email, resourceId, aliasCount, organizer, current]
+      properties:
+        email: { type: string }
+        resourceId: { type: integer, minimum: 1, nullable: true }
+        aliasCount: { type: integer, minimum: 0, nullable: true }
+        organizer: { type: boolean }
+        current: { type: boolean }
+      additionalProperties: false
+    AdminICloudFamily:
+      type: object
+      required: [state, familyId, members, syncedAt, lastError, canRefresh, unavailableReason, importedCount, fullCount, aliasLimit]
+      properties:
+        state:
+          type: string
+          enum: [idle, queued, querying, logging_in, waiting, ready, failed]
+        familyId: { type: string }
+        members:
+          type: array
+          items: { $ref: "#/components/schemas/AdminICloudFamilyMember" }
+        syncedAt: { type: string, format: date-time, nullable: true }
+        lastError: { type: string }
+        canRefresh: { type: boolean }
+        unavailableReason: { type: string }
+        importedCount: { type: integer, minimum: 0 }
+        fullCount: { type: integer, minimum: 0 }
+        aliasLimit: { type: integer, enum: [750] }
+      additionalProperties: false
     AdminICloudDeviceBinding:
       type: object
       required: [status]

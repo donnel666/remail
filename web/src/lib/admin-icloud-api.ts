@@ -6,6 +6,15 @@ export type AdminICloudResourceStatus =
   components["schemas"]["AdminICloudResourceStatus"];
 export type AdminICloudDeviceBinding = components["schemas"]["AdminICloudDeviceBinding"];
 export type AdminICloudDeviceBalance = components["schemas"]["AdminICloudDeviceBalance"];
+export type AdminICloudFamily = components["schemas"]["AdminICloudFamily"];
+
+export async function getAdminICloudFamily(resourceId: number, signal?: AbortSignal): Promise<AdminICloudFamily> {
+  return unwrap(await client.GET("/v1/admin/icloud/resources/{resourceId}/family", { params: { path: { resourceId } }, signal }));
+}
+
+export async function refreshAdminICloudFamily(resourceId: number, signal?: AbortSignal): Promise<AdminICloudFamily> {
+  return unwrap(await client.POST("/v1/admin/icloud/resources/{resourceId}/family/refresh", { params: { path: { resourceId }, header: csrfHeader() }, signal }));
+}
 
 export async function getAdminICloudDeviceBalance(signal?: AbortSignal): Promise<AdminICloudDeviceBalance> {
   return unwrap(await client.GET("/v1/admin/icloud/device-platform/balance", { signal }));

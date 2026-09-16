@@ -51,6 +51,8 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 	resources.POST("/batch/delete", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudDelete))
 	resources.POST("/batch/expiration", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudExpire))
 	resources.GET("/:resourceId", middleware.PermissionRequired(checker, "core:resource", "read"), h.getResource)
+	resources.GET("/:resourceId/family", middleware.PermissionRequired(checker, "core:resource", "read"), h.familyDetails)
+	resources.POST("/:resourceId/family/refresh", middleware.PermissionRequired(checker, "core:resource", "read"), middleware.PermissionRequired(checker, "core:resource", "operate"), middleware.RateLimitPerUser(module.Service.deviceRedis, "icloud_family_refresh", 10, 60), h.familyDetails)
 	device := resources.Group("/:resourceId/device", middleware.PermissionRequired(checker, "core:resource", "operate"), middleware.PermissionRequired(checker, "mailmatch:message", "read"))
 	device.GET("", h.deviceBinding)
 	device.POST("", h.deviceBinding)

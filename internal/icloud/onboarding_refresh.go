@@ -52,6 +52,9 @@ func (s *Service) ensureICloudCookieRefreshTx(ctx context.Context, tx *gorm.DB, 
 	if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || resource.AliasCount >= iCloudMaxAliases || (resource.DeviceCodeAPI == "" && (strings.TrimSpace(resource.BoundPhoneNumber) == "" || resource.KitesimPhoneID == nil)) {
 		return false, nil
 	}
+	if active, err := s.familyLoginActive(ctx, resourceID); active || err != nil {
+		return false, err
+	}
 	if iCloudCookieRefreshTerminallyFailed(resource) {
 		return false, nil
 	}

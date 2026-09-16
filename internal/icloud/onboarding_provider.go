@@ -25,6 +25,7 @@ const (
 	appleOnboardingAddForward             = "add_forward"
 	appleOnboardingVerifyForward          = "verify_forward"
 	appleOnboardingExport                 = "export"
+	appleOnboardingExportSession          = "export_session"
 
 	appleSMSICloudLogin          = "icloud_login"
 	appleSMSOldCookieLogin       = "old_cookie_login"
@@ -224,6 +225,8 @@ func (c *appleOnboardingClient) Execute(ctx context.Context, request AppleOnboar
 		response, err = flow.verifyForward(request)
 	case appleOnboardingExport:
 		response, err = flow.exportChannels(request)
+	case appleOnboardingExportSession:
+		response, err = flow.exportAccountChannel()
 	default:
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "invalid_operation", SafeMessage: "Apple onboarding operation is invalid."}
 	}

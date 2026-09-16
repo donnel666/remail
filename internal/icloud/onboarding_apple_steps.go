@@ -780,6 +780,13 @@ func (f *appleOnboardingFlow) exportChannels(request AppleOnboardingRequest) (Ap
 	if f.state.Status != http.StatusOK {
 		return AppleOnboardingResponse{}, appleOnboardingPermanent("new_cookie_unavailable", "Apple Account session could not be exported.", data)
 	}
+	return f.exportAccountChannel()
+}
+
+func (f *appleOnboardingFlow) exportAccountChannel() (AppleOnboardingResponse, error) {
+	if f.state.Mode != "manage" || f.state.APIKey == "" {
+		return AppleOnboardingResponse{}, appleOnboardingRestart("manage_prepare")
+	}
 	cookies, err := f.http.SnapshotCookies(f.endpoints.Account, f.endpoints.IDMSA, f.endpoints.AppleID)
 	if err != nil {
 		return AppleOnboardingResponse{}, err

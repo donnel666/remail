@@ -580,6 +580,7 @@ describe("admin iCloud modal workflows", () => {
 
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
       "Basic info",
+      "Family group",
       "Validation",
       "Aliases",
     ]);

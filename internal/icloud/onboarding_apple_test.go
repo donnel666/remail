@@ -809,6 +809,17 @@ func TestAppleOnboardingChecksOwnFamilyBeforePrivateAliases(t *testing.T) {
 	}
 }
 
+func TestFamilySessionExportDoesNotTouchAliasesOrForwarding(t *testing.T) {
+	session := &appleOnboardingScriptedSession{cookies: []msacl.SessionCookie{{Name: "myacinfo", Value: "family-session", Domain: ".apple.com", Host: "appleid.apple.com"}}}
+	response, err := appleOnboardingTestClient(time.Now(), session).Execute(context.Background(), AppleOnboardingRequest{
+		Operation: appleOnboardingExportSession,
+		Session:   appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) { state.APIKey = "api-key" }),
+	})
+	if err != nil || response.NewChannel == nil || !strings.Contains(response.NewChannel.Cookie, "myacinfo=family-session") || len(session.requests) != 0 {
+		t.Fatalf("session export must only snapshot the authenticated Cookie: response=%+v requests=%v err=%v", response, session.requests, err)
+	}
+}
+
 func TestAppleOnboardingExportsNewAndPreservedOldChannels(t *testing.T) {
 	now := time.Date(2026, 8, 16, 10, 0, 0, 0, time.UTC)
 	old := &AppleOnboardingChannel{Kind: iCloudChannelWeb, Host: "p1-maildomainws.icloud.com", Cookie: "old=value"}

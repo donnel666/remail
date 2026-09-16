@@ -4376,6 +4376,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/icloud/resources/{resourceId}/family": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get cached family members and current local alias counts
+         * @description Requires core:resource/read. Family snapshots and refresh progress are stored in Redis. Members absent from non-deleted local resources have a null aliasCount.
+         */
+        get: operations["getAdminICloudFamily"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/{resourceId}/family/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue a family refresh using Cookie or device authentication
+         * @description Requires core:resource/read and core:resource/operate. Deduplicates active refreshes and reuses successful snapshots for one minute. Device login never sends SMS and is allowed at the alias limit. Returned state also describes cached or unavailable results.
+         */
+        post: operations["refreshAdminICloudFamily"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/icloud/resources/{resourceId}/device": {
         parameters: {
             query?: never;
@@ -9502,6 +9542,28 @@ export interface components {
             balance: string | null;
             /** Format: date-time */
             checkedAt: string | null;
+        };
+        AdminICloudFamilyMember: {
+            email: string;
+            resourceId: number | null;
+            aliasCount: number | null;
+            organizer: boolean;
+            current: boolean;
+        };
+        AdminICloudFamily: {
+            /** @enum {string} */
+            state: "idle" | "queued" | "querying" | "logging_in" | "waiting" | "ready" | "failed";
+            familyId: string;
+            members: components["schemas"]["AdminICloudFamilyMember"][];
+            /** Format: date-time */
+            syncedAt: string | null;
+            lastError: string;
+            canRefresh: boolean;
+            unavailableReason: string;
+            importedCount: number;
+            fullCount: number;
+            /** @enum {integer} */
+            aliasLimit: 750;
         };
         AdminICloudDeviceBinding: {
             status: string;
@@ -24780,6 +24842,62 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    getAdminICloudFamily: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Family details and refresh eligibility */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudFamily"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    refreshAdminICloudFamily: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Refresh state */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudFamily"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getAdminICloudDeviceBinding: {

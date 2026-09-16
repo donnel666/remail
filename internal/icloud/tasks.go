@@ -260,6 +260,13 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 	mux.HandleFunc(typeICloudDeviceSync, func(ctx context.Context, _ *asynq.Task) error {
 		return service.syncDeviceBindings(ctx)
 	})
+	mux.HandleFunc(typeICloudFamilyRefresh, func(ctx context.Context, task *asynq.Task) error {
+		var payload iCloudFamilyRefreshTask
+		if task == nil || json.Unmarshal(task.Payload(), &payload) != nil || payload.ResourceID == 0 || payload.Token == "" {
+			return asynq.SkipRetry
+		}
+		return service.processFamilyRefresh(ctx, payload)
+	})
 	mux.HandleFunc(typeICloudProvision, func(ctx context.Context, task *asynq.Task) error {
 		var payload iCloudProvisionTask
 		if task == nil || json.Unmarshal(task.Payload(), &payload) != nil || payload.ResourceID == 0 {

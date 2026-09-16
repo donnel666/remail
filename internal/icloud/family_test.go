@@ -70,11 +70,7 @@ func TestICloudFamilyClientValidatesAuthoritativeMembership(t *testing.T) {
 	duplicate.IsLinkedToFamily, duplicate.IsMemberOfFamily = &linked, &member
 	duplicate.CurrentDSID, duplicate.CurrentUserAppleID = "same", "child@example.com"
 	duplicate.Family.FamilyID, duplicate.Family.OrganizerDSID = "family-1", "same"
-	duplicate.FamilyMembers = append(duplicate.FamilyMembers, struct {
-		DSID string `json:"dsid"`
-	}{DSID: "same"}, struct {
-		DSID string `json:"dsid"`
-	}{DSID: "same"})
+	duplicate.FamilyMembers = append(duplicate.FamilyMembers, iCloudFamilyRemoteMember{DSID: "same"}, iCloudFamilyRemoteMember{DSID: "same"})
 	_, err = validateICloudFamilyMembers(duplicate)
 	var providerErr *iCloudFamilyError
 	if !errors.As(err, &providerErr) || providerErr.Category != "provider_response_invalid" {

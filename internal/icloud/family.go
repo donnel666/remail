@@ -90,6 +90,17 @@ type iCloudFamilySnapshot struct {
 	RemoteExtraMemberCount uint8
 	Linked                 bool
 	Member                 bool
+	Members                []iCloudFamilyMember
+}
+
+type iCloudFamilyMember struct {
+	DSID  string `json:"dsid"`
+	Email string `json:"email"`
+}
+
+type iCloudFamilyRemoteMember struct {
+	DSID    string `json:"dsid"`
+	AppleID string `json:"appleId"`
 }
 
 type iCloudFamilyMembersResponse struct {
@@ -99,11 +110,9 @@ type iCloudFamilyMembersResponse struct {
 		FamilyID      string `json:"familyId"`
 		OrganizerDSID string `json:"organizerDsid"`
 	} `json:"family"`
-	FamilyMembers []struct {
-		DSID string `json:"dsid"`
-	} `json:"familyMembers"`
-	IsLinkedToFamily *bool `json:"isLinkedToFamily"`
-	IsMemberOfFamily *bool `json:"isMemberOfFamily"`
+	FamilyMembers    []iCloudFamilyRemoteMember `json:"familyMembers"`
+	IsLinkedToFamily *bool                      `json:"isLinkedToFamily"`
+	IsMemberOfFamily *bool                      `json:"isMemberOfFamily"`
 }
 
 func (c *iCloudFamilyClient) fetch(ctx context.Context, channel iCloudResourceChannelModel) (iCloudFamilySnapshot, error) {
@@ -114,7 +123,7 @@ func (c *iCloudFamilyClient) fetch(ctx context.Context, channel iCloudResourceCh
 	if cookie == "" {
 		cookie = strings.TrimSpace(channel.Cookie)
 	}
-	if (channel.Kind != "" && channel.Kind != iCloudChannelWeb && channel.Kind != iCloudChannelFamilySession) || !validICloudFamilyCookie(cookie) {
+	if (channel.Kind != "" && channel.Kind != iCloudChannelWeb && channel.Kind != iCloudChannelAppleAccount && channel.Kind != iCloudChannelFamilySession) || !validICloudFamilyCookie(cookie) {
 		return iCloudFamilySnapshot{}, &iCloudFamilyError{Category: "session_invalid", SafeMessage: "iCloud family session is invalid."}
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint, nil)
@@ -209,6 +218,11 @@ func validateICloudFamilyMembers(payload iCloudFamilyMembersResponse) (iCloudFam
 			return iCloudFamilySnapshot{}, invalidICloudFamilyResponse()
 		}
 		seen[dsid] = struct{}{}
+		email := strings.ToLower(strings.TrimSpace(member.AppleID))
+		if email != "" && !validStandaloneICloudEmail(email) {
+			return iCloudFamilySnapshot{}, invalidICloudFamilyResponse()
+		}
+		snapshot.Members = append(snapshot.Members, iCloudFamilyMember{DSID: dsid, Email: email})
 		if dsid == snapshot.CurrentDSID {
 			currentCount++
 		}

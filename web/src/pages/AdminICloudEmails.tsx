@@ -42,6 +42,7 @@ import {
   Workflow,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { ICloudFamilyPanel } from "./admin-icloud-family";
 
 import { CardPro } from "@/components/semi/card-pro";
 import { createCardProPagination } from "@/components/semi/card-pro-pagination";
@@ -2628,6 +2629,7 @@ export function ICloudDetailSheet({
               type="line"
             >
               <Tabs.TabPane itemKey="basic" tab={t("Basic info")} />
+              <Tabs.TabPane itemKey="family" tab={t("Family group")} />
               {canReadOrders ? <Tabs.TabPane itemKey="orders" tab={t("Orders")} /> : null}
               <Tabs.TabPane itemKey="validation" tab={t("Validation")} />
               <Tabs.TabPane itemKey="aliases" tab={t("Aliases")} />
@@ -2843,6 +2845,8 @@ export function ICloudDetailSheet({
                 )}
               </div>
             ) : null}
+
+            {activeTab === "family" ? <ICloudFamilyPanel key={item.id} resourceId={item.id} canOperate={canOperate} /> : null}
 
             {activeTab === "orders" && canReadOrders ? (
               <RelatedOrdersTable
