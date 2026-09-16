@@ -185,7 +185,7 @@ export async function importAdminMicrosoftResources(
   formData.append("longLived", String(payload.longLived));
   formData.append("errorStrategy", payload.errorStrategy);
 
-  const response = await unwrap<AdminMicrosoftImportResponse>(
+  return unwrap<AdminMicrosoftImportResponse>(
     await client.POST("/v1/admin/resources/imports", {
       body: formData as never,
       bodySerializer: (body) => body,
@@ -193,16 +193,6 @@ export async function importAdminMicrosoftResources(
       signal,
     })
   );
-  if (response.status !== "processing") return response;
-  const completed = await waitForAdminMicrosoftResourceImport(response.importId, {
-    signal,
-  });
-  return {
-    ...completed,
-    taskId: response.taskId,
-    requestId: response.requestId,
-    reused: response.reused,
-  };
 }
 
 export async function getAdminMicrosoftResourceImport(

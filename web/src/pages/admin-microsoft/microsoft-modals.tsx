@@ -8,6 +8,7 @@ import {
   Toast,
   Typography,
 } from "@douyinfe/semi-ui";
+import { FileText, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -20,6 +21,7 @@ import {
   listAdminMicrosoftOwners,
   replaceAdminMicrosoftCredentials,
   updateAdminMicrosoftResource,
+  waitForAdminMicrosoftResourceImport,
 } from "@/lib/admin-microsoft-api";
 
 import { MICROSOFT_EMAIL_FORMAT_HINT } from "../resources/model";
@@ -36,6 +38,8 @@ const { Text } = Typography;
 // Segmented toggle-card styling, matching the console import modal
 // (resources/import-microsoft-emails-modal.tsx) for a consistent look.
 const IMPORT_ENTRY_AREA_HEIGHT = 208;
+// ponytail: mirror the server hard cap; lower configured limits stay server-enforced.
+const MAX_IMPORT_FILE_BYTES = 512 * 1024 * 1024;
 
 function switchButtonClass(active: boolean) {
   return [
@@ -112,22 +116,32 @@ export function ImportMicrosoftModal({
   visible: boolean;
 }) {
   const { t } = useTranslation();
+  const [mode, setMode] = useState<"paste" | "file">("paste");
   const [content, setContent] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const [ownerId, setOwnerId] = useState<number | undefined>();
   const [longLived, setLongLived] = useState(true);
   const [errorStrategy, setErrorStrategy] =
     useState<AdminMicrosoftImportErrorStrategy>("skip");
   const [submitting, setSubmitting] = useState(false);
-  const previousVisible = useRef(false);
+  const [polling, setPolling] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const importAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    const opened = visible && !previousVisible.current;
-    previousVisible.current = visible;
-    if (!opened) return;
+    if (!visible) return;
+    setMode("paste");
     setContent("");
+    setFile(null);
     setOwnerId(undefined);
     setLongLived(true);
     setErrorStrategy("skip");
+    setSubmitting(false);
+    setPolling(false);
+    return () => {
+      importAbortRef.current?.abort();
+      importAbortRef.current = null;
+    };
   }, [visible]);
 
   useEffect(() => {
@@ -140,23 +154,85 @@ export function ImportMicrosoftModal({
     [content]
   );
 
+  const selectFile = (selected: File | null) => {
+    if (fileRef.current) fileRef.current.value = "";
+    if (submitting || importAbortRef.current) return;
+    if (selected && !selected.name.toLowerCase().endsWith(".txt")) {
+      setFile(null);
+      Toast.warning(t("Please select a TXT file."));
+      return;
+    }
+    if (selected && selected.size > MAX_IMPORT_FILE_BYTES) {
+      setFile(null);
+      Toast.warning(t("Import file must not exceed {{max}} MiB.", {
+        max: MAX_IMPORT_FILE_BYTES / 1024 / 1024,
+      }));
+      return;
+    }
+    setFile(selected);
+  };
+
+  const close = () => {
+    if (submitting && !polling) return;
+    if (polling) Toast.info(t("Resource import continues in background."));
+    importAbortRef.current?.abort();
+    importAbortRef.current = null;
+    setContent("");
+    setFile(null);
+    setSubmitting(false);
+    setPolling(false);
+    onCancel();
+  };
+
   const submit = async () => {
+    if (submitting || importAbortRef.current) return;
     if (!ownerId) {
       Toast.warning(t("Please select an owner."));
       return;
     }
-    if (lines.length === 0) {
-      Toast.warning(t("Please enter Microsoft resources."));
+    if (mode === "paste" ? lines.length === 0 : !file) {
+      Toast.warning(
+        t(mode === "file" ? "Please select a TXT file." : "Please enter Microsoft resources.")
+      );
       return;
     }
+    const controller = new AbortController();
+    importAbortRef.current = controller;
+    const isCurrentImport = () =>
+      importAbortRef.current === controller && !controller.signal.aborted;
     setSubmitting(true);
     try {
-      const response = await importAdminMicrosoftResources({
-        content,
+      let sourceContent = content;
+      if (mode === "file" && file) {
+        const bytes = await file.arrayBuffer();
+        if (!isCurrentImport()) return;
+        try {
+          sourceContent = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        } catch {
+          Toast.error(t("Import file must be UTF-8 encoded."));
+          return;
+        }
+      }
+      if (!sourceContent.trim()) {
+        Toast.warning(t("Please enter Microsoft resources."));
+        return;
+      }
+      const accepted = await importAdminMicrosoftResources({
+        content: sourceContent,
         errorStrategy,
         longLived,
         ownerId,
-      });
+      }, controller.signal);
+      if (!isCurrentImport()) return;
+      let response = accepted;
+      if (accepted.status === "processing") {
+        setPolling(true);
+        Toast.success(t("Resource import accepted."));
+        response = await waitForAdminMicrosoftResourceImport(accepted.importId, {
+          signal: controller.signal,
+        });
+        if (!isCurrentImport()) return;
+      }
       if (response.status === "failed") {
         throw new Error(response.lastSafeError || "Resource import failed.");
       }
@@ -168,30 +244,40 @@ export function ImportMicrosoftModal({
       if (response.skipped > 0) {
         Toast.warning(t("Import skipped errors", { count: response.skipped }));
       }
+      try {
+        await onImported();
+      } catch (error) {
+        if (isCurrentImport()) {
+          Toast.error(getIamErrorMessage(t, error, "Admin Microsoft resources load failed."));
+        }
+      }
+      if (isCurrentImport()) {
+        setContent("");
+        setFile(null);
+        onCancel();
+      }
     } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Resource import failed."));
-      setSubmitting(false);
-      return;
-    }
-    try {
-      await onImported();
-    } catch (error) {
-      Toast.error(
-        getIamErrorMessage(t, error, "Admin Microsoft resources load failed.")
-      );
+      if (isCurrentImport()) {
+        Toast.error(getIamErrorMessage(t, error, "Resource import failed."));
+      }
     } finally {
-      setSubmitting(false);
+      if (isCurrentImport()) {
+        importAbortRef.current = null;
+        setSubmitting(false);
+        setPolling(false);
+      }
     }
-    onCancel();
   };
 
   return (
     <Modal
-      cancelText={t("Cancel")}
+      cancelButtonProps={{ disabled: submitting && !polling }}
+      cancelText={polling ? t("Continue in background") : t("Cancel")}
       centered
       confirmLoading={submitting}
-      onCancel={onCancel}
+      onCancel={close}
       onOk={() => void submit()}
+      okButtonProps={{ disabled: mode === "paste" ? lines.length === 0 : !file }}
       okText={t("Import")}
       title={t("Import Microsoft Emails")}
       visible={visible}
@@ -204,6 +290,35 @@ export function ImportMicrosoftModal({
           </span>
           <OwnerSelect onChange={setOwnerId} owners={owners} t={t} value={ownerId} />
         </label>
+
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            aria-pressed={mode === "paste"}
+            className={switchButtonClass(mode === "paste")}
+            disabled={submitting}
+            onClick={() => {
+              setMode("paste");
+              setFile(null);
+            }}
+            type="button"
+          >
+            <FileText size={16} />
+            {t("Manual input")}
+          </button>
+          <button
+            aria-pressed={mode === "file"}
+            className={switchButtonClass(mode === "file")}
+            disabled={submitting}
+            onClick={() => {
+              setMode("file");
+              setContent("");
+            }}
+            type="button"
+          >
+            <Upload size={16} />
+            {t("TXT file")}
+          </button>
+        </div>
 
         <div className="grid grid-cols-2 gap-2">
           <button
@@ -239,22 +354,58 @@ export function ImportMicrosoftModal({
           </button>
         </div>
 
-        <label className="block">
-          <span className="mb-1.5 flex items-center justify-between text-sm font-medium text-[var(--semi-color-text-0)]">
-            <span>{t("Microsoft resource entries")} *</span>
-            <Text size="small" type="tertiary">
-              {t("Parsed entries", { count: lines.length })}
-            </Text>
-          </span>
-          <TextArea
-            className="font-mono"
-            onChange={(value) => setContent(value)}
-            placeholder="email----password"
-            rows={8}
-            style={{ height: IMPORT_ENTRY_AREA_HEIGHT, resize: "none" }}
-            value={content}
-          />
-        </label>
+        {mode === "paste" ? (
+          <label className="block">
+            <span className="mb-1.5 flex items-center justify-between text-sm font-medium text-[var(--semi-color-text-0)]">
+              <span>{t("Microsoft resource entries")} *</span>
+              <Text size="small" type="tertiary">
+                {t("Parsed entries", { count: lines.length })}
+              </Text>
+            </span>
+            <TextArea
+              className="font-mono"
+              onChange={(value) => setContent(value)}
+              placeholder="email----password"
+              rows={8}
+              style={{ height: IMPORT_ENTRY_AREA_HEIGHT, resize: "none" }}
+              value={content}
+            />
+          </label>
+        ) : (
+          <div>
+            <input
+              accept=".txt"
+              aria-label={t("TXT file")}
+              className="hidden"
+              disabled={submitting}
+              onChange={(event) => selectFile(event.target.files?.[0] ?? null)}
+              ref={fileRef}
+              type="file"
+            />
+            <button
+              className="flex w-full flex-col items-center justify-center rounded-xl border border-dashed border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-6 text-center transition-colors hover:bg-[var(--semi-color-fill-1)]"
+              disabled={submitting}
+              onClick={() => fileRef.current?.click()}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                selectFile(event.dataTransfer.files[0] ?? null);
+              }}
+              style={{ height: IMPORT_ENTRY_AREA_HEIGHT }}
+              type="button"
+            >
+              <FileText className="mb-2 size-8 text-[var(--semi-color-text-2)]" />
+              <Text strong>
+                {file ? file.name : t("Click to select or drag file here")}
+              </Text>
+              <Text size="small" type="tertiary">
+                {file
+                  ? `${(file.size / 1024).toFixed(1)} KB`
+                  : t("Supports .txt files, one entry per line")}
+              </Text>
+            </button>
+          </div>
+        )}
 
         <div className="rounded-xl border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-3">
           <div className="mb-1 text-xs font-medium text-[var(--semi-color-text-0)]">

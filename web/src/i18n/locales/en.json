@@ -237,6 +237,7 @@
   "Please enter iCloud resources.": "Please enter iCloud resources.",
   "Please select a TXT file.": "Please select a TXT file.",
   "Import file must not exceed {{max}} MiB.": "Import file must not exceed {{max}} MiB.",
+  "Import file must be UTF-8 encoded.": "The import file must use UTF-8 encoding. Save it as UTF-8 and try again.",
   "Please paste an iCloud HME cURL request.": "Please paste an iCloud HME cURL request.",
   "HME cURL request": "HME cURL request",
   "The HME cURL does not contain the primary email. Enter it separately.": "The HME cURL does not contain the primary email. Enter it separately.",

@@ -397,7 +397,7 @@ describe("admin Microsoft API adapter", () => {
     }
   });
 
-  it("preserves the POST import reuse metadata after status polling", async () => {
+  it("returns accepted import metadata immediately and leaves polling to the caller", async () => {
     apiMocks.POST.mockResolvedValueOnce({
       data: {
         ...IMPORT_RESPONSE,
@@ -407,21 +407,21 @@ describe("admin Microsoft API adapter", () => {
         task: { ...IMPORT_RESPONSE.task, status: "queued", finishedAt: null },
       } satisfies AdminMicrosoftImportResponse,
     });
-    apiMocks.GET.mockResolvedValueOnce({
-      data: { ...IMPORT_RESPONSE, reused: false } satisfies AdminMicrosoftImportResponse,
-    });
+    const controller = new AbortController();
 
     await expect(importAdminMicrosoftResources({
       content: "mail@outlook.com----password",
       ownerId: 101,
       longLived: true,
       errorStrategy: "skip",
-    })).resolves.toMatchObject({
-      status: "imported",
+    }, controller.signal)).resolves.toMatchObject({
+      status: "processing",
       taskId: "import:17",
       requestId: "request-import-17",
       reused: true,
     });
+    expect(apiMocks.GET).not.toHaveBeenCalled();
+    expect(callOptions(apiMocks.POST).signal).toBe(controller.signal);
   });
 
   it("submits ids/filter selection once and uses formal type=microsoft", async () => {
