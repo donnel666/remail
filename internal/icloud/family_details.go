@@ -98,7 +98,7 @@ func (s *Service) familyChannels(ctx context.Context, id uint) ([]iCloudResource
 func usableFamilyCookie(channel iCloudResourceChannelModel) bool {
 	// Family access is checked by FamilyWS itself; another channel's failure
 	// must not discard a Cookie that can still read the family.
-	return validICloudFamilyCookie(firstNonEmpty(channel.SetupCookie, channel.Cookie))
+	return validICloudFamilyCookie(iCloudFamilyCookie(channel))
 }
 
 func (s *Service) familyRefreshEligibility(ctx context.Context, resource iCloudResourceModel) (bool, string, error) {

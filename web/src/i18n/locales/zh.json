@@ -3041,7 +3041,7 @@
   "Leave blank to keep the current key": "留空保留当前密钥",
   "UID 919; import after 30 seconds; check bindings every 10 seconds; stage delays 1–30 seconds.": "UID 固定为 919；绑定手机后 30 秒导入，每 10 秒查询绑定状态，阶段间延迟 1～30 秒。",
   "Device code API": "设备",
-  "Device not bound": "未绑定设备",
+  "Device not bound": "未绑定",
   "Device binding queued": "等待导入设备",
   "Device binding in progress": "设备绑定中",
   "Device bound": "成功",

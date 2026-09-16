@@ -1490,8 +1490,8 @@ func TestICloudProvisionCreatesExpectedCookieMaintenanceTaskForInvalidChannel(t 
 			if test.channelKind == iCloudChannelWeb && tasks[0].PendingSMSPurpose != appleSMSOldCookieLogin {
 				t.Fatalf("old-cookie recovery purpose = %q, want %q", tasks[0].PendingSMSPurpose, appleSMSOldCookieLogin)
 			}
-			if test.taskKind == iCloudCookieRecoveryTaskKind && (tasks[0].NextAttemptAt == nil || !tasks[0].NextAttemptAt.After(now) || tasks[0].NextAttemptAt.After(now.Add(60*time.Minute))) {
-				t.Fatalf("recovery delay = %v, want 1-60 minutes after %v", tasks[0].NextAttemptAt, now)
+			if test.taskKind == iCloudCookieRecoveryTaskKind && (tasks[0].NextAttemptAt == nil || tasks[0].NextAttemptAt.Before(now.Add(time.Minute)) || tasks[0].NextAttemptAt.After(now.Add(10*time.Minute))) {
+				t.Fatalf("recovery delay = %v, want 1-10 minutes after %v", tasks[0].NextAttemptAt, now)
 			}
 		})
 	}

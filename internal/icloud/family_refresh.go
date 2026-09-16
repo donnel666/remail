@@ -148,8 +148,9 @@ func (s *Service) refreshFamilySnapshot(ctx context.Context, task iCloudFamilyRe
 		if err != nil {
 			return iCloudFamilySnapshot{}, false, err
 		}
+		var deferredErr error
 		for _, channel := range channels {
-			cookie := firstNonEmpty(channel.SetupCookie, channel.Cookie)
+			cookie := iCloudFamilyCookie(channel)
 			if !usableFamilyCookie(channel) || triedCookies[cookie] {
 				continue
 			}
@@ -160,10 +161,42 @@ func (s *Service) refreshFamilySnapshot(ctx context.Context, task iCloudFamilyRe
 			}
 			var familyErr *iCloudFamilyError
 			if !errors.As(err, &familyErr) || familyErr.Category != "session_invalid" {
-				return iCloudFamilySnapshot{}, false, err
+				deferredErr = errors.Join(deferredErr, err)
+				continue
+			}
+			if channel.Kind == iCloudChannelAppleAccount {
+				// FamilyWS can reject an expired family session while the new
+				// management Cookie can still renew it without a device challenge.
+				refreshed, refreshErr := s.apple.refresh(withAppleRouteEmail(ctx, resource.PrimaryEmail), channel, s.now())
+				if refreshErr != nil {
+					var appleErr *appleAccountError
+					if errors.As(refreshErr, &appleErr) && (appleErr.Category == "session_invalid" || appleErr.Category == "invalid_context") {
+						continue
+					}
+					deferredErr = errors.Join(deferredErr, refreshErr)
+					continue
+				}
+				if err := s.saveFamilyCookieRefresh(ctx, resource, channel, refreshed); err != nil {
+					return iCloudFamilySnapshot{}, false, err
+				}
+				// This save advances the shared credential fence used by all
+				// channel writers. Carry its version through the remaining flow.
+				resource.CredentialRevision++
+				resource.ValidationGeneration++
+				if resource.Status == iCloudResourceValidating {
+					resource.Status = iCloudResourcePending
+				}
+				triedCookies[iCloudFamilyCookie(refreshed)] = true
+				snapshot, err = s.fetchResourceFamily(ctx, resource, refreshed)
+				if err == nil {
+					return snapshot, true, nil
+				}
+				if !errors.As(err, &familyErr) || familyErr.Category != "session_invalid" {
+					deferredErr = errors.Join(deferredErr, err)
+				}
 			}
 		}
-		return iCloudFamilySnapshot{}, false, nil
+		return iCloudFamilySnapshot{}, false, deferredErr
 	}
 	if snapshot, ready, err := tryCookies(); ready || err != nil {
 		return snapshot, err
@@ -250,6 +283,11 @@ func (s *Service) refreshFamilySnapshot(ctx context.Context, task iCloudFamilyRe
 		defer cancel()
 		_ = releaseFamilyLoginScript.Run(releaseCtx, s.deviceRedis, []string{familyRedisKey(resource.ID, "login")}, task.Token).Err()
 	}()
+	// A normal Cookie task may have finished between the initial read and
+	// taking the login lease. Reuse its newly persisted Cookie first.
+	if snapshot, ready, err := tryCookies(); ready || err != nil {
+		return snapshot, err
+	}
 	if err := progress("logging_in"); err != nil {
 		return iCloudFamilySnapshot{}, err
 	}
@@ -334,6 +372,49 @@ func (s *Service) loginFamilyDevice(ctx context.Context, resource iCloudResource
 		return nil, ErrICloudOnboardingProvider
 	}
 	return response.NewChannel, nil
+}
+
+func (s *Service) saveFamilyCookieRefresh(ctx context.Context, resource iCloudResourceModel, previous, refreshed iCloudResourceChannelModel) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var root iCloudRootModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&root, resource.ID).Error; err != nil {
+			return err
+		}
+		locked, err := lockICloudProvisionResourceTx(ctx, tx, resource)
+		if err != nil {
+			return err
+		}
+		if iCloudCookieMaintenanceWorkflowActive(*locked) {
+			return errFamilyAccountBusy
+		}
+		var current iCloudResourceChannelModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND resource_id = ?", previous.ID, resource.ID).Take(&current).Error; err != nil {
+			return err
+		}
+		if current.Cookie != previous.Cookie || current.SetupCookie != previous.SetupCookie || !current.UpdatedAt.Equal(previous.UpdatedAt) {
+			return errICloudRefreshStale
+		}
+		now := s.now().UTC().Truncate(time.Millisecond)
+		if err := tx.Model(&current).Updates(map[string]any{
+			"cookie": refreshed.Cookie, "scnt": refreshed.Scnt, "session_id": refreshed.SessionID,
+			"api_key": refreshed.APIKey, "data_access_token": refreshed.DataAccessToken,
+			"manage_expires_at": refreshed.ManageExpiresAt, "updated_at": now,
+			"session_status": iCloudSessionUnchecked, "session_failures": 0,
+		}).Error; err != nil {
+			return err
+		}
+		updates := map[string]any{
+			"credential_revision": locked.CredentialRevision + 1, "credential_updated_at": now,
+			"validation_generation": locked.ValidationGeneration + 1, "next_validation_at": now, "updated_at": now,
+		}
+		if locked.Status == iCloudResourceValidating {
+			updates["status"] = iCloudResourcePending
+		}
+		if err := tx.Model(locked).Updates(updates).Error; err != nil {
+			return err
+		}
+		return tx.Model(&root).Updates(map[string]any{"version": gorm.Expr("version + 1"), "updated_at": now}).Error
+	})
 }
 
 func (s *Service) saveFamilyCookie(ctx context.Context, expected iCloudResourceModel, channel *AppleOnboardingChannel) error {

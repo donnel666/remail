@@ -156,7 +156,7 @@ func (s *Service) ensureICloudCookieRecoveryTx(ctx context.Context, tx *gorm.DB,
 	}
 	// Persist the random delay in the resource workflow row so a worker restart
 	// cannot turn a delayed recovery into an immediate SMS request.
-	nextAttempt := now.Add(time.Duration(1+rand.Intn(60)) * time.Minute)
+	nextAttempt := now.Add(time.Duration(1+rand.Intn(10)) * time.Minute)
 	updates := map[string]any{
 		"import_id": resource.WorkflowImportID, "resource_id": resource.ID, "task_kind": iCloudCookieRecoveryTaskKind,
 		"line_number": resource.WorkflowLineNumber, "family_reservation_confirmed": false,
@@ -189,7 +189,7 @@ func isICloudCookieRecoveryTask(task *iCloudOnboardingTaskModel) bool {
 	return task != nil && task.TaskKind == iCloudCookieRecoveryTaskKind
 }
 
-// A recovery may sit in the queue for up to an hour. Recheck the credential
+// A recovery starts after a random 1-10 minute delay. Recheck the credential
 // and phone snapshot immediately before the first Apple request so a queued
 // task cannot use secrets that an admin/import operation has replaced.
 func (s *Service) preflightICloudCookieRecoveryTask(ctx context.Context, task *iCloudOnboardingTaskModel) (bool, error) {

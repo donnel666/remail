@@ -115,14 +115,18 @@ type iCloudFamilyMembersResponse struct {
 	IsMemberOfFamily *bool                      `json:"isMemberOfFamily"`
 }
 
+func iCloudFamilyCookie(channel iCloudResourceChannelModel) string {
+	if channel.Kind != iCloudChannelAppleAccount && strings.TrimSpace(channel.SetupCookie) != "" {
+		return strings.TrimSpace(channel.SetupCookie)
+	}
+	return strings.TrimSpace(channel.Cookie)
+}
+
 func (c *iCloudFamilyClient) fetch(ctx context.Context, channel iCloudResourceChannelModel) (iCloudFamilySnapshot, error) {
 	if c == nil || c.httpClient == nil || strings.TrimSpace(c.endpoint) == "" {
 		return iCloudFamilySnapshot{}, &iCloudFamilyError{Category: "provider_unavailable", SafeMessage: "iCloud family service is unavailable.", Retryable: true}
 	}
-	cookie := strings.TrimSpace(channel.SetupCookie)
-	if cookie == "" {
-		cookie = strings.TrimSpace(channel.Cookie)
-	}
+	cookie := iCloudFamilyCookie(channel)
 	if (channel.Kind != "" && channel.Kind != iCloudChannelWeb && channel.Kind != iCloudChannelAppleAccount && channel.Kind != iCloudChannelFamilySession) || !validICloudFamilyCookie(cookie) {
 		return iCloudFamilySnapshot{}, &iCloudFamilyError{Category: "session_invalid", SafeMessage: "iCloud family session is invalid."}
 	}

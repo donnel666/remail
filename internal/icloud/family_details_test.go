@@ -33,6 +33,9 @@ func newFamilyDetailsTest(t *testing.T) (*Service, *gorm.DB, *miniredis.Miniredi
 	red := miniredis.RunT(t)
 	s.deviceRedis = redis.NewClient(&redis.Options{Addr: red.Addr()})
 	s.queue = asynq.NewClient(asynq.RedisClientOpt{Addr: red.Addr()})
+	s.apple = NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(strings.NewReader("unauthorized"))}, nil
+	})})
 	t.Cleanup(func() { _ = s.deviceRedis.Close(); _ = s.queue.Close() })
 	return s, db, red
 }
@@ -111,11 +114,168 @@ func TestFamilyDetailsUseRedisAndLiveLocalCounts(t *testing.T) {
 	require.NotEmpty(t, view.LastError)
 }
 
+func TestFamilyRenewsManagementCookieWithoutDeviceLogin(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		status int
+	}{
+		{"renewed session", http.StatusOK},
+		{"temporary service error", http.StatusServiceUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s, db, _ := newFamilyDetailsTest(t)
+			require.NoError(t, db.Model(&iCloudResourceModel{}).Where("id = 1").Update("device_code_api", "https://devices.orangeid.top:56133/api/free/v4/getcode?id=1").Error)
+			now := s.now()
+			require.NoError(t, db.Create(&iCloudResourceChannelModel{ResourceID: 1, Kind: iCloudChannelAppleAccount,
+				Host: "appleid.apple.com", Cookie: "myacinfo=valid; caw=expired", SetupCookie: "caw=obsolete", Scnt: "old-scnt", APIKey: "old-api", SessionStatus: iCloudSessionValid, UpdatedAt: now,
+				ProvisionWindowCount: 7, CooldownUntil: &now,
+			}).Error)
+			calls := []string{}
+			s.apple = NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+				calls = append(calls, request.URL.Path)
+				header, body := make(http.Header), `{}`
+				switch request.URL.Path {
+				case appleAccountTokenPath:
+					require.Equal(t, "myacinfo=valid; caw=expired", request.Header.Get("Cookie"))
+					header.Set("scnt", "new-scnt")
+					header.Add("Set-Cookie", "caw=renewed; Path=/; Secure")
+				case "/account/manage":
+					body = `{"apiKey":"new-api"}`
+				default:
+					t.Fatalf("unexpected authentication request: %s", request.URL.Path)
+				}
+				return &http.Response{StatusCode: test.status, Header: header, Body: io.NopCloser(strings.NewReader(body))}, nil
+			})})
+			s.family = newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+				calls = append(calls, "family")
+				require.NotContains(t, request.Header.Get("Cookie"), "obsolete")
+				status := http.StatusUnauthorized
+				if strings.Contains(request.Header.Get("Cookie"), "caw=renewed") {
+					status = http.StatusOK
+				}
+				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(familyDetailResponse))}, nil
+			})})
+			_, err := s.RefreshAdminICloudFamily(context.Background(), 1)
+			require.NoError(t, err)
+			runFamilyRefreshForTest(t, s)
+			view, err := s.GetAdminICloudFamily(context.Background(), 1)
+			require.NoError(t, err)
+			var channel iCloudResourceChannelModel
+			require.NoError(t, db.Where("resource_id = 1").Take(&channel).Error)
+			if test.status == http.StatusOK {
+				require.Equal(t, "ready", view.State)
+				require.Equal(t, []string{"family", appleAccountTokenPath, "/account/manage", "family"}, calls)
+				require.Contains(t, channel.Cookie, "caw=renewed")
+				require.Equal(t, "new-api", channel.APIKey)
+			} else {
+				require.Equal(t, "failed", view.State)
+				require.Equal(t, "myacinfo=valid; caw=expired", channel.Cookie)
+			}
+			require.EqualValues(t, 7, channel.ProvisionWindowCount)
+			require.NotNil(t, channel.CooldownUntil)
+			require.Empty(t, s.onboardingApple.(*onboardingFakeApple).operations, "existing Cookie refresh must not perform a device login")
+		})
+	}
+}
+
 type familyDeviceTestApple struct {
 	t          *testing.T
 	db         *gorm.DB
 	stale      bool
 	operations []string
+}
+
+func TestFamilyRechecksCookieBeforeDeviceLogin(t *testing.T) {
+	s, db, _ := newFamilyDetailsTest(t)
+	require.NoError(t, db.Model(&iCloudResourceModel{}).Where("id = 1").Update("device_code_api", "https://devices.orangeid.top:56133/api/free/v4/getcode?id=1").Error)
+	require.NoError(t, db.Create(&iCloudResourceChannelModel{ResourceID: 1, Kind: iCloudChannelAppleAccount, Cookie: "myacinfo=old"}).Error)
+	s.family = newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		status := http.StatusOK
+		if request.Header.Get("Cookie") == "myacinfo=old" {
+			status = http.StatusUnauthorized
+			// Simulate a normal Cookie update finishing during the first query.
+			require.NoError(t, db.Model(&iCloudResourceChannelModel{}).Where("resource_id = 1").Update("cookie", "myacinfo=new").Error)
+		}
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(familyDetailResponse))}, nil
+	})})
+	_, err := s.RefreshAdminICloudFamily(context.Background(), 1)
+	require.NoError(t, err)
+	runFamilyRefreshForTest(t, s)
+	view, err := s.GetAdminICloudFamily(context.Background(), 1)
+	require.NoError(t, err)
+	require.Equal(t, "ready", view.State)
+	require.Empty(t, s.onboardingApple.(*onboardingFakeApple).operations)
+}
+
+func TestFamilyRenewalFencesEarlierChannelWrites(t *testing.T) {
+	for _, status := range []string{iCloudResourceNormal, iCloudResourceValidating} {
+		t.Run(status, func(t *testing.T) {
+			s, db, _ := newFamilyDetailsTest(t)
+			ctx := context.Background()
+			require.NoError(t, db.Model(&iCloudResourceModel{}).Where("id = 1").Updates(map[string]any{"status": status, "alias_count": 122}).Error)
+			require.NoError(t, db.Create(&iCloudResourceChannelModel{ResourceID: 1, Kind: iCloudChannelAppleAccount, Cookie: "caw=old", SessionStatus: iCloudSessionValid}).Error)
+			var previousResource iCloudResourceModel
+			var previousChannel iCloudResourceChannelModel
+			require.NoError(t, db.First(&previousResource, 1).Error)
+			require.NoError(t, db.Where("resource_id = 1").Take(&previousChannel).Error)
+			renewed := previousChannel
+			renewed.Cookie = "caw=renewed"
+			require.NoError(t, s.saveFamilyCookieRefresh(ctx, previousResource, previousChannel, renewed))
+			require.ErrorIs(t, s.persistICloudProvisionChannel(ctx, previousResource, previousChannel, true, false, s.now()), errICloudValidationStale)
+			require.ErrorIs(t, s.applyICloudProvisionError(ctx, previousResource, previousChannel, &appleAccountError{Category: "session_invalid"}, s.now()), errICloudValidationStale)
+			var saved iCloudResourceChannelModel
+			require.NoError(t, db.First(&saved, previousChannel.ID).Error)
+			require.Equal(t, "caw=renewed", saved.Cookie)
+			var current iCloudResourceModel
+			require.NoError(t, db.First(&current, 1).Error)
+			require.Equal(t, previousResource.CredentialRevision+1, current.CredentialRevision)
+			require.Equal(t, previousResource.ValidationGeneration+1, current.ValidationGeneration)
+			require.EqualValues(t, 122, current.AliasCount)
+			if status == iCloudResourceNormal {
+				require.Equal(t, status, current.Status)
+			} else {
+				require.Equal(t, iCloudResourcePending, current.Status)
+			}
+			candidates, err := s.iCloudValidationCandidates(ctx, 1)
+			require.NoError(t, err)
+			require.Len(t, candidates, 1, "superseded validation must be replaced, not left running")
+			require.Equal(t, current.CredentialRevision, candidates[0].ExpectedCredentialRevision)
+			require.NoError(t, s.persistICloudProvisionChannel(ctx, current, saved, true, false, s.now()), "a new task can persist the current session normally")
+		})
+	}
+}
+
+func TestFamilyUsesOldCookieWhenNewCookieRenewalIsUnavailable(t *testing.T) {
+	for _, stage := range []string{"family", "renewal"} {
+		t.Run(stage, func(t *testing.T) {
+			s, db, _ := newFamilyDetailsTest(t)
+			require.NoError(t, db.Create(&iCloudResourceChannelModel{ResourceID: 1, Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com", Cookie: "myacinfo=new", Scnt: "context"}).Error)
+			require.NoError(t, db.Create(&iCloudResourceChannelModel{ResourceID: 1, Kind: iCloudChannelWeb, SetupCookie: "caw=old-valid"}).Error)
+			oldRequests := 0
+			s.family = newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+				status := http.StatusUnauthorized
+				if stage == "family" {
+					status = http.StatusServiceUnavailable
+				}
+				if request.Header.Get("Cookie") == "caw=old-valid" {
+					status = http.StatusOK
+					oldRequests++
+				}
+				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(familyDetailResponse))}, nil
+			})})
+			s.apple = NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusServiceUnavailable, Body: io.NopCloser(strings.NewReader("service unavailable"))}, nil
+			})})
+			_, err := s.RefreshAdminICloudFamily(context.Background(), 1)
+			require.NoError(t, err)
+			runFamilyRefreshForTest(t, s)
+			view, err := s.GetAdminICloudFamily(context.Background(), 1)
+			require.NoError(t, err)
+			require.Equal(t, "ready", view.State)
+			require.Equal(t, 1, oldRequests)
+			require.Empty(t, s.onboardingApple.(*onboardingFakeApple).operations)
+		})
+	}
 }
 
 func (a *familyDeviceTestApple) Execute(_ context.Context, request AppleOnboardingRequest) (AppleOnboardingResponse, error) {

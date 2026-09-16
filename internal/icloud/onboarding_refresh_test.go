@@ -12,6 +12,7 @@ import (
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/kitesim"
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -1219,6 +1220,34 @@ func TestICloudRefreshRejectsResourceChangedAfterAppleCall(t *testing.T) {
 	}
 	if channel.Cookie != "expired" {
 		t.Fatalf("stale refresh wrote a cookie: %+v", channel)
+	}
+}
+
+func TestAppleCookieRecoveryDelayIsOneToTenMinutesAndStable(t *testing.T) {
+	for _, deviceAPI := range []string{"", "https://devices.orangeid.top:56133/api/free/v4/getcode?id=1"} {
+		t.Run(map[bool]string{true: "device", false: "sms"}[deviceAPI != ""], func(t *testing.T) {
+			s, db, task, apple := newOnboardingStateTest(t)
+			now := s.now()
+			require.NoError(t, db.AutoMigrate(&iCloudResourceChannelModel{}))
+			require.NoError(t, db.Model(task).Updates(map[string]any{"status": iCloudResourceNormal, "onboarding_status": iCloudOnboardingCompleted, "dispatch_status": "succeeded", "kitesim_phone_id": 7, "device_code_api": deviceAPI}).Error)
+			require.NoError(t, db.Create(&iCloudResourceChannelModel{ResourceID: task.ID, Kind: iCloudChannelAppleAccount, SessionStatus: iCloudSessionInvalid}).Error)
+			ctx := context.Background()
+			created, err := s.ensureICloudCookieRecoveryTx(ctx, db, task.ID)
+			require.NoError(t, err)
+			require.True(t, created)
+			require.NoError(t, db.First(task, task.ID).Error)
+			require.NotNil(t, task.NextAttemptAt)
+			due := *task.NextAttemptAt
+			require.False(t, due.Before(now.Add(time.Minute)))
+			require.False(t, due.After(now.Add(10*time.Minute)))
+			s.now = func() time.Time { return now.Add(30 * time.Second) }
+			created, err = s.ensureICloudCookieRecoveryTx(ctx, db, task.ID)
+			require.NoError(t, err)
+			require.False(t, created)
+			require.NoError(t, db.First(task, task.ID).Error)
+			require.Equal(t, due, *task.NextAttemptAt)
+			require.Empty(t, apple.operations)
+		})
 	}
 }
 

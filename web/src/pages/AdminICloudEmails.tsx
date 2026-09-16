@@ -3772,7 +3772,7 @@ export default function AdminICloudEmails() {
         ),
       },
       {
-        key: "deviceCodeApi", title: t("Device code API"), width: 180,
+        key: "deviceCodeApi", title: t("Device code API"), width: 140,
         render: (_: unknown, item: AdminICloudResourceItem) => <ICloudDeviceActions item={item} />,
       },
       {

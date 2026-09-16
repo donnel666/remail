@@ -3041,7 +3041,7 @@
   "Leave blank to keep the current key": "Leave blank to keep the current key",
   "UID 919; import after 30 seconds; check bindings every 10 seconds; stage delays 1–30 seconds.": "UID 919; import after 30 seconds; check bindings every 10 seconds; stage delays 1–30 seconds.",
   "Device code API": "Device",
-  "Device not bound": "Device not bound",
+  "Device not bound": "Unbound",
   "Device binding queued": "Device binding queued",
   "Device binding in progress": "Device binding in progress",
   "Device bound": "Success",
