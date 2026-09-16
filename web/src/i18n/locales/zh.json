@@ -3031,6 +3031,7 @@
   "Kitesim SMS pickup": "Kitesim 短信取件",
   "SMS links return the newest message within this window and follow the phone expiry.": "取件链接仅返回窗口内最新一条短信，有效期跟随号码。",
   "Default: 120 seconds (2 minutes). Changes apply to subsequent requests.": "默认 120 秒（2 分钟），保存后新请求使用新窗口。",
+  "Copy link": "复制链接",
   "Copy failed": "复制失败",
   "Save settings": "保存设置",
   "Apple device codes": "苹果设备码",

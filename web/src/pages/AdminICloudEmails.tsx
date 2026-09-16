@@ -4303,7 +4303,7 @@ export function ICloudDeviceActions({ item }: { item: AdminICloudResourceItem })
   const status = view ? (view.codeApi ? "success" : view.status) : (item.deviceCodeApiAvailable ? "success" : item.deviceBindStatus || "unbound");
   return <>
     <Button size="small" type="tertiary" disabled={!canManage || item.status === "deleted"} onClick={() => { setOpen(true); void load(); }}>{t(statuses[status] ?? "Device not bound")}</Button>
-    {open && canManage ? <Modal visible title={`${t("Device code API")} · ${item.primaryEmail}`} onCancel={() => setOpen(false)} footer={null} width={600}>
+    {open && canManage ? <Modal visible title={`${t("Device code API")} · ${item.primaryEmail}`} onCancel={() => setOpen(false)} footer={null} width={600} height={400}>
       <div className="space-y-4">
         <Text>{t(statuses[status] ?? "Device not bound")}</Text>
         {view?.codeApi ? <Input aria-label={t("Device code API")} value={view.codeApi} readOnly /> : null}

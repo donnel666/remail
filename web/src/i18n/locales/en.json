@@ -3031,6 +3031,7 @@
   "Kitesim SMS pickup": "Kitesim SMS pickup",
   "SMS links return the newest message within this window and follow the phone expiry.": "SMS links return the newest message within this window and follow the phone expiry.",
   "Default: 120 seconds (2 minutes). Changes apply to subsequent requests.": "Default: 120 seconds (2 minutes). Changes apply to subsequent requests.",
+  "Copy link": "Copy link",
   "Copy failed": "Copy failed",
   "Save settings": "Save settings",
   "Apple device codes": "Apple device codes",
