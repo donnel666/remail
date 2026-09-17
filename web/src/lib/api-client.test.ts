@@ -12,7 +12,11 @@ afterEach(() => {
   }
 });
 
-it("keeps requests alive after 60 seconds and aborts at 120 seconds", async () => {
+it.each([
+  ["/v1/turnstile/config", 120_000],
+  ["/v1/resources/imports", 600_000],
+  ["/v1/admin/resources/imports", 600_000],
+] as const)("keeps %s requests alive until %i ms", async (path, timeoutMs) => {
   vi.useFakeTimers();
   let observed: AbortSignal | undefined;
   vi.stubGlobal("fetch", vi.fn((request: Request) => {
@@ -21,11 +25,20 @@ it("keeps requests alive after 60 seconds and aborts at 120 seconds", async () =
       request.signal.addEventListener("abort", () => reject(new DOMException("Timeout", "AbortError")), { once: true });
     });
   }));
-  const request = apiClient.GET("/v1/turnstile/config", { baseUrl: "http://localhost" });
+  const formData = new FormData();
+  formData.append("file", "test upload");
+  const request = path === "/v1/turnstile/config"
+    ? apiClient.GET(path, { baseUrl: "http://localhost" })
+    : apiClient.POST(path, {
+      baseUrl: "http://localhost",
+      body: formData as never,
+      bodySerializer: (body) => body,
+      params: { header: { "X-CSRF-Token": "csrf", "Idempotency-Key": "timeout-test" } },
+    });
   const rejected = expect(request).rejects.toMatchObject({ name: "AbortError" });
   await vi.advanceTimersByTimeAsync(60_000);
   expect(observed?.aborted).toBe(false);
-  await vi.advanceTimersByTimeAsync(59_999);
+  await vi.advanceTimersByTimeAsync(timeoutMs - 60_001);
   expect(observed?.aborted).toBe(false);
   await vi.advanceTimersByTimeAsync(1);
   await rejected;

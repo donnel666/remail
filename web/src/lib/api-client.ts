@@ -60,7 +60,10 @@ function withTimeoutSignal(input: Request, timeoutMs: number) {
 }
 
 async function fetchWithTimeout(input: Request) {
-  const { request, cleanup } = withTimeoutSignal(input, apiRequestTimeoutMs);
+  const timeoutMs = input.headers.get("Content-Type")?.startsWith("multipart/form-data")
+    ? 600_000
+    : apiRequestTimeoutMs;
+  const { request, cleanup } = withTimeoutSignal(input, timeoutMs);
   try {
     return await globalThis.fetch(request);
   } finally {
