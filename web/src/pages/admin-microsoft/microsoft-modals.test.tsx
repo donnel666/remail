@@ -232,7 +232,7 @@ describe("admin Microsoft modal workflows", () => {
         errorStrategy: "skip",
         longLived: true,
         ownerId: 7,
-      }, expect.any(AbortSignal))
+      }, expect.any(AbortSignal), expect.any(String))
     );
     await waitFor(() => expect(onImported).toHaveBeenCalledTimes(1));
     expect(onCancel).toHaveBeenCalledTimes(1);
@@ -296,7 +296,7 @@ describe("admin Microsoft modal workflows", () => {
 
     await waitFor(() => expect(mocks.importResources).toHaveBeenCalledWith({
       content, errorStrategy: "abort", longLived: false, ownerId: 7,
-    }, expect.any(AbortSignal)));
+    }, expect.any(AbortSignal), expect.any(String)));
     expect(mocks.importResources).toHaveBeenCalledOnce();
     await waitFor(() => expect(onImported).toHaveBeenCalledOnce());
     expect(onCancel).toHaveBeenCalledOnce();

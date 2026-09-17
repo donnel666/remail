@@ -15,7 +15,7 @@ export type ApiErrorBody = Partial<components["schemas"]["Error"]>;
 
 const csrfCookieName = "csrf_token";
 const csrfHeaderName = "X-CSRF-Token";
-export const apiRequestTimeoutMs = 60_000;
+export const apiRequestTimeoutMs = 120_000;
 const authRequiredIgnoredPaths = new Set([
   "/v1/activation",
   "/v1/email/code",

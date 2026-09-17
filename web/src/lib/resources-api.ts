@@ -106,7 +106,8 @@ export async function importMicrosoftResources(
   file: File,
   longLived: boolean,
   turnstileToken: string,
-  errorStrategy: ImportErrorStrategy = "skip"
+  errorStrategy: ImportErrorStrategy = "skip",
+  signal?: AbortSignal
 ) {
   const formData = new FormData();
   formData.append("file", file);
@@ -120,6 +121,7 @@ export async function importMicrosoftResources(
       params: {
         header: { ...csrfHeader(), ...turnstileHeader(turnstileToken) },
       },
+      signal,
     })
   );
 }

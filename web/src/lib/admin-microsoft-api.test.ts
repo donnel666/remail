@@ -371,6 +371,19 @@ describe("admin Microsoft API adapter", () => {
     }
   });
 
+  it("preserves the caller's batch key when an upload response is lost", async () => {
+    const payload = { content: "mail@outlook.com----password", ownerId: 101, longLived: true, errorStrategy: "skip" as const };
+    apiMocks.POST.mockRejectedValueOnce(new Error("Response lost")).mockResolvedValueOnce({ data: IMPORT_RESPONSE });
+    await expect(importAdminMicrosoftResources(payload, undefined, "stable-batch-key")).rejects.toThrow("Response lost");
+    await expect(importAdminMicrosoftResources(payload, undefined, "stable-batch-key")).resolves.toMatchObject({ importId: 17 });
+    for (let index = 0; index < 2; index += 1) {
+      expect(callOptions(apiMocks.POST, index).params?.header).toEqual({
+        "X-CSRF-Token": "admin-csrf", "Idempotency-Key": "stable-batch-key",
+      });
+    }
+    expect(idempotencyMock).not.toHaveBeenCalled();
+  });
+
   it("rejects an import that is still processing after the polling limit", async () => {
     vi.useFakeTimers();
     try {

@@ -17,6 +17,12 @@ import {
   preprocessMicrosoftImportContent,
   type MicrosoftImportPreprocessFailure,
 } from "./microsoft-import-preprocess";
+import {
+  createMicrosoftImportBatches,
+  runMicrosoftImportBatches,
+  type MicrosoftImportBatches,
+  type MicrosoftImportBatchProgress,
+} from "./microsoft-import-batches";
 
 const { Text } = Typography;
 const ENTRY_AREA_HEIGHT = 208;
@@ -43,9 +49,11 @@ export function ImportMicrosoftEmailsModal({
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
-  const [polling, setPolling] = useState(false);
+  const [progress, setProgress] = useState<MicrosoftImportBatchProgress | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const importPollAbortRef = useRef<AbortController | null>(null);
+  const batchesRef = useRef<MicrosoftImportBatches | null>(null);
+  const polling = busy && progress?.polling && progress.current === progress.total;
 
   const lines = useMemo(
     () =>
@@ -65,7 +73,8 @@ export function ImportMicrosoftEmailsModal({
     setText("");
     setFile(null);
     setBusy(false);
-    setPolling(false);
+    setProgress(null);
+    batchesRef.current = null;
   };
 
   const close = () => {
@@ -78,12 +87,17 @@ export function ImportMicrosoftEmailsModal({
   };
 
   useEffect(() => {
-    if (open) return;
-    importPollAbortRef.current?.abort();
-    importPollAbortRef.current = null;
-    setPolling(false);
     setBusy(false);
+    return () => {
+      importPollAbortRef.current?.abort();
+      importPollAbortRef.current = null;
+    };
   }, [open]);
+
+  useEffect(() => {
+    batchesRef.current = null;
+    setProgress(null);
+  }, [text, file, lifetimeType, errorStrategy, open]);
 
   const switchButtonClass = (active: boolean) =>
     [
@@ -94,69 +108,98 @@ export function ImportMicrosoftEmailsModal({
     ].join(" ");
 
   const handleImport = async () => {
-    if (lines.length === 0 && !file) return;
+    if (busy || importPollAbortRef.current || batchesRef.current?.failed || batchesRef.current?.uploadUncertain) return;
+    if (mode === "paste" ? lines.length === 0 : !file) return;
+    const controller = new AbortController();
+    importPollAbortRef.current = controller;
+    const isCurrentImport = () =>
+      importPollAbortRef.current === controller && !controller.signal.aborted;
     setBusy(true);
     try {
-      const sourceText = mode === "paste" ? text : (await file?.text()) ?? "";
-      const sourceName =
-        mode === "paste" ? "microsoft-resources.txt" : file?.name;
-      if (!sourceName) return;
-
-      const prepared = preprocessMicrosoftImportContent(
-        sourceText,
-        errorStrategy
-      );
-      if (prepared.firstFailure) {
-        Toast.error(
-          getImportPreprocessFailureMessage(t, prepared.firstFailure)
-        );
-        return;
+      const sourceName = mode === "paste" ? "microsoft-resources.txt" : file!.name;
+      if (!batchesRef.current) {
+        let sourceText = text;
+        if (mode === "file" && file) {
+          const bytes = await file.arrayBuffer();
+          if (!isCurrentImport()) return;
+          try {
+            sourceText = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+          } catch {
+            Toast.error(t("Import file must be UTF-8 encoded."));
+            return;
+          }
+        }
+        const prepared = preprocessMicrosoftImportContent(sourceText, errorStrategy);
+        if (prepared.firstFailure) {
+          Toast.error(getImportPreprocessFailureMessage(t, prepared.firstFailure));
+          return;
+        }
+        if (prepared.validCount === 0) throw new Error("No valid import entries.");
+        batchesRef.current = createMicrosoftImportBatches(prepared.content);
+        if (prepared.skippedCount > 0) {
+          Toast.warning(t("Import skipped errors", { count: prepared.skippedCount }));
+        }
       }
-      if (prepared.validCount === 0) {
-        throw new Error("No valid import entries.");
-      }
-      if (prepared.skippedCount > 0) {
-        Toast.warning(
-          t("Import skipped errors", { count: prepared.skippedCount })
-        );
-      }
-
-      const uploadFile = new File([prepared.content], sourceName, {
-        type: "text/plain",
-      });
-
-      // Challenged only after preprocessing passes, so a file that fails
-      // validation never costs the user a verification.
-      const turnstileToken = await requireTurnstile("resource_import");
-      if (!turnstileToken) return;
-      const result = await importMicrosoftResources(
-        uploadFile,
-        lifetimeType === "long_lived",
-        turnstileToken,
-        errorStrategy
-      );
-      Toast.success(t("Resource import accepted."));
-      const controller = new AbortController();
-      importPollAbortRef.current = controller;
-      setPolling(true);
-      const status = await waitForResourceImport(result.importId, {
+      const batches = batchesRef.current;
+      // The shared Turnstile dialog allows only one active challenge at a time.
+      let verificationQueue = Promise.resolve<string | null>(null);
+      const finished = await runMicrosoftImportBatches(batches, {
+        upload: async (chunk, index) => {
+          // Turnstile tokens are single-use: every upload needs its own token.
+          const verification = verificationQueue.then(async () => {
+            if (batches.paused || !isCurrentImport()) return null;
+            const token = await requireTurnstile("resource_import", controller.signal);
+            if (!token) batches.paused = true;
+            return token;
+          });
+          verificationQueue = verification.catch(() => null);
+          const token = await verification;
+          if (!token || batches.paused || !isCurrentImport()) return null;
+          const name = batches.chunks.length === 1 ? sourceName : `${sourceName}.part-${index + 1}.txt`;
+          return importMicrosoftResources(
+            new File([chunk], name, { type: "text/plain" }),
+            lifetimeType === "long_lived", token, errorStrategy, controller.signal
+          );
+        },
+        poll: (id) => waitForResourceImport(id, { signal: controller.signal }),
+        onProgress: setProgress,
+        onResult: (status) => {
+          if (status.status === "imported" && status.lastSafeError) {
+            Toast.warning(getImportWarningMessage(t, status.lastSafeError));
+          }
+        },
         signal: controller.signal,
       });
-      if (status.status === "failed") {
-        throw new Error(status.lastSafeError || "Resource import failed.");
+      if (!isCurrentImport()) return;
+      if (!finished) {
+        Toast.info(t("Import paused. Click Import to continue the remaining batches."));
+        return;
       }
-      if (status.lastSafeError) {
-        Toast.warning(getImportWarningMessage(t, status.lastSafeError));
+      Toast.success(t("Microsoft resources imported.", { count: batches.imported }));
+      try {
+        await onSuccess();
+      } catch (error) {
+        if (isCurrentImport()) Toast.error(getIamErrorMessage(t, error, "Resource import failed."));
       }
-      close();
-      await onSuccess();
+      if (!isCurrentImport()) return;
+      reset();
+      onOpenChange(false);
     } catch (error) {
-      if (isAbortError(error)) return;
+      if (!isCurrentImport()) return;
       Toast.error(getIamErrorMessage(t, error, "Resource import failed."));
+      if (batchesRef.current?.imported) {
+        Toast.warning(t("Completed import batches are kept. Remaining batches have not been uploaded."));
+        try {
+          await onSuccess();
+        } catch (refreshError) {
+          if (isCurrentImport()) Toast.error(getIamErrorMessage(t, refreshError, "Resource import failed."));
+        }
+      }
     } finally {
-      importPollAbortRef.current = null;
-      setPolling(false);
-      setBusy(false);
+      if (isCurrentImport()) {
+        importPollAbortRef.current = null;
+        setBusy(false);
+      }
     }
   };
 
@@ -168,7 +211,7 @@ export function ImportMicrosoftEmailsModal({
             {polling ? t("Continue in background") : t("Cancel")}
           </Button>
           <Button
-            disabled={mode === "paste" ? lines.length === 0 : !file}
+            disabled={batchesRef.current?.failed || batchesRef.current?.uploadUncertain || (mode === "paste" ? lines.length === 0 : !file)}
             loading={busy}
             onClick={handleImport}
             type="primary"
@@ -186,6 +229,7 @@ export function ImportMicrosoftEmailsModal({
         <div className="grid grid-cols-2 gap-2">
           <button
             className={switchButtonClass(mode === "paste")}
+            disabled={busy}
             onClick={() => {
               setMode("paste");
               setFile(null);
@@ -197,6 +241,7 @@ export function ImportMicrosoftEmailsModal({
           </button>
           <button
             className={switchButtonClass(mode === "file")}
+            disabled={busy}
             onClick={() => {
               setMode("file");
               setText("");
@@ -211,6 +256,7 @@ export function ImportMicrosoftEmailsModal({
         <div className="grid grid-cols-2 gap-2">
           <button
             className={switchButtonClass(lifetimeType === "long_lived")}
+            disabled={busy}
             onClick={() => setLifetimeType("long_lived")}
             type="button"
           >
@@ -218,6 +264,7 @@ export function ImportMicrosoftEmailsModal({
           </button>
           <button
             className={switchButtonClass(lifetimeType === "short_lived")}
+            disabled={busy}
             onClick={() => setLifetimeType("short_lived")}
             type="button"
           >
@@ -228,6 +275,7 @@ export function ImportMicrosoftEmailsModal({
         <div className="grid grid-cols-2 gap-2">
           <button
             className={switchButtonClass(errorStrategy === "skip")}
+            disabled={busy}
             onClick={() => setErrorStrategy("skip")}
             type="button"
           >
@@ -235,6 +283,7 @@ export function ImportMicrosoftEmailsModal({
           </button>
           <button
             className={switchButtonClass(errorStrategy === "abort")}
+            disabled={busy}
             onClick={() => setErrorStrategy("abort")}
             type="button"
           >
@@ -246,6 +295,7 @@ export function ImportMicrosoftEmailsModal({
           {mode === "paste" ? (
             <TextArea
               className="font-mono"
+              disabled={busy}
               onChange={(value) => setText(value)}
               placeholder="email----password"
               rows={8}
@@ -255,13 +305,16 @@ export function ImportMicrosoftEmailsModal({
           ) : (
             <button
               className="flex w-full flex-col items-center justify-center rounded-xl border border-dashed border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-6 text-center transition-colors hover:bg-[var(--semi-color-fill-1)]"
+              disabled={busy}
               onClick={() => fileRef.current?.click()}
               style={{ height: ENTRY_AREA_HEIGHT }}
               type="button"
             >
               <input
                 accept=".txt"
+                aria-label={t("TXT file")}
                 className="hidden"
+                disabled={busy}
                 onChange={(event) => setFile(event.target.files?.[0] ?? null)}
                 ref={fileRef}
                 type="file"
@@ -286,6 +339,17 @@ export function ImportMicrosoftEmailsModal({
           </div>
         </div>
 
+        {progress ? (
+          <div aria-live="polite" className="text-xs text-[var(--semi-color-text-2)]" role="status">
+            {t("Import batch progress", { current: progress.current, total: progress.total, completed: batchesRef.current?.completed ?? 0 })}
+            {batchesRef.current?.failed ? <p>{t("This batch failed. Correct the remaining data before importing again.")}</p> : null}
+            {batchesRef.current?.uploadUncertain ? <p>{t("Upload result is unknown. Check imported emails before importing the remaining data.")}</p> : null}
+          </div>
+        ) : null}
+        <p className="text-xs text-[var(--semi-color-text-2)]">
+          {t("Large files are split into batches of up to 99 MB. Keep this dialog open until all batches are uploaded.")}
+        </p>
+
         <div className="rounded-xl border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-3">
           <div className="mb-1 text-xs font-medium text-[var(--semi-color-text-0)]">
             {t("Supported format")}
@@ -309,10 +373,6 @@ export function getImportWarningMessage(t: TFunction, safeMessage: string) {
     { message: safeMessage },
     "Resource import completed with warnings."
   );
-}
-
-function isAbortError(error: unknown) {
-  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function getImportPreprocessFailureMessage(

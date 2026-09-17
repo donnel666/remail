@@ -25,6 +25,12 @@ import {
 } from "@/lib/admin-microsoft-api";
 
 import { MICROSOFT_EMAIL_FORMAT_HINT } from "../resources/model";
+import {
+  createMicrosoftImportBatches,
+  runMicrosoftImportBatches,
+  type MicrosoftImportBatches,
+  type MicrosoftImportBatchProgress,
+} from "../resources/microsoft-import-batches";
 import { InfoItem, ownerRoleLabel } from "./microsoft-meta";
 import type {
   AdminMicrosoftImportErrorStrategy,
@@ -124,9 +130,11 @@ export function ImportMicrosoftModal({
   const [errorStrategy, setErrorStrategy] =
     useState<AdminMicrosoftImportErrorStrategy>("skip");
   const [submitting, setSubmitting] = useState(false);
-  const [polling, setPolling] = useState(false);
+  const [progress, setProgress] = useState<MicrosoftImportBatchProgress | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const importAbortRef = useRef<AbortController | null>(null);
+  const batchesRef = useRef<MicrosoftImportBatches | null>(null);
+  const polling = submitting && progress?.polling && progress.current === progress.total;
 
   useEffect(() => {
     if (!visible) return;
@@ -137,12 +145,18 @@ export function ImportMicrosoftModal({
     setLongLived(true);
     setErrorStrategy("skip");
     setSubmitting(false);
-    setPolling(false);
+    setProgress(null);
+    batchesRef.current = null;
     return () => {
       importAbortRef.current?.abort();
       importAbortRef.current = null;
     };
   }, [visible]);
+
+  useEffect(() => {
+    batchesRef.current = null;
+    setProgress(null);
+  }, [content, file, ownerId, longLived, errorStrategy]);
 
   useEffect(() => {
     if (!visible || ownerId !== undefined) return;
@@ -180,12 +194,13 @@ export function ImportMicrosoftModal({
     setContent("");
     setFile(null);
     setSubmitting(false);
-    setPolling(false);
+    setProgress(null);
+    batchesRef.current = null;
     onCancel();
   };
 
   const submit = async () => {
-    if (submitting || importAbortRef.current) return;
+    if (submitting || importAbortRef.current || batchesRef.current?.failed) return;
     if (!ownerId) {
       Toast.warning(t("Please select an owner."));
       return;
@@ -202,48 +217,43 @@ export function ImportMicrosoftModal({
       importAbortRef.current === controller && !controller.signal.aborted;
     setSubmitting(true);
     try {
-      let sourceContent = content;
-      if (mode === "file" && file) {
-        const bytes = await file.arrayBuffer();
-        if (!isCurrentImport()) return;
-        try {
-          sourceContent = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-        } catch {
-          Toast.error(t("Import file must be UTF-8 encoded."));
+      if (!batchesRef.current) {
+        let sourceContent = content;
+        if (mode === "file" && file) {
+          const bytes = await file.arrayBuffer();
+          if (!isCurrentImport()) return;
+          try {
+            sourceContent = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+          } catch {
+            Toast.error(t("Import file must be UTF-8 encoded."));
+            return;
+          }
+        }
+        if (!sourceContent.trim()) {
+          Toast.warning(t("Please enter Microsoft resources."));
           return;
         }
+        batchesRef.current = createMicrosoftImportBatches(sourceContent);
       }
-      if (!sourceContent.trim()) {
-        Toast.warning(t("Please enter Microsoft resources."));
-        return;
-      }
-      const accepted = await importAdminMicrosoftResources({
-        content: sourceContent,
-        errorStrategy,
-        longLived,
-        ownerId,
-      }, controller.signal);
+      const batches = batchesRef.current;
+      await runMicrosoftImportBatches(batches, {
+        upload: (chunk, _index, idempotencyKey) => importAdminMicrosoftResources({
+          content: chunk, errorStrategy, longLived, ownerId,
+        }, controller.signal, idempotencyKey),
+        idempotentUploads: true,
+        poll: (id) => waitForAdminMicrosoftResourceImport(id, { signal: controller.signal }),
+        onProgress: setProgress,
+        onResult: (status) => {
+          if (status.skipped) Toast.warning(t("Import skipped errors", { count: status.skipped }));
+        },
+        signal: controller.signal,
+      });
       if (!isCurrentImport()) return;
-      let response = accepted;
-      if (accepted.status === "processing") {
-        setPolling(true);
-        Toast.success(t("Resource import accepted."));
-        response = await waitForAdminMicrosoftResourceImport(accepted.importId, {
-          signal: controller.signal,
-        });
-        if (!isCurrentImport()) return;
-      }
-      if (response.status === "failed") {
-        throw new Error(response.lastSafeError || "Resource import failed.");
-      }
       Toast.success(
         t("Microsoft resources imported.", {
-          count: response.imported,
+          count: batches.imported,
         })
       );
-      if (response.skipped > 0) {
-        Toast.warning(t("Import skipped errors", { count: response.skipped }));
-      }
       try {
         await onImported();
       } catch (error) {
@@ -259,12 +269,19 @@ export function ImportMicrosoftModal({
     } catch (error) {
       if (isCurrentImport()) {
         Toast.error(getIamErrorMessage(t, error, "Resource import failed."));
+        if (batchesRef.current?.imported) {
+          Toast.warning(t("Completed import batches are kept. Remaining batches have not been uploaded."));
+          try {
+            await onImported();
+          } catch (refreshError) {
+            if (isCurrentImport()) Toast.error(getIamErrorMessage(t, refreshError, "Admin Microsoft resources load failed."));
+          }
+        }
       }
     } finally {
       if (isCurrentImport()) {
         importAbortRef.current = null;
         setSubmitting(false);
-        setPolling(false);
       }
     }
   };
@@ -277,14 +294,14 @@ export function ImportMicrosoftModal({
       confirmLoading={submitting}
       onCancel={close}
       onOk={() => void submit()}
-      okButtonProps={{ disabled: mode === "paste" ? lines.length === 0 : !file }}
+      okButtonProps={{ disabled: batchesRef.current?.failed || (mode === "paste" ? lines.length === 0 : !file) }}
       okText={t("Import")}
       title={t("Import Microsoft Emails")}
       visible={visible}
       width="min(666px, calc(100vw - 32px))"
     >
       <div className="space-y-4 py-1">
-        <label className="block">
+        <label className="block" inert={submitting}>
           <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
             {t("Owner")} *
           </span>
@@ -320,9 +337,20 @@ export function ImportMicrosoftModal({
           </button>
         </div>
 
+        {progress ? (
+          <div aria-live="polite" className="text-xs text-[var(--semi-color-text-2)]" role="status">
+            {t("Import batch progress", { current: progress.current, total: progress.total, completed: batchesRef.current?.completed ?? 0 })}
+            {batchesRef.current?.failed ? <p>{t("This batch failed. Correct the remaining data before importing again.")}</p> : null}
+          </div>
+        ) : null}
+        <p className="text-xs text-[var(--semi-color-text-2)]">
+          {t("Large files are split into batches of up to 99 MB. Keep this dialog open until all batches are uploaded.")}
+        </p>
+
         <div className="grid grid-cols-2 gap-2">
           <button
             className={switchButtonClass(longLived)}
+            disabled={submitting}
             onClick={() => setLongLived(true)}
             type="button"
           >
@@ -330,6 +358,7 @@ export function ImportMicrosoftModal({
           </button>
           <button
             className={switchButtonClass(!longLived)}
+            disabled={submitting}
             onClick={() => setLongLived(false)}
             type="button"
           >
@@ -340,6 +369,7 @@ export function ImportMicrosoftModal({
         <div className="grid grid-cols-2 gap-2">
           <button
             className={switchButtonClass(errorStrategy === "skip")}
+            disabled={submitting}
             onClick={() => setErrorStrategy("skip")}
             type="button"
           >
@@ -347,6 +377,7 @@ export function ImportMicrosoftModal({
           </button>
           <button
             className={switchButtonClass(errorStrategy === "abort")}
+            disabled={submitting}
             onClick={() => setErrorStrategy("abort")}
             type="button"
           >
@@ -364,6 +395,7 @@ export function ImportMicrosoftModal({
             </span>
             <TextArea
               className="font-mono"
+              disabled={submitting}
               onChange={(value) => setContent(value)}
               placeholder="email----password"
               rows={8}

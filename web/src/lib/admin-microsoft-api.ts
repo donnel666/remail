@@ -36,10 +36,10 @@ export type AdminMicrosoftBulkCommandResponse =
 const MAX_PAGE_SIZE = 100;
 const OWNER_PAGE_SIZE = 100;
 
-function commandHeaders() {
+function commandHeaders(idempotencyKey = generateIdempotencyKey()) {
   return {
     ...csrfHeader(),
-    "Idempotency-Key": generateIdempotencyKey(),
+    "Idempotency-Key": idempotencyKey,
   };
 }
 
@@ -174,7 +174,8 @@ export async function listAdminMicrosoftOwners(
 
 export async function importAdminMicrosoftResources(
   payload: ImportAdminMicrosoftResourcesRequest,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  idempotencyKey?: string
 ): Promise<AdminMicrosoftImportResponse> {
   const formData = new FormData();
   const file = new File([payload.content], "microsoft-resources.txt", {
@@ -189,7 +190,7 @@ export async function importAdminMicrosoftResources(
     await client.POST("/v1/admin/resources/imports", {
       body: formData as never,
       bodySerializer: (body) => body,
-      params: { header: commandHeaders() },
+      params: { header: commandHeaders(idempotencyKey) },
       signal,
     })
   );
