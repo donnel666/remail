@@ -165,6 +165,8 @@ P1-I5 分配算法采用 Bucketed Locked LRU Allocation。目标是保持实现�
 | 唯一约束 | 并发正确性最终由 `OrderGuard` 和 allocation active generated unique key 兜底；锁只用于减少复用实体冲突。 |
 | 重试 | Allocation 及承载它的 Trade 顶层事务使用 `READ COMMITTED`，保证等待资源根锁后的历史复核读取最新提交状态且不制造 RR gap 锁。候选根或 subtype 因 `SKIP LOCKED` 未取得、锁后条件失效等尚未写入的瞬时 miss 可继续下一个候选；`OrderGuard` 或 allocation 写入一旦遇到唯一冲突，必须退出并回滚当前事务，禁止带着失败 INSERT 的索引锁继续换候选。同一事务的第一把资源根锁可以等待，后续候选根只允许 `SKIP LOCKED`。事务内不得 sleep；MySQL `1213/1205` 重试只作为异常兜底，不作为候选竞争的正确性机制。超过窗口仍失败返回库存不足。 |
 
+iCloud 按主账号 ID 的 CRC32 划分 256 桶，复用 Microsoft 的有界探测机制：每个供给范围默认先查 4 个单桶，未命中时再把额外 100 个不同桶合为一次 `IN` 查询；桶序号可取模回绕，但禁止扫描剩余桶或整圈分页。单桶候选使用 `candidate_window_size`，扩展阶段使用 `global_candidate_window`，默认每个供给范围最多 5 条主账号候选 SQL；预算跨外层重试和仓储事务重试共享。候选按桶内 `last_allocated_at, id` 排序；先对资源根 `FOR UPDATE SKIP LOCKED`，再在单个账号内通过 `idx_icloud_aliases_inventory` 选别名，同项目历史及实时转发域名授权仍在锁内校验。有界未命中返回库存不足，争用耗尽返回分配冲突，均不宣称全局售罄，也不触发同步全量库存查询。
+
 `main/dot/plus` 权重只决定首选 mailbox 类型，不表示唯一可选类型。若首选类型因库存耗尽失败，分配器可按同一商品内其他非零权重类型继续尝试，避免有库存但误报无库存。权重选择必须基于 `orderNo + productId` 的确定性 hash，保证幂等重放不会漂移。
 
 Microsoft `main` 在持有资源根锁后必须同时复核当前项目历史和项目级 active main；同一主资源可被不同项目同时使用。当前项目 main 已占用但 explicit alias 可用时直接分配 alias，不得先制造一次必然失败的 main INSERT。dot/plus/generated mailbox 使用幂等 upsert 取得实体，禁用实体只作为候选 miss 跳过，不使用 duplicate-key 异常驱动同事务内的变体循环。历史识别导入若需要创建订单，锁顺序与 Checkout 一致为 `wallet -> resource root -> allocation`；上游历史扫描不得在调用 Trade 前锁定或更新资源，refresh token 写入必须放在历史导入之后。

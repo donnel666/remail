@@ -169,7 +169,7 @@ func (s *Server) start() {
 	req := testcontainers.ContainerRequest{
 		Image:        "mysql:8.0",
 		ExposedPorts: []string{"3306/tcp"},
-		Cmd:          []string{"--innodb-use-native-aio=OFF"},
+		Cmd:          []string{"--innodb-use-native-aio=OFF", "--max-connections=550"},
 		Env: map[string]string{
 			"TZ":                  "Asia/Shanghai",
 			"MYSQL_ROOT_PASSWORD": "root",

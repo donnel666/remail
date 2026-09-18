@@ -38,15 +38,29 @@ func InventoryRefreshParametersValue() InventoryRefreshParameters {
 }
 
 var (
-	errCandidateUnavailable          = errors.New("allocation candidate unavailable")
-	errResourceRootBusy              = errors.New("allocation resource root busy")
-	errResourceTypeBusy              = errors.New("allocation resource type busy")
-	errMicrosoftProbeBudgetExhausted = fmt.Errorf("microsoft bucket probe budget exhausted: %w", domain.ErrAllocationConflict)
+	errCandidateUnavailable       = errors.New("allocation candidate unavailable")
+	errResourceRootBusy           = errors.New("allocation resource root busy")
+	errResourceTypeBusy           = errors.New("allocation resource type busy")
+	errBucketProbeBudgetExhausted = fmt.Errorf("bucket probe budget exhausted: %w", domain.ErrAllocationConflict)
 )
 
-type microsoftProbeWindow struct {
+type bucketProbeWindow struct {
 	batches [][]uint16
 	busy    bool
+}
+
+func newBucketProbeWindow(orderNo string, projectID uint, kind string, bucketCount uint16, expansionBuckets int) *bucketProbeWindow {
+	initial := bucketProbeSequence(orderNo, projectID, kind, bucketCount)
+	window := &bucketProbeWindow{}
+	for _, bucket := range initial {
+		window.batches = append(window.batches, []uint16{bucket})
+	}
+	expanded := make([]uint16, min(expansionBuckets, int(bucketCount)-len(initial)))
+	for i := range expanded {
+		expanded[i] = (initial[0] + uint16(len(initial)+i)) % bucketCount
+	}
+	window.batches = append(window.batches, expanded)
+	return window
 }
 
 var pinyinMailboxNameParts = [...]string{
@@ -191,7 +205,8 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 	}
 	// Each supply scope/mailbox owns one window for this entire invocation,
 	// including retries inside the repository's transaction wrapper.
-	microsoftProbes := make(map[[2]string]*microsoftProbeWindow)
+	microsoftProbes := make(map[[2]string]*bucketProbeWindow)
+	icloudProbes := make(map[domain.SupplyScope]*bucketProbeWindow)
 	attempts := candidateRetryCountValue()
 	if uc.repo.HasParentTx(ctx) {
 		// A nested retry would keep the parent wallet/resource locks and sleep in
@@ -257,10 +272,10 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 				if _, locked := lockedRoots[key]; locked {
 					return true, nil
 				}
-				// Gmail rotation must skip a concurrently selected resource even when
+				// Gmail and iCloud skip a concurrently selected resource even when
 				// it is the first candidate. Later roots for every type also skip so the
 				// shared wallet -> resource lock order stays acyclic.
-				if allocationType == domain.AllocationTypeGmail || len(lockedRoots) > 0 {
+				if allocationType == domain.AllocationTypeGmail || allocationType == domain.AllocationTypeICloud || len(lockedRoots) > 0 {
 					locked, err := uc.repo.TryLockResourceRoot(lockCtx, resourceID, allocationType)
 					if locked {
 						lockedRoots[key] = struct{}{}
@@ -288,7 +303,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 					case coredomain.ProductTypeGmail, coredomain.ProductTypeGmailVariant:
 						result, err = uc.allocateGmail(txCtx, attemptCmd, *config)
 					case coredomain.ProductTypeICloud:
-						result, err = uc.allocateICloud(txCtx, attemptCmd, *config)
+						result, err = uc.allocateICloud(txCtx, attemptCmd, *config, icloudProbes)
 					case coredomain.ProductTypeProto:
 						result, err = uc.allocateProto(txCtx, attemptCmd, *config)
 					default:
@@ -307,10 +322,10 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 			}
 			return domain.ErrInsufficientInventory
 		})
-		// Repeating a bounded Microsoft miss would scan the same buckets again.
+		// Repeating a bounded Microsoft/iCloud miss cannot prove exhaustion.
 		if err == nil || errors.Is(err, domain.ErrDefinitiveInventoryExhausted) ||
-			errors.Is(err, errMicrosoftProbeBudgetExhausted) ||
-			(metricType == string(coredomain.ProductTypeMicrosoft) && errors.Is(err, domain.ErrInsufficientInventory)) ||
+			errors.Is(err, errBucketProbeBudgetExhausted) ||
+			((metricType == string(coredomain.ProductTypeMicrosoft) || metricType == string(coredomain.ProductTypeICloud)) && errors.Is(err, domain.ErrInsufficientInventory)) ||
 			(!errors.Is(err, domain.ErrInsufficientInventory) && !errors.Is(err, domain.ErrAllocationConflict) && !errors.Is(err, errResourceTypeBusy)) {
 			break
 		}
@@ -318,7 +333,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 			time.Sleep(candidateRetryDelay)
 		}
 	}
-	if errors.Is(err, errResourceTypeBusy) || err == errMicrosoftProbeBudgetExhausted {
+	if errors.Is(err, errResourceTypeBusy) || err == errBucketProbeBudgetExhausted {
 		err = domain.ErrAllocationConflict
 	}
 	// A concurrent request can commit this order's allocation after our first
@@ -1883,46 +1898,60 @@ func (uc *UseCase) createGmailAllocation(
 	}, nil
 }
 
-func (uc *UseCase) allocateICloud(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig) (*domain.UnifiedAllocation, error) {
+func (uc *UseCase) allocateICloud(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, probes map[domain.SupplyScope]*bucketProbeWindow) (*domain.UnifiedAllocation, error) {
 	now := time.Now().UTC()
-	requiredUntil := cmd.RequiredUntil.UTC()
-	if requiredUntil.Before(now) {
-		requiredUntil = now
+	window := probes[cmd.SupplyScope]
+	if window == nil {
+		window = newBucketProbeWindow(cmd.OrderNo, config.ProjectID, "icloud", ICloudBucketCount, ICloudExpansionBuckets)
+		probes[cmd.SupplyScope] = window
 	}
-	candidates, err := uc.repo.ListICloudSourceCandidates(
-		ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, requiredUntil, globalCandidateWindowValue(),
-	)
-	if err != nil {
-		return nil, err
+	// ponytail: stock outside the bounded window can be missed; a live
+	// availability index is the upgrade path, never a global checkout scan.
+	for len(window.batches) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		buckets := window.batches[0]
+		window.batches = window.batches[1:]
+		limit := candidateWindowSizeValue()
+		if len(buckets) > 1 {
+			limit = globalCandidateWindowValue()
+		}
+		candidates, err := uc.repo.ListICloudSourceCandidates(ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, buckets, limit)
+		if err != nil {
+			window.busy = true
+			return nil, err
+		}
+		for _, resourceID := range candidates {
+			platform.AddAllocationCandidateAttempts(string(domain.AllocationTypeICloud), 1)
+			result, err := uc.tryICloudCandidate(ctx, cmd, config, resourceID, now)
+			if err == nil && result != nil {
+				return result, nil
+			}
+			if errors.Is(err, errResourceRootBusy) {
+				window.busy = true
+				continue
+			}
+			if errors.Is(err, errCandidateUnavailable) || errors.Is(err, domain.ErrInsufficientInventory) {
+				continue
+			}
+			// A failed INSERT must roll back before another bucket is attempted.
+			window.busy = true
+			return nil, err
+		}
 	}
-	resourceBusy := false
-	for _, candidate := range candidates {
-		platform.AddAllocationCandidateAttempts(string(domain.AllocationTypeICloud), 1)
-		result, err := uc.tryICloudCandidate(ctx, cmd, config, candidate, requiredUntil, now)
-		if err == nil && result != nil {
-			return result, nil
-		}
-		if errors.Is(err, errResourceRootBusy) {
-			resourceBusy = true
-			continue
-		}
-		if errors.Is(err, errCandidateUnavailable) || errors.Is(err, domain.ErrInsufficientInventory) {
-			continue
-		}
-		return nil, err
-	}
-	if resourceBusy {
-		return nil, errResourceTypeBusy
+	if window.busy {
+		return nil, errBucketProbeBudgetExhausted
 	}
 	return nil, domain.ErrInsufficientInventory
 }
 
-func (uc *UseCase) tryICloudCandidate(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, candidate ICloudCandidate, requiredUntil, now time.Time) (*domain.UnifiedAllocation, error) {
-	lockRoot := uc.repo.LockResourceRoot
+func (uc *UseCase) tryICloudCandidate(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, resourceID uint, now time.Time) (*domain.UnifiedAllocation, error) {
+	lockRoot := uc.repo.TryLockResourceRoot
 	if cmd.lockResourceRoot != nil {
 		lockRoot = cmd.lockResourceRoot
 	}
-	lockedRoot, err := lockRoot(ctx, candidate.ResourceID, domain.AllocationTypeICloud)
+	lockedRoot, err := lockRoot(ctx, resourceID, domain.AllocationTypeICloud)
 	if err != nil {
 		return nil, err
 	}
@@ -1930,14 +1959,13 @@ func (uc *UseCase) tryICloudCandidate(ctx context.Context, cmd AllocateCommand, 
 		return nil, errResourceRootBusy
 	}
 	locked, err := uc.repo.LockICloudCandidate(
-		ctx, candidate.ResourceID, candidate.AliasID, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, requiredUntil,
+		ctx, resourceID, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope,
 	)
 	if err != nil {
 		return nil, err
 	}
 	if locked == nil {
-		platform.RecordAllocationCandidateRecheckMiss(string(domain.AllocationTypeICloud))
-		return nil, errCandidateUnavailable
+		return nil, domain.ErrInsufficientInventory
 	}
 	if cmd.ensureOrderGuard == nil {
 		return nil, domain.ErrAllocationTxRequired
@@ -1967,7 +1995,7 @@ func (uc *UseCase) tryICloudCandidate(ctx context.Context, cmd AllocateCommand, 
 	}, nil
 }
 
-func (uc *UseCase) allocateMicrosoft(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, probes map[[2]string]*microsoftProbeWindow) (*domain.UnifiedAllocation, error) {
+func (uc *UseCase) allocateMicrosoft(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, probes map[[2]string]*bucketProbeWindow) (*domain.UnifiedAllocation, error) {
 	preferences := microsoftMailboxPreferences(cmd.OrderNo, config)
 	now := time.Now().UTC()
 	resourceBusy := false
@@ -1975,16 +2003,7 @@ func (uc *UseCase) allocateMicrosoft(ctx context.Context, cmd AllocateCommand, c
 		key := [2]string{string(cmd.SupplyScope), string(mailbox)}
 		window := probes[key]
 		if window == nil {
-			initial := bucketProbeSequence(cmd.OrderNo, config.ProjectID, string(mailbox), MicrosoftBucketCount)
-			window = &microsoftProbeWindow{}
-			for _, bucket := range initial {
-				window.batches = append(window.batches, []uint16{bucket})
-			}
-			expanded := make([]uint16, min(MicrosoftExpansionBuckets, int(MicrosoftBucketCount)-len(initial)))
-			for i := range expanded {
-				expanded[i] = (initial[0] + uint16(len(initial)+i)) % MicrosoftBucketCount
-			}
-			window.batches = append(window.batches, expanded)
+			window = newBucketProbeWindow(cmd.OrderNo, config.ProjectID, string(mailbox), MicrosoftBucketCount, MicrosoftExpansionBuckets)
 			probes[key] = window
 		}
 		// ponytail: stock outside this window, or beyond its candidate limits,
@@ -2007,7 +2026,7 @@ func (uc *UseCase) allocateMicrosoft(ctx context.Context, cmd AllocateCommand, c
 		resourceBusy = resourceBusy || window.busy
 	}
 	if resourceBusy {
-		return nil, errMicrosoftProbeBudgetExhausted
+		return nil, errBucketProbeBudgetExhausted
 	}
 	return nil, domain.ErrInsufficientInventory
 }

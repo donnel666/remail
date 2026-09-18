@@ -14,6 +14,8 @@ const GmailVariantInventory int64 = 1_000_000_000
 const (
 	MicrosoftBucketCount        = coredomain.MicrosoftAllocationBucketCount
 	MicrosoftExpansionBuckets   = 100
+	ICloudBucketCount           = 256
+	ICloudExpansionBuckets      = 100
 	DomainBucketCount           = coredomain.DomainAllocationBucketCount
 	GmailDotMaxLocalCharacters  = 30
 	GeneratedMailboxBucketCount = coredomain.GeneratedMailboxBucketCount
@@ -462,14 +464,14 @@ type Repository interface {
 
 	ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, buckets []uint16, limit int, emailSuffix string) ([]MicrosoftCandidate, error)
 	ListGmailSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.GmailMailbox, after *GmailCandidate, limit int) ([]GmailCandidate, error)
-	ListICloudSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, requiredUntil time.Time, limit int) ([]ICloudCandidate, error)
+	ListICloudSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, buckets []uint16, limit int) ([]uint, error)
 	ListDomainSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int, emailSuffix string) ([]DomainCandidate, error)
 	ListGeneratedMailboxCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int, emailSuffix string) ([]GeneratedMailboxCandidate, error)
 	LockResourceRoot(ctx context.Context, resourceID uint, allocationType domain.AllocationType) (bool, error)
 	TryLockResourceRoot(ctx context.Context, resourceID uint, allocationType domain.AllocationType) (bool, error)
 	LockMicrosoftCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, emailSuffix string) (*MicrosoftCandidate, error)
 	LockGmailCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.GmailMailbox) (*GmailCandidate, error)
-	LockICloudCandidate(ctx context.Context, resourceID uint, aliasID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, requiredUntil time.Time) (*ICloudCandidate, error)
+	LockICloudCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope) (*ICloudCandidate, error)
 	LockDomainCandidate(ctx context.Context, resourceID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*DomainCandidate, error)
 	LockGeneratedMailboxCandidate(ctx context.Context, mailboxID uint, resourceID uint, projectID uint) (*GeneratedMailboxCandidate, error)
 	AssertNoActiveAllocations(ctx context.Context, resourceIDs []uint) error

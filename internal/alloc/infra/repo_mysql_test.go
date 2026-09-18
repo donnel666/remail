@@ -1337,28 +1337,33 @@ INSERT INTO icloud_allocations(
 	require.Equal(t, int64(2), *totals.Items[0].PurchaseAvailable)
 	require.Equal(t, int64(2), *totals.Items[0].PurchasePublicAvailable)
 
+	var buckets []uint16
+	require.NoError(t, db.Table("icloud_resources").Where("id IN ?", []uint{1000, 1001}).Pluck("alloc_bucket", &buckets).Error)
 	candidates, err := repo.ListICloudSourceCandidates(
-		context.Background(), 10, 2, domain.SupplyScopePublic, time.Now(), 10,
+		context.Background(), 10, 2, domain.SupplyScopePublic, buckets, 10,
 	)
 	require.NoError(t, err)
 	require.Len(t, candidates, 2)
 	owned, err := repo.ListICloudSourceCandidates(
-		context.Background(), 10, 2, domain.SupplyScopeOwned, time.Now(), 10,
+		context.Background(), 10, 2, domain.SupplyScopeOwned, buckets, 10,
 	)
 	require.NoError(t, err)
 	require.Len(t, owned, 1)
-	require.Equal(t, uint(1001), owned[0].ResourceID)
+	require.Equal(t, uint(1001), owned[0])
 
 	var locked *allocapp.ICloudCandidate
 	require.NoError(t, repo.WithTx(context.Background(), func(ctx context.Context) error {
-		var lockErr error
+		_, lockErr := repo.LockResourceRoot(ctx, 1000, domain.AllocationTypeICloud)
+		if lockErr != nil {
+			return lockErr
+		}
 		locked, lockErr = repo.LockICloudCandidate(
-			ctx, candidates[0].ResourceID, candidates[0].AliasID, 10, 2,
-			domain.SupplyScopePublic, time.Now(),
+			ctx, 1000, 10, 2, domain.SupplyScopePublic,
 		)
 		return lockErr
 	}))
 	require.NotNil(t, locked)
+	require.Equal(t, uint(1), locked.AliasID, "an allocation in another project must not consume this project's alias")
 
 	require.NoError(t, db.Table("icloud_resources").Where("id = ?", 1001).Update("for_sale", false).Error)
 	ownedTotals, err := repo.ListPrivateICloudInventoryTotals(context.Background(), 10, 2)
@@ -1367,11 +1372,11 @@ INSERT INTO icloud_allocations(
 		ProductID: 20, Available: 1,
 	}}, ownedTotals)
 	owned, err = repo.ListICloudSourceCandidates(
-		context.Background(), 10, 2, domain.SupplyScopeOwned, time.Now(), 10,
+		context.Background(), 10, 2, domain.SupplyScopeOwned, buckets, 10,
 	)
 	require.NoError(t, err)
 	require.Len(t, owned, 1)
-	require.Equal(t, uint(1001), owned[0].ResourceID)
+	require.Equal(t, uint(1001), owned[0])
 
 	userTotals, err := allocapp.NewUseCase(repo).GetProductInventoryTotals(context.Background(), 10, 2)
 	require.NoError(t, err)
@@ -1637,11 +1642,16 @@ VALUES (1001, 1, 'high@hotmail.com', 'normal')`).Error)
 type candidateSQLCapture struct {
 	gormlogger.Interface
 	queries []string
+	match   string
 }
 
 func (l *candidateSQLCapture) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
 	sqlText, rows := fc()
-	if strings.Contains(sqlText, "ORDER BY ms.last_allocated_at ASC, ms.quality_score DESC, ms.id ASC") {
+	match := l.match
+	if match == "" {
+		match = "ORDER BY ms.last_allocated_at ASC, ms.quality_score DESC, ms.id ASC"
+	}
+	if strings.Contains(sqlText, match) {
 		l.queries = append(l.queries, sqlText)
 	}
 	l.Interface.Trace(ctx, begin, func() (string, int64) { return sqlText, rows }, err)

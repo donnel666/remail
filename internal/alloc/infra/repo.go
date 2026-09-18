@@ -791,49 +791,51 @@ LIMIT ?`
 	return rows, nil
 }
 
-func (r *Repo) ListICloudSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, _ time.Time, limit int) ([]allocapp.ICloudCandidate, error) {
-	if projectID == 0 || limit <= 0 {
+func (r *Repo) ListICloudSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, buckets []uint16, limit int) ([]uint, error) {
+	if projectID == 0 || buyerUserID == 0 || len(buckets) == 0 || len(buckets) > allocapp.ICloudExpansionBuckets || limit <= 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
-	where := []string{
-		"ir.status = 'normal'",
-		"ia.status = 'normal'",
-		`NOT EXISTS (
-            SELECT 1 FROM icloud_allocations history
-            WHERE history.alias_id = ia.id AND history.project_id = ?
-        )`,
-		`NOT EXISTS (
-	            SELECT 1 FROM icloud_allocations active
-	            WHERE active.alias_id = ia.id
-              AND active.project_id = ?
-              AND active.status = 'allocated'
-	        )`,
+	for _, bucket := range buckets {
+		if bucket >= allocapp.ICloudBucketCount {
+			return nil, domain.ErrInvalidAllocationRequest
+		}
 	}
-	args := []any{projectID, projectID}
-	forwardingCondition, forwardingArgs := iCloudForwardingDomainCondition("ia.forward_to_email")
-	where = append(where, forwardingCondition)
-	args = append(args, forwardingArgs...)
+	eligible, eligibleArgs := iCloudAvailableAliasCondition(projectID)
+	where := []string{
+		"ir.status = 'normal'", "ir.alloc_bucket IN ?",
+		`EXISTS (
+            SELECT /*+ QB_NAME(icloud_candidate_alias) */ STRAIGHT_JOIN 1
+            FROM icloud_aliases ia FORCE INDEX (idx_icloud_aliases_inventory)
+            WHERE ia.resource_id = ir.id AND ` + eligible + `
+        )`,
+	}
+	args := append([]any{buckets}, eligibleArgs...)
+	// Keep alias eligibility correlated to the bounded root scan. Owned supply
+	// may still start with the owner index and reject an empty account cheaply.
+	from := "icloud_resources ir FORCE INDEX (idx_icloud_alloc_bucket)"
+	hint := "/*+ NO_SEMIJOIN(@icloud_candidate_alias)"
 	switch scope {
 	case domain.SupplyScopeOwned:
 		where = append(where, "er.owner_user_id = ?")
 		args = append(args, buyerUserID)
 	default:
 		where = append(where, "ir.for_sale = TRUE")
+		hint += " JOIN_ORDER(ir, er)"
 	}
+	hint += " */ "
 	args = append(args, limit)
-	var rows []allocapp.ICloudCandidate
+	var ids []uint
 	query := `
-SELECT ir.id AS resource_id, ia.id AS alias_id, ia.email AS email
-FROM icloud_aliases ia
-JOIN icloud_resources ir ON ir.id = ia.resource_id
+SELECT ` + hint + `ir.id
+FROM ` + from + `
 JOIN email_resources er ON er.id = ir.id AND er.type = 'icloud'
 WHERE ` + strings.Join(where, " AND ") + `
-ORDER BY ir.last_allocated_at ASC, ia.last_allocated_at ASC, ia.id ASC
+ORDER BY ir.last_allocated_at ASC, ir.id ASC
 LIMIT ?`
-	if err := r.dbFor(ctx).Raw(query, args...).Scan(&rows).Error; err != nil {
-		return nil, fmt.Errorf("list iCloud allocation candidates: %w", err)
+	if err := r.dbFor(ctx).Raw(query, args...).Scan(&ids).Error; err != nil {
+		return nil, fmt.Errorf("list iCloud source allocation candidates: %w", err)
 	}
-	return rows, nil
+	return ids, nil
 }
 
 func (r *Repo) ListDomainSourceCandidates(ctx context.Context, buyerUserID uint, scope domain.SupplyScope, bucket *uint16, limit int, emailSuffix string) ([]allocapp.DomainCandidate, error) {
@@ -1059,28 +1061,16 @@ func (r *Repo) LockGmailCandidate(ctx context.Context, resourceID uint, projectI
 	return &row, nil
 }
 
-func (r *Repo) LockICloudCandidate(ctx context.Context, resourceID uint, aliasID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, _ time.Time) (*allocapp.ICloudCandidate, error) {
-	if resourceID == 0 || aliasID == 0 || projectID == 0 {
+func (r *Repo) LockICloudCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope) (*allocapp.ICloudCandidate, error) {
+	if resourceID == 0 || projectID == 0 || buyerUserID == 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
 	where := []string{
-		"ia.id = ?", "ia.resource_id = ?", "ia.status = 'normal'",
-		"ir.status = 'normal'",
-		`NOT EXISTS (
-            SELECT 1 FROM icloud_allocations history
-            WHERE history.alias_id = ia.id AND history.project_id = ?
-        )`,
-		`NOT EXISTS (
-	            SELECT 1 FROM icloud_allocations active
-	            WHERE active.alias_id = ia.id
-              AND active.project_id = ?
-              AND active.status = 'allocated'
-	        )`,
+		"ia.resource_id = ?", "ir.status = 'normal'",
 	}
-	args := []any{aliasID, resourceID, projectID, projectID}
-	forwardingCondition, forwardingArgs := iCloudForwardingDomainCondition("ia.forward_to_email")
-	where = append(where, forwardingCondition)
-	args = append(args, forwardingArgs...)
+	eligible, eligibleArgs := iCloudAvailableAliasCondition(projectID)
+	where = append(where, eligible)
+	args := append([]any{resourceID}, eligibleArgs...)
 	switch scope {
 	case domain.SupplyScopeOwned:
 		where = append(where, "er.owner_user_id = ?")
@@ -1089,12 +1079,15 @@ func (r *Repo) LockICloudCandidate(ctx context.Context, resourceID uint, aliasID
 		where = append(where, "ir.for_sale = TRUE")
 	}
 	var row allocapp.ICloudCandidate
+	// The resource root is already locked. Keep this ordered scan inside one
+	// account; a semijoin starting at forwarding domains would repeat it.
 	query := `
-SELECT ir.id AS resource_id, ia.id AS alias_id, ia.email AS email
-FROM icloud_aliases ia
+SELECT STRAIGHT_JOIN ir.id AS resource_id, ia.id AS alias_id, ia.email AS email
+FROM icloud_aliases ia FORCE INDEX (idx_icloud_aliases_inventory)
 JOIN icloud_resources ir ON ir.id = ia.resource_id
 JOIN email_resources er ON er.id = ir.id AND er.type = 'icloud'
 WHERE ` + strings.Join(where, " AND ") + `
+ORDER BY ia.last_allocated_at ASC, ia.id ASC
 LIMIT 1
 FOR UPDATE SKIP LOCKED`
 	if err := r.dbFor(ctx).Raw(query, args...).Scan(&row).Error; err != nil {
@@ -1104,6 +1097,14 @@ FOR UPDATE SKIP LOCKED`
 		return nil, nil
 	}
 	return &row, nil
+}
+
+func iCloudAvailableAliasCondition(projectID uint) (string, []any) {
+	forwarding, args := iCloudForwardingDomainCondition("ia.forward_to_email")
+	return `ia.status = 'normal' AND NOT EXISTS (
+        SELECT 1 FROM icloud_allocations history
+        WHERE history.alias_id = ia.id AND history.project_id = ?
+    ) AND ` + forwarding, append([]any{projectID}, args...)
 }
 
 func iCloudForwardingDomainCondition(aliasColumn string) (string, []any) {
