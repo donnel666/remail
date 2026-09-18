@@ -19,6 +19,7 @@ import (
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/donnel666/remail/internal/trade/successranking"
 	"github.com/go-sql-driver/mysql"
+	"github.com/redis/go-redis/v9"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -198,6 +199,11 @@ type BillingRepo struct {
 	hasGmailAllocations  bool
 	hasICloudAllocations bool
 	hasProtoAllocations  bool
+	fulfillmentStats     *platform.HourlySnapshotCache[supplierFulfillmentMetrics]
+}
+
+func (r *BillingRepo) SetStatisticsCache(client redis.UniversalClient) {
+	r.fulfillmentStats = platform.NewHourlySnapshotCache[supplierFulfillmentMetrics](client)
 }
 
 func NewBillingRepo(db *gorm.DB) *BillingRepo {
@@ -296,11 +302,35 @@ JOIN orders o ON o.order_no = allocations.order_no
 WHERE o.debit_tx_id IS NOT NULL
   AND o.order_no NOT LIKE 'HIST-%'`
 
+type supplierFulfillmentMetrics struct {
+	AllocationCount        int64   `gorm:"column:allocation_count"`
+	FulfillmentSuccessRate float64 `gorm:"column:fulfillment_success_rate"`
+}
+
 func (r *BillingRepo) populateSupplierFulfillmentMetrics(ctx context.Context, db *gorm.DB, userID uint, summary *domain.WalletSummary) error {
-	var metrics struct {
-		AllocationCount        int64   `gorm:"column:allocation_count"`
-		FulfillmentSuccessRate float64 `gorm:"column:fulfillment_success_rate"`
+	var metrics supplierFulfillmentMetrics
+	if r.fulfillmentStats != nil {
+		key := fmt.Sprintf("billing:supplier-statistics:v1:%d", userID)
+		cached := r.fulfillmentStats.Get(ctx, key, func(ctx context.Context) (supplierFulfillmentMetrics, error) {
+			return r.loadSupplierFulfillmentMetrics(ctx, r.db, userID)
+		})
+		if cached != nil {
+			metrics = *cached
+		}
+	} else {
+		var err error
+		metrics, err = r.loadSupplierFulfillmentMetrics(ctx, db, userID)
+		if err != nil {
+			return err
+		}
 	}
+	summary.SupplierAllocationCount = metrics.AllocationCount
+	summary.SupplierFulfillmentSuccessRate = metrics.FulfillmentSuccessRate
+	return nil
+}
+
+func (r *BillingRepo) loadSupplierFulfillmentMetrics(ctx context.Context, db *gorm.DB, userID uint) (supplierFulfillmentMetrics, error) {
+	var metrics supplierFulfillmentMetrics
 	allocationQueries := []string{supplierMicrosoftAllocationsSQL, supplierDomainAllocationsSQL}
 	args := []any{time.Now().UTC(), userID, userID}
 	if r.hasGmailAllocations {
@@ -317,11 +347,9 @@ func (r *BillingRepo) populateSupplierFulfillmentMetrics(ctx context.Context, db
 	}
 	query := supplierFulfillmentMetricsPrefix + strings.Join(allocationQueries, "\nUNION ALL\n") + supplierFulfillmentMetricsSuffix
 	if err := db.WithContext(ctx).Raw(query, args...).Scan(&metrics).Error; err != nil {
-		return fmt.Errorf("load supplier fulfillment metrics: %w", err)
+		return metrics, fmt.Errorf("load supplier fulfillment metrics: %w", err)
 	}
-	summary.SupplierAllocationCount = metrics.AllocationCount
-	summary.SupplierFulfillmentSuccessRate = metrics.FulfillmentSuccessRate
-	return nil
+	return metrics, nil
 }
 
 func walletSummaryFromModel(wallet WalletModel) (*domain.WalletSummary, error) {

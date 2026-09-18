@@ -8,11 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/donnel666/remail/api/middleware"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	tradedomain "github.com/donnel666/remail/internal/trade/domain"
+	tradeinfra "github.com/donnel666/remail/internal/trade/infra"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -360,6 +363,46 @@ INSERT INTO project_mail_rules(project_id, rule_type, pattern, enabled) VALUES
 	require.Equal(t, uint(11), adminList.Facets.Projects[1].ProjectID)
 	require.Equal(t, "Second Project", adminList.Facets.Projects[1].Name)
 	require.EqualValues(t, 2, adminList.Facets.Projects[1].Count)
+
+	t.Run("hourly snapshots preserve filters while order rows stay live", func(t *testing.T) {
+		server := miniredis.RunT(t)
+		client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+		t.Cleanup(func() { _ = client.Close() })
+		cachedRepo := tradeinfra.NewRepo(db, client)
+		plainRepo := tradeinfra.NewRepo(db)
+		for _, filter := range []tradeapp.OrderListFilter{
+			{UserID: 2}, {UserID: 3}, {UserID: 1, IsAdmin: true, Scope: "all"},
+			{UserID: 2, Status: tradedomain.OrderStatusActive}, {UserID: 2, ProjectID: 11},
+		} {
+			wantTotal, err := plainRepo.CountOrders(ctx, filter)
+			require.NoError(t, err)
+			wantFacets, err := plainRepo.OrderFacets(ctx, filter)
+			require.NoError(t, err)
+			require.Eventually(t, func() bool {
+				total, facets, err := cachedRepo.CachedOrderStats(ctx, filter)
+				return err == nil && facets != nil && total == wantTotal
+			}, 5*time.Second, 10*time.Millisecond)
+			_, facets, err := cachedRepo.CachedOrderStats(ctx, filter)
+			require.NoError(t, err)
+			require.Equal(t, wantFacets, facets)
+		}
+		filter := tradeapp.OrderListFilter{UserID: 2}
+		_, before, err := cachedRepo.CachedOrderStats(ctx, filter)
+		require.NoError(t, err)
+		require.NoError(t, db.Model(&tradeinfra.OrderModel{}).Where("order_no = ?", first.Order.OrderNo).Update("status", "completed").Error)
+		cachedUC := tradeapp.NewUseCase(cachedRepo, nil, nil, nil, nil)
+		live, err := cachedUC.ListOrders(ctx, filter, 0, 0, 500)
+		require.NoError(t, err)
+		require.Equal(t, before, live.Facets, "statistics remain cached")
+		found := false
+		for _, item := range live.Items {
+			if item.Order.OrderNo == first.Order.OrderNo {
+				found = true
+				require.Equal(t, tradedomain.OrderStatusCompleted, item.Order.Status, "order state is never cached")
+			}
+		}
+		require.True(t, found)
+	})
 }
 
 func TestParseOrderFiltersAndOptionalTime(t *testing.T) {

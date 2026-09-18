@@ -7,10 +7,12 @@ import (
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 type BillingModule struct {
+	repo                  *billinginfra.BillingRepo
 	WalletUseCase         *billingapp.WalletUseCase
 	RechargeUseCase       *billingapp.RechargeUseCase
 	OperationLogs         governanceapp.OperationLogPort
@@ -27,10 +29,15 @@ func NewBillingModule(db *gorm.DB, clients ...*asynq.Client) *BillingModule {
 	}
 	configProvider := billinginfra.RechargeConfigProvider{}
 	return &BillingModule{
+		repo:            repo,
 		WalletUseCase:   billingapp.NewWalletUseCase(repo),
 		RechargeUseCase: billingapp.NewRechargeUseCase(repo, configProvider, billinginfra.NewRechargeGateway(configProvider), billinginfra.NewRechargeQueue(client)),
 		OperationLogs:   operationLogs,
 	}
+}
+
+func (m *BillingModule) SetStatisticsCache(client redis.UniversalClient) {
+	m.repo.SetStatisticsCache(client)
 }
 
 // SetUserSelectionResolver wires the cross-context resolver used by bulk

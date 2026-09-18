@@ -17,6 +17,7 @@ import (
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	"github.com/donnel666/remail/internal/trade/domain"
 	"github.com/go-sql-driver/mysql"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -76,11 +77,16 @@ type OrderEventModel struct {
 func (OrderEventModel) TableName() string { return "order_events" }
 
 type Repo struct {
-	db *gorm.DB
+	db    *gorm.DB
+	stats *platform.HourlySnapshotCache[orderStatistics]
 }
 
-func NewRepo(db *gorm.DB) *Repo {
-	return &Repo{db: db}
+func NewRepo(db *gorm.DB, clients ...redis.UniversalClient) *Repo {
+	r := &Repo{db: db}
+	if len(clients) > 0 {
+		r.stats = platform.NewHourlySnapshotCache[orderStatistics](clients[0])
+	}
+	return r
 }
 
 func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error {

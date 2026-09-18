@@ -38,7 +38,7 @@ func NewModule(db *gorm.DB, coreProjects *coreapp.ProjectUseCase, billingWallet 
 	if len(redisClients) > 0 {
 		redisClient = redisClients[0]
 	}
-	repo := infra.NewRepo(db)
+	repo := infra.NewRepo(db, redisClient)
 	systemLogs := governanceinfra.NewSystemLogRepo(db)
 	operationLogs := governanceinfra.NewOperationLogRepo(db)
 	uc := tradeapp.NewUseCase(

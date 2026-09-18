@@ -1809,13 +1809,17 @@ func (uc *UseCase) ListOrders(ctx context.Context, filter OrderListFilter, offse
 	if err != nil {
 		return nil, err
 	}
-	total, err := uc.repo.CountOrders(ctx, filter)
+	total, facets, err := uc.orderListStats(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
-	facets, err := uc.repo.OrderFacets(ctx, filter)
-	if err != nil {
-		return nil, err
+	// A stale total must not hide newly arrived orders or the next page.
+	observed := int64(offset + len(items))
+	if nextAfterID != nil {
+		observed++
+	}
+	if len(items) > 0 {
+		total = max(total, observed)
 	}
 	results := make([]CheckoutResult, len(items))
 	orderIDs := make([]uint, len(items))
@@ -1845,13 +1849,31 @@ func (uc *UseCase) ListOrders(ctx context.Context, filter OrderListFilter, offse
 	if err := uc.attachAllocationIDs(ctx, allocationResults...); err != nil {
 		return nil, err
 	}
-	if err := uc.attachProjectDisplays(ctx, results, facets.Projects); err != nil {
+	var projects []OrderProjectFacet
+	if facets != nil {
+		projects = facets.Projects
+	}
+	if err := uc.attachProjectDisplays(ctx, results, projects); err != nil {
 		return nil, err
 	}
 	if err := uc.attachOwners(ctx, filter, results); err != nil {
 		return nil, err
 	}
 	return list, nil
+}
+
+func (uc *UseCase) orderListStats(ctx context.Context, filter OrderListFilter) (int64, *OrderListFacets, error) {
+	if reader, ok := uc.repo.(interface {
+		CachedOrderStats(context.Context, OrderListFilter) (int64, *OrderListFacets, error)
+	}); ok {
+		return reader.CachedOrderStats(ctx, filter)
+	}
+	total, err := uc.repo.CountOrders(ctx, filter)
+	if err != nil {
+		return 0, nil, err
+	}
+	facets, err := uc.repo.OrderFacets(ctx, filter)
+	return total, facets, err
 }
 
 // attachOwners enriches each row with its buyer summary. It only runs for the

@@ -291,6 +291,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		// Billing module (wallet, recharge ledger and card-key redemption)
 		billingMod := billingapi.NewBillingModule(p.DB, p.Asynq)
+		billingMod.SetStatisticsCache(p.Redis)
 		billingMod.SetUserSelectionResolver(iamMod.AdminUserSelectionResolver)
 		billingMod.SetUserDirectory(financeUserDirectory{users: iamMod.Users})
 		billingMod.SetMailDelivery(mailMod.DeliveryUseCase)
