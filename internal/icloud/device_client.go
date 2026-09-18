@@ -20,7 +20,7 @@ import (
 var (
 	errDeviceUnavailable       = errors.New("device platform is temporarily unavailable")
 	errDeviceUnauthorized      = errors.New("device platform API key was rejected")
-	errDeviceResponse          = errors.New("device platform response needs adapter verification (TODO)")
+	errDeviceResponse          = errors.New("device platform returned an invalid response")
 	errDeviceNoCode            = errors.New("device verification code is not available yet")
 	errDeviceImportRejected    = errors.New("device platform rejected account import; check its account diagnostics")
 	errDeviceRechargeRejected  = errors.New("device platform rejected the recharge card")

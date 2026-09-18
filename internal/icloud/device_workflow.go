@@ -18,16 +18,22 @@ func (s *Service) ensureOnboardingDevice(ctx context.Context, task *iCloudOnboar
 		return true, nil
 	}
 	if task.KitesimPhoneID == nil {
-		return false, s.waitICloudOnboardingTask(ctx, task, nil, "waiting", "Device enrollment requires the initially bound phone.")
+		return false, s.failICloudOnboardingTask(ctx, task, "phone_binding_missing", "Device enrollment requires the initially bound phone.")
 	}
 	binding, err := s.EnsureDeviceBinding(ctx, task.PrimaryEmail, secret.Password, *task.KitesimPhoneID, task.BoundPhoneNumber, &task.ID, time.Time{})
 	if err != nil {
+		if errors.Is(err, ErrICloudOnboardingInvalid) || errors.Is(err, ErrICloudResourceStatus) || errors.Is(err, errDeviceUnauthorized) {
+			return false, s.failICloudOnboardingTask(ctx, task, "device_binding_failed", "Device enrollment cannot continue; check the account and device platform settings.")
+		}
 		next := s.now().Add(deviceBindingPoll)
-		return false, s.waitICloudOnboardingTask(ctx, task, &next, "pending", "Device enrollment is unavailable; check the device platform settings.")
+		return false, s.retryICloudOnboardingTask(ctx, task, task.Stage, &next, "device_binding_unavailable", "Device enrollment is unavailable; check the device platform settings.", nil)
 	}
 	if binding.Status == "success" && binding.CodeAPI != "" {
 		next := s.now().Add(iCloudOnboardingStageDelay())
 		return false, s.advanceICloudOnboardingTask(ctx, task, task.Stage, &next, map[string]any{"device_code_api": binding.CodeAPI, "device_bind_status": "success", "device_account_id": binding.RemoteID})
+	}
+	if binding.Status != "pending" && binding.Status != "binding" {
+		return false, s.failICloudOnboardingTask(ctx, task, "device_binding_failed", firstNonEmpty(binding.LastError, "Device binding failed or returned an invalid result."))
 	}
 	message := "Waiting for device binding; subsequent verification will use the device API."
 	if binding.LastError != "" {
@@ -40,27 +46,29 @@ func (s *Service) ensureOnboardingDevice(ctx context.Context, task *iCloudOnboar
 		var current iCloudOnboardingTaskModel
 		query := tx.Model(&iCloudOnboardingTaskModel{}).
 			Where("id = ? AND generation = ? AND claim_token = ? AND dispatch_status = ?", task.ID, task.Generation, task.ClaimToken, "running")
-		if err := query.Clauses(clause.Locking{Strength: "UPDATE"}).Select("device_code_api").Take(&current).Error; err != nil {
+		if err := query.Clauses(clause.Locking{Strength: "UPDATE"}).Select("device_code_api", "device_bind_status").Take(&current).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil
 			}
 			return err
 		}
-		// The same resource lock serializes waiting with the binding worker's
-		// success update. A ready API must never be replaced by an indefinite wait.
+		// A binding result arriving before this wait must still wake the workflow.
 		updates := map[string]any{
 			"onboarding_status": iCloudOnboardingWaiting, "dispatch_status": "waiting",
 			"claim_token": "", "next_attempt_at": nil, "last_safe_error": safeICloudImportMessage(message), "updated_at": now,
 		}
-		if current.DeviceCodeAPI != "" {
-			next := now.Add(iCloudOnboardingStageDelay())
+		if current.DeviceCodeAPI != "" || current.DeviceBindStatus == "failed" {
+			next := now
+			if current.DeviceCodeAPI != "" {
+				next = now.Add(iCloudOnboardingStageDelay())
+				updates["stage_attempts"] = 0
+			}
 			resumeAt = &next
 			updates["onboarding_status"] = iCloudOnboardingProcessing
 			updates["dispatch_status"] = "pending"
 			updates["next_attempt_at"] = next
 			updates["last_safe_error"] = ""
 			updates["last_error_category"] = ""
-			updates["stage_attempts"] = 0
 		}
 		omitICloudOldCookieSafeError(task, updates)
 		result := tx.Model(&iCloudOnboardingTaskModel{}).

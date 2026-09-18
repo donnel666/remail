@@ -79,6 +79,7 @@ func (s *Service) ensureDeviceBinding(ctx context.Context, email, password strin
 		confirmedAt = now
 	}
 	var binding deviceBindingModel
+	supersededTask := false
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if resourceID != nil {
 			var resource iCloudResourceModel
@@ -108,6 +109,7 @@ func (s *Service) ensureDeviceBinding(ctx context.Context, email, password strin
 		if !DeviceCodeConfigured() {
 			return errDeviceUnauthorized
 		}
+		retryingFailure := retry && err == nil && binding.Status == "failed"
 		var secret [32]byte
 		if _, err := rand.Read(secret[:]); err != nil {
 			return err
@@ -123,6 +125,16 @@ func (s *Service) ensureDeviceBinding(ctx context.Context, email, password strin
 				Updates(map[string]any{"device_code_api": "", "device_bind_status": "pending", "device_account_id": ""}).Error; err != nil {
 				return err
 			}
+			if retryingFailure {
+				// A worker holding the old failure must lose its claim before this retry commits.
+				result := tx.Model(&iCloudOnboardingTaskModel{}).
+					Where("id = ? AND task_kind = ? AND onboarding_status IN ? AND dispatch_status = ?", *resourceID, "onboarding", []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, "running").
+					Updates(map[string]any{"generation": gorm.Expr("generation + 1"), "claim_token": "", "dispatch_status": "pending", "next_attempt_at": now, "updated_at": now})
+				if result.Error != nil {
+					return result.Error
+				}
+				supersededTask = result.RowsAffected == 1
+			}
 		}
 		if audit != nil {
 			return s.operationLogs.CreateInTx(ctx, tx, audit)
@@ -134,6 +146,9 @@ func (s *Service) ensureDeviceBinding(ctx context.Context, email, password strin
 	}
 	if binding.Status == "pending" || binding.Status == "binding" {
 		_ = s.ScheduleDeviceBindingSync(context.WithoutCancel(ctx))
+	}
+	if supersededTask {
+		_ = s.ScheduleICloudOnboardingDispatcher(context.WithoutCancel(ctx), 0)
 	}
 	return &DeviceBinding{Status: binding.Status, CodeAPI: binding.CodeAPI, RemoteID: binding.RemoteID, LastError: binding.LastError}, nil
 }
@@ -225,6 +240,12 @@ func (s *Service) syncDeviceBindings(ctx context.Context) error {
 			continue
 		}
 		if listErr != nil {
+			if errors.Is(listErr, errDeviceUnauthorized) || errors.Is(listErr, errDeviceResponse) {
+				if err := s.finishDeviceBinding(ctx, binding, "failed", "", "", listErr.Error()); err != nil {
+					return err
+				}
+				continue
+			}
 			if err := s.deviceBindingError(ctx, binding, listErr.Error()); err != nil {
 				return err
 			}
@@ -239,7 +260,10 @@ func (s *Service) syncDeviceBindings(ctx context.Context) error {
 		if len(matches) != 1 {
 			message := "Waiting for the imported device account to appear."
 			if len(matches) > 1 {
-				message = "Multiple device records match this binding; verify the platform response (TODO)."
+				if err := s.finishDeviceBinding(ctx, binding, "failed", "", "", "Multiple device records match this binding."); err != nil {
+					return err
+				}
+				continue
 			}
 			if err := s.deviceBindingError(ctx, binding, message); err != nil {
 				return err
@@ -251,7 +275,7 @@ func (s *Service) syncDeviceBindings(ctx context.Context) error {
 		case "success":
 			api := item.codeURL()
 			if !validDeviceCodeURL(api) {
-				if err := s.deviceBindingError(ctx, binding, errDeviceResponse.Error()); err != nil {
+				if err := s.finishDeviceBinding(ctx, binding, "failed", string(item.ID), "", "Device platform reported success without a usable device code API."); err != nil {
 					return err
 				}
 				continue
@@ -268,7 +292,7 @@ func (s *Service) syncDeviceBindings(ctx context.Context) error {
 				return err
 			}
 		default:
-			if err := s.deviceBindingError(ctx, binding, errDeviceResponse.Error()); err != nil {
+			if err := s.finishDeviceBinding(ctx, binding, "failed", string(item.ID), "", fmt.Sprintf("Device platform returned an unsupported binding status: %q.", item.Status)); err != nil {
 				return err
 			}
 		}
@@ -282,13 +306,16 @@ func (s *Service) deviceBindingError(ctx context.Context, b deviceBindingModel, 
 
 func (s *Service) submitDeviceBinding(ctx context.Context, b deviceBindingModel) error {
 	if !DeviceCodeConfigured() || s.smsPhones == nil {
-		return s.deviceBindingError(ctx, b, "Configure the device API key before binding.")
+		return s.finishDeviceBinding(ctx, b, "failed", "", "", "Device enrollment configuration is unavailable.")
 	}
 	if b.CallbackToken == nil {
 		return s.finishDeviceBinding(ctx, b, "failed", "", "", "Device SMS callback is missing.")
 	}
 	reservation, err := s.smsPhones.ReserveSMSChallenge(ctx, b.PhoneID, "device_binding", deviceBindingTag(b), b.DeadlineAt)
 	if err != nil {
+		if errors.Is(err, kitesim.ErrSMSPhoneBlacklisted) || errors.Is(err, kitesim.ErrSMSPhoneBoundUnavailable) || errors.Is(err, kitesim.ErrPhoneMissing) {
+			return s.finishDeviceBinding(ctx, b, "failed", "", "", err.Error())
+		}
 		return s.deviceBindingError(ctx, b, "Waiting for the phone to become available for device enrollment.")
 	}
 	b.ChallengeID = reservation.ID
@@ -340,7 +367,7 @@ func (s *Service) submitDeviceBinding(ctx context.Context, b deviceBindingModel)
 	// The submitted marker is committed before external I/O. An ambiguous reply
 	// is reconciled through the shared list poller instead of replaying importData.
 	if err := s.device.importAccount(ctx, b, callback); err != nil {
-		if errors.Is(err, errDeviceImportRejected) || errors.Is(err, errDeviceUnauthorized) {
+		if errors.Is(err, errDeviceImportRejected) || errors.Is(err, errDeviceUnauthorized) || errors.Is(err, errDeviceResponse) {
 			return s.finishDeviceBinding(context.WithoutCancel(ctx), b, "failed", "", "", err.Error())
 		}
 		return s.deviceBindingError(context.WithoutCancel(ctx), b, err.Error())
@@ -379,13 +406,17 @@ func (s *Service) finishDeviceBinding(ctx context.Context, b deviceBindingModel,
 			return nil
 		}
 		updates := map[string]any{"device_bind_status": status, "device_code_api": api, "device_account_id": remoteID}
-		if err := tx.Model(&iCloudResourceModel{}).Where("id = ? AND LOWER(primary_email) = ? AND kitesim_phone_id = ? AND status <> ? AND device_bind_status IN ?", *b.ResourceID, b.Email, b.PhoneID, iCloudResourceDeleted, []string{"pending", "binding"}).Updates(updates).Error; err != nil {
-			return err
+		result = tx.Model(&iCloudResourceModel{}).Where("id = ? AND LOWER(primary_email) = ? AND kitesim_phone_id = ? AND status <> ? AND device_bind_status IN ?", *b.ResourceID, b.Email, b.PhoneID, iCloudResourceDeleted, []string{"pending", "binding"}).Updates(updates)
+		if result.Error != nil || result.RowsAffected == 0 {
+			return result.Error
 		}
-		if status == "success" {
-			next := s.now().Add(iCloudOnboardingStageDelay())
-			result := tx.Model(&iCloudResourceModel{}).Where("id = ? AND device_code_api = ? AND dispatch_status = ? AND onboarding_status = ?", *b.ResourceID, api, "waiting", iCloudOnboardingWaiting).
-				Updates(map[string]any{"dispatch_status": "pending", "next_attempt_at": next, "last_safe_error": ""})
+		if status == "success" || status == "failed" {
+			next := s.now()
+			if status == "success" {
+				next = next.Add(iCloudOnboardingStageDelay())
+			}
+			result := tx.Model(&iCloudResourceModel{}).Where("id = ? AND device_bind_status = ? AND device_code_api = ? AND dispatch_status = ? AND onboarding_status = ?", *b.ResourceID, status, api, "waiting", iCloudOnboardingWaiting).
+				Updates(map[string]any{"dispatch_status": "pending", "next_attempt_at": next, "last_safe_error": safeICloudImportMessage(message)})
 			if result.RowsAffected > 0 {
 				resumeAt = &next
 			}

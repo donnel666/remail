@@ -184,6 +184,7 @@ type iCloudOnboardingExistingResource struct {
 	Status                  string `gorm:"column:status"`
 	TaskKind                string `gorm:"column:task_kind"`
 	OnboardingStatus        string `gorm:"column:onboarding_status"`
+	ImportID                *uint  `gorm:"column:import_id"`
 	ForSale                 bool   `gorm:"column:for_sale"`
 	Generation              uint64 `gorm:"column:generation"`
 	CredentialRevision      uint64 `gorm:"column:credential_revision"`
@@ -601,7 +602,7 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 		}
 		var existing []iCloudOnboardingExistingResource
 		if err := tx.Table("icloud_resources AS ir").Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("ir.id, er.owner_user_id, ir.primary_email, ir.account_role, ir.status, ir.task_kind, ir.onboarding_status, ir.for_sale, ir.generation, ir.credential_revision, ir.validation_generation, ir.bound_phone_number, ir.bound_phone_country_code, ir.bound_phone_source, ir.kitesim_phone_id").
+			Select("ir.id, er.owner_user_id, ir.primary_email, ir.account_role, ir.status, ir.task_kind, ir.onboarding_status, ir.import_id, ir.for_sale, ir.generation, ir.credential_revision, ir.validation_generation, ir.bound_phone_number, ir.bound_phone_country_code, ir.bound_phone_source, ir.kitesim_phone_id").
 			Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").
 			Where("LOWER(ir.primary_email) IN ?", emails).Find(&existing).Error; err != nil {
 			return ErrICloudOnboardingTemporary
@@ -731,6 +732,11 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 			}
 			importID := batchID
 			task.ImportID = &importID
+			if hasExistingResource && isICloudOnboardingRetryablePlaceholder(existingResource) && existingResource.ImportID != nil {
+				if err := releaseICloudAppleIDReservationTx(tx, iCloudAppleIDReservationOnboarding, *existingResource.ImportID, line.PrimaryEmail); err != nil {
+					return err
+				}
+			}
 			if err := reserveICloudAppleIDsTx(tx, []iCloudAppleIDReservationModel{{
 				EmailKey: iCloudImportEmailKey(line.PrimaryEmail), OwnerKind: iCloudAppleIDReservationOnboarding,
 				OwnerID: batchID, CreatedAt: now,
@@ -975,7 +981,7 @@ func (s *Service) loadICloudOnboardingImport(ctx context.Context, importID uint)
 	}
 	model.AcceptedCount = len(tasks)
 	for _, task := range tasks {
-		switch task.Status {
+		switch iCloudOnboardingStatus(task) {
 		case iCloudOnboardingCompleted:
 			model.CompletedCount++
 		case iCloudOnboardingFailed:
@@ -1021,7 +1027,8 @@ func (s *Service) GetAdminICloudOnboardingTask(ctx context.Context, taskID uint)
 }
 
 func iCloudOnboardingTaskView(task iCloudOnboardingTaskModel) OnboardingTaskView {
-	needsPostFamilyRecovery := isICloudPostFamilyRecoveryWaiting(task)
+	needsPostFamilyRecovery := isICloudPostFamilyRecoveryAvailable(task)
+	status := iCloudOnboardingStatus(task)
 	taskKind := firstNonEmpty(task.TaskKind, "onboarding")
 	// Keep the administrator contract stable: recovery is an internal
 	// maintenance variant of the existing Cookie-refresh task.
@@ -1034,16 +1041,36 @@ func iCloudOnboardingTaskView(task iCloudOnboardingTaskModel) OnboardingTaskView
 		Region: task.Region, CountryCode: task.CountryCode, ICloudOpened: task.ICloudOpened,
 		FamilyInviteURL: task.FamilyInviteURL, BoundPhoneNumber: task.BoundPhoneNumber,
 		BoundPhoneCountryCode: task.BoundPhoneCountryCode, BoundPhoneSource: task.BoundPhoneSource,
-		KitesimPhoneID: task.KitesimPhoneID, Status: task.Status, Stage: task.Stage,
+		KitesimPhoneID: task.KitesimPhoneID, Status: status, Stage: task.Stage,
 		Attempts: task.Attempts, MaxAttempts: task.MaxAttempts, NextAttemptAt: task.NextAttemptAt,
 		PendingSMSPurpose:       task.PendingSMSPurpose,
-		NeedsManualCode:         !needsPostFamilyRecovery && task.Status == iCloudOnboardingWaiting && task.DispatchStatus == "waiting" && task.KitesimPhoneID == nil && task.PendingSMSPurpose != "",
-		NeedsICloudActivation:   task.Status == iCloudOnboardingWaiting && task.Stage == "waiting_icloud_activation",
-		NeedsFamilyReset:        task.Status == iCloudOnboardingWaiting && isICloudOnboardingFamilySharingStage(task.Stage),
+		NeedsManualCode:         !needsPostFamilyRecovery && status == iCloudOnboardingWaiting && task.DispatchStatus == "waiting" && task.Stage == "sms_wait" && task.KitesimPhoneID == nil && task.PendingSMSPurpose != "" && task.LastErrorCategory == "",
+		NeedsICloudActivation:   status == iCloudOnboardingWaiting && task.Stage == "waiting_icloud_activation",
+		NeedsFamilyReset:        status == iCloudOnboardingWaiting && isICloudOnboardingFamilySharingStage(task.Stage),
 		NeedsPostFamilyRecovery: needsPostFamilyRecovery,
 		LastErrorCategory:       task.LastErrorCategory, LastSafeError: task.LastSafeError,
 		StartedAt: task.StartedAt, FinishedAt: task.FinishedAt, CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
 	}
+}
+
+func iCloudOnboardingStatus(task iCloudOnboardingTaskModel) string {
+	switch task.Status {
+	case iCloudOnboardingCompleted, iCloudOnboardingFailed:
+		return task.Status
+	case iCloudOnboardingProcessing, iCloudOnboardingWaiting:
+		switch task.DispatchStatus {
+		case "pending", "queued", "running":
+			return task.Status
+		case "waiting":
+			if task.Status == iCloudOnboardingWaiting && (isICloudOnboardingFamilySharingStage(task.Stage) ||
+				task.Stage == "waiting_icloud_activation" ||
+				(task.Stage == "sms_wait" && task.KitesimPhoneID == nil && task.PendingSMSPurpose != "" && task.LastErrorCategory == "") ||
+				task.DeviceBindStatus == "pending" || task.DeviceBindStatus == "binding") {
+				return iCloudOnboardingWaiting
+			}
+		}
+	}
+	return iCloudOnboardingFailed
 }
 
 func isICloudOnboardingFamilySharingStage(stage string) bool {

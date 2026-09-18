@@ -78,7 +78,10 @@ func TestGetAdminICloudOnboardingImportAggregatesResourceRows(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
-	createOnboardingResource(t, db, 7, &importID, iCloudOnboardingWaiting, "waiting", now)
+	waiting := createOnboardingResource(t, db, 7, &importID, iCloudOnboardingWaiting, "waiting", now)
+	if err := db.Model(&waiting).Update("stage", iCloudOnboardingStageFamilySharing).Error; err != nil {
+		t.Fatal(err)
+	}
 	createOnboardingResource(t, db, 7, &importID, iCloudOnboardingFailed, "failed", now)
 
 	service := NewService(db, nil, nil)

@@ -2154,7 +2154,7 @@ func TestICloudOnboardingAppleRetryPathsConsumeMaxAttempts(t *testing.T) {
 	}
 }
 
-func TestICloudOnboardingPostFamilyFailuresRemainRecoverable(t *testing.T) {
+func TestICloudOnboardingPostFamilyFailuresAreFailedAndRetryable(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		stage     string
@@ -2186,24 +2186,24 @@ func TestICloudOnboardingPostFamilyFailuresRemainRecoverable(t *testing.T) {
 				t.Fatal(err)
 			}
 			view := iCloudOnboardingTaskView(*task)
-			if task.Status != iCloudOnboardingWaiting || task.DispatchStatus != "waiting" || task.Attempts != 5 ||
+			if task.Status != iCloudOnboardingFailed || task.DispatchStatus != "failed" || task.Attempts != 5 ||
 				!view.NeedsPostFamilyRecovery || len(task.SecretPayload) == 0 || len(task.SessionPayload) == 0 ||
 				task.FamilyPrimaryResourceID == nil || *task.FamilyPrimaryResourceID != primaryID ||
-				task.ForwardPreparationID == nil || *task.ForwardPreparationID != preparationID || task.FinishedAt != nil {
+				task.ForwardPreparationID == nil || *task.ForwardPreparationID != preparationID || task.FinishedAt == nil {
 				t.Fatalf("post-family failure was not recoverable: task=%+v view=%+v", task, view)
 			}
 			if test.stage == "family_join_apply" && iCloudPostFamilyRecoveryStage(*task) != "family_join_apply" {
 				t.Fatalf("uncertain family join would not resume reconciliation: %+v", task)
 			}
 			var reservations int64
-			if err := db.Model(&iCloudAppleIDReservationModel{}).Where("owner_kind = ? AND owner_id = ?", iCloudAppleIDReservationOnboarding, *task.ImportID).Count(&reservations).Error; err != nil || reservations != 1 {
+			if err := db.Model(&iCloudAppleIDReservationModel{}).Where("owner_kind = ? AND owner_id = ?", iCloudAppleIDReservationOnboarding, *task.ImportID).Count(&reservations).Error; err != nil || reservations != 0 {
 				t.Fatalf("post-family reservation count=%d err=%v", reservations, err)
 			}
 		})
 	}
 }
 
-func TestICloudOnboardingPrimaryStage3FailureRemainsRecoverable(t *testing.T) {
+func TestICloudOnboardingPrimaryStage3FailureIsFailedAndRetryable(t *testing.T) {
 	service, db, task, apple := newOnboardingStateTest(t)
 	if err := service.ensureICloudOnboardingAppleIDReservation(context.Background(), task); err != nil {
 		t.Fatal(err)
@@ -2231,9 +2231,9 @@ func TestICloudOnboardingPrimaryStage3FailureRemainsRecoverable(t *testing.T) {
 	if err := db.First(&resource, task.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if task.Status != iCloudOnboardingWaiting || task.DispatchStatus != "waiting" || !view.NeedsPostFamilyRecovery ||
+	if task.Status != iCloudOnboardingFailed || task.DispatchStatus != "failed" || task.FinishedAt == nil || !view.NeedsPostFamilyRecovery ||
 		len(task.SecretPayload) == 0 || len(task.SessionPayload) == 0 || task.ForwardPreparationID == nil ||
-		resource.Status != iCloudResourcePending || resource.AccountRole != "primary" {
+		resource.Status != iCloudResourceAbnormal || resource.AccountRole != "primary" {
 		t.Fatalf("primary stage 3 failure was not recoverable: task=%+v resource=%+v", task, resource)
 	}
 
@@ -2246,6 +2246,9 @@ func TestICloudOnboardingPrimaryStage3FailureRemainsRecoverable(t *testing.T) {
 	if task.Status != iCloudOnboardingProcessing || task.DispatchStatus != "pending" || task.Stage != "forwarding_prepare" ||
 		task.ForwardPreparationID != nil || task.FamilyReservationConfirmed || task.FamilyPrimaryResourceID != nil || len(apple.operations) != 0 {
 		t.Fatalf("primary stage 3 retry = task=%+v Apple=%v", task, apple.operations)
+	}
+	if err := db.First(&resource, task.ID).Error; err != nil || resource.Status != iCloudResourcePending {
+		t.Fatalf("retried resource status=%s err=%v", resource.Status, err)
 	}
 }
 
@@ -2288,7 +2291,7 @@ func TestICloudOnboardingPreJoinFailuresTerminateAndReleaseReservation(t *testin
 	}
 }
 
-func TestICloudOnboardingPostFamilyLeaseExhaustionRemainsRecoverable(t *testing.T) {
+func TestICloudOnboardingPostFamilyLeaseExhaustionIsFailedAndRetryable(t *testing.T) {
 	service, db, task, _ := newOnboardingStateTest(t)
 	if err := service.ensureICloudOnboardingAppleIDReservation(context.Background(), task); err != nil {
 		t.Fatal(err)
@@ -2311,7 +2314,7 @@ func TestICloudOnboardingPostFamilyLeaseExhaustionRemainsRecoverable(t *testing.
 	if err := db.First(task, task.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if task.Status != iCloudOnboardingWaiting || task.DispatchStatus != "waiting" || task.LastErrorCategory != "infrastructure_retries_exhausted" ||
+	if task.Status != iCloudOnboardingFailed || task.DispatchStatus != "failed" || task.FinishedAt == nil || task.LastErrorCategory != "infrastructure_retries_exhausted" ||
 		!iCloudOnboardingTaskView(*task).NeedsPostFamilyRecovery || len(task.SecretPayload) == 0 || len(task.SessionPayload) == 0 ||
 		task.ForwardPreparationID == nil || *task.ForwardPreparationID != preparationID {
 		t.Fatalf("post-family lease exhaustion was not recoverable: %+v", task)

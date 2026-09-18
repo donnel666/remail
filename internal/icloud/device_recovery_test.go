@@ -18,9 +18,12 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestDeviceBindingReadyAndWaitCannotLoseWakeup(t *testing.T) {
-	for _, before := range []bool{true, false} {
-		t.Run(fmt.Sprintf("success_before_wait=%t", before), func(t *testing.T) {
+func TestDeviceBindingResultAndWaitCannotLoseWakeup(t *testing.T) {
+	for _, tc := range []struct {
+		status string
+		before bool
+	}{{"success", true}, {"success", false}, {"failed", true}, {"failed", false}} {
+		t.Run(fmt.Sprintf("%s_before_wait=%t", tc.status, tc.before), func(t *testing.T) {
 			s, db, task, _ := newOnboardingStateTest(t)
 			require.NoError(t, db.AutoMigrate(&deviceBindingModel{}))
 			require.NoError(t, db.Model(task).Updates(map[string]any{"kitesim_phone_id": 7, "stage": "family_prepare", "dispatch_status": "running", "claim_token": "recovery"}).Error)
@@ -32,12 +35,16 @@ func TestDeviceBindingReadyAndWaitCannotLoseWakeup(t *testing.T) {
 			require.NoError(t, db.Where("email = ?", task.PrimaryEmail).Take(&binding).Error)
 			require.NoError(t, db.First(task, task.ID).Error)
 			finish := func() {
-				require.NoError(t, s.finishDeviceBinding(ctx, binding, "success", "1", "https://devices.orangeid.top:56133/api/free/v4/getcode?id=1", ""))
+				api := ""
+				if tc.status == "success" {
+					api = "https://devices.orangeid.top:56133/api/free/v4/getcode?id=1"
+				}
+				require.NoError(t, s.finishDeviceBinding(ctx, binding, tc.status, "1", api, ""))
 			}
 			calls, fired := 0, false
 			s.now = func() time.Time {
 				calls++
-				if before && calls == 2 {
+				if tc.before && calls == 2 {
 					fired = true
 					finish()
 				}
@@ -46,18 +53,25 @@ func TestDeviceBindingReadyAndWaitCannotLoseWakeup(t *testing.T) {
 			ready, err := s.ensureOnboardingDevice(ctx, task, iCloudOnboardingSecret{Password: "Secret1!"})
 			require.NoError(t, err)
 			require.False(t, ready)
-			if before {
+			if tc.before {
 				require.True(t, fired)
 			} else {
 				finish()
 			}
 			var row iCloudResourceModel
 			require.NoError(t, db.First(&row, task.ID).Error)
-			require.Equal(t, "success", row.DeviceBindStatus)
+			require.Equal(t, tc.status, row.DeviceBindStatus)
 			require.Equal(t, "pending", row.WorkflowDispatchStatus)
 			require.NotNil(t, row.WorkflowNextAttemptAt)
-			require.True(t, row.WorkflowNextAttemptAt.After(now))
-			require.False(t, row.WorkflowNextAttemptAt.After(now.Add(30*time.Second)))
+			if tc.status == "success" {
+				require.True(t, row.WorkflowNextAttemptAt.After(now))
+				require.False(t, row.WorkflowNextAttemptAt.After(now.Add(30*time.Second)))
+			} else {
+				require.True(t, row.WorkflowNextAttemptAt.Equal(now))
+				processOnboardingStageForTest(t, s, db, task)
+				require.Equal(t, iCloudOnboardingFailed, task.Status)
+				require.Equal(t, "device_binding_failed", task.LastErrorCategory)
+			}
 		})
 	}
 }

@@ -141,11 +141,6 @@ func TestDeviceBindingDelaySharedPollingAndPersistence(t *testing.T) {
 	var resource iCloudResourceModel
 	require.NoError(t, db.First(&resource, task.ID).Error)
 	require.Empty(t, resource.DeviceCodeAPI)
-	status = "unknown"
-	advance(10 * time.Second)
-	require.NoError(t, s.syncDeviceBindings(ctx))
-	require.NoError(t, db.First(&resource, task.ID).Error)
-	require.Empty(t, resource.DeviceCodeAPI)
 	status = "success"
 	advance(10 * time.Second)
 	require.NoError(t, s.syncDeviceBindings(ctx))
@@ -295,6 +290,82 @@ func TestDeviceBindingTimeoutRetryAndStaleResults(t *testing.T) {
 	require.NoError(t, db.First(task, task.ID).Error)
 	require.Equal(t, "waiting", task.DispatchStatus)
 	require.Equal(t, "pending", task.DeviceBindStatus)
+}
+
+func TestDeviceBindingFailureMarksOnboardingFailed(t *testing.T) {
+	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceAPIKey, "test-key")
+	for _, role := range []string{"primary", "child"} {
+		for _, beforeWait := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/failure_before_wait=%t", role, beforeWait), func(t *testing.T) {
+				s, db, task, apple := newOnboardingStateTest(t)
+				require.NoError(t, db.AutoMigrate(&deviceBindingModel{}))
+				stage := "family_prepare"
+				if role == "primary" {
+					stage = "manage_prepare"
+				}
+				require.NoError(t, db.Model(task).Updates(map[string]any{
+					"account_role": role, "stage": stage, "kitesim_phone_id": 7,
+				}).Error)
+				ctx := context.Background()
+				_, err := s.EnsureDeviceBinding(ctx, task.PrimaryEmail, "Secret1!", 7, task.BoundPhoneNumber, &task.ID, s.now())
+				require.NoError(t, err)
+				var binding deviceBindingModel
+				require.NoError(t, db.Where("email = ?", task.PrimaryEmail).Take(&binding).Error)
+				if !beforeWait {
+					processOnboardingStageForTest(t, s, db, task)
+					require.Equal(t, "waiting", task.DispatchStatus)
+				}
+				require.NoError(t, s.finishDeviceBinding(ctx, binding, "failed", "1", "", "Device binding failed."))
+				processOnboardingStageForTest(t, s, db, task)
+				require.Equal(t, iCloudOnboardingFailed, task.Status)
+				require.Equal(t, "failed", task.DispatchStatus)
+				require.Equal(t, "device_binding_failed", task.LastErrorCategory)
+				require.Equal(t, "Device binding failed.", task.LastSafeError)
+				require.NotNil(t, task.FinishedAt)
+				require.Nil(t, task.NextAttemptAt)
+				require.Empty(t, apple.operations)
+				var resource iCloudResourceModel
+				require.NoError(t, db.First(&resource, task.ID).Error)
+				require.Equal(t, iCloudResourceAbnormal, resource.Status)
+				batch, err := s.GetAdminICloudOnboardingImport(ctx, *task.ImportID)
+				require.NoError(t, err)
+				require.Equal(t, 1, batch.Failed)
+				require.Zero(t, batch.Waiting)
+			})
+		}
+	}
+}
+
+func TestDeviceBindingUnknownOrInvalidResultFails(t *testing.T) {
+	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceAPIKey, "test-key")
+	for _, status := range []string{"unknown", "", "success"} {
+		t.Run("status="+status, func(t *testing.T) {
+			s, db, task, _ := newOnboardingStateTest(t)
+			require.NoError(t, db.AutoMigrate(&deviceBindingModel{}))
+			require.NoError(t, db.Model(task).Updates(map[string]any{"kitesim_phone_id": 7, "stage": "family_prepare"}).Error)
+			ctx := context.Background()
+			_, err := s.EnsureDeviceBinding(ctx, task.PrimaryEmail, "Secret1!", 7, task.BoundPhoneNumber, &task.ID, s.now())
+			require.NoError(t, err)
+			var binding deviceBindingModel
+			require.NoError(t, db.Where("email = ?", task.PrimaryEmail).Take(&binding).Error)
+			require.NoError(t, db.Model(&binding).Update("status", "binding").Error)
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "/api/accounts", r.URL.Path)
+				_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
+					"list": []map[string]any{{"id": 1, "account": task.PrimaryEmail, "tag": deviceBindingTag(binding), "result_status": status}},
+				}})
+			}))
+			t.Cleanup(server.Close)
+			setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, server.URL)
+			s.device.http.Transport = server.Client().Transport
+			require.NoError(t, s.syncDeviceBindings(ctx))
+			processOnboardingStageForTest(t, s, db, task)
+			require.Equal(t, "failed", task.DeviceBindStatus)
+			require.Equal(t, iCloudOnboardingFailed, task.Status)
+			require.Equal(t, "device_binding_failed", task.LastErrorCategory)
+			require.NotEmpty(t, task.LastSafeError)
+		})
+	}
 }
 
 func TestDeviceWorkflowCoversMultipleCodesAndCookieRecovery(t *testing.T) {

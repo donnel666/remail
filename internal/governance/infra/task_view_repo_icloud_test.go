@@ -89,6 +89,8 @@ func TestAdminTaskViewRepoListsICloudRefreshTasks(t *testing.T) {
 	require.NoError(t, db.Exec(`
 CREATE TABLE icloud_resources (
     id INTEGER PRIMARY KEY,
+    stage TEXT DEFAULT '', device_bind_status TEXT DEFAULT '', kitesim_phone_id INTEGER,
+    pending_sms_purpose TEXT DEFAULT '', last_error_category TEXT DEFAULT '',
     task_kind TEXT NOT NULL,
     onboarding_status TEXT NOT NULL,
     dispatch_status TEXT NOT NULL,
@@ -111,6 +113,7 @@ INSERT INTO icloud_resources(
     (205, 'refresh', 'failed', 'failed', 5, 5, 9, '2026-08-17 08:04:00', '2026-08-17 08:04:01', '2026-08-17 08:04:02', '2026-08-17 08:04:02'),
     (206, 'cookie_recovery', 'completed', 'succeeded', 1, 5, 10, '2026-08-17 08:05:00', '2026-08-17 08:05:01', '2026-08-17 08:05:02', '2026-08-17 08:05:02'),
     (207, 'onboarding', 'processing', 'pending', 0, 5, 0, '2026-08-17 08:06:00', NULL, NULL, '2026-08-17 08:06:00');
+UPDATE icloud_resources SET stage = 'waiting_icloud_activation' WHERE id = 203;
 `).Error)
 
 	repo := NewAdminTaskViewRepo(db)
@@ -166,6 +169,8 @@ CREATE TABLE icloud_resource_imports (
 CREATE TABLE icloud_resource_import_items (import_id INTEGER, outcome TEXT, category TEXT);
 CREATE TABLE icloud_resources (
     id INTEGER PRIMARY KEY, import_id INTEGER, task_kind TEXT, onboarding_status TEXT,
+    stage TEXT DEFAULT '', device_bind_status TEXT DEFAULT '', kitesim_phone_id INTEGER,
+    pending_sms_purpose TEXT DEFAULT '', last_error_category TEXT DEFAULT '',
     dispatch_status TEXT, attempts INTEGER, max_attempts INTEGER, created_at DATETIME, started_at DATETIME,
     finished_at DATETIME, updated_at DATETIME
 );
@@ -181,6 +186,7 @@ INSERT INTO icloud_resources(
     (32, 23, 'onboarding', 'failed', 2, 5, '2026-08-16 08:00:00', '2026-08-16 08:00:02', '2026-08-16 08:04:00', '2026-08-16 08:04:00'),
     (33, 23, 'onboarding', 'processing', 0, 5, '2026-08-16 08:00:00', NULL, NULL, '2026-08-16 08:03:00'),
     (34, 23, 'refresh', 'processing', 4, 5, '2026-08-17 08:00:00', '2026-08-17 08:00:01', NULL, '2026-08-17 08:00:02');
+UPDATE icloud_resources SET dispatch_status = 'pending' WHERE onboarding_status = 'processing';
 `).Error)
 
 	items, total, succeeded, err := NewAdminTaskViewRepo(db).ListForICloudImports(
@@ -208,6 +214,8 @@ func TestAdminTaskViewRepoMarksFinishedMixedICloudOnboardingAsFailed(t *testing.
 	require.NoError(t, db.Exec(`
 CREATE TABLE icloud_resources (
     id INTEGER PRIMARY KEY, import_id INTEGER, task_kind TEXT, onboarding_status TEXT,
+    stage TEXT DEFAULT '', device_bind_status TEXT DEFAULT '', kitesim_phone_id INTEGER,
+    pending_sms_purpose TEXT DEFAULT '', last_error_category TEXT DEFAULT '',
     dispatch_status TEXT, attempts INTEGER, max_attempts INTEGER, created_at DATETIME,
     started_at DATETIME, finished_at DATETIME, updated_at DATETIME
 );
@@ -256,6 +264,8 @@ func TestAdminTaskViewRepoMarksManualICloudOnboardingAsUncertain(t *testing.T) {
 	require.NoError(t, db.Exec(`
 CREATE TABLE icloud_resources (
     id INTEGER PRIMARY KEY, import_id INTEGER, task_kind TEXT, onboarding_status TEXT,
+    stage TEXT DEFAULT '', device_bind_status TEXT DEFAULT '', kitesim_phone_id INTEGER,
+    pending_sms_purpose TEXT DEFAULT '', last_error_category TEXT DEFAULT '',
     dispatch_status TEXT, attempts INTEGER, max_attempts INTEGER, created_at DATETIME,
     started_at DATETIME, finished_at DATETIME, updated_at DATETIME
 );
@@ -270,6 +280,7 @@ INSERT INTO icloud_resources(
     created_at, started_at, finished_at, updated_at
 ) VALUES (41, 24, 'onboarding', 'waiting', 'waiting', 0, 5,
           '2026-08-16 09:00:00', NULL, NULL, '2026-08-16 09:01:00');
+UPDATE icloud_resources SET stage = 'waiting_family_sharing' WHERE id = 41;
 `).Error)
 
 	items, total, _, err := NewAdminTaskViewRepo(db).ListForICloudImports(
@@ -285,4 +296,33 @@ INSERT INTO icloud_resources(
 	require.Equal(t, int64(1), total)
 	require.Len(t, items, 1)
 	require.Equal(t, governanceapp.AdminTaskStatusUncertain, items[0].Status)
+	for _, tc := range []struct {
+		name, status, dispatch, stage, device, purpose, category, want string
+	}{
+		{"device running", "waiting", "waiting", "family_prepare", "binding", "", "", governanceapp.AdminTaskStatusRunning},
+		{"device failed", "waiting", "waiting", "family_prepare", "failed", "", "", governanceapp.AdminTaskStatusFailed},
+		{"automatic failure", "waiting", "waiting", "manage_prepare", "", "", "phone_blacklisted", governanceapp.AdminTaskStatusFailed},
+		{"unknown state", "unknown", "pending", "accepted", "", "", "", governanceapp.AdminTaskStatusFailed},
+		{"unknown dispatch", "processing", "unknown", "accepted", "", "", "", governanceapp.AdminTaskStatusFailed},
+		{"unknown wait", "waiting", "waiting", "unknown", "", "", "", governanceapp.AdminTaskStatusFailed},
+		{"manual code", "waiting", "waiting", "sms_wait", "", "manage_login", "", governanceapp.AdminTaskStatusUncertain},
+		{"manual activation", "waiting", "waiting", "waiting_icloud_activation", "", "", "", governanceapp.AdminTaskStatusUncertain},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, db.Exec(`UPDATE icloud_resources SET onboarding_status = ?, dispatch_status = ?, stage = ?,
+                device_bind_status = ?, pending_sms_purpose = ?, last_error_category = ? WHERE id = 41`,
+				tc.status, tc.dispatch, tc.stage, tc.device, tc.purpose, tc.category).Error)
+			items, total, _, err := NewAdminTaskViewRepo(db).ListForICloudImports(context.Background(), governanceapp.AdminTaskListFilter{
+				Source: governanceapp.AdminTaskSourceICloudOnboarding, Status: tc.want, Limit: 10,
+			})
+			require.NoError(t, err)
+			require.Equal(t, int64(1), total)
+			require.Len(t, items, 1)
+			require.Equal(t, tc.want, items[0].Status)
+			if tc.want == governanceapp.AdminTaskStatusFailed {
+				require.Equal(t, int64(1), items[0].Progress.Failed)
+				require.Equal(t, int64(1), items[0].Progress.Processed)
+			}
+		})
+	}
 }

@@ -415,6 +415,20 @@ SELECT
     NULL AS reason_buckets
 FROM icloud_maintenance_runs AS run`
 
+const iCloudWorkflowStatusSQL = `CASE
+    WHEN resource.onboarding_status = 'completed' THEN 'succeeded'
+    WHEN resource.onboarding_status = 'failed' THEN 'failed'
+    WHEN resource.onboarding_status IN ('processing', 'waiting') AND resource.dispatch_status IN ('pending', 'queued') THEN 'queued'
+    WHEN resource.onboarding_status IN ('processing', 'waiting') AND resource.dispatch_status = 'running' THEN 'running'
+    WHEN resource.onboarding_status = 'waiting' AND resource.dispatch_status = 'waiting'
+         AND (resource.stage IN ('waiting_family_reset', 'waiting_family_sharing', 'waiting_icloud_activation')
+              OR (resource.stage = 'sms_wait' AND resource.kitesim_phone_id IS NULL
+                  AND COALESCE(resource.pending_sms_purpose, '') <> '' AND COALESCE(resource.last_error_category, '') = '')) THEN 'uncertain'
+    WHEN resource.onboarding_status = 'waiting' AND resource.dispatch_status = 'waiting'
+         AND resource.device_bind_status IN ('pending', 'binding') THEN 'running'
+    ELSE 'failed'
+END`
+
 const iCloudRefreshTaskSelect = `
 SELECT
     'icloud_refresh' AS source,
@@ -423,13 +437,7 @@ SELECT
     'icloud_resource' AS biz_type,
     resource.id AS biz_id,
     'refresh' AS kind,
-    CASE
-        WHEN resource.onboarding_status = 'completed' THEN 'succeeded'
-        WHEN resource.onboarding_status = 'failed' THEN 'failed'
-        WHEN resource.onboarding_status = 'waiting' AND resource.dispatch_status = 'waiting' THEN 'uncertain'
-        WHEN resource.dispatch_status IN ('pending', 'queued') THEN 'queued'
-        ELSE 'running'
-    END AS status,
+    ` + iCloudWorkflowStatusSQL + ` AS status,
     resource.attempts AS attempts,
     resource.max_attempts AS max_attempts,
     resource.expected_credential_revision AS credential_revision,
@@ -685,12 +693,9 @@ SELECT
     resource.import_id AS biz_id,
     'import' AS kind,
     CASE
-        WHEN SUM(CASE WHEN resource.onboarding_status IN ('completed', 'failed') THEN 1 ELSE 0 END) < COUNT(*)
-             AND SUM(CASE WHEN resource.onboarding_status = 'waiting' AND resource.dispatch_status = 'waiting' THEN 1 ELSE 0 END)
-                 = COUNT(*) - SUM(CASE WHEN resource.onboarding_status IN ('completed', 'failed') THEN 1 ELSE 0 END)
-            THEN 'uncertain'
-        WHEN SUM(CASE WHEN resource.onboarding_status IN ('completed', 'failed') THEN 1 ELSE 0 END) < COUNT(*) THEN 'running'
-        WHEN SUM(CASE WHEN resource.onboarding_status = 'failed' THEN 1 ELSE 0 END) = 0 THEN 'succeeded'
+        WHEN SUM(CASE WHEN resource.workflow_status IN ('queued', 'running') THEN 1 ELSE 0 END) > 0 THEN 'running'
+        WHEN SUM(CASE WHEN resource.workflow_status = 'uncertain' THEN 1 ELSE 0 END) > 0 THEN 'uncertain'
+        WHEN SUM(CASE WHEN resource.workflow_status = 'failed' THEN 1 ELSE 0 END) = 0 THEN 'succeeded'
         ELSE 'failed'
     END AS status,
     COALESCE(MAX(resource.attempts), 0) AS attempts,
@@ -699,19 +704,22 @@ SELECT
     MIN(resource.created_at) AS queued_at,
     MIN(resource.started_at) AS started_at,
     CASE
-        WHEN SUM(CASE WHEN resource.onboarding_status IN ('completed', 'failed') THEN 1 ELSE 0 END) = COUNT(*)
+        WHEN SUM(CASE WHEN resource.workflow_status IN ('succeeded', 'failed') THEN 1 ELSE 0 END) = COUNT(*)
         THEN MAX(resource.updated_at)
         ELSE NULL
     END AS finished_at,
     MAX(resource.updated_at) AS updated_at,
     COUNT(*) AS progress_total,
-    SUM(CASE WHEN resource.onboarding_status IN ('completed', 'failed') THEN 1 ELSE 0 END) AS progress_processed,
-    SUM(CASE WHEN resource.onboarding_status = 'completed' THEN 1 ELSE 0 END) AS progress_succeeded,
+    SUM(CASE WHEN resource.workflow_status IN ('succeeded', 'failed') THEN 1 ELSE 0 END) AS progress_processed,
+    SUM(CASE WHEN resource.workflow_status = 'succeeded' THEN 1 ELSE 0 END) AS progress_succeeded,
     0 AS progress_skipped,
-    SUM(CASE WHEN resource.onboarding_status = 'failed' THEN 1 ELSE 0 END) AS progress_failed,
+    SUM(CASE WHEN resource.workflow_status = 'failed' THEN 1 ELSE 0 END) AS progress_failed,
     NULL AS reason_buckets
-FROM icloud_resources AS resource
-WHERE resource.task_kind = 'onboarding' AND resource.import_id IS NOT NULL
+FROM (
+    SELECT resource.*, ` + iCloudWorkflowStatusSQL + ` AS workflow_status
+    FROM icloud_resources AS resource
+    WHERE resource.task_kind = 'onboarding' AND resource.import_id IS NOT NULL
+) AS resource
 GROUP BY resource.import_id`
 
 const iCloudImportTaskUnion = iCloudImportSingleTaskSelect + `
