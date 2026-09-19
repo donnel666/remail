@@ -62,7 +62,7 @@ export async function importAdminKitesimAccounts(
 ): Promise<AdminKitesimImportResult> {
   return unwrap(
     await client.POST("/v1/admin/kitesim/accounts/imports", {
-      body: { content },
+      body: { content: content.split(/\r?\n/).map((line) => line.split("----", 2).join("----")).join("\n") },
       params: { header: csrfHeader() },
     }),
   );
