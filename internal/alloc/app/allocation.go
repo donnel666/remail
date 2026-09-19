@@ -103,6 +103,7 @@ type UseCase struct {
 	historicalMicrosoftAliases HistoricalMicrosoftAliasPort
 	gmailVariantCooldown       GmailVariantCooldownPort
 	inventoryCache             InventoryCache
+	privateInventoryCache      *platform.HourlySnapshotCache[PrivateInventoryTotals]
 	protoProtocolReady         atomic.Bool
 }
 
@@ -998,38 +999,19 @@ func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint
 	if err != nil {
 		return nil, err
 	}
-	privateMicrosoft, err := uc.repo.ListPrivateMicrosoftInventoryTotals(ctx, projectID, viewerUserID)
+	private, err := uc.privateInventoryTotals(ctx, projectID, viewerUserID)
 	if err != nil {
 		return nil, err
 	}
-	privateDomains, err := uc.repo.ListPrivateDomainInventoryTotals(ctx, projectID, viewerUserID)
-	if err != nil {
-		return nil, err
-	}
-	privateGmail, err := uc.repo.ListPrivateGmailInventoryTotals(ctx, projectID, viewerUserID)
-	if err != nil {
-		return nil, err
-	}
-	privateICloud, err := uc.repo.ListPrivateICloudInventoryTotals(ctx, projectID, viewerUserID)
-	if err != nil {
-		return nil, err
-	}
-	var privateProto []PrivateProductInventoryTotal
-	if protoRepo, ok := uc.repo.(ProtoInventoryRepository); ok {
-		privateProto, err = protoRepo.ListPrivateProtoInventoryTotals(ctx, projectID, viewerUserID)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if len(privateMicrosoft) == 0 && len(privateDomains) == 0 && len(privateGmail) == 0 && len(privateICloud) == 0 && len(privateProto) == 0 {
+	if private == nil || (len(private.Microsoft) == 0 && len(private.Domains) == 0 && len(private.Gmail) == 0 && len(private.ICloud) == 0 && len(private.Proto) == 0) {
 		return snapshot, nil
 	}
 	result := cloneProductInventoryTotals(snapshot)
-	mergePrivateProductInventory(result, privateMicrosoft, coredomain.ProductTypeMicrosoft)
-	mergePrivateProductInventory(result, privateDomains, coredomain.ProductTypeDomain)
-	mergePrivateSingletonInventory(result, privateGmail, coredomain.ProductTypeGmail)
-	mergePrivateSingletonInventory(result, privateICloud, coredomain.ProductTypeICloud)
-	mergePrivateProductInventory(result, privateProto, coredomain.ProductTypeProto)
+	mergePrivateProductInventory(result, private.Microsoft, coredomain.ProductTypeMicrosoft)
+	mergePrivateProductInventory(result, private.Domains, coredomain.ProductTypeDomain)
+	mergePrivateSingletonInventory(result, private.Gmail, coredomain.ProductTypeGmail)
+	mergePrivateSingletonInventory(result, private.ICloud, coredomain.ProductTypeICloud)
+	mergePrivateProductInventory(result, private.Proto, coredomain.ProductTypeProto)
 	for i := range result.Items {
 		sort.Slice(result.Items[i].Suffixes, func(left, right int) bool {
 			return result.Items[i].Suffixes[left].Suffix < result.Items[i].Suffixes[right].Suffix

@@ -3,6 +3,7 @@ package api
 import (
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	allocinfra "github.com/donnel666/remail/internal/alloc/infra"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -31,6 +32,7 @@ func NewModule(db *gorm.DB, redisClient redis.UniversalClient, asynqClient *asyn
 	useCase := allocapp.NewUseCase(repo, queue)
 	if redisClient != nil {
 		useCase.SetInventoryCache(allocinfra.NewInventoryCache(redisClient))
+		useCase.SetPrivateInventoryCache(platform.NewHourlySnapshotCache[allocapp.PrivateInventoryTotals](redisClient))
 	}
 	useCase.SetAdminAllocationEnrichmentPort(allocinfra.NewAdminAllocationEnrichmentRepo(db))
 	return &Module{

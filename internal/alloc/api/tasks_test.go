@@ -15,6 +15,7 @@ import (
 )
 
 type allocationTaskQueueStub struct {
+	allocapp.InventoryRefreshQueue
 	inventoryCalls    atomic.Int32
 	continuationCalls atomic.Int32
 }
@@ -138,6 +139,21 @@ func TestInventoryRefreshAdmissionDenialDefersTask(t *testing.T) {
 
 	require.ErrorIs(t, err, platform.ErrBackgroundExecutionDeferred)
 	require.False(t, gate.released.Load())
+}
+
+func TestPrivateInventoryTaskDefersBusyCapacityAndRejectsInvalidPayload(t *testing.T) {
+	gate := &allocationBackgroundGateStub{}
+	mux := asynq.NewServeMux()
+	cleanup := RegisterAllocationTaskHandlers(mux, &Module{UseCase: allocapp.NewUseCase(nil), BackgroundExecution: gate})
+	t.Cleanup(func() { cleanup(context.Background()) })
+	task := asynq.NewTask(allocinfra.TypePrivateInventoryRefresh, []byte(`{"projectId":10,"viewerUserId":7}`))
+	err := mux.ProcessTask(context.Background(), task)
+	require.ErrorIs(t, err, platform.ErrBackgroundExecutionDeferred)
+	require.False(t, gate.released.Load())
+	for _, payload := range []string{`{`, `{}`, `{"projectId":10,"viewerUserId":0}`} {
+		err := mux.ProcessTask(context.Background(), asynq.NewTask(allocinfra.TypePrivateInventoryRefresh, []byte(payload)))
+		require.ErrorIs(t, err, asynq.SkipRetry)
+	}
 }
 
 func TestInventoryRefreshTaskReturnsAggregateFailure(t *testing.T) {

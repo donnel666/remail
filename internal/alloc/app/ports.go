@@ -451,6 +451,7 @@ type AdminAllocationListResult struct {
 type InventoryRefreshQueue interface {
 	EnqueueInventoryRefresh(ctx context.Context) error
 	EnqueueInventoryRefreshContinuation(ctx context.Context) error
+	EnqueuePrivateInventoryRefresh(ctx context.Context, projectID, viewerUserID uint) error
 }
 
 type Repository interface {

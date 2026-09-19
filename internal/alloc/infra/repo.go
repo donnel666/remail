@@ -2694,9 +2694,14 @@ func (r *Repo) microsoftSuffixInventory(ctx context.Context, projectID uint, row
 		DotCapacity    int64
 		PlusDailyLimit int64
 	}
-	if err := r.dbFor(ctx).Raw(`
+	if row.DotWeight > 0 || row.PlusWeight > 0 {
+		dotCapacity := "0"
+		if row.DotWeight > 0 {
+			dotCapacity = microsoftDotCapacityExpression("ms")
+		}
+		if err := r.dbFor(ctx).Raw(`
 SELECT ms.email_domain AS suffix,
-       COALESCE(SUM(`+microsoftDotCapacityExpression("ms")+`), 0) AS dot_capacity,
+       COALESCE(SUM(`+dotCapacity+`), 0) AS dot_capacity,
        COALESCE(SUM(ms.plus_daily_limit), 0) AS plus_daily_limit
 FROM microsoft_resources ms
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
@@ -2706,7 +2711,8 @@ WHERE ms.status = 'normal'
   AND `+scope+`
   AND `+allowedRoot+`
 GROUP BY ms.email_domain`, append(append([]any{}, scopeArgs...), allowedRootArgs...)...).Scan(&capacities).Error; err != nil {
-		return nil, fmt.Errorf("microsoft suffix capacity: %w", err)
+			return nil, fmt.Errorf("microsoft suffix capacity: %w", err)
+		}
 	}
 	dotCapacityBySuffix := map[string]int64{}
 	plusLimitBySuffix := map[string]int64{}

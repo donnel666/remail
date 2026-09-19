@@ -149,7 +149,10 @@ func (c *protoSuffixCache) AdvanceInventory(_ context.Context, entries []Invento
 	return nil
 }
 
-type protoSuffixRefreshQueue struct{ calls int }
+type protoSuffixRefreshQueue struct {
+	InventoryRefreshQueue
+	calls int
+}
 
 func (q *protoSuffixRefreshQueue) EnqueueInventoryRefresh(context.Context) error {
 	q.calls++

@@ -59,7 +59,10 @@ func (*inventoryRefreshHandlerRepo) ListInventoryProjects(context.Context) ([]al
 	return []allocapp.InventoryProject{{ID: 2, Name: "chatgpt"}}, nil
 }
 
-type inventoryRefreshHandlerQueue struct{ calls int }
+type inventoryRefreshHandlerQueue struct {
+	allocapp.InventoryRefreshQueue
+	calls int
+}
 
 func (q *inventoryRefreshHandlerQueue) EnqueueInventoryRefresh(context.Context) error {
 	q.calls++

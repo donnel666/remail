@@ -40,20 +40,12 @@ func NewHourlySnapshotCache[T any](client redis.UniversalClient) *HourlySnapshot
 func (c *HourlySnapshotCache[T]) Get(ctx context.Context, key string, load func(context.Context) (T, error)) *T {
 	cacheCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 	defer cancel()
-	var cached *T
-	if payload, err := c.redis.Get(cacheCtx, key).Bytes(); err == nil {
-		var snapshot hourlySnapshot[T]
-		if json.Unmarshal(payload, &snapshot) == nil {
-			cached = &snapshot.Data
-			if time.Since(snapshot.UpdatedAt) < time.Hour {
-				return cached
-			}
-		}
-	} else if !errors.Is(err, redis.Nil) {
+	cached, fresh, err := c.Read(cacheCtx, key)
+	if err != nil {
 		slog.WarnContext(ctx, "read hourly snapshot failed", "key", key, "error", err)
 		return nil
 	}
-	if load == nil {
+	if fresh || load == nil {
 		return cached
 	}
 	select {
@@ -81,6 +73,46 @@ func (c *HourlySnapshotCache[T]) Get(ctx context.Context, key string, load func(
 		}
 	}()
 	return cached
+}
+
+// Read returns a snapshot and its freshness without scheduling any work.
+func (c *HourlySnapshotCache[T]) Read(ctx context.Context, key string) (*T, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+	payload, err := c.redis.Get(ctx, key).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	var snapshot hourlySnapshot[T]
+	if json.Unmarshal(payload, &snapshot) != nil {
+		return nil, false, nil
+	}
+	return &snapshot.Data, time.Since(snapshot.UpdatedAt) < time.Hour, nil
+}
+
+// Refresh is called by a durable queue worker. Busy capacity and loader errors
+// are returned to the queue for retry; no one-hour failure marker is written.
+func (c *HourlySnapshotCache[T]) Refresh(ctx context.Context, key string, load func(context.Context) (T, error)) error {
+	_, fresh, err := c.Read(ctx, key)
+	if err != nil || fresh {
+		return err
+	}
+	select {
+	case hourlySnapshotSlots <- struct{}{}:
+		defer func() { <-hourlySnapshotSlots }()
+	default:
+		return ErrBackgroundExecutionDeferred
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	data, err := load(ctx)
+	if err != nil {
+		return err
+	}
+	return c.store(ctx, key, data, false)
 }
 
 // Seed publishes a cheap partial result without replacing a completed snapshot.

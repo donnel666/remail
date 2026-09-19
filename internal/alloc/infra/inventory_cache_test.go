@@ -64,6 +64,11 @@ func (q *inventoryRefreshQueueStub) EnqueueInventoryRefreshContinuation(context.
 	return q.err
 }
 
+func (q *inventoryRefreshQueueStub) EnqueuePrivateInventoryRefresh(context.Context, uint, uint) error {
+	q.calls++
+	return q.err
+}
+
 func (r *inventoryCacheRepoStub) AssertProjectInventoryAccess(context.Context, uint, uint) error {
 	r.accessCalls++
 	return r.accessErr

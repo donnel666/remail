@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -16,6 +17,21 @@ import (
 const inventoryRefreshMaxEntriesPerTask = 50
 
 func RegisterAllocationTaskHandlers(mux *asynq.ServeMux, module *Module) func(context.Context) {
+	mux.HandleFunc(allocinfra.TypePrivateInventoryRefresh, func(ctx context.Context, task *asynq.Task) error {
+		if module == nil || module.UseCase == nil {
+			return nil
+		}
+		var payload allocinfra.PrivateInventoryRefreshPayload
+		if err := json.Unmarshal(task.Payload(), &payload); err != nil || payload.ProjectID == 0 || payload.ViewerUserID == 0 {
+			return fmt.Errorf("invalid private inventory refresh payload: %w", asynq.SkipRetry)
+		}
+		release, admitted := acquireInventoryRefreshCapacity(ctx, module)
+		if !admitted {
+			return platform.ErrBackgroundExecutionDeferred
+		}
+		defer release()
+		return module.UseCase.RefreshPrivateInventory(ctx, payload.ProjectID, payload.ViewerUserID)
+	})
 	mux.HandleFunc(allocinfra.TypeInventoryRefresh, func(ctx context.Context, _ *asynq.Task) error {
 		if module == nil || module.UseCase == nil {
 			return nil

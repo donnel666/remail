@@ -1271,6 +1271,12 @@ func TestInventoryStatsExcludePrivateMicrosoftFromSharedPoolMySQL(t *testing.T) 
 	require.Equal(t, []allocapp.ProductInventorySuffixTotal{{
 		Suffix: "example.com", TotalAvailable: 1,
 	}}, userStats.Items[0].Suffixes)
+
+	capture := &candidateSQLCapture{Interface: gormlogger.Default.LogMode(gormlogger.Silent), match: " AS dot_capacity"}
+	private, err := NewRepo(db.Session(&gorm.Session{Logger: capture})).ListPrivateMicrosoftInventoryTotals(context.Background(), 10, 2)
+	require.NoError(t, err)
+	require.Equal(t, []allocapp.PrivateProductInventoryTotal{{ProductID: 20, Suffix: "example.com", Available: 1}}, private)
+	require.Empty(t, capture.queries, "main-only products must not scan dot/plus capacity")
 }
 
 func TestICloudInventoryIgnoresExpirationAndCookieStateMySQL(t *testing.T) {
