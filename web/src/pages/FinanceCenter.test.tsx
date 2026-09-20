@@ -57,6 +57,7 @@ vi.mock("./resources/supplier-application-modal", () => ({
 
 vi.mock("@douyinfe/semi-ui", async () => {
   const React = await import("react");
+  const { default: SemiModal } = await import("@douyinfe/semi-ui/lib/es/modal");
   const Box = ({ children }: { children?: React.ReactNode }) => <div>{children}</div>;
   const Button = ({ children, disabled, loading, onClick, ...props }: any) => (
     <button
@@ -74,16 +75,10 @@ vi.mock("@douyinfe/semi-ui", async () => {
       {children}
     </section>
   );
-  const InputNumber = ({ id, onChange, value }: any) => (
-    <input id={id} onChange={(event) => onChange?.(event.target.value)} value={value} />
+  const InputNumber = ({ autoFocus, id, onChange, value }: any) => (
+    <input autoFocus={autoFocus} id={id} onChange={(event) => onChange?.(event.target.value)} value={value} />
   );
-  const Modal = ({ children, footer, title, visible }: any) =>
-    visible ? (
-      <div aria-label={title} role="dialog">
-        {children}
-        {footer}
-      </div>
-    ) : null;
+  const Modal = (props: any) => <SemiModal {...props} motion={false} />;
   const Radio = ({ children }: any) => <label>{children}</label>;
   const RadioGroup = ({ children }: any) => <div>{children}</div>;
   const Skeleton = ({ children, loading }: any) =>
@@ -152,6 +147,7 @@ describe("FinanceCenter", () => {
     expect(mocks.toastError).toHaveBeenCalledWith("Supplier transactions load failed.");
 
     fireEvent.click(screen.getByRole("button", { name: "Withdraw to Alipay" }));
+    fireEvent.click(screen.getByRole("button", { name: "I understand, continue withdrawal" }));
     expect(screen.getByText(/999,999,999,999\.999999/)).toBeVisible();
 
     mocks.getWallet.mockRejectedValueOnce(new Error("wallet unavailable"));
@@ -171,6 +167,7 @@ describe("FinanceCenter", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Transfer to user wallet" }));
     expect(screen.getByRole("dialog", { name: "Transfer supplier balance" })).toBeVisible();
     expect(screen.queryByText("Alipay payment QR code")).not.toBeInTheDocument();
+    expect(screen.queryByText("Alipay withdrawals are subject to a 3% fee.")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "5" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm transfer" }));
@@ -186,10 +183,26 @@ describe("FinanceCenter", () => {
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Wallet transfer completed.");
   });
 
-  it("submits Alipay withdrawals through the structured wallet endpoint", async () => {
+  it("requires the fee and risk notice before opening and submitting an Alipay withdrawal", async () => {
     render(<FinanceCenter />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw to Alipay" }));
+    const dialog = screen.getByRole("dialog", { name: "Alipay withdrawal notice" });
+    expect(dialog).toBeVisible();
+    expect(document.getElementById("withdraw-amount")).not.toBeInTheDocument();
+    expect(mocks.requireTurnstile).not.toHaveBeenCalled();
+    expect(mocks.createSupplierWithdrawal).not.toHaveBeenCalled();
+    expect(screen.getByText("Alipay withdrawals are subject to a 3% fee.")).toBeVisible();
+    expect(screen.getByText(/Upload a clear, valid Alipay payment QR code belonging to you/)).toBeVisible();
+    expect(screen.getByText(/You are responsible for any failed or delayed transfers or financial losses/)).toBeVisible();
+
+    const continueButton = screen.getByRole("button", { name: "I understand, continue withdrawal" });
+    continueButton.focus();
+    fireEvent.click(continueButton);
+    expect(screen.getByRole("dialog", { name: "Supplier withdrawal application" })).toBe(dialog);
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(document.getElementById("withdraw-amount")).toHaveFocus();
+    expect(mocks.createSupplierWithdrawal).not.toHaveBeenCalled();
     fireEvent.change(document.getElementById("withdraw-amount")!, { target: { value: "5" } });
     fireEvent.change(document.querySelector('input[type="file"]')!, {
       target: { files: [new File(["qr"], "qr.png", { type: "image/png" })] },
@@ -208,6 +221,38 @@ describe("FinanceCenter", () => {
     );
     expect(mocks.transferSupplierBalance).not.toHaveBeenCalled();
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Withdrawal submitted.");
+  });
+
+  it("cancels the notice and requires confirmation again when reopened", async () => {
+    render(<FinanceCenter />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw to Alipay" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mocks.requireTurnstile).not.toHaveBeenCalled();
+    expect(mocks.createSupplierWithdrawal).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Withdraw to Alipay" }));
+    expect(screen.getByRole("dialog", { name: "Alipay withdrawal notice" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "I understand, continue withdrawal" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Withdraw to Alipay" }));
+    expect(screen.getByRole("dialog", { name: "Alipay withdrawal notice" })).toBeVisible();
+    expect(document.getElementById("withdraw-amount")).not.toBeInTheDocument();
+  });
+
+  it.each(["notice", "form"])("removes the %s dialog when the page unmounts", async (step) => {
+    const { unmount } = render(<FinanceCenter />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw to Alipay" }));
+    if (step === "form") {
+      fireEvent.click(screen.getByRole("button", { name: "I understand, continue withdrawal" }));
+    }
+    expect(screen.getByRole("dialog")).toBeVisible();
+    unmount();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mocks.requireTurnstile).not.toHaveBeenCalled();
+    expect(mocks.createSupplierWithdrawal).not.toHaveBeenCalled();
   });
 
   it("reuses the transfer idempotency key after an ambiguous failure", async () => {

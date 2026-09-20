@@ -199,7 +199,7 @@ export default function FinanceCenter() {
   const [transactions, setTransactions] = useState<TransactionItem[]>([]);
   const [walletLoading, setWalletLoading] = useState(supplier);
   const [transactionsLoading, setTransactionsLoading] = useState(supplier);
-  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [withdrawStep, setWithdrawStep] = useState<"notice" | "form" | null>(null);
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [destination, setDestination] = useState<WithdrawalDestination>("alipay");
   const [note, setNote] = useState("");
@@ -262,7 +262,7 @@ export default function FinanceCenter() {
 
   const closeWithdrawal = () => {
     fileReadSequence.current += 1;
-    setWithdrawOpen(false);
+    setWithdrawStep(null);
     setWithdrawAmount("");
     setDestination("alipay");
     setNote("");
@@ -297,8 +297,12 @@ export default function FinanceCenter() {
     }
   };
 
-  const submitWithdrawal = async () => {
-    if (withdrawing) return;
+  const confirmWithdrawal = async () => {
+    if (withdrawing || withdrawStep === null) return;
+    if (withdrawStep === "notice") {
+      setWithdrawStep("form");
+      return;
+    }
     const validationError = validateWithdrawal({
       amount: withdrawAmount,
       available: wallet?.supplierAvailable ?? "0",
@@ -446,7 +450,7 @@ export default function FinanceCenter() {
             icon={<CircleDollarSign size={16} />}
             onClick={() => {
               setDestination("alipay");
-              setWithdrawOpen(true);
+              setWithdrawStep("notice");
             }}
             type="primary"
           >
@@ -457,7 +461,7 @@ export default function FinanceCenter() {
             icon={<ArrowRightLeft size={16} />}
             onClick={() => {
               setDestination("wallet");
-              setWithdrawOpen(true);
+              setWithdrawStep("form");
             }}
             theme="outline"
           >
@@ -567,104 +571,115 @@ export default function FinanceCenter() {
             <Button disabled={withdrawing} onClick={closeWithdrawal} theme="outline">
               {t("Cancel")}
             </Button>
-            <Button loading={withdrawing} onClick={() => void submitWithdrawal()} type="primary">
-              {withdrawing
-                ? t(destination === "wallet" ? "Transferring" : "Submitting")
-                : t(destination === "wallet" ? "Confirm transfer" : "Submit")}
+            <Button loading={withdrawing} onClick={() => void confirmWithdrawal()} type="primary">
+              {withdrawStep === "notice"
+                ? t("I understand, continue withdrawal")
+                : withdrawing
+                  ? t(destination === "wallet" ? "Transferring" : "Submitting")
+                  : t(destination === "wallet" ? "Confirm transfer" : "Submit")}
             </Button>
           </Space>
         }
-        maskClosable={!withdrawing}
+        maskClosable={withdrawStep !== "notice" && !withdrawing}
         onCancel={() => {
           if (!withdrawing) closeWithdrawal();
         }}
-        title={t(destination === "wallet" ? "Transfer supplier balance" : "Supplier withdrawal application")}
-        visible={withdrawOpen}
+        title={t(withdrawStep === "notice" ? "Alipay withdrawal notice" : destination === "wallet" ? "Transfer supplier balance" : "Supplier withdrawal application")}
+        visible={withdrawStep !== null}
         width={isMobile ? "94%" : 560}
       >
-        <div className="space-y-4">
-          <label className="block" htmlFor="withdraw-amount">
-            <span className="mb-2 block text-sm font-medium text-[var(--semi-color-text-0)]">
-              {t(destination === "wallet" ? "Transfer points" : "Withdraw points")}
-            </span>
-            <InputNumber
-              id="withdraw-amount"
-              min={1}
-              onChange={(value) => setWithdrawAmount(String(value ?? ""))}
-              placeholder="1"
-              precision={0}
-              step={1}
-              style={{ width: "100%" }}
-              value={withdrawAmount}
-            />
-            <span className="mt-1 block text-xs text-[var(--semi-color-text-2)]">
-              {t("Withdrawable points")}: {formatPointsValue(supplierAvailable)}
-            </span>
-          </label>
-
-          {destination === "alipay" ? (
-            <div>
-              <div className="mb-2 text-sm font-medium text-[var(--semi-color-text-0)]">
-                {t("Alipay payment QR code")}
-              </div>
-              <input
-                accept="image/*"
-                className="hidden"
-                onChange={(event) => void pickQrCode(event.target.files?.[0])}
-                ref={fileInputRef}
-                type="file"
-              />
-              {paymentQrCode ? (
-                <div className="relative overflow-hidden rounded-xl border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-3">
-                  <img
-                    alt={t("Alipay payment QR code")}
-                    className="mx-auto max-h-56 max-w-full object-contain"
-                    src={paymentQrCode}
-                  />
-                  <Button
-                    aria-label={t("Remove payment QR code")}
-                    className="!absolute right-2 top-2"
-                    icon={<X size={15} />}
-                    onClick={() => {
-                      setPaymentQrCode("");
-                      setPaymentQrCodeName("");
-                    }}
-                    size="small"
-                    theme="solid"
-                    type="tertiary"
-                  />
-                  <div className="mt-2 truncate text-center text-xs text-[var(--semi-color-text-2)]">
-                    {paymentQrCodeName}
-                  </div>
-                </div>
-              ) : (
-                <Button icon={<Upload size={16} />} onClick={() => fileInputRef.current?.click()} theme="outline">
-                  {t("Upload payment QR code")}
-                </Button>
-              )}
-              <div className="mt-1 text-xs text-[var(--semi-color-text-2)]">
-                {t("Image files only, up to 5 MB.")}
-              </div>
-            </div>
-          ) : null}
-
-          {destination === "alipay" ? (
-            <label className="block" htmlFor="withdraw-note">
+        {withdrawStep === "notice" ? (
+          <ol className="list-decimal space-y-3 pl-5 text-sm leading-6">
+            <li><strong>{t("Alipay withdrawals are subject to a 3% fee.")}</strong></li>
+            <li>{t("Upload a clear, valid Alipay payment QR code belonging to you. Verify the receiving account and make sure it can receive payments.")}</li>
+            <li>{t("You are responsible for any failed or delayed transfers or financial losses caused by an incorrect or invalid QR code or issues with your receiving account. The platform will not compensate for these losses.")}</li>
+          </ol>
+        ) : withdrawStep === "form" ? (
+          <div className="space-y-4">
+            <label className="block" htmlFor="withdraw-amount">
               <span className="mb-2 block text-sm font-medium text-[var(--semi-color-text-0)]">
-                {t("Note")}
+                {t(destination === "wallet" ? "Transfer points" : "Withdraw points")}
               </span>
-              <TextArea
-                autosize={{ minRows: 3, maxRows: 6 }}
-                id="withdraw-note"
-                maxCount={500}
-                onChange={(value) => setNote(String(value))}
-                placeholder={t("Withdrawal request note placeholder")}
-                showClear
-                value={note}
+              <InputNumber
+                autoFocus={destination === "alipay"}
+                id="withdraw-amount"
+                min={1}
+                onChange={(value) => setWithdrawAmount(String(value ?? ""))}
+                placeholder="1"
+                precision={0}
+                step={1}
+                style={{ width: "100%" }}
+                value={withdrawAmount}
               />
+              <span className="mt-1 block text-xs text-[var(--semi-color-text-2)]">
+                {t("Withdrawable points")}: {formatPointsValue(supplierAvailable)}
+              </span>
             </label>
-          ) : null}
-        </div>
+
+            {destination === "alipay" ? (
+              <div>
+                <div className="mb-2 text-sm font-medium text-[var(--semi-color-text-0)]">
+                  {t("Alipay payment QR code")}
+                </div>
+                <input
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) => void pickQrCode(event.target.files?.[0])}
+                  ref={fileInputRef}
+                  type="file"
+                />
+                {paymentQrCode ? (
+                  <div className="relative overflow-hidden rounded-xl border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-3">
+                    <img
+                      alt={t("Alipay payment QR code")}
+                      className="mx-auto max-h-56 max-w-full object-contain"
+                      src={paymentQrCode}
+                    />
+                    <Button
+                      aria-label={t("Remove payment QR code")}
+                      className="!absolute right-2 top-2"
+                      icon={<X size={15} />}
+                      onClick={() => {
+                        setPaymentQrCode("");
+                        setPaymentQrCodeName("");
+                      }}
+                      size="small"
+                      theme="solid"
+                      type="tertiary"
+                    />
+                    <div className="mt-2 truncate text-center text-xs text-[var(--semi-color-text-2)]">
+                      {paymentQrCodeName}
+                    </div>
+                  </div>
+                ) : (
+                  <Button icon={<Upload size={16} />} onClick={() => fileInputRef.current?.click()} theme="outline">
+                    {t("Upload payment QR code")}
+                  </Button>
+                )}
+                <div className="mt-1 text-xs text-[var(--semi-color-text-2)]">
+                  {t("Image files only, up to 5 MB.")}
+                </div>
+              </div>
+            ) : null}
+
+            {destination === "alipay" ? (
+              <label className="block" htmlFor="withdraw-note">
+                <span className="mb-2 block text-sm font-medium text-[var(--semi-color-text-0)]">
+                  {t("Note")}
+                </span>
+                <TextArea
+                  autosize={{ minRows: 3, maxRows: 6 }}
+                  id="withdraw-note"
+                  maxCount={500}
+                  onChange={(value) => setNote(String(value))}
+                  placeholder={t("Withdrawal request note placeholder")}
+                  showClear
+                  value={note}
+                />
+              </label>
+            ) : null}
+          </div>
+        ) : null}
       </Modal>
     </div>
   );
