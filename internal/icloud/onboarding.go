@@ -171,6 +171,7 @@ type iCloudOnboardingLine struct {
 	ICloudOpened    bool
 	PrimaryEmail    string
 	PhoneNumber     string
+	DeviceCodeAPI   string
 	FamilyInviteURL string
 	AccountRole     string
 	Secret          iCloudOnboardingSecret
@@ -317,12 +318,20 @@ func parseICloudOnboardingLine(lineNumber int, raw string) (iCloudOnboardingLine
 		return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid birthday on line %d", ErrICloudOnboardingInvalid, lineNumber)
 	}
 	candidate := parts[8]
-	phoneShaped := candidate != "" && strings.IndexFunc(candidate, func(char rune) bool {
-		return (char < '0' || char > '9') && !strings.ContainsRune("+ -().", char)
-	}) == -1
-	phone := onboardingPhoneDigits(candidate)
-	if !phoneShaped || len(phone) < 7 || len(phone) > 20 {
-		return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid phone number on line %d", ErrICloudOnboardingInvalid, lineNumber)
+	phone, deviceCodeAPI := "", ""
+	if strings.Contains(candidate, "://") {
+		if len(candidate) > 2048 || !validDeviceCodeURL(candidate) {
+			return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid device code URL on line %d", ErrICloudOnboardingInvalid, lineNumber)
+		}
+		deviceCodeAPI = candidate
+	} else {
+		phoneShaped := candidate != "" && strings.IndexFunc(candidate, func(char rune) bool {
+			return (char < '0' || char > '9') && !strings.ContainsRune("+ -().", char)
+		}) == -1
+		phone = onboardingPhoneDigits(candidate)
+		if !phoneShaped || len(phone) < 7 || len(phone) > 20 {
+			return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid phone number on line %d", ErrICloudOnboardingInvalid, lineNumber)
+		}
 	}
 	invite := ""
 	role := "primary"
@@ -335,7 +344,7 @@ func parseICloudOnboardingLine(lineNumber int, raw string) (iCloudOnboardingLine
 	}
 	return iCloudOnboardingLine{
 		LineNumber: lineNumber, Region: region, CountryCode: countryCodeFromICloudRegion(region),
-		ICloudOpened: opened, PrimaryEmail: emailValue, PhoneNumber: phone,
+		ICloudOpened: opened, PrimaryEmail: emailValue, PhoneNumber: phone, DeviceCodeAPI: deviceCodeAPI,
 		FamilyInviteURL: invite, AccountRole: role,
 		Secret: iCloudOnboardingSecret{Password: password, SecurityAnswers: answers, Birthday: birthday.Format("2006-01-02")},
 	}, nil
@@ -684,6 +693,13 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 				OperatorUserID: operatorUserID, RequestID: strings.TrimSpace(requestID),
 				IdempotencyKey: strings.TrimSpace(idempotencyKey), RequestFingerprint: fingerprint,
 			}
+			if line.DeviceCodeAPI != "" {
+				task.DeviceCodeAPI, task.DeviceBindStatus = line.DeviceCodeAPI, "success"
+				task.Stage = "manage_prepare"
+				if line.AccountRole == "child" {
+					task.Stage = "family_prepare"
+				}
+			}
 			if task.ResourceID == nil {
 				if err := createICloudOnboardingPlaceholderTx(tx, &iCloudOnboardingImportModel{OwnerUserID: ownerUserID, ResourceExpireAt: normalizeICloudResourceExpireAt(resourceExpireAt)}, &task, line.Secret, now); err != nil {
 					if errors.Is(err, ErrICloudResourceIdentity) || isICloudDuplicateError(err) {
@@ -901,6 +917,11 @@ func persistICloudOnboardingResourceStateTx(tx *gorm.DB, task *iCloudOnboardingT
 		"onboarding_operator_user_id":    task.OperatorUserID, "onboarding_request_id": task.RequestID,
 		"onboarding_idempotency_key": task.IdempotencyKey, "onboarding_request_fingerprint": task.RequestFingerprint,
 		"updated_at": now,
+	}
+	if task.DeviceCodeAPI != "" {
+		updates["device_code_api"] = task.DeviceCodeAPI
+		updates["device_bind_status"] = task.DeviceBindStatus
+		updates["device_account_id"] = task.DeviceAccountID
 	}
 	if task.ImportID != nil {
 		updates["import_id"] = *task.ImportID

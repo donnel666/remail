@@ -394,7 +394,7 @@ func (s *Service) refreshICloudOnboardingResource(ctx context.Context, task *iCl
 	if task.TaskKind != "refresh" || task.ResourceID == nil {
 		return s.failICloudOnboardingTask(ctx, task, "invalid_refresh_state", "Apple session refresh state is invalid.")
 	}
-	if task.KitesimPhoneID == nil || strings.TrimSpace(task.BoundPhoneNumber) == "" {
+	if task.DeviceCodeAPI == "" && (task.KitesimPhoneID == nil || strings.TrimSpace(task.BoundPhoneNumber) == "") {
 		return s.failICloudOnboardingTask(ctx, task, "phone_binding_missing", "Cookie refresh requires the permanently bound eSIM phone.")
 	}
 	response, err := s.executeICloudOnboardingApple(ctx, task, secret, AppleOnboardingRequest{

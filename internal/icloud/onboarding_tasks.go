@@ -548,7 +548,7 @@ func (s *Service) prepareICloudOnboardingAppleWithInvite(ctx context.Context, ta
 	if response.Next == "ready" || response.Next == "" {
 		return s.advanceICloudOnboardingTask(ctx, task, readyStage, nil, updates)
 	}
-	if task.KitesimPhoneID == nil && !pendingPhoneBinding {
+	if task.DeviceCodeAPI == "" && task.KitesimPhoneID == nil && !pendingPhoneBinding {
 		binding, err := s.bindICloudOnboardingTrustedPhone(ctx, task, response.TrustedPhoneLastTwo, false)
 		if err != nil || binding == nil {
 			return err
@@ -594,7 +594,7 @@ func (s *Service) checkICloudOnboardingSMSPhone(ctx context.Context, task *iClou
 }
 
 func isICloudOnboardingPhoneBindingPending(task *iCloudOnboardingTaskModel) bool {
-	if task == nil || task.TaskKind != "onboarding" || task.KitesimPhoneID != nil || strings.TrimSpace(task.BoundPhoneNumber) == "" {
+	if task == nil || task.TaskKind != "onboarding" || task.DeviceCodeAPI != "" || task.KitesimPhoneID != nil || strings.TrimSpace(task.BoundPhoneNumber) == "" {
 		return false
 	}
 	return task.Stage == "accepted" || task.Stage == "icloud_prepare"
@@ -1126,7 +1126,7 @@ func (s *Service) fetchICloudOnboardingManage(ctx context.Context, task *iCloudO
 	if code := strings.ToUpper(strings.TrimSpace(response.CountryCode)); code != "" {
 		updates["country_code"] = code
 	}
-	if task.KitesimPhoneID == nil {
+	if task.DeviceCodeAPI == "" && task.KitesimPhoneID == nil {
 		binding, err := s.bindICloudOnboardingTrustedPhone(ctx, task, response.TrustedPhoneLastTwo, false)
 		if err != nil || binding == nil {
 			return err
@@ -1280,7 +1280,7 @@ func (s *Service) verifyICloudOnboardingForwarding(ctx context.Context, task *iC
 }
 
 func (s *Service) importICloudOnboardingResource(ctx context.Context, task *iCloudOnboardingTaskModel, secret iCloudOnboardingSecret) error {
-	if task.KitesimPhoneID == nil || strings.TrimSpace(task.BoundPhoneNumber) == "" {
+	if task.DeviceCodeAPI == "" && (task.KitesimPhoneID == nil || strings.TrimSpace(task.BoundPhoneNumber) == "") {
 		return s.failICloudOnboardingTask(ctx, task, "phone_binding_missing", "The Apple ID has no permanent eSIM phone binding.")
 	}
 	var preparation *iCloudImportPreparationModel

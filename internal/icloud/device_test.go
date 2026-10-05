@@ -29,6 +29,181 @@ func setDeviceTestSetting(t *testing.T, key, value string) {
 	t.Cleanup(func() { runtimeconfig.Set(key, old) })
 }
 
+type manualDeviceApple struct{ requests []AppleOnboardingRequest }
+
+func (p *manualDeviceApple) Execute(_ context.Context, request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
+	p.requests = append(p.requests, request)
+	response := AppleOnboardingResponse{Next: "ready", Session: json.RawMessage(`{"version":1}`)}
+	switch request.Operation {
+	case appleOnboardingPrepareFamily:
+		response.Next = appleSMSFamilyLogin
+	case appleOnboardingPrepareManage:
+		response.Next = appleSMSManageLogin
+	case appleOnboardingVerifySMS:
+		if request.Code != "123456" {
+			return AppleOnboardingResponse{}, errors.New("unexpected device code")
+		}
+	case appleOnboardingExport:
+		response.NewChannel = &AppleOnboardingChannel{Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com", Cookie: "myacinfo=device-cookie"}
+	}
+	return response, nil
+}
+
+func TestManualDeviceURLOnboardingWithoutPhone(t *testing.T) {
+	ctx := context.Background()
+	service, db, _, _ := newOnboardingStateTest(t)
+	require.NoError(t, db.AutoMigrate(&iCloudResourceChannelModel{}, &iCloudImportPreparationModel{}))
+	service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
+	service.smsPhones = nil
+	apple := &manualDeviceApple{}
+	service.onboardingApple = apple
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/code", r.URL.Path)
+		require.Empty(t, r.Header.Get("Authorization"))
+		_, _ = fmt.Fprint(w, "AppleID 登录验证码:123456")
+	}))
+	defer server.Close()
+	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceAPIKey, "")
+	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, server.URL)
+	service.device.http.Transport = server.Client().Transport
+	codeURL := server.URL + "/code?id=1&token=secret-device-token"
+	prefix := "美国区----否----device@example.com----Secret1!----q1(a1)----q2(a2)----q3(a3)----2000-11-02----"
+	for _, invalid := range []string{
+		strings.Replace(codeURL, "https:", "http:", 1), "https://other.example/code",
+		codeURL + "#fragment", strings.Replace(codeURL, "https://", "https://user:password@", 1),
+		strings.Replace(codeURL, "/code", "/co\rde", 1), codeURL + strings.Repeat("x", 2048),
+	} {
+		_, err := parseICloudOnboardingLine(1, prefix+invalid+"----invite")
+		require.ErrorIs(t, err, ErrICloudOnboardingInvalid)
+	}
+	view, reused, err := service.AcceptAdminICloudOnboardingImport(ctx, 1, 1, []byte(prefix+codeURL+"----invite"), service.now().Add(time.Hour), "device-import", "request", "/test")
+	require.NoError(t, err)
+	require.False(t, reused)
+	task := &iCloudOnboardingTaskModel{}
+	require.NoError(t, db.First(task, view.Tasks[0].ID).Error)
+	require.Equal(t, "family_prepare", task.Stage)
+	require.Equal(t, codeURL, task.DeviceCodeAPI)
+	require.Equal(t, "success", task.DeviceBindStatus)
+	require.Empty(t, task.BoundPhoneNumber)
+	require.Nil(t, task.KitesimPhoneID)
+	payload, err := json.Marshal(view)
+	require.NoError(t, err)
+	require.NotContains(t, string(payload), "secret-device-token")
+	for _, stage := range []string{"sms_send", "sms_wait", "sms_verify", "family_join_intent", "family_join_apply", iCloudOnboardingStageFamilySharing} {
+		processOnboardingStageForTest(t, service, db, task)
+		require.Equal(t, stage, task.Stage)
+	}
+	require.NoError(t, service.ConfirmICloudOnboardingFamilyReset(ctx, task.ID, 1, "confirm", "/test"))
+	require.NoError(t, db.First(task, task.ID).Error)
+	for _, stage := range []string{"sms_send", "sms_wait", "sms_verify", "manage_profile", "forwarding_prepare"} {
+		processOnboardingStageForTest(t, service, db, task)
+		require.Equal(t, stage, task.Stage)
+	}
+	now, operator := service.now(), uint(1)
+	preparation := iCloudImportPreparationModel{OperatorUserID: &operator, ForwardToEmail: "relay@example.com", VerificationCode: "654321", VerifiedAt: &now, ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now}
+	require.NoError(t, db.Create(&preparation).Error)
+	require.NoError(t, db.Model(task).Updates(map[string]any{"stage": "resource_import", "selected_forward_to": preparation.ForwardToEmail, "forward_preparation_id": preparation.ID}).Error)
+	require.NoError(t, db.First(task, task.ID).Error)
+	processOnboardingStageForTest(t, service, db, task)
+	require.Equal(t, iCloudOnboardingCompleted, task.Status)
+	require.Equal(t, codeURL, task.DeviceCodeAPI)
+	require.NoError(t, db.Model(&iCloudResourceChannelModel{}).Where("resource_id = ?", task.ID).Update("session_status", iCloudSessionInvalid).Error)
+	require.NoError(t, service.EnsureICloudCookieRefresh(ctx, task.ID))
+	require.NoError(t, db.First(task, task.ID).Error)
+	for _, stage := range []string{"sms_send", "sms_wait", "sms_verify", "manage_profile", "resource_refresh", "completed"} {
+		processOnboardingStageForTest(t, service, db, task)
+		require.Equal(t, stage, task.Stage)
+	}
+	for _, request := range apple.requests {
+		require.True(t, request.UseDeviceCode)
+		require.True(t, request.SkipPhoneEnrollment)
+		require.Empty(t, request.PhoneNumber)
+		require.NotEqual(t, appleOnboardingPrepareICloud, request.Operation)
+		require.NotEqual(t, appleOnboardingSendSMS, request.Operation)
+	}
+	view, reused, err = service.AcceptAdminICloudOnboardingImport(ctx, 1, 1, []byte(prefix+codeURL+"----invite"), now.Add(time.Hour), "device-import", "request", "/test")
+	require.NoError(t, err)
+	require.True(t, reused)
+	require.Equal(t, task.ID, view.Tasks[0].ID)
+	view, _, err = service.AcceptAdminICloudOnboardingImport(ctx, 1, 1, []byte(strings.Replace(prefix, "device@example.com", "primary-device@example.com", 1)+codeURL), now.Add(time.Hour), "primary-device-import", "request", "/test")
+	require.NoError(t, err)
+	require.Equal(t, "manage_prepare", view.Tasks[0].Stage)
+	primaryID := view.Tasks[0].ID
+	require.NoError(t, db.Model(&iCloudResourceModel{}).Where("id = ?", primaryID).Updates(map[string]any{
+		"device_code_api": "", "device_bind_status": "failed", "bound_phone_number": "14155550001", "bound_phone_source": "manual",
+		"onboarding_status": iCloudOnboardingFailed, "dispatch_status": "failed",
+	}).Error)
+	view, _, err = service.AcceptAdminICloudOnboardingImport(ctx, 1, 1, []byte(strings.Replace(prefix, "device@example.com", "primary-device@example.com", 1)+codeURL), now.Add(time.Hour), "retry-device-import", "request", "/test")
+	require.NoError(t, err)
+	require.Equal(t, primaryID, view.Tasks[0].ID)
+	task = &iCloudOnboardingTaskModel{}
+	require.NoError(t, db.First(task, primaryID).Error)
+	processOnboardingStageForTest(t, service, db, task)
+	require.Equal(t, "sms_send", task.Stage)
+	require.Nil(t, task.KitesimPhoneID)
+	require.NoError(t, db.Model(task).Updates(map[string]any{"stage": "resource_import", "icloud_opened": true}).Error)
+	require.NoError(t, db.First(task, primaryID).Error)
+	processOnboardingStageForTest(t, service, db, task)
+	require.Equal(t, "icloud_cookie_prepare", task.Stage)
+	require.Equal(t, "old_cookie_missing", task.LastErrorCategory)
+}
+
+func TestDeviceURLImportPreservesPhoneOnboarding(t *testing.T) {
+	service, db, _, apple := newOnboardingStateTest(t)
+	service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
+	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceAPIKey, "configured-for-new-accounts")
+	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, "https://devices.example")
+	codeURL := "https://devices.example/code?id=1"
+	entries := []struct{ email, contact, invite, phone, stage, role string }{
+		{"phone-child@example.com", "+1 (415) 555-0001", "----invite", "14155550001", "accepted", "child"},
+		{"device-child@example.com", codeURL, "----invite", "", "family_prepare", "child"},
+		{"phone-primary@example.com", "14155550002", "", "14155550002", "accepted", "primary"},
+		{"device-primary@example.com", codeURL, "", "", "manage_prepare", "primary"},
+	}
+	lines := make([]string, len(entries))
+	for i, entry := range entries {
+		lines[i] = "美国区----否----" + entry.email + "----Secret1!----q1(a1)----q2(a2)----q3(a3)----2000-11-02----" + entry.contact + entry.invite
+	}
+	now := service.now()
+	view, _, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, []byte(strings.Join(lines, "\n")), now.Add(time.Hour), "mixed-import", "request", "/test")
+	require.NoError(t, err)
+	require.Len(t, view.Tasks, len(entries))
+	for i, entry := range entries {
+		var task iCloudOnboardingTaskModel
+		require.NoError(t, db.First(&task, view.Tasks[i].ID).Error)
+		require.Equal(t, entry.phone, task.BoundPhoneNumber)
+		require.Equal(t, entry.stage, task.Stage)
+		require.Equal(t, entry.role, task.AccountRole)
+		if entry.phone != "" {
+			require.Empty(t, task.DeviceCodeAPI)
+			require.Empty(t, task.DeviceBindStatus)
+		} else {
+			require.Equal(t, codeURL, task.DeviceCodeAPI)
+		}
+	}
+	phoneTask := &iCloudOnboardingTaskModel{}
+	require.NoError(t, db.First(phoneTask, view.Tasks[0].ID).Error)
+	processOnboardingStageForTest(t, service, db, phoneTask)
+	require.Equal(t, "sms_send", phoneTask.Stage)
+	require.Equal(t, appleSMSPhoneEnrollment, phoneTask.PendingSMSPurpose)
+	require.NotNil(t, phoneTask.KitesimPhoneID)
+	require.Equal(t, []string{appleOnboardingPrepareICloud + ":"}, apple.operations)
+	require.NoError(t, db.Model(phoneTask).Updates(map[string]any{
+		"onboarding_status": iCloudOnboardingFailed, "dispatch_status": "failed",
+		"device_code_api": codeURL, "device_bind_status": "success", "device_account_id": "original-device",
+	}).Error)
+	retry, _, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, []byte(lines[0]), now.Add(time.Hour), "phone-retry", "request", "/test")
+	require.NoError(t, err)
+	require.Equal(t, phoneTask.ID, retry.Tasks[0].ID)
+	require.NoError(t, db.First(phoneTask, phoneTask.ID).Error)
+	require.Equal(t, "accepted", phoneTask.Stage)
+	require.Equal(t, "14155550001", phoneTask.BoundPhoneNumber)
+	require.NotNil(t, phoneTask.KitesimPhoneID)
+	require.Equal(t, codeURL, phoneTask.DeviceCodeAPI)
+	require.Equal(t, "success", phoneTask.DeviceBindStatus)
+	require.Equal(t, "original-device", phoneTask.DeviceAccountID)
+}
+
 type deviceTestPhones struct {
 	onboardingProvidedPhone
 	reserves int
