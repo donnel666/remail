@@ -250,24 +250,27 @@ jobs:
 
       - name: Start MinIO
         run: |
-          docker rm -f remail-smoke-minio >/dev/null 2>&1 || true
-          docker run -d \
-            --name remail-smoke-minio \
-            -p 9000:9000 \
-            -e MINIO_ROOT_USER=remail \
-            -e MINIO_ROOT_PASSWORD=remail_secret \
-            quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data --console-address ":9001"
+          curl -fsSL --retry 3 --max-time 120 \
+            https://github.com/minio/minio/releases/download/RELEASE.2025-09-07T16-13-09Z/minio.linux-amd64.RELEASE.2025-09-07T16-13-09Z \
+            -o "$RUNNER_TEMP/minio"
+          echo "7c5bd8512c6e966455b1d198209358b2d191c77a83ab377c4073281065fb855f  $RUNNER_TEMP/minio" | sha256sum --check --strict
+          chmod +x "$RUNNER_TEMP/minio"
+          MINIO_ROOT_USER=remail MINIO_ROOT_PASSWORD=remail_secret \
+            "$RUNNER_TEMP/minio" server "$RUNNER_TEMP/minio-data" --console-address ":9001" \
+            >"$RUNNER_TEMP/minio.log" 2>&1 &
+          MINIO_PID=$!
+          echo "MINIO_PID=$MINIO_PID" >> "$GITHUB_ENV"
           for _ in $(seq 1 60); do
             if curl -sf http://127.0.0.1:9000/minio/health/live >/dev/null; then
               exit 0
             fi
-            if ! docker ps --format '{{.Names}}' | grep -qx remail-smoke-minio; then
-              docker logs remail-smoke-minio
+            if ! kill -0 "$MINIO_PID" 2>/dev/null; then
+              cat "$RUNNER_TEMP/minio.log"
               exit 1
             fi
             sleep 1
           done
-          docker logs remail-smoke-minio
+          cat "$RUNNER_TEMP/minio.log"
           exit 1
 
       - name: Build server binary
@@ -326,9 +329,9 @@ jobs:
           mysql -h 127.0.0.1 -u remail -premail remail -e \
             "SELECT owner_user_id FROM explicit_aliases LIMIT 1;"
 
-      - name: Shutdown server
+      - name: Shutdown smoke services
         if: always()
-        run: kill "$SERVER_PID" 2>/dev/null || true
+        run: kill "${SERVER_PID:-}" "${MINIO_PID:-}" 2>/dev/null || true
 
   docker:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
