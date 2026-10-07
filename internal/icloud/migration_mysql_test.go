@@ -15,6 +15,37 @@ import (
 
 var iCloudOnboardingMigrationMySQL = testmysql.New("remail_icloud_onboarding_migration")
 
+func TestICloudOptionalBirthdayMigrationMySQL(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	source := filepath.Clean(filepath.Join(filepath.Dir(file), "../..", "migrations"))
+	db := iCloudOnboardingMigrationMySQL.Database(t, testmysql.MigrationsThrough(t, source, 110))
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, platform.RunMigrations(sqlDB, testmysql.MigrationsThrough(t, source, 144)))
+	require.NoError(t, db.Exec("SET FOREIGN_KEY_CHECKS = 0").Error)
+	require.NoError(t, db.Exec(`INSERT INTO icloud_resource_credentials(resource_id, apple_password, security_answers, birthday)
+		VALUES (990145, 'old-password', '[]', '2000-01-02')`).Error)
+	through145 := testmysql.MigrationsThrough(t, source, 145)
+	require.NoError(t, platform.RunMigrations(sqlDB, through145))
+	var oldBirthday string
+	require.NoError(t, db.Raw("SELECT DATE_FORMAT(birthday, '%Y-%m-%d') FROM icloud_resource_credentials WHERE resource_id = 990145").Scan(&oldBirthday).Error)
+	require.Equal(t, "2000-01-02", oldBirthday)
+	setDeviceTestSetting(t, "icloud_device_base_url", "https://devices.example")
+	service := NewService(db, nil, nil)
+	service.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
+	view, _, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1,
+		[]byte("compact@example.com----TestPassword!----https://devices.example/code?id=1"),
+		time.Now().Add(time.Hour), "compact-mysql", "request", "/test")
+	require.NoError(t, err)
+	var count int64
+	require.NoError(t, db.Model(&iCloudResourceCredentialModel{}).Where("resource_id = ? AND birthday IS NULL", view.Tasks[0].ID).Count(&count).Error)
+	require.EqualValues(t, 1, count)
+	require.Error(t, goose.DownTo(sqlDB, through145, 144), "rollback must not invent a date for compact accounts")
+	require.NoError(t, db.Exec("DELETE FROM icloud_resource_credentials WHERE resource_id = ?", view.Tasks[0].ID).Error)
+	require.NoError(t, goose.DownTo(sqlDB, through145, 144))
+}
+
 func TestICloudDeviceCodeMigrationMySQL(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	require.True(t, ok)

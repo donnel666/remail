@@ -133,19 +133,11 @@ func (s *Service) ensureICloudCookieRecoveryTx(ctx context.Context, tx *gorm.DB,
 		}
 		return false, err
 	}
-	var answers [3]iCloudSecurityAnswer
-	if err := json.Unmarshal(credential.SecurityAnswers, &answers); err != nil ||
-		strings.TrimSpace(credential.ApplePassword) == "" || credential.Birthday.IsZero() {
+	storedSecret, err := credential.onboardingSecret(resource.DeviceCodeAPI)
+	if err != nil {
 		return false, nil
 	}
-	for _, answer := range answers {
-		if strings.TrimSpace(answer.Question) == "" || strings.TrimSpace(answer.Answer) == "" {
-			return false, nil
-		}
-	}
-	secret, err := json.Marshal(iCloudOnboardingSecret{
-		Password: credential.ApplePassword, SecurityAnswers: answers, Birthday: credential.Birthday.Format("2006-01-02"),
-	})
+	secret, err := json.Marshal(storedSecret)
 	if err != nil {
 		return false, err
 	}

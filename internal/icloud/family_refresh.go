@@ -316,7 +316,10 @@ func (s *Service) fetchResourceFamily(ctx context.Context, resource iCloudResour
 }
 
 func (s *Service) loginFamilyDevice(ctx context.Context, resource iCloudResourceModel, credential iCloudResourceCredentialModel) (*AppleOnboardingChannel, error) {
-	secret := AppleOnboardingSecret{Password: credential.ApplePassword, Birthday: credential.Birthday.Format(time.DateOnly)}
+	secret := AppleOnboardingSecret{Password: credential.ApplePassword}
+	if !credential.Birthday.IsZero() {
+		secret.Birthday = credential.Birthday.Format(time.DateOnly)
+	}
 	if len(credential.SecurityAnswers) > 0 {
 		_ = json.Unmarshal(credential.SecurityAnswers, &secret.SecurityAnswers)
 	}

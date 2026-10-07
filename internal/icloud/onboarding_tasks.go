@@ -1314,8 +1314,7 @@ func (s *Service) importICloudOnboardingResource(ctx context.Context, task *iClo
 	if preparation == nil {
 		return s.retryICloudOnboardingForwardingPreparation(ctx, task)
 	}
-	birthday, err := time.Parse("2006-01-02", secret.Birthday)
-	if err != nil {
+	if birthday, err := time.Parse(time.DateOnly, secret.Birthday); (err != nil || birthday.IsZero()) && (secret.Birthday != "" || task.DeviceCodeAPI == "") {
 		return s.failICloudOnboardingTask(ctx, task, "invalid_credentials", "Stored Apple birthday is invalid.")
 	}
 	now := s.now().UTC().Truncate(time.Millisecond)
@@ -1436,17 +1435,7 @@ func (s *Service) importICloudOnboardingResource(ctx context.Context, task *iClo
 		if rootUpdated.RowsAffected != 1 {
 			return ErrICloudImportClaim
 		}
-		answers, err := json.Marshal(secret.SecurityAnswers)
-		if err != nil {
-			return err
-		}
-		if err := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "resource_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"apple_password", "security_answers", "birthday", "updated_at"}),
-		}).Create(&iCloudResourceCredentialModel{
-			ResourceID: resourceID, ApplePassword: secret.Password, SecurityAnswers: iCloudJSON(answers),
-			Birthday: birthday, CreatedAt: now, UpdatedAt: now,
-		}).Error; err != nil {
+		if err := upsertICloudOnboardingCredentialsTx(tx, resourceID, secret, locked.DeviceCodeAPI, now); err != nil {
 			return err
 		}
 		channels := []iCloudImportChannel{appleOnboardingImportChannel(*response.NewChannel)}

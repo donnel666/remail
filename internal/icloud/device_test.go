@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func setDeviceTestSetting(t *testing.T, key, value string) {
@@ -50,6 +52,15 @@ func (p *manualDeviceApple) Execute(_ context.Context, request AppleOnboardingRe
 }
 
 func TestManualDeviceURLOnboardingWithoutPhone(t *testing.T) {
+	for _, compact := range []bool{false, true} {
+		t.Run(fmt.Sprintf("compact=%t", compact), func(t *testing.T) {
+			testManualDeviceURLOnboardingWithoutPhone(t, compact)
+		})
+	}
+}
+
+func testManualDeviceURLOnboardingWithoutPhone(t *testing.T, compact bool) {
+	t.Helper()
 	ctx := context.Background()
 	service, db, _, _ := newOnboardingStateTest(t)
 	require.NoError(t, db.AutoMigrate(&iCloudResourceChannelModel{}, &iCloudImportPreparationModel{}))
@@ -57,17 +68,26 @@ func TestManualDeviceURLOnboardingWithoutPhone(t *testing.T) {
 	service.smsPhones = nil
 	apple := &manualDeviceApple{}
 	service.onboardingApple = apple
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	service.device.http.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 		require.Equal(t, "/code", r.URL.Path)
+		require.Equal(t, http.MethodGet, r.Method)
 		require.Empty(t, r.Header.Get("Authorization"))
-		_, _ = fmt.Fprint(w, "AppleID 登录验证码:123456")
-	}))
-	defer server.Close()
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("AppleID 登录验证码:123456"))}, nil
+	})
 	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceAPIKey, "")
-	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, server.URL)
-	service.device.http.Transport = server.Client().Transport
-	codeURL := server.URL + "/code?id=1&token=secret-device-token"
+	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, "https://devices.example")
+	codeURL := "https://devices.example/code?id=1&token=secret-device-token"
 	prefix := "美国区----否----device@example.com----Secret1!----q1(a1)----q2(a2)----q3(a3)----2000-11-02----"
+	if compact {
+		prefix = "device@example.com----Secret1!----"
+		for _, invalid := range []string{"", "14155550001", "not-a-url"} {
+			_, err := parseICloudOnboardingLine(1, prefix+invalid)
+			require.ErrorIs(t, err, ErrICloudOnboardingInvalid)
+		}
+	} else {
+		_, err := parseICloudOnboardingLine(1, strings.Replace(prefix+codeURL, "2000-11-02", "0001-01-01", 1))
+		require.ErrorIs(t, err, ErrICloudOnboardingInvalid, "an explicit zero date must not become a missing birthday")
+	}
 	for _, invalid := range []string{
 		strings.Replace(codeURL, "https:", "http:", 1), "https://other.example/code",
 		codeURL + "#fragment", strings.Replace(codeURL, "https://", "https://user:password@", 1),
@@ -84,6 +104,11 @@ func TestManualDeviceURLOnboardingWithoutPhone(t *testing.T) {
 	require.Equal(t, "family_prepare", task.Stage)
 	require.Equal(t, codeURL, task.DeviceCodeAPI)
 	require.Equal(t, "success", task.DeviceBindStatus)
+	if compact {
+		var missingBirthday int64
+		require.NoError(t, db.Model(&iCloudResourceCredentialModel{}).Where("resource_id = ? AND birthday IS NULL", task.ID).Count(&missingBirthday).Error)
+		require.EqualValues(t, 1, missingBirthday)
+	}
 	require.Empty(t, task.BoundPhoneNumber)
 	require.Nil(t, task.KitesimPhoneID)
 	payload, err := json.Marshal(view)
@@ -107,12 +132,31 @@ func TestManualDeviceURLOnboardingWithoutPhone(t *testing.T) {
 	processOnboardingStageForTest(t, service, db, task)
 	require.Equal(t, iCloudOnboardingCompleted, task.Status)
 	require.Equal(t, codeURL, task.DeviceCodeAPI)
+	if compact {
+		var credential iCloudResourceCredentialModel
+		require.NoError(t, db.First(&credential, task.ID).Error)
+		require.True(t, credential.Birthday.IsZero())
+		_, err := credential.onboardingSecret("")
+		require.ErrorIs(t, err, ErrICloudOnboardingInvalid, "SMS accounts must still require their original metadata")
+	}
 	require.NoError(t, db.Model(&iCloudResourceChannelModel{}).Where("resource_id = ?", task.ID).Update("session_status", iCloudSessionInvalid).Error)
 	require.NoError(t, service.EnsureICloudCookieRefresh(ctx, task.ID))
 	require.NoError(t, db.First(task, task.ID).Error)
 	for _, stage := range []string{"sms_send", "sms_wait", "sms_verify", "manage_profile", "resource_refresh", "completed"} {
 		processOnboardingStageForTest(t, service, db, task)
 		require.Equal(t, stage, task.Stage)
+	}
+	if compact {
+		require.NoError(t, db.Model(&iCloudResourceChannelModel{}).Where("resource_id = ?", task.ID).Update("session_status", iCloudSessionInvalid).Error)
+		created := false
+		require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+			var err error
+			created, err = service.ensureICloudCookieRecoveryTx(ctx, tx, task.ID)
+			return err
+		}))
+		require.True(t, created)
+		require.NoError(t, db.First(task, task.ID).Error)
+		require.Equal(t, iCloudCookieRecoveryTaskKind, task.TaskKind)
 	}
 	for _, request := range apple.requests {
 		require.True(t, request.UseDeviceCode)
@@ -154,15 +198,23 @@ func TestDeviceURLImportPreservesPhoneOnboarding(t *testing.T) {
 	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceAPIKey, "configured-for-new-accounts")
 	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, "https://devices.example")
 	codeURL := "https://devices.example/code?id=1"
-	entries := []struct{ email, contact, invite, phone, stage, role string }{
-		{"phone-child@example.com", "+1 (415) 555-0001", "----invite", "14155550001", "accepted", "child"},
-		{"device-child@example.com", codeURL, "----invite", "", "family_prepare", "child"},
-		{"phone-primary@example.com", "14155550002", "", "14155550002", "accepted", "primary"},
-		{"device-primary@example.com", codeURL, "", "", "manage_prepare", "primary"},
+	entries := []struct {
+		email, contact, invite, phone, stage, role string
+		compact                                    bool
+	}{
+		{"phone-child@example.com", "+1 (415) 555-0001", "----invite", "14155550001", "accepted", "child", false},
+		{"device-child@example.com", codeURL, "----invite", "", "family_prepare", "child", false},
+		{"phone-primary@example.com", "14155550002", "", "14155550002", "accepted", "primary", false},
+		{"device-primary@example.com", codeURL, "", "", "manage_prepare", "primary", false},
+		{"compact-child@example.com", codeURL, "----invite", "", "family_prepare", "child", true},
+		{"compact-primary@example.com", codeURL, "", "", "manage_prepare", "primary", true},
 	}
 	lines := make([]string, len(entries))
 	for i, entry := range entries {
 		lines[i] = "美国区----否----" + entry.email + "----Secret1!----q1(a1)----q2(a2)----q3(a3)----2000-11-02----" + entry.contact + entry.invite
+		if entry.compact {
+			lines[i] = entry.email + "----Secret1!----" + entry.contact + entry.invite
+		}
 	}
 	now := service.now()
 	view, _, err := service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, []byte(strings.Join(lines, "\n")), now.Add(time.Hour), "mixed-import", "request", "/test")
@@ -202,6 +254,24 @@ func TestDeviceURLImportPreservesPhoneOnboarding(t *testing.T) {
 	require.Equal(t, codeURL, phoneTask.DeviceCodeAPI)
 	require.Equal(t, "success", phoneTask.DeviceBindStatus)
 	require.Equal(t, "original-device", phoneTask.DeviceAccountID)
+	var oldCredential iCloudResourceCredentialModel
+	require.NoError(t, db.First(&oldCredential, phoneTask.ID).Error)
+	require.NoError(t, db.Model(phoneTask).Updates(map[string]any{
+		"onboarding_status": iCloudOnboardingFailed, "dispatch_status": "failed", "icloud_opened": true,
+	}).Error)
+	retry, _, err = service.AcceptAdminICloudOnboardingImport(context.Background(), 1, 1, []byte("phone-child@example.com----NewPassword!----"+codeURL+"----invite"), now.Add(time.Hour), "compact-retry", "request", "/test")
+	require.NoError(t, err)
+	require.Equal(t, phoneTask.ID, retry.Tasks[0].ID)
+	require.NoError(t, db.First(phoneTask, phoneTask.ID).Error)
+	require.Equal(t, "family_prepare", phoneTask.Stage)
+	require.Equal(t, "美国区", phoneTask.Region)
+	require.Equal(t, "US", phoneTask.CountryCode)
+	require.True(t, phoneTask.ICloudOpened)
+	var newCredential iCloudResourceCredentialModel
+	require.NoError(t, db.First(&newCredential, phoneTask.ID).Error)
+	require.Equal(t, "NewPassword!", newCredential.ApplePassword)
+	require.Equal(t, oldCredential.Birthday, newCredential.Birthday)
+	require.JSONEq(t, string(oldCredential.SecurityAnswers), string(newCredential.SecurityAnswers))
 }
 
 type deviceTestPhones struct {

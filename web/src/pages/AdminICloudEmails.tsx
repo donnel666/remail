@@ -1085,6 +1085,9 @@ export function ICloudOnboardingModal({
               {t("Import format")}
             </div>
             <code className="block whitespace-pre-wrap break-all font-mono text-xs leading-5 text-[var(--semi-color-text-2)]">
+              {t("Short format: Apple ID----Password----Device code URL[----Invitation URL]")}
+            </code>
+            <code className="block whitespace-pre-wrap break-all font-mono text-xs leading-5 text-[var(--semi-color-text-2)]">
               {t("Region----iCloud opened----Apple ID----Password----Security answer 1----Security answer 2----Security answer 3----Birthday----Phone or device code URL[----Invitation URL]")}
             </code>
             <Text size="small" type="tertiary">

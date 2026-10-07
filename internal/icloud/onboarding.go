@@ -146,12 +146,55 @@ type iCloudResourceCredentialModel struct {
 	ResourceID      uint       `gorm:"column:resource_id;primaryKey"`
 	ApplePassword   string     `gorm:"column:apple_password"`
 	SecurityAnswers iCloudJSON `gorm:"column:security_answers;type:json;serializer:json"`
-	Birthday        time.Time  `gorm:"column:birthday;type:date"`
+	Birthday        time.Time  `gorm:"column:birthday;type:date;default:null"`
 	CreatedAt       time.Time  `gorm:"column:created_at"`
 	UpdatedAt       time.Time  `gorm:"column:updated_at"`
 }
 
 func (iCloudResourceCredentialModel) TableName() string { return "icloud_resource_credentials" }
+
+func (credential iCloudResourceCredentialModel) onboardingSecret(deviceCodeAPI string) (iCloudOnboardingSecret, error) {
+	secret := iCloudOnboardingSecret{Password: credential.ApplePassword}
+	if err := json.Unmarshal(credential.SecurityAnswers, &secret.SecurityAnswers); err != nil || strings.TrimSpace(secret.Password) == "" {
+		return secret, ErrICloudOnboardingInvalid
+	}
+	if !credential.Birthday.IsZero() {
+		secret.Birthday = credential.Birthday.Format(time.DateOnly)
+	}
+	if deviceCodeAPI == "" {
+		if secret.Birthday == "" {
+			return secret, ErrICloudOnboardingInvalid
+		}
+		for _, answer := range secret.SecurityAnswers {
+			if strings.TrimSpace(answer.Question) == "" || strings.TrimSpace(answer.Answer) == "" {
+				return secret, ErrICloudOnboardingInvalid
+			}
+		}
+	}
+	return secret, nil
+}
+
+func upsertICloudOnboardingCredentialsTx(tx *gorm.DB, resourceID uint, secret iCloudOnboardingSecret, deviceCodeAPI string, now time.Time) error {
+	var birthday time.Time
+	updates := []string{"apple_password", "updated_at"}
+	if secret.Birthday != "" {
+		var err error
+		birthday, err = time.Parse(time.DateOnly, secret.Birthday)
+		if err != nil || birthday.IsZero() {
+			return ErrICloudOnboardingInvalid
+		}
+		updates = append(updates, "security_answers", "birthday")
+	} else if deviceCodeAPI == "" {
+		return ErrICloudOnboardingInvalid
+	}
+	answers, err := json.Marshal(secret.SecurityAnswers)
+	if err != nil {
+		return err
+	}
+	return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "resource_id"}}, DoUpdates: clause.AssignmentColumns(updates)}).
+		Create(&iCloudResourceCredentialModel{ResourceID: resourceID, ApplePassword: secret.Password,
+			SecurityAnswers: iCloudJSON(answers), Birthday: birthday, CreatedAt: now, UpdatedAt: now}).Error
+}
 
 type iCloudSecurityAnswer struct {
 	Question string `json:"question"`
@@ -191,6 +234,9 @@ type iCloudOnboardingExistingResource struct {
 	CredentialRevision      uint64 `gorm:"column:credential_revision"`
 	ValidationGeneration    uint64 `gorm:"column:validation_generation"`
 	BoundPhoneNumber        string `gorm:"column:bound_phone_number"`
+	Region                  string `gorm:"column:region"`
+	CountryCode             string `gorm:"column:country_code"`
+	ICloudOpened            bool   `gorm:"column:icloud_opened"`
 	BoundPhoneCountryCode   string `gorm:"column:bound_phone_country_code"`
 	BoundPhoneSource        string `gorm:"column:bound_phone_source"`
 	KitesimPhoneID          *uint  `gorm:"column:kitesim_phone_id"`
@@ -283,18 +329,22 @@ func parseICloudOnboardingImport(content []byte) ([]iCloudOnboardingLine, error)
 
 func parseICloudOnboardingLine(lineNumber int, raw string) (iCloudOnboardingLine, error) {
 	parts := strings.Split(raw, "----")
+	compact := len(parts) == 3 || len(parts) == 4
+	if compact {
+		parts = append([]string{"", "", parts[0], parts[1], "", "", "", "", parts[2]}, parts[3:]...)
+	}
 	if len(parts) != 9 && len(parts) != 10 {
-		return iCloudOnboardingLine{}, fmt.Errorf("%w: line %d must contain 9 or 10 fields", ErrICloudOnboardingInvalid, lineNumber)
+		return iCloudOnboardingLine{}, fmt.Errorf("%w: line %d must contain 3, 4, 9 or 10 fields", ErrICloudOnboardingInvalid, lineNumber)
 	}
 	for index := range parts {
 		parts[index] = strings.TrimSpace(parts[index])
 	}
 	region := parts[0]
-	if region == "" || utf8.RuneCountInString(region) > 64 || strings.ContainsAny(region, "\r\n") {
+	if (!compact && region == "") || utf8.RuneCountInString(region) > 64 || strings.ContainsAny(region, "\r\n") {
 		return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid region on line %d", ErrICloudOnboardingInvalid, lineNumber)
 	}
 	opened, ok := parseICloudOpened(parts[1])
-	if !ok {
+	if !compact && !ok {
 		return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid iCloud flag on line %d", ErrICloudOnboardingInvalid, lineNumber)
 	}
 	emailValue := strings.ToLower(parts[2])
@@ -307,17 +357,24 @@ func parseICloudOnboardingLine(lineNumber int, raw string) (iCloudOnboardingLine
 		return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid password on line %d", ErrICloudOnboardingInvalid, lineNumber)
 	}
 	var answers [3]iCloudSecurityAnswer
-	for index := range answers {
-		answers[index], ok = parseICloudSecurityAnswer(parts[index+4])
-		if !ok {
-			return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid security answer on line %d", ErrICloudOnboardingInvalid, lineNumber)
+	birthdayValue := ""
+	if !compact {
+		for index := range answers {
+			answers[index], ok = parseICloudSecurityAnswer(parts[index+4])
+			if !ok {
+				return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid security answer on line %d", ErrICloudOnboardingInvalid, lineNumber)
+			}
 		}
-	}
-	birthday, err := time.Parse("2006-01-02", parts[7])
-	if err != nil || birthday.After(time.Now().UTC()) {
-		return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid birthday on line %d", ErrICloudOnboardingInvalid, lineNumber)
+		birthday, err := time.Parse(time.DateOnly, parts[7])
+		if err != nil || birthday.IsZero() || birthday.After(time.Now().UTC()) {
+			return iCloudOnboardingLine{}, fmt.Errorf("%w: invalid birthday on line %d", ErrICloudOnboardingInvalid, lineNumber)
+		}
+		birthdayValue = birthday.Format(time.DateOnly)
 	}
 	candidate := parts[8]
+	if compact && !strings.Contains(candidate, "://") {
+		return iCloudOnboardingLine{}, fmt.Errorf("%w: short format requires a device code URL on line %d", ErrICloudOnboardingInvalid, lineNumber)
+	}
 	phone, deviceCodeAPI := "", ""
 	if strings.Contains(candidate, "://") {
 		if len(candidate) > 2048 || !validDeviceCodeURL(candidate) {
@@ -346,7 +403,7 @@ func parseICloudOnboardingLine(lineNumber int, raw string) (iCloudOnboardingLine
 		LineNumber: lineNumber, Region: region, CountryCode: countryCodeFromICloudRegion(region),
 		ICloudOpened: opened, PrimaryEmail: emailValue, PhoneNumber: phone, DeviceCodeAPI: deviceCodeAPI,
 		FamilyInviteURL: invite, AccountRole: role,
-		Secret: iCloudOnboardingSecret{Password: password, SecurityAnswers: answers, Birthday: birthday.Format("2006-01-02")},
+		Secret: iCloudOnboardingSecret{Password: password, SecurityAnswers: answers, Birthday: birthdayValue},
 	}, nil
 }
 
@@ -611,7 +668,7 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 		}
 		var existing []iCloudOnboardingExistingResource
 		if err := tx.Table("icloud_resources AS ir").Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("ir.id, er.owner_user_id, ir.primary_email, ir.account_role, ir.status, ir.task_kind, ir.onboarding_status, ir.import_id, ir.for_sale, ir.generation, ir.credential_revision, ir.validation_generation, ir.bound_phone_number, ir.bound_phone_country_code, ir.bound_phone_source, ir.kitesim_phone_id").
+			Select("ir.id, er.owner_user_id, ir.primary_email, ir.account_role, ir.status, ir.task_kind, ir.onboarding_status, ir.import_id, ir.for_sale, ir.generation, ir.credential_revision, ir.validation_generation, ir.region, ir.country_code, ir.icloud_opened, ir.bound_phone_number, ir.bound_phone_country_code, ir.bound_phone_source, ir.kitesim_phone_id").
 			Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").
 			Where("LOWER(ir.primary_email) IN ?", emails).Find(&existing).Error; err != nil {
 			return ErrICloudOnboardingTemporary
@@ -641,6 +698,9 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 			var resourceID *uint
 			existingResource, hasExistingResource := existingByEmail[iCloudImportEmailKey(line.PrimaryEmail)]
 			if hasExistingResource {
+				if line.Secret.Birthday == "" {
+					line.Region, line.CountryCode, line.ICloudOpened = existingResource.Region, existingResource.CountryCode, existingResource.ICloudOpened
+				}
 				if existingResource.KitesimPhoneID != nil && strings.TrimSpace(line.PhoneNumber) != "" &&
 					!sameICloudPhoneNumber(line.PhoneNumber, existingResource.BoundPhoneNumber) {
 					return ErrICloudResourceIdentity
@@ -765,21 +825,7 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 			if task.ResourceID == nil {
 				return ErrICloudResourceIdentity
 			}
-			birthday, birthdayErr := time.Parse("2006-01-02", line.Secret.Birthday)
-			if birthdayErr != nil {
-				return ErrICloudOnboardingInvalid
-			}
-			answers, answersErr := json.Marshal(line.Secret.SecurityAnswers)
-			if answersErr != nil {
-				return ErrICloudOnboardingTemporary
-			}
-			if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "resource_id"}}, DoUpdates: clause.AssignmentColumns([]string{
-				"apple_password", "security_answers", "birthday", "updated_at",
-			})}).Create(&iCloudResourceCredentialModel{
-				ResourceID: *task.ResourceID, ApplePassword: line.Secret.Password,
-				SecurityAnswers: iCloudJSON(answers), Birthday: birthday,
-				CreatedAt: now, UpdatedAt: now,
-			}).Error; err != nil {
+			if err := upsertICloudOnboardingCredentialsTx(tx, *task.ResourceID, line.Secret, line.DeviceCodeAPI, now); err != nil {
 				return err
 			}
 			if err := persistICloudOnboardingResourceStateTx(tx, &task, now); err != nil {
@@ -855,14 +901,6 @@ func createICloudOnboardingPlaceholderTx(
 		strings.TrimSpace(task.PrimaryEmail) == "" || strings.TrimSpace(secret.Password) == "" {
 		return ErrICloudOnboardingInvalid
 	}
-	birthday, err := time.Parse("2006-01-02", secret.Birthday)
-	if err != nil {
-		return ErrICloudOnboardingInvalid
-	}
-	answers, err := json.Marshal(secret.SecurityAnswers)
-	if err != nil {
-		return err
-	}
 	root := iCloudRootModel{
 		Type: "icloud", OwnerUserID: batch.OwnerUserID, Version: 1,
 		CreatedAt: now, UpdatedAt: now,
@@ -885,10 +923,7 @@ func createICloudOnboardingPlaceholderTx(
 		}
 		return err
 	}
-	if err := tx.Create(&iCloudResourceCredentialModel{
-		ResourceID: root.ID, ApplePassword: secret.Password, SecurityAnswers: iCloudJSON(answers),
-		Birthday: birthday, CreatedAt: now, UpdatedAt: now,
-	}).Error; err != nil {
+	if err := upsertICloudOnboardingCredentialsTx(tx, root.ID, secret, task.DeviceCodeAPI, now); err != nil {
 		return err
 	}
 	resourceID := root.ID
