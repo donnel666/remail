@@ -1091,7 +1091,7 @@ export function ICloudOnboardingModal({
               {t("Region----iCloud opened----Apple ID----Password----Security answer 1----Security answer 2----Security answer 3----Birthday----Phone or device code URL[----Invitation URL]")}
             </code>
             <Text size="small" type="tertiary">
-              {t("For a manually bound device, put its HTTPS code URL in the phone field to skip phone binding and start with the family invitation. The URL must use the configured device platform host.")}
+              {t("For a manually bound device, supply its HTTPS code URL to skip phone and device binding. iCloud web sign-in and terms acceptance still run before the family invitation. The URL must use the configured device platform host.")}
             </Text>
           </div>
         </div>

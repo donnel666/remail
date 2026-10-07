@@ -755,10 +755,7 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 			}
 			if line.DeviceCodeAPI != "" {
 				task.DeviceCodeAPI, task.DeviceBindStatus = line.DeviceCodeAPI, "success"
-				task.Stage = "manage_prepare"
-				if line.AccountRole == "child" {
-					task.Stage = "family_prepare"
-				}
+				task.Stage = "icloud_prepare"
 			}
 			if task.ResourceID == nil {
 				if err := createICloudOnboardingPlaceholderTx(tx, &iCloudOnboardingImportModel{OwnerUserID: ownerUserID, ResourceExpireAt: normalizeICloudResourceExpireAt(resourceExpireAt)}, &task, line.Secret, now); err != nil {

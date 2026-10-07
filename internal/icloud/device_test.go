@@ -31,12 +31,23 @@ func setDeviceTestSetting(t *testing.T, key, value string) {
 	t.Cleanup(func() { runtimeconfig.Set(key, old) })
 }
 
-type manualDeviceApple struct{ requests []AppleOnboardingRequest }
+type manualDeviceApple struct {
+	requests  []AppleOnboardingRequest
+	finishErr error
+}
 
 func (p *manualDeviceApple) Execute(_ context.Context, request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
 	p.requests = append(p.requests, request)
-	response := AppleOnboardingResponse{Next: "ready", Session: json.RawMessage(`{"version":1}`)}
+	response := AppleOnboardingResponse{Next: "ready", CountryCode: "US", Session: json.RawMessage(`{"version":1}`)}
 	switch request.Operation {
+	case appleOnboardingPrepareICloud:
+		response.Next = appleSMSICloudLogin
+	case appleOnboardingFinishICloud:
+		if p.finishErr != nil {
+			return AppleOnboardingResponse{}, p.finishErr
+		}
+		opened := false
+		response.ICloudOpened = &opened
 	case appleOnboardingPrepareFamily:
 		response.Next = appleSMSFamilyLogin
 	case appleOnboardingPrepareManage:
@@ -49,6 +60,24 @@ func (p *manualDeviceApple) Execute(_ context.Context, request AppleOnboardingRe
 		response.NewChannel = &AppleOnboardingChannel{Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com", Cookie: "myacinfo=device-cookie"}
 	}
 	return response, nil
+}
+
+func TestManualDeviceTermsFailureDoesNotReachFamily(t *testing.T) {
+	service, db, task, _ := newOnboardingStateTest(t)
+	require.NoError(t, db.Model(task).Updates(map[string]any{
+		"stage": "icloud_finish", "device_code_api": "https://devices.orangeid.top:56133/code", "device_bind_status": "success",
+		"bound_phone_number": "", "kitesim_phone_id": nil, "family_invite_url": "invite",
+	}).Error)
+	require.NoError(t, db.First(task, task.ID).Error)
+	service.smsPhones = nil
+	apple := &manualDeviceApple{finishErr: &AppleOnboardingError{Category: "icloud_terms_rejected", SafeMessage: "iCloud terms acceptance failed."}}
+	service.onboardingApple = apple
+	processOnboardingStageForTest(t, service, db, task)
+	require.Equal(t, iCloudOnboardingFailed, task.Status)
+	require.Equal(t, "icloud_finish", task.Stage)
+	require.Equal(t, "icloud_terms_rejected", task.LastErrorCategory)
+	require.Len(t, apple.requests, 1)
+	require.Equal(t, appleOnboardingFinishICloud, apple.requests[0].Operation)
 }
 
 func TestManualDeviceURLOnboardingWithoutPhone(t *testing.T) {
@@ -101,7 +130,7 @@ func testManualDeviceURLOnboardingWithoutPhone(t *testing.T, compact bool) {
 	require.False(t, reused)
 	task := &iCloudOnboardingTaskModel{}
 	require.NoError(t, db.First(task, view.Tasks[0].ID).Error)
-	require.Equal(t, "family_prepare", task.Stage)
+	require.Equal(t, "icloud_prepare", task.Stage)
 	require.Equal(t, codeURL, task.DeviceCodeAPI)
 	require.Equal(t, "success", task.DeviceBindStatus)
 	if compact {
@@ -114,7 +143,7 @@ func testManualDeviceURLOnboardingWithoutPhone(t *testing.T, compact bool) {
 	payload, err := json.Marshal(view)
 	require.NoError(t, err)
 	require.NotContains(t, string(payload), "secret-device-token")
-	for _, stage := range []string{"sms_send", "sms_wait", "sms_verify", "family_join_intent", "family_join_apply", iCloudOnboardingStageFamilySharing} {
+	for _, stage := range []string{"sms_send", "sms_wait", "sms_verify", "icloud_finish", "family_prepare", "sms_send", "sms_wait", "sms_verify", "family_join_intent", "family_join_apply", iCloudOnboardingStageFamilySharing} {
 		processOnboardingStageForTest(t, service, db, task)
 		require.Equal(t, stage, task.Stage)
 	}
@@ -162,16 +191,18 @@ func testManualDeviceURLOnboardingWithoutPhone(t *testing.T, compact bool) {
 		require.True(t, request.UseDeviceCode)
 		require.True(t, request.SkipPhoneEnrollment)
 		require.Empty(t, request.PhoneNumber)
-		require.NotEqual(t, appleOnboardingPrepareICloud, request.Operation)
 		require.NotEqual(t, appleOnboardingSendSMS, request.Operation)
 	}
+	require.Equal(t, appleOnboardingPrepareICloud, apple.requests[0].Operation)
+	require.Equal(t, appleOnboardingFinishICloud, apple.requests[2].Operation)
+	require.Equal(t, appleOnboardingPrepareFamily, apple.requests[3].Operation)
 	view, reused, err = service.AcceptAdminICloudOnboardingImport(ctx, 1, 1, []byte(prefix+codeURL+"----invite"), now.Add(time.Hour), "device-import", "request", "/test")
 	require.NoError(t, err)
 	require.True(t, reused)
 	require.Equal(t, task.ID, view.Tasks[0].ID)
 	view, _, err = service.AcceptAdminICloudOnboardingImport(ctx, 1, 1, []byte(strings.Replace(prefix, "device@example.com", "primary-device@example.com", 1)+codeURL), now.Add(time.Hour), "primary-device-import", "request", "/test")
 	require.NoError(t, err)
-	require.Equal(t, "manage_prepare", view.Tasks[0].Stage)
+	require.Equal(t, "icloud_prepare", view.Tasks[0].Stage)
 	primaryID := view.Tasks[0].ID
 	require.NoError(t, db.Model(&iCloudResourceModel{}).Where("id = ?", primaryID).Updates(map[string]any{
 		"device_code_api": "", "device_bind_status": "failed", "bound_phone_number": "14155550001", "bound_phone_source": "manual",
@@ -203,11 +234,11 @@ func TestDeviceURLImportPreservesPhoneOnboarding(t *testing.T) {
 		compact                                    bool
 	}{
 		{"phone-child@example.com", "+1 (415) 555-0001", "----invite", "14155550001", "accepted", "child", false},
-		{"device-child@example.com", codeURL, "----invite", "", "family_prepare", "child", false},
+		{"device-child@example.com", codeURL, "----invite", "", "icloud_prepare", "child", false},
 		{"phone-primary@example.com", "14155550002", "", "14155550002", "accepted", "primary", false},
-		{"device-primary@example.com", codeURL, "", "", "manage_prepare", "primary", false},
-		{"compact-child@example.com", codeURL, "----invite", "", "family_prepare", "child", true},
-		{"compact-primary@example.com", codeURL, "", "", "manage_prepare", "primary", true},
+		{"device-primary@example.com", codeURL, "", "", "icloud_prepare", "primary", false},
+		{"compact-child@example.com", codeURL, "----invite", "", "icloud_prepare", "child", true},
+		{"compact-primary@example.com", codeURL, "", "", "icloud_prepare", "primary", true},
 	}
 	lines := make([]string, len(entries))
 	for i, entry := range entries {
@@ -263,7 +294,7 @@ func TestDeviceURLImportPreservesPhoneOnboarding(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, phoneTask.ID, retry.Tasks[0].ID)
 	require.NoError(t, db.First(phoneTask, phoneTask.ID).Error)
-	require.Equal(t, "family_prepare", phoneTask.Stage)
+	require.Equal(t, "icloud_prepare", phoneTask.Stage)
 	require.Equal(t, "美国区", phoneTask.Region)
 	require.Equal(t, "US", phoneTask.CountryCode)
 	require.True(t, phoneTask.ICloudOpened)

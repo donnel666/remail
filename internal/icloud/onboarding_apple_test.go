@@ -107,6 +107,39 @@ func appleOnboardingTestState(t *testing.T, mutate func(*appleOnboardingBrowserS
 	return data
 }
 
+func TestAppleOnboardingDeviceICloudLoginAcceptsWebTerms(t *testing.T) {
+	session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{
+		{status: http.StatusOK, body: `{"termsUpdateNeeded":true,"dsInfo":{"dsid":"123","hasICloudQualifyingDevice":false}}`},
+		{status: http.StatusOK, body: `{"iCloudTerms":{"version":"terms-1"}}`},
+		{status: http.StatusOK, body: `{"success":true}`},
+		{status: http.StatusOK, body: `{"termsUpdateNeeded":false,"dsInfo":{"dsid":"123","hasICloudQualifyingDevice":false}}`},
+	}}
+	response, err := appleOnboardingTestClient(time.Now(), session).Execute(context.Background(), AppleOnboardingRequest{
+		Operation: appleOnboardingFinishICloud, UseDeviceCode: true, SkipPhoneEnrollment: true,
+		Session: appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+			state.Mode, state.RepairToken, state.AccountCountry = "icloud", "web-token", "US"
+			state.AccountLoginURL = "https://setup.icloud.com/setup/ws/1/accountLogin"
+			state.GetTermsURL = "https://setup.icloud.com/setup/ws/1/getTerms"
+			state.RepairDoneURL = "https://setup.icloud.com/setup/ws/1/repairDone"
+		}),
+	})
+	if err != nil || response.Next != "ready" || response.ICloudOpened == nil || *response.ICloudOpened {
+		t.Fatalf("iCloud web initialization without mobile iCloud: response=%+v err=%v", response, err)
+	}
+	if len(session.requests) != 4 {
+		t.Fatalf("unexpected iCloud requests: %v", session.requests)
+	}
+	for index, endpoint := range []string{"accountLogin", "getTerms", "repairDone", "accountLogin"} {
+		if !strings.Contains(session.requests[index], "/"+endpoint+"?") {
+			t.Fatalf("iCloud terms request %d: %q", index, session.requests[index])
+		}
+	}
+	accepted := appleOnboardingMap(session.requestBodies[2])["acceptedICloudTerms"]
+	if accepted != "terms-1" {
+		t.Fatalf("submitted iCloud terms version = %v", accepted)
+	}
+}
+
 func TestAppleOnboardingNewSessionUsesWindowsFingerprint(t *testing.T) {
 	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
 	session := &appleOnboardingScriptedSession{}
