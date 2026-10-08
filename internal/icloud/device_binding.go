@@ -274,7 +274,7 @@ func (s *Service) syncDeviceBindings(ctx context.Context) error {
 		switch item.Status {
 		case "success":
 			api := item.codeURL()
-			if !validDeviceCodeURL(api) {
+			if !validDevicePlatformURL(api) {
 				if err := s.finishDeviceBinding(ctx, binding, "failed", string(item.ID), "", "Device platform reported success without a usable device code API."); err != nil {
 					return err
 				}

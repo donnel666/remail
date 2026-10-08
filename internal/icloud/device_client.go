@@ -19,7 +19,7 @@ import (
 
 var (
 	errDeviceUnavailable       = errors.New("device platform is temporarily unavailable")
-	errDeviceUnauthorized      = errors.New("device platform API key was rejected")
+	errDeviceUnauthorized      = errors.New("device platform denied access")
 	errDeviceResponse          = errors.New("device platform returned an invalid response")
 	errDeviceNoCode            = errors.New("device verification code is not available yet")
 	errDeviceImportRejected    = errors.New("device platform rejected account import; check its account diagnostics")
@@ -110,6 +110,18 @@ func deviceBaseURL() string {
 }
 
 func validDeviceCodeURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || len(raw) > 2048 || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
+		return false
+	}
+	if port := u.Port(); port != "" {
+		value, err := strconv.ParseUint(port, 10, 16)
+		return err == nil && value != 0
+	}
+	return true
+}
+
+func validDevicePlatformURL(raw string) bool {
 	base, err := url.Parse(deviceBaseURL())
 	if err != nil {
 		return false
@@ -119,7 +131,7 @@ func validDeviceCodeURL(raw string) bool {
 }
 
 func (c *deviceClient) request(ctx context.Context, method, path string, payload any) ([]byte, error) {
-	if !validDeviceCodeURL(path) {
+	if !validDevicePlatformURL(path) {
 		return nil, errDeviceResponse
 	}
 	var body []byte
@@ -141,6 +153,26 @@ func (c *deviceClient) request(ctx context.Context, method, path string, payload
 	if payload != nil {
 		r.Header.Set("Content-Type", "application/json")
 	}
+	return c.do(r)
+}
+
+func (c *deviceClient) requestCode(ctx context.Context, codeAPI string) ([]byte, error) {
+	if validDevicePlatformURL(codeAPI) {
+		return c.request(ctx, http.MethodGet, codeAPI, nil)
+	}
+	if !validDeviceCodeURL(codeAPI) {
+		return nil, errDeviceResponse
+	}
+	// Other providers never receive the configured platform's management key.
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, codeAPI, nil)
+	if err != nil {
+		return nil, errDeviceResponse
+	}
+	r.Header.Set("Accept", "application/json, text/plain")
+	return c.do(r)
+}
+
+func (c *deviceClient) do(r *http.Request) ([]byte, error) {
 	response, err := c.http.Do(r)
 	if err != nil {
 		return nil, errDeviceUnavailable
@@ -152,7 +184,7 @@ func (c *deviceClient) request(ctx context.Context, method, path string, payload
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, fmt.Errorf("%w (HTTP %d)", errDeviceUnavailable, response.StatusCode)
 	}
-	body, err = io.ReadAll(io.LimitReader(response.Body, (2<<20)+1))
+	body, err := io.ReadAll(io.LimitReader(response.Body, (2<<20)+1))
 	if err != nil || len(body) > 2<<20 {
 		return nil, errDeviceResponse
 	}
@@ -252,7 +284,7 @@ func (c *deviceClient) accounts(ctx context.Context) ([]deviceRemoteAccount, err
 
 // FetchDeviceCode reads one live Apple trusted-device code, preserving leading zeroes.
 func (s *Service) FetchDeviceCode(ctx context.Context, codeAPI string) (string, error) {
-	body, err := s.device.request(ctx, http.MethodGet, codeAPI, nil)
+	body, err := s.device.requestCode(ctx, codeAPI)
 	if err != nil {
 		return "", err
 	}

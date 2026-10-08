@@ -82,13 +82,19 @@ func TestManualDeviceTermsFailureDoesNotReachFamily(t *testing.T) {
 
 func TestManualDeviceURLOnboardingWithoutPhone(t *testing.T) {
 	for _, compact := range []bool{false, true} {
-		t.Run(fmt.Sprintf("compact=%t", compact), func(t *testing.T) {
-			testManualDeviceURLOnboardingWithoutPhone(t, compact)
-		})
+		for _, codeURL := range []string{
+			"https://devices.example/code?id=1&token=secret-device-token",
+			"http://192.0.2.20:8818/api/Accounts/getCode?ID=1",
+			"https://another-device.example/code?id=1",
+		} {
+			t.Run(fmt.Sprintf("compact=%t/%s", compact, codeURL), func(t *testing.T) {
+				testManualDeviceURLOnboardingWithoutPhone(t, compact, codeURL)
+			})
+		}
 	}
 }
 
-func testManualDeviceURLOnboardingWithoutPhone(t *testing.T, compact bool) {
+func testManualDeviceURLOnboardingWithoutPhone(t *testing.T, compact bool, codeURL string) {
 	t.Helper()
 	ctx := context.Background()
 	service, db, _, _ := newOnboardingStateTest(t)
@@ -98,14 +104,13 @@ func testManualDeviceURLOnboardingWithoutPhone(t *testing.T, compact bool) {
 	apple := &manualDeviceApple{}
 	service.onboardingApple = apple
 	service.device.http.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-		require.Equal(t, "/code", r.URL.Path)
+		require.Equal(t, codeURL, r.URL.String())
 		require.Equal(t, http.MethodGet, r.Method)
 		require.Empty(t, r.Header.Get("Authorization"))
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("AppleID 登录验证码:123456"))}, nil
 	})
 	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceAPIKey, "")
 	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, "https://devices.example")
-	codeURL := "https://devices.example/code?id=1&token=secret-device-token"
 	prefix := "美国区----否----device@example.com----Secret1!----q1(a1)----q2(a2)----q3(a3)----2000-11-02----"
 	if compact {
 		prefix = "device@example.com----Secret1!----"
@@ -118,9 +123,9 @@ func testManualDeviceURLOnboardingWithoutPhone(t *testing.T, compact bool) {
 		require.ErrorIs(t, err, ErrICloudOnboardingInvalid, "an explicit zero date must not become a missing birthday")
 	}
 	for _, invalid := range []string{
-		strings.Replace(codeURL, "https:", "http:", 1), "https://other.example/code",
-		codeURL + "#fragment", strings.Replace(codeURL, "https://", "https://user:password@", 1),
-		strings.Replace(codeURL, "/code", "/co\rde", 1), codeURL + strings.Repeat("x", 2048),
+		"ftp://devices.example/code", "http:///code", "https://:8818/code", "http://devices.example:65536/code", "http://devices.example:0/code",
+		codeURL + "#fragment", strings.Replace(codeURL, "://", "://user:password@", 1),
+		strings.Replace(codeURL, "://", "://\r", 1), codeURL + strings.Repeat("x", 2048),
 	} {
 		_, err := parseICloudOnboardingLine(1, prefix+invalid+"----invite")
 		require.ErrorIs(t, err, ErrICloudOnboardingInvalid)
@@ -143,6 +148,7 @@ func testManualDeviceURLOnboardingWithoutPhone(t *testing.T, compact bool) {
 	payload, err := json.Marshal(view)
 	require.NoError(t, err)
 	require.NotContains(t, string(payload), "secret-device-token")
+	require.NotContains(t, string(payload), codeURL)
 	for _, stage := range []string{"sms_send", "sms_wait", "sms_verify", "icloud_finish", "family_prepare", "sms_send", "sms_wait", "sms_verify", "family_join_intent", "family_join_apply", iCloudOnboardingStageFamilySharing} {
 		processOnboardingStageForTest(t, service, db, task)
 		require.Equal(t, stage, task.Stage)
@@ -435,7 +441,7 @@ func TestDeviceBindingDelaySharedPollingAndPersistence(t *testing.T) {
 	code, err := s.FetchDeviceCode(ctx, resource.DeviceCodeAPI)
 	require.NoError(t, err)
 	require.Equal(t, "000123", code)
-	_, err = s.FetchDeviceCode(ctx, "https://untrusted.example/code")
+	_, err = s.device.request(ctx, http.MethodGet, "https://untrusted.example/code", nil)
 	require.ErrorIs(t, err, errDeviceResponse)
 	// A later Cookie workflow can retrieve the existing binding without another import.
 	s = NewService(db, nil, nil, rdb)
@@ -484,6 +490,78 @@ func TestDeviceCodeAuthenticationNeverDispatchesSMS(t *testing.T) {
 			require.Equal(t, map[string]any{"securityCode": map[string]any{"code": "000123"}}, session.requestBodies[0])
 		})
 	}
+}
+
+func TestDeviceCodeURLsKeepPlatformCredentialsOnPlatform(t *testing.T) {
+	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, "https://devices.example")
+	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceAPIKey, "test-key")
+	for index, tc := range []struct{ codeURL, authorization string }{
+		{"https://devices.example/code?id=1", "Bearer test-key"},
+		{"https://devices.example/code?token=" + strings.Repeat("x", 2048), "Bearer test-key"},
+		{"http://devices.example/code?id=1", ""},
+		{"http://192.0.2.20:8818/api/Accounts/getCode?ID=1", ""},
+		{"https://192.0.2.20:8818/api/Accounts/getCode?ID=1", ""},
+		{"https://another-device.example/code?id=1", ""},
+		{"https://devices.example:9443/code?id=1", ""},
+	} {
+		t.Run(fmt.Sprint(index), func(t *testing.T) {
+			s := &Service{device: newDeviceClient()}
+			requests := 0
+			s.device.http.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+				requests++
+				require.Equal(t, tc.codeURL, r.URL.String())
+				require.Equal(t, http.MethodGet, r.Method)
+				require.Equal(t, tc.authorization, r.Header.Get("Authorization"))
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("AppleID 登录验证码:000123"))}, nil
+			})
+			code, err := s.FetchDeviceCode(context.Background(), tc.codeURL)
+			require.NoError(t, err)
+			require.Equal(t, "000123", code)
+			require.Equal(t, 1, requests)
+			if tc.authorization == "" {
+				_, err = s.device.request(context.Background(), http.MethodPost, tc.codeURL, map[string]string{"secret": "test"})
+				require.ErrorIs(t, err, errDeviceResponse)
+				require.Equal(t, 1, requests, "platform management must reject other destinations before making a request")
+			}
+		})
+	}
+}
+
+func TestOtherDeviceCodeProviderAccessDenied(t *testing.T) {
+	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, "https://devices.example")
+	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceAPIKey, "test-key")
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			s := &Service{device: newDeviceClient()}
+			s.device.http.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+				require.Empty(t, r.Header.Get("Authorization"))
+				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(""))}, nil
+			})
+			_, err := s.FetchDeviceCode(context.Background(), "http://192.0.2.20:8818/code?id=1")
+			require.ErrorIs(t, err, errDeviceUnauthorized)
+			require.NotContains(t, err.Error(), "API key")
+		})
+	}
+}
+
+func TestDeviceCodeHTTPRedirectIsNotFollowed(t *testing.T) {
+	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, "https://devices.example")
+	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceAPIKey, "test-key")
+	redirected := 0
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		redirected++
+		_, _ = w.Write([]byte("000123"))
+	}))
+	t.Cleanup(target.Close)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Empty(t, r.Header.Get("Authorization"))
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(server.Close)
+	s := &Service{device: newDeviceClient()}
+	_, err := s.FetchDeviceCode(context.Background(), server.URL)
+	require.ErrorIs(t, err, errDeviceUnavailable)
+	require.Zero(t, redirected)
 }
 
 func TestDeviceCodeUsesSMSCodeExtraction(t *testing.T) {

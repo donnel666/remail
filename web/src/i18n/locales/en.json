@@ -2870,7 +2870,7 @@
   "Please select a non-empty TXT file.": "Please select a non-empty TXT file.",
   "Region----iCloud opened----Apple ID----Password----Security answer 1----Security answer 2----Security answer 3----Birthday----Phone or device code URL[----Invitation URL]": "Primary: Region----iCloud opened----Apple ID----Password----Security answer 1----Security answer 2----Security answer 3----Birthday----Phone or device code URL; Child: add ----Invitation URL",
   "Short format: Apple ID----Password----Device code URL[----Invitation URL]": "Short format: Apple ID----Password----Device code URL; Child: add ----Invitation URL",
-  "For a manually bound device, supply its HTTPS code URL to skip phone and device binding. iCloud web sign-in and terms acceptance still run before the family invitation. The URL must use the configured device platform host.": "For a manually bound device, supply its HTTPS code URL to skip phone and device binding. iCloud web sign-in and terms acceptance still run before the family invitation. The URL must use the configured device platform host.",
+  "For a manually bound device, supply its HTTP or HTTPS code URL to skip phone and device binding. The URL can use a domain name or IP address. iCloud web sign-in and terms acceptance still run before the family invitation.": "For a manually bound device, supply its HTTP or HTTPS code URL to skip phone and device binding. The URL can use a domain name or IP address. iCloud web sign-in and terms acceptance still run before the family invitation.",
   "Apple account onboarding started.": "Apple account onboarding started.",
   "Apple account onboarding failed.": "Apple account onboarding failed.",
   "Apple ID": "Apple ID",

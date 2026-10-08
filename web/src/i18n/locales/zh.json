@@ -2870,7 +2870,7 @@
   "Please select a non-empty TXT file.": "请选择非空 TXT 文件。",
   "Region----iCloud opened----Apple ID----Password----Security answer 1----Security answer 2----Security answer 3----Birthday----Phone or device code URL[----Invitation URL]": "母号：地区----是否开通iCloud----Apple ID----密码----密保1----密保2----密保3----生日----手机号或设备接码URL；子号：末尾再加----邀请链接",
   "Short format: Apple ID----Password----Device code URL[----Invitation URL]": "简写主号：账号----密码----设备接码URL；简写子号：账号----密码----设备接码URL----家庭邀请链接",
-  "For a manually bound device, supply its HTTPS code URL to skip phone and device binding. iCloud web sign-in and terms acceptance still run before the family invitation. The URL must use the configured device platform host.": "提供已手工绑定设备的 HTTPS 接码 URL 后，跳过绑手机和绑定设备；仍先完成 iCloud 网页登录及条款，再加入家庭。URL 须使用系统设置中的设备平台主机。",
+  "For a manually bound device, supply its HTTP or HTTPS code URL to skip phone and device binding. The URL can use a domain name or IP address. iCloud web sign-in and terms acceptance still run before the family invitation.": "提供已手工绑定设备的 HTTP 或 HTTPS 接码 URL 后，跳过绑手机和绑定设备；支持域名或 IP 地址，仍先完成 iCloud 网页登录及条款，再加入家庭。",
   "Apple account onboarding started.": "Apple 账号自动开通已开始。",
   "Apple account onboarding failed.": "Apple 账号自动开通失败。",
   "Apple ID": "Apple ID",
