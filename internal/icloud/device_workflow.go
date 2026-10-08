@@ -101,11 +101,11 @@ func (s *Service) waitOnboardingDeviceCode(ctx context.Context, task *iCloudOnbo
 		return s.retryICloudOnboardingSMSRound(ctx, task, "The device code was not available before the verification deadline.")
 	}
 	code, err := s.FetchDeviceCode(ctx, task.DeviceCodeAPI)
-	if err == nil {
+	if err == nil && code != task.ManualVerificationCode {
 		return s.advanceICloudOnboardingTask(ctx, task, "sms_verify", nil, map[string]any{"manual_verification_code": code, "stage_attempts": task.StageAttempts})
 	}
 	message := "Waiting for the Apple device verification code."
-	if !errors.Is(err, errDeviceNoCode) {
+	if err != nil && !errors.Is(err, errDeviceNoCode) {
 		message = err.Error()
 	}
 	next := s.now().Add(iCloudOnboardingSMSPoll)

@@ -67,6 +67,7 @@ type accountInput struct {
 	ICloudOpened     bool
 	Email            string
 	Secret           icloud.AppleOnboardingSecret
+	DeviceCodeAPI    string `json:"deviceCodeApi,omitempty"`
 	PhoneNumber      string
 	FamilyInviteURL  string
 }
@@ -200,6 +201,13 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return fmt.Errorf("repair checkpoint expiry: %w", err)
 		}
 	}
+	if input.DeviceCodeAPI != "" {
+		checkpoint.DeviceCodeAPI, checkpoint.DeviceBindStatus = input.DeviceCodeAPI, "success"
+		state.Accounts[stateKey] = checkpoint
+		if err := saveCheckpoint(config.statePath, state); err != nil {
+			return fmt.Errorf("save provided device checkpoint: %w", err)
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, config.timeout)
 	defer cancel()
 	runtimeStarted := time.Now()
@@ -212,7 +220,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	fmt.Fprintf(stdout, "runtime=ready proxy_mode=sticky_pool duration=%s\n", elapsed(runtimeStarted))
 
 	preparedBeforeBinding := false
-	if checkpoint.Binding == nil && input.PhoneNumber != "" && !checkpoint.ICloudAuthenticated && !checkpoint.ICloudReady && strings.TrimSpace(checkpoint.CountryCode) == "" {
+	if checkpoint.DeviceCodeAPI == "" && checkpoint.Binding == nil && input.PhoneNumber != "" && !checkpoint.ICloudAuthenticated && !checkpoint.ICloudReady && strings.TrimSpace(checkpoint.CountryCode) == "" {
 		preflight := &debugger{ctx: ctx, input: input, runtime: rt, reader: reader, stdout: stdout,
 			statePath: config.statePath, state: &state, stateKey: stateKey, checkpoint: &checkpoint,
 			session: append(json.RawMessage(nil), checkpoint.Session...)}
@@ -242,7 +250,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			}
 		}
 	}
-	if checkpoint.Binding != nil {
+	if checkpoint.DeviceCodeAPI != "" && checkpoint.Binding == nil {
+		fmt.Fprintln(stdout, "device_code=ready phone_binding=skipped")
+	} else if checkpoint.Binding != nil {
 		value := checkpoint.Binding.toKitesim()
 		binding = &value
 		input.PhoneNumber = value.PhoneNumber
@@ -406,6 +416,14 @@ func parseLine(raw string) (accountInput, error) {
 		return accountInput{}, errors.New("input line is empty or invalid UTF-8")
 	}
 	parts := strings.Split(raw, separator)
+	if len(parts) == 3 || len(parts) == 4 || (len(parts) == 9 || len(parts) == 10) && strings.Contains(parts[8], "://") {
+		line, err := icloud.ParseAppleOnboardingInput(raw)
+		if err != nil {
+			return accountInput{}, err
+		}
+		return accountInput{Region: line.Region, CountryCode: line.CountryCode, ICloudOpened: line.ICloudOpened,
+			Email: line.PrimaryEmail, Secret: line.Secret, DeviceCodeAPI: line.DeviceCodeAPI, FamilyInviteURL: line.FamilyInviteURL}, nil
+	}
 	if len(parts) != 9 && len(parts) != 10 {
 		return accountInput{}, errors.New("apple input must contain 9 or 10 fields separated by ----")
 	}
@@ -654,12 +672,15 @@ func (d *debugger) run(binding *kitesim.SMSPhoneBinding, config options) error {
 	}
 	formalCookiesReady := d.checkpoint != nil && d.checkpoint.CookiesReady && channelReady(d.checkpoint.NewChannel)
 	if d.input.FamilyInviteURL != "" && d.checkpoint.FamilyJoined && !d.checkpoint.FamilySharingConfirmed && !formalCookiesReady {
-		// Match the web workflow: discard temporary authentication while the
-		// operator enables sharing, keeping completed phases and device binding.
+		var familySession json.RawMessage
+		if d.checkpoint.DeviceCodeAPI != "" {
+			familySession = d.session
+		}
 		if err := d.restartAt("manage_prepare"); err != nil {
 			return err
 		}
 		if err := d.markCheckpoint(func(cp *accountCheckpoint) {
+			cp.Session = familySession
 			cp.FamilySharingConfirmed = config.familySharingConfirmed
 			if !cp.FamilySharingConfirmed {
 				cp.Stage = "waiting_family_sharing"
@@ -667,6 +688,7 @@ func (d *debugger) run(binding *kitesim.SMSPhoneBinding, config options) error {
 		}); err != nil {
 			return err
 		}
+		d.session = familySession
 		if !config.familySharingConfirmed {
 			d.logf("family_sharing=waiting stage=waiting_family_sharing action=enable_sharing_then_rerun_with_-family-sharing-confirmed\n")
 			return errFamilySharingRequired
@@ -895,7 +917,11 @@ func (d *debugger) auth(operation, label string, binding *kitesim.SMSPhoneBindin
 func (d *debugger) authWithRequest(request icloud.AppleOnboardingRequest, label string, binding *kitesim.SMSPhoneBinding) (icloud.AppleOnboardingResponse, error) {
 	if d.checkpoint != nil && d.checkpoint.PendingSMSPurpose != "" && isApplePrepareOperation(request.Operation) {
 		d.logf("checkpoint=resume stage=sms_wait purpose=%s label=%q\n", d.checkpoint.PendingSMSPurpose, label)
-		return d.smsRound(d.checkpoint.PendingSMSPurpose, label, binding)
+		verified, err := d.smsRound(d.checkpoint.PendingSMSPurpose, label, binding)
+		if err == nil && request.Operation == icloud.AppleOnboardingPrepareFamily && verified.Next == "family_prepare" {
+			return d.authWithRequest(request, label, binding)
+		}
+		return verified, err
 	}
 	response, err := d.execute(request)
 	if err != nil {
@@ -911,7 +937,11 @@ func (d *debugger) authWithRequest(request icloud.AppleOnboardingRequest, label 
 	if err := d.markCheckpoint(func(cp *accountCheckpoint) { cp.PendingSMSPurpose = response.Next; cp.Stage = "sms_wait" }); err != nil {
 		return icloud.AppleOnboardingResponse{}, err
 	}
-	return d.smsRound(response.Next, label, binding)
+	verified, err := d.smsRound(response.Next, label, binding)
+	if err == nil && request.Operation == icloud.AppleOnboardingPrepareFamily && verified.Next == "family_prepare" {
+		return d.authWithRequest(request, label, binding)
+	}
+	return verified, err
 }
 
 func (d *debugger) checkSMSPhoneBeforePhase(binding *kitesim.SMSPhoneBinding, phase string) error {
@@ -1200,6 +1230,12 @@ func (d *debugger) execute(request icloud.AppleOnboardingRequest) (icloud.AppleO
 	if err != nil {
 		var appleErr *icloud.AppleOnboardingError
 		if errors.As(err, &appleErr) {
+			if request.UseDeviceCode && appleErr.CodeRejected && len(response.Session) > 0 {
+				d.session = response.Session
+				if persistErr := d.markCheckpoint(func(cp *accountCheckpoint) { cp.Session = response.Session }); persistErr != nil {
+					return icloud.AppleOnboardingResponse{}, persistErr
+				}
+			}
 			d.logf("apple_operation=failed operation=%s sms_purpose=%s duration=%s category=%q http_status=%d retryable=%t restart_stage=%q send_rejected=%t code_rejected=%t safe_message=%q provider_message=%q\n", request.Operation, firstNonEmpty(request.SMSPurpose, "none"), elapsed(started), appleErr.Category, appleErr.HTTPStatus, appleErr.Retryable, appleErr.RestartStage, appleErr.SendRejected, appleErr.CodeRejected, redactDebugMessage(appleErr.SafeMessage, request), redactDebugMessage(appleErr.ProviderMessage, request))
 			if appleErr.Category != "" {
 				return icloud.AppleOnboardingResponse{}, fmt.Errorf("apple %s: %s: %w", appleErr.Category, appleErr.SafeMessage, err)

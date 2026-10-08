@@ -308,6 +308,16 @@ func iCloudOnboardingSessionCheckpoint(task *iCloudOnboardingTaskModel) json.Raw
 	return appleOnboardingCheckpoint(task.SessionPayload)
 }
 
+func iCloudOnboardingPostFamilyCheckpoint(task *iCloudOnboardingTaskModel, session []byte) json.RawMessage {
+	if len(session) == 0 {
+		session = task.SessionPayload
+	}
+	if task.DeviceCodeAPI != "" {
+		return json.RawMessage(session)
+	}
+	return appleOnboardingCheckpoint(session)
+}
+
 func (s *Service) processICloudOnboardingStage(ctx context.Context, task *iCloudOnboardingTaskModel) error {
 	if task == nil || task.ID == 0 || task.ClaimToken == "" {
 		return ErrICloudOnboardingTemporary
@@ -836,6 +846,14 @@ func (s *Service) verifyICloudOnboardingSMS(ctx context.Context, task *iCloudOnb
 	if err != nil {
 		var appleErr *AppleOnboardingError
 		if errors.As(err, &appleErr) && appleErr.CodeRejected {
+			if task.DeviceCodeAPI != "" && task.SMSPollDeadline != nil && s.now().Before(*task.SMSPollDeadline) {
+				updates := map[string]any{"stage": "sms_wait", "manual_verification_code": code}
+				if len(response.Session) > 0 {
+					updates["session_payload"] = iCloudJSON(response.Session)
+				}
+				next := s.now().Add(iCloudOnboardingSMSPoll)
+				return s.waitICloudOnboardingTaskWithUpdates(ctx, task, &next, "pending", "Waiting for a new Apple device verification code.", updates)
+			}
 			return s.retryICloudOnboardingSMSRound(ctx, task, appleErr.SafeMessage)
 		}
 		return s.handleICloudOnboardingAppleError(ctx, task, err)
@@ -849,6 +867,9 @@ func (s *Service) verifyICloudOnboardingSMS(ctx context.Context, task *iCloudOnb
 	}
 	if len(response.Session) > 0 {
 		updates["session_payload"] = iCloudJSON(response.Session)
+	}
+	if task.DeviceCodeAPI != "" && task.PendingSMSPurpose == appleSMSFamilyLogin && response.Next == "family_prepare" {
+		next = "family_prepare"
 	}
 	// Device enrollment starts from the persisted icloud_finish stage so a
 	// local binding failure cannot discard Apple's accepted verification.
@@ -1094,12 +1115,8 @@ func (s *Service) joinICloudOnboardingFamily(ctx context.Context, task *iCloudOn
 	// workflow deliberately pauses at the manual sharing checkpoint; it does
 	// not call familyws.icloud.apple.com or inspect a primary account.
 	if task.TaskKind == "onboarding" && task.AccountRole == "child" && hasICloudDirectFamilyInvite(task) {
-		checkpoint := response.Session
-		if len(checkpoint) == 0 {
-			checkpoint = json.RawMessage(task.SessionPayload)
-		}
 		waitUpdates := map[string]any{
-			"stage": iCloudOnboardingStageFamilySharing, "session_payload": appleOnboardingCheckpoint(checkpoint),
+			"stage": iCloudOnboardingStageFamilySharing, "session_payload": iCloudOnboardingPostFamilyCheckpoint(task, response.Session),
 			"pending_sms_purpose": "", "manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil,
 			"family_primary_resource_id": nil, "family_reservation_confirmed": true,
 		}
@@ -2091,7 +2108,7 @@ func (s *Service) ConfirmICloudOnboardingFamilyReset(ctx context.Context, taskID
 		resumeAt = &nextAttempt
 		if err := tx.Model(&iCloudOnboardingTaskModel{}).Where("id = ?", task.ID).Updates(map[string]any{
 			"task_kind": "onboarding", "onboarding_status": iCloudOnboardingProcessing, "stage": "manage_prepare", "dispatch_status": "pending",
-			"generation": task.Generation + 1, "claim_token": "", "session_payload": iCloudOnboardingSessionCheckpoint(&task),
+			"generation": task.Generation + 1, "claim_token": "", "session_payload": iCloudOnboardingPostFamilyCheckpoint(&task, nil),
 			"family_primary_resource_id": nil, "family_reservation_confirmed": true,
 			"manual_verification_code": "", "pending_sms_purpose": "", "sms_sent_at": nil, "sms_poll_deadline": nil,
 			"forward_preparation_id": nil, "attempts": 0, "stage_attempts": 0, "next_attempt_at": nextAttempt,

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -31,12 +32,35 @@ func TestParseLine(t *testing.T) {
 
 func TestParseLineRejectsInviteWithoutToken(t *testing.T) {
 	for _, line := range []string{
-		"美国区----否----example@example.com----password----q1(a1)----q2(a2)----q3(a3)----1981-10-06----https://setup.icloud.com/family/messages",
+		"美国区----否----example@example.com----password----q1(a1)----q2(a2)----q3(a3)----1981-10-06----14155550001----https://setup.icloud.com/family/messages",
 		"美国区----否----example@example.com----password----q1(a1)----q2(a2)----q3(a3)----1981-10-06----14155550001----",
 	} {
 		if _, err := parseLine(line); err == nil {
 			t.Fatalf("invalid family invitation accepted: %q", line)
 		}
+	}
+}
+
+func TestParseDeviceURLInputMatchesAdministratorFormat(t *testing.T) {
+	for _, codeURL := range []string{"http://192.0.2.20:8818/api/Accounts/getCode?ID=1", "https://devices.example/code?id=1"} {
+		for _, prefix := range []string{
+			"example@example.com----password----",
+			"美国区----否----example@example.com----password----q1(a1)----q2(a2)----q3(a3)----1981-10-06----",
+		} {
+			for _, invite := range []string{"", "----https://setup.icloud.com/family/messages?inviteCode=test"} {
+				input, err := parseLine(prefix + codeURL + invite)
+				if err != nil || input.DeviceCodeAPI != codeURL || input.PhoneNumber != "" || input.Email != "example@example.com" {
+					t.Fatalf("device input: %+v err=%v", input, err)
+				}
+				if (input.FamilyInviteURL != "") != (invite != "") {
+					t.Fatal("device input changed primary/child classification")
+				}
+			}
+		}
+	}
+	data, err := json.Marshal(accountInput{Email: "example@example.com", PhoneNumber: "14155550001"})
+	if err != nil || strings.Contains(string(data), "deviceCodeApi") {
+		t.Fatal("empty device URL must not alter old phone input fingerprints")
 	}
 }
 
@@ -212,6 +236,16 @@ func TestCompletedPhasesResumeAtManage(t *testing.T) {
 }
 
 func TestFamilySharingPauseSurvivesResume(t *testing.T) {
+	compact := func(raw json.RawMessage) string {
+		if len(raw) == 0 {
+			return ""
+		}
+		var result bytes.Buffer
+		if err := json.Compact(&result, raw); err != nil {
+			t.Fatal(err)
+		}
+		return result.String()
+	}
 	for _, tc := range []struct {
 		name      string
 		joined    bool
@@ -245,7 +279,11 @@ func TestFamilySharingPauseSurvivesResume(t *testing.T) {
 				t.Fatal(err)
 			}
 			cp = loaded.Accounts[d.stateKey]
-			if cp.Stage != "waiting_family_sharing" || cp.FamilySharingConfirmed || !cp.ICloudReady || !cp.FamilyJoined || cp.DeviceCodeAPI != tc.deviceAPI || cp.ManageAuthenticated || cp.ManageReady || len(cp.Session) != 0 || !cp.ManageSessionExpiresAt.IsZero() {
+			wantSession := ""
+			if tc.deviceAPI != "" {
+				wantSession = `{"mode":"manage"}`
+			}
+			if cp.Stage != "waiting_family_sharing" || cp.FamilySharingConfirmed || !cp.ICloudReady || !cp.FamilyJoined || cp.DeviceCodeAPI != tc.deviceAPI || cp.ManageAuthenticated || cp.ManageReady || compact(cp.Session) != wantSession || !cp.ManageSessionExpiresAt.IsZero() {
 				t.Fatalf("invalid sharing checkpoint: %+v", cp)
 			}
 			if err := d.run(nil, options{}); !errors.Is(err, errFamilySharingRequired) || provider.calls != wantCalls {
@@ -270,6 +308,9 @@ func TestFamilySharingPauseSurvivesResume(t *testing.T) {
 			provider.err = stop
 			if err := d.run(nil, options{}); !errors.Is(err, stop) || provider.request.Operation != icloud.AppleOnboardingPrepareManage || provider.request.UseDeviceCode != (tc.deviceAPI != "") {
 				t.Fatalf("confirmed resume = err=%v request=%+v", err, provider.request)
+			}
+			if compact(provider.request.Session) != wantSession {
+				t.Fatal("management login lost the saved family account session")
 			}
 		})
 	}

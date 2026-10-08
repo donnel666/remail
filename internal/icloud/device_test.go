@@ -32,13 +32,18 @@ func setDeviceTestSetting(t *testing.T, key, value string) {
 }
 
 type manualDeviceApple struct {
-	requests  []AppleOnboardingRequest
-	finishErr error
+	requests   []AppleOnboardingRequest
+	finishErr  error
+	session    json.RawMessage
+	verifyNext string
 }
 
 func (p *manualDeviceApple) Execute(_ context.Context, request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
 	p.requests = append(p.requests, request)
 	response := AppleOnboardingResponse{Next: "ready", CountryCode: "US", Session: json.RawMessage(`{"version":1}`)}
+	if len(p.session) > 0 {
+		response.Session = p.session
+	}
 	switch request.Operation {
 	case appleOnboardingPrepareICloud:
 		response.Next = appleSMSICloudLogin
@@ -53,6 +58,7 @@ func (p *manualDeviceApple) Execute(_ context.Context, request AppleOnboardingRe
 	case appleOnboardingPrepareManage:
 		response.Next = appleSMSManageLogin
 	case appleOnboardingVerifySMS:
+		response.Next = p.verifyNext
 		if request.Code != "123456" {
 			return AppleOnboardingResponse{}, errors.New("unexpected device code")
 		}
@@ -607,6 +613,87 @@ func TestDeviceOnboardingStillWaitsForManualFamilySharing(t *testing.T) {
 	require.Equal(t, iCloudOnboardingStageFamilySharing, task.Stage)
 	require.Equal(t, "waiting", task.DispatchStatus)
 	require.Len(t, apple.operations, 1)
+}
+
+func TestDeviceFamilyAccountVerificationContinuesToInvitationLogin(t *testing.T) {
+	s, db, task, _ := newOnboardingStateTest(t)
+	s.onboardingApple = &manualDeviceApple{verifyNext: "family_prepare"}
+	require.NoError(t, db.Model(task).Updates(map[string]any{
+		"device_code_api": "http://192.0.2.20/code", "stage": "sms_verify", "pending_sms_purpose": appleSMSFamilyLogin,
+		"manual_verification_code": "123456", "sms_poll_deadline": s.now().Add(time.Minute),
+	}).Error)
+	processOnboardingStageForTest(t, s, db, task)
+	require.Equal(t, "family_prepare", task.Stage)
+	require.Empty(t, task.PendingSMSPurpose)
+	require.Empty(t, task.ManualVerificationCode)
+	require.False(t, task.FamilyReservationConfirmed)
+}
+
+func TestDeviceRejectedCodePreservesSessionAndWaitsForDifferentCode(t *testing.T) {
+	s, db, task, _ := newOnboardingStateTest(t)
+	deadline := s.now().Add(time.Minute)
+	state := appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) { state.Mode = "family" })
+	session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{
+		{status: http.StatusBadRequest, body: `{}`, header: http.Header{"Scnt": {"new-challenge-context"}}},
+		{status: http.StatusNoContent},
+	}}
+	s.onboardingApple = appleOnboardingTestClient(s.now(), session)
+	session.cookies = []msacl.SessionCookie{{Name: "myacinfo", Value: "session-cookie", Domain: ".apple.com"}}
+	require.NoError(t, db.Model(task).Updates(map[string]any{
+		"device_code_api": "http://192.0.2.20/code", "stage": "sms_verify", "pending_sms_purpose": appleSMSFamilyLogin,
+		"session_payload": iCloudJSON(state), "manual_verification_code": "123456", "sms_poll_deadline": deadline,
+	}).Error)
+	code := "123456"
+	s.device.http.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(code))}, nil
+	})
+	processOnboardingStageForTest(t, s, db, task)
+	require.Equal(t, "sms_wait", task.Stage)
+	require.Contains(t, string(task.SessionPayload), "new-challenge-context")
+	require.Equal(t, "123456", task.ManualVerificationCode)
+	processOnboardingStageForTest(t, s, db, task)
+	require.Equal(t, "sms_wait", task.Stage)
+	require.Len(t, session.requests, 1, "do not submit the same rejected code again")
+	code = "654321"
+	processOnboardingStageForTest(t, s, db, task)
+	require.Equal(t, "sms_verify", task.Stage)
+	processOnboardingStageForTest(t, s, db, task)
+	require.Equal(t, "family_join_intent", task.Stage)
+	require.Len(t, session.requests, 2)
+	require.Equal(t, "new-challenge-context", session.requestHeaders[1]["scnt"])
+	require.Zero(t, task.StageAttempts)
+}
+
+func TestFamilySharingRetainsOnlyDeviceAccountSessions(t *testing.T) {
+	for _, deviceURL := range []string{"", "http://192.0.2.20:8818/code?id=1"} {
+		t.Run(fmt.Sprintf("device=%t", deviceURL != ""), func(t *testing.T) {
+			s, db, task, _ := newOnboardingStateTest(t)
+			session := json.RawMessage(`{"version":1,"mode":"family","domainId":"11","authVersion":"8.0.2","cookies":[{"name":"myacinfo","value":"private-account-cookie","domain":".apple.com"}]}`)
+			s.onboardingApple = &manualDeviceApple{session: session}
+			require.NoError(t, db.Model(task).Updates(map[string]any{
+				"device_code_api": deviceURL, "stage": "family_join_apply", "family_invite_url": "invite",
+			}).Error)
+			processOnboardingStageForTest(t, s, db, task)
+			require.Equal(t, iCloudOnboardingStageFamilySharing, task.Stage)
+			for checkpoint := 0; checkpoint < 2; checkpoint++ {
+				if deviceURL != "" {
+					require.JSONEq(t, string(session), string(task.SessionPayload))
+				} else {
+					require.NotContains(t, string(task.SessionPayload), "private-account-cookie")
+				}
+				if checkpoint == 0 {
+					view, err := s.GetAdminICloudOnboardingImport(context.Background(), *task.ImportID)
+					require.NoError(t, err)
+					payload, err := json.Marshal(view)
+					require.NoError(t, err)
+					require.NotContains(t, string(payload), "private-account-cookie")
+					require.NoError(t, s.ConfirmICloudOnboardingFamilyReset(context.Background(), task.ID, 1, "sharing", "/test"))
+					require.NoError(t, db.First(task, task.ID).Error)
+					require.Equal(t, "manage_prepare", task.Stage)
+				}
+			}
+		})
+	}
 }
 
 func TestDeviceBindingTimeoutRetryAndStaleResults(t *testing.T) {

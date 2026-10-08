@@ -61,19 +61,25 @@ func (d *debugger) deviceRound(purpose string) (icloud.AppleOnboardingResponse, 
 	}
 	deadline := time.Now().Add(2 * time.Minute)
 	previousError := ""
+	rejected := ""
 	for time.Now().Before(deadline) {
 		code, err := d.runtime.icloud.FetchDeviceCode(d.ctx, d.checkpoint.DeviceCodeAPI)
-		if err == nil {
-			response, err := d.execute(icloud.AppleOnboardingRequest{Operation: icloud.AppleOnboardingVerifySMS, SMSPurpose: purpose, Code: code, UseDeviceCode: true})
-			if err != nil {
+		if err == nil && code != rejected {
+			var response icloud.AppleOnboardingResponse
+			response, err = d.execute(icloud.AppleOnboardingRequest{Operation: icloud.AppleOnboardingVerifySMS, SMSPurpose: purpose, Code: code, UseDeviceCode: true})
+			if err == nil {
+				if err := d.markCheckpoint(func(cp *accountCheckpoint) { cp.PendingSMSPurpose = ""; cp.Stage = "device_verified" }); err != nil {
+					return icloud.AppleOnboardingResponse{}, err
+				}
+				return response, nil
+			}
+			var providerErr *icloud.AppleOnboardingError
+			if !errors.As(err, &providerErr) || !providerErr.CodeRejected {
 				return icloud.AppleOnboardingResponse{}, err
 			}
-			if err := d.markCheckpoint(func(cp *accountCheckpoint) { cp.PendingSMSPurpose = ""; cp.Stage = "device_verified" }); err != nil {
-				return icloud.AppleOnboardingResponse{}, err
-			}
-			return response, nil
+			rejected = code
 		}
-		if err.Error() != previousError {
+		if err != nil && err.Error() != previousError {
 			previousError = err.Error()
 			d.logf("device_code=waiting reason=%q\n", previousError)
 		}

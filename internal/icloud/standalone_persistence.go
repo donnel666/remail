@@ -2,7 +2,6 @@ package icloud
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/mail"
 	"strconv"
@@ -70,9 +69,10 @@ func (s *Service) CommitStandaloneValidatedAccount(
 	if !validICloudResourceExpireAt(expireAt, s.now().UTC()) {
 		return StandaloneCommitResult{}, ErrICloudImportInvalid
 	}
-	birthday, err := time.Parse("2006-01-02", strings.TrimSpace(account.Secret.Birthday))
-	if err != nil {
-		return StandaloneCommitResult{}, ErrICloudImportInvalid
+	if account.Secret.Birthday != "" || account.DeviceCodeAPI == "" {
+		if _, err := time.Parse(time.DateOnly, strings.TrimSpace(account.Secret.Birthday)); err != nil {
+			return StandaloneCommitResult{}, ErrICloudImportInvalid
+		}
 	}
 	if account.NewChannel == nil || strings.TrimSpace(account.NewChannel.Cookie) == "" {
 		return StandaloneCommitResult{}, errors.New("icloud: new Apple Account channel is missing")
@@ -91,10 +91,6 @@ func (s *Service) CommitStandaloneValidatedAccount(
 	if account.ICloudOpened && oldChannel == nil {
 		return StandaloneCommitResult{}, errors.New("icloud: old iCloud channel is missing")
 	}
-	answers, err := json.Marshal(account.Secret.SecurityAnswers)
-	if err != nil {
-		return StandaloneCommitResult{}, ErrICloudImportInvalid
-	}
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
 		requestID = platform.NewUUIDV7String()
@@ -109,7 +105,7 @@ func (s *Service) CommitStandaloneValidatedAccount(
 	}
 
 	var result StandaloneCommitResult
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := assertAdminICloudOwnerEligibleTx(ctx, tx, ownerUserID); err != nil {
 			return err
 		}
@@ -256,10 +252,7 @@ func (s *Service) CommitStandaloneValidatedAccount(
 			result = StandaloneCommitResult{ResourceID: resource.ID, ValidationGeneration: generation, CredentialRevision: revision}
 		}
 
-		if err := tx.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "resource_id"}}, DoUpdates: clause.AssignmentColumns([]string{
-			"apple_password", "security_answers", "birthday", "updated_at",
-		})}).Create(&iCloudResourceCredentialModel{ResourceID: result.ResourceID, ApplePassword: account.Secret.Password,
-			SecurityAnswers: iCloudJSON(answers), Birthday: birthday, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		if err := upsertICloudOnboardingCredentialsTx(tx.WithContext(ctx), result.ResourceID, account.Secret, account.DeviceCodeAPI, now); err != nil {
 			return err
 		}
 		channels := []iCloudImportChannel{*newChannel}

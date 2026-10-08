@@ -88,6 +88,12 @@ type AppleOnboardingRequest struct {
 // or returned by the command.
 type AppleSecurityAnswer = iCloudSecurityAnswer
 type AppleOnboardingSecret = iCloudOnboardingSecret
+type AppleOnboardingInput = iCloudOnboardingLine
+
+// ParseAppleOnboardingInput shares the administrator import format with the CMD.
+func ParseAppleOnboardingInput(raw string) (AppleOnboardingInput, error) {
+	return parseICloudOnboardingLine(1, strings.TrimSpace(raw))
+}
 
 type AppleOnboardingResponse struct {
 	FamilyID            string
@@ -233,6 +239,20 @@ func (c *appleOnboardingClient) Execute(ctx context.Context, request AppleOnboar
 	if err != nil {
 		if proxyErr := appleOnboardingProxyError(err, flow.now); proxyErr != nil {
 			return AppleOnboardingResponse{}, proxyErr
+		}
+		var familyErr *AppleOnboardingError
+		if errors.As(err, &familyErr) && familyErr.RestartStage == "manage_prepare" &&
+			(request.Operation == appleOnboardingPrepareFamily || request.Operation == appleOnboardingVerifySMS && request.SMSPurpose == appleSMSFamilyLogin) {
+			familyErr.RestartStage = "family_prepare"
+		}
+		var verificationErr *AppleOnboardingError
+		if request.UseDeviceCode && errors.As(err, &verificationErr) && verificationErr.CodeRejected {
+			session, snapshotErr := flow.snapshot()
+			if snapshotErr != nil {
+				return AppleOnboardingResponse{}, snapshotErr
+			}
+			verificationErr.HTTPStatus = flow.lastHTTPStatus
+			return AppleOnboardingResponse{Session: session}, err
 		}
 		if resetter, ok := flow.http.(appleProxyRotationResetter); ok {
 			if resetErr := resetter.resetProxyRotation(); resetErr != nil {

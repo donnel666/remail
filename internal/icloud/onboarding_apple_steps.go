@@ -260,6 +260,12 @@ func (f *appleOnboardingFlow) verifyDeviceCode(request AppleOnboardingRequest) (
 	if err := f.finishHSA2Login(request.SMSPurpose); err != nil {
 		return AppleOnboardingResponse{}, err
 	}
+	if f.state.Mode == "family_account" {
+		if err := f.finishFamilyAccountLogin(request); err != nil {
+			return AppleOnboardingResponse{}, err
+		}
+		return AppleOnboardingResponse{Next: "family_prepare"}, nil
+	}
 	return AppleOnboardingResponse{}, nil
 }
 
@@ -275,6 +281,9 @@ func (f *appleOnboardingFlow) finishHSA2Login(purpose string) error {
 		}
 		return nil
 	case appleSMSFamilyLogin, appleSMSFamilyReconcileLogin:
+		if f.state.Mode == "family_account" {
+			return f.ensureManageLogin(appleOnboardingRestartStage(purpose))
+		}
 		if !hasCookie {
 			return appleOnboardingRestart(appleOnboardingRestartStage(purpose))
 		}
@@ -336,8 +345,33 @@ func (f *appleOnboardingFlow) prepareFamily(request AppleOnboardingRequest) (App
 	if err != nil {
 		return AppleOnboardingResponse{}, err
 	}
-	if err := f.reset("family"); err != nil {
-		return AppleOnboardingResponse{}, err
+	if request.UseDeviceCode && f.state.Mode != "family_account_ready" {
+		response, err := f.prepareManage(request)
+		if err != nil {
+			return AppleOnboardingResponse{}, err
+		}
+		f.state.Mode = "family_account"
+		f.state.InviteToken = token
+		f.state.FamilyOrganizerEmail = strings.ToLower(strings.TrimSpace(request.FamilyOrganizerEmail))
+		if response.Next == appleSMSManageLogin {
+			response.Next = appleSMSFamilyLogin
+			return response, nil
+		}
+		if err := f.finishFamilyAccountLogin(request); err != nil {
+			return AppleOnboardingResponse{}, err
+		}
+	}
+	if request.UseDeviceCode && f.state.Mode == "family_account_ready" {
+		// Keep the account Cookie jar while starting the invitation's own login.
+		f.state.Mode = "family"
+		f.state.SessionID, f.state.AuthAttributes, f.state.RepairToken, f.state.OAuthContext, f.state.GSToken = "", "", "", "", ""
+		delete(f.state.Scnt, appleOnboardingHost(f.state.ServiceURL))
+		f.state.FrameID = platform.NewUUIDV4String()
+		f.state.DomainID, f.state.AuthVersion = "", appleOnboardingAuthVersion
+	} else {
+		if err := f.reset("family"); err != nil {
+			return AppleOnboardingResponse{}, err
+		}
 	}
 	// All onboarding now uses the supplied invitation. Keep the legacy
 	// operation accepted for old callers, but deliberately use the same login
@@ -348,18 +382,9 @@ func (f *appleOnboardingFlow) prepareFamily(request AppleOnboardingRequest) (App
 	f.state.RememberMe = false
 	f.state.InviteToken = token
 	f.state.FamilyOrganizerEmail = strings.ToLower(strings.TrimSpace(request.FamilyOrganizerEmail))
-	landing := strings.TrimRight(f.endpoints.Setup, "/") + "/family/messages?" + url.Values{
-		"aaaction": {"showFamilyInvite"}, "inviteCode": {token}, "clientAppContext": {"Preferences"}, "actionUrlKey": {"acceptFamilyInvite.v2"},
-	}.Encode()
-	_, html, err := f.follow(landing, 8)
+	html, err := f.openFamilyInvite()
 	if err != nil {
 		return AppleOnboardingResponse{}, err
-	}
-	if f.state.Status == http.StatusNotFound || f.state.Status == http.StatusGone {
-		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "family_invite_expired", SafeMessage: "The family invitation is expired or invalid."}
-	}
-	if f.state.Status < http.StatusOK || f.state.Status >= http.StatusMultipleChoices {
-		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "family_invite_unavailable", SafeMessage: "The family invitation is unavailable.", HTTPStatus: f.state.Status}
 	}
 	if err := f.loadFamilyWidget(html); err != nil {
 		return AppleOnboardingResponse{}, err
@@ -395,6 +420,33 @@ func (f *appleOnboardingFlow) prepareFamily(request AppleOnboardingRequest) (App
 		return AppleOnboardingResponse{}, appleOnboardingRestart(restartStage)
 	}
 	return AppleOnboardingResponse{Next: "ready"}, nil
+}
+
+func (f *appleOnboardingFlow) finishFamilyAccountLogin(request AppleOnboardingRequest) error {
+	f.state.Mode = "manage"
+	if _, err := f.fetchManage(AppleOnboardingRequest{Email: request.Email, SkipPrivateAlias: true}); err != nil {
+		return err
+	}
+	f.state.AccountWidgetKey = f.state.WidgetKey
+	f.state.Mode = "family_account_ready"
+	return nil
+}
+
+func (f *appleOnboardingFlow) openFamilyInvite() (string, error) {
+	landing := strings.TrimRight(f.endpoints.Setup, "/") + "/family/messages?" + url.Values{
+		"aaaction": {"showFamilyInvite"}, "inviteCode": {f.state.InviteToken}, "clientAppContext": {"Preferences"}, "actionUrlKey": {"acceptFamilyInvite.v2"},
+	}.Encode()
+	_, html, err := f.follow(landing, 8)
+	if err != nil {
+		return "", err
+	}
+	if f.state.Status == http.StatusNotFound || f.state.Status == http.StatusGone {
+		return "", &AppleOnboardingError{Category: "family_invite_expired", SafeMessage: "The family invitation is expired or invalid."}
+	}
+	if f.state.Status < http.StatusOK || f.state.Status >= http.StatusMultipleChoices {
+		return "", &AppleOnboardingError{Category: "family_invite_unavailable", SafeMessage: "The family invitation is unavailable.", HTTPStatus: f.state.Status}
+	}
+	return html, nil
 }
 
 func (f *appleOnboardingFlow) joinFamily(request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
@@ -471,13 +523,29 @@ func (f *appleOnboardingFlow) joinFamily(request AppleOnboardingRequest) (AppleO
 
 func (f *appleOnboardingFlow) familyJoinResponse() (AppleOnboardingResponse, error) {
 	// Stage 2 pauses for manual sharing after accept/update. Stage 3 verifies
-	// membership again with its own authenticated session before creating aliases.
+	// membership with the authenticated account session before creating aliases.
 	return AppleOnboardingResponse{Next: "ready"}, nil
 }
 
 func (f *appleOnboardingFlow) prepareManage(request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
 	if err := validateAppleOnboardingCredentials(request); err != nil {
 		return AppleOnboardingResponse{}, err
+	}
+	if request.UseDeviceCode && f.state.Mode == "family" && f.state.AccountWidgetKey != "" {
+		cookies, err := f.http.SnapshotCookies(f.endpoints.Account, f.endpoints.AppleID)
+		if err != nil {
+			return AppleOnboardingResponse{}, err
+		}
+		for _, cookie := range cookies {
+			if cookie.Name == "myacinfo" && cookie.Value != "" && (cookie.Expires.IsZero() || cookie.Expires.After(f.now())) {
+				f.state.Mode = "manage"
+				f.state.WidgetKey, f.state.DomainID, f.state.AuthVersion = f.state.AccountWidgetKey, "11", appleOnboardingManageAuth
+				f.state.SessionID, f.state.AuthAttributes, f.state.RepairToken, f.state.OAuthContext = "", "", "", ""
+				delete(f.state.Scnt, appleOnboardingHost(f.state.ServiceURL))
+				f.state.InviteToken, f.state.FamilyOrganizerEmail, f.state.GSToken = "", "", ""
+				return AppleOnboardingResponse{Next: "ready"}, nil
+			}
+		}
 	}
 	if err := f.reset("manage"); err != nil {
 		return AppleOnboardingResponse{}, err
@@ -572,6 +640,9 @@ func (f *appleOnboardingFlow) fetchManage(request AppleOnboardingRequest) (Apple
 	f.state.APIKey = appleOnboardingString(data["apiKey"])
 	f.rememberCountry(data)
 	if f.state.APIKey == "" {
+		if request.UseDeviceCode && f.state.AccountWidgetKey != "" {
+			return AppleOnboardingResponse{}, appleOnboardingRestart("manage_prepare")
+		}
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "api_key_missing", SafeMessage: "Apple Account profile did not return an API key.", Retryable: true}
 	}
 	familyID := ""

@@ -114,3 +114,48 @@ func gormOpenStandaloneTestDB(_ *testing.T) (*gorm.DB, error) {
 	}
 	return db, nil
 }
+
+func TestStandaloneDeviceInputAllowsMissingBirthdayAndPreservesMetadata(t *testing.T) {
+	db, err := gormOpenStandaloneTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&iCloudAdminTestUser{ID: 1, Status: "active", Role: "supplier"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(db, nil, nil)
+	account := StandaloneValidatedAccount{
+		Email: "device@example.com", AccountRole: "primary", DeviceCodeAPI: "http://192.0.2.20/code?id=1",
+		ExpireAt: time.Now().Add(24 * time.Hour), Secret: AppleOnboardingSecret{Password: "secret"},
+		NewChannel: &AppleOnboardingChannel{Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com", Cookie: "new-cookie"},
+	}
+	result, err := service.CommitStandaloneValidatedAccount(context.Background(), 1, account, "device-cmd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var missing int64
+	if err := db.Model(&iCloudResourceCredentialModel{}).Where("resource_id = ? AND birthday IS NULL", result.ResourceID).Count(&missing).Error; err != nil || missing != 1 {
+		t.Fatalf("missing device birthday was not stored as NULL: count=%d err=%v", missing, err)
+	}
+	account.Secret.Birthday = "1981-10-06"
+	account.Secret.SecurityAnswers[0] = AppleSecurityAnswer{Question: "question", Answer: "answer"}
+	if _, err := service.CommitStandaloneValidatedAccount(context.Background(), 1, account, "device-cmd-full"); err != nil {
+		t.Fatal(err)
+	}
+	account.Secret = AppleOnboardingSecret{Password: "new-secret"}
+	if _, err := service.CommitStandaloneValidatedAccount(context.Background(), 1, account, "device-cmd-retry"); err != nil {
+		t.Fatal(err)
+	}
+	var credential iCloudResourceCredentialModel
+	if err := db.First(&credential, result.ResourceID).Error; err != nil {
+		t.Fatal(err)
+	}
+	secret, err := credential.onboardingSecret(account.DeviceCodeAPI)
+	if err != nil || secret.Password != "new-secret" || secret.Birthday != "1981-10-06" || secret.SecurityAnswers[0].Answer != "answer" {
+		t.Fatalf("compact device retry lost saved metadata: %+v err=%v", secret, err)
+	}
+	account.DeviceCodeAPI = ""
+	if _, err := service.CommitStandaloneValidatedAccount(context.Background(), 1, account, "sms-without-birthday"); err != ErrICloudImportInvalid {
+		t.Fatalf("SMS account accepted missing birthday: %v", err)
+	}
+}

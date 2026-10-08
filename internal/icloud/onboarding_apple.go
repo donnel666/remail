@@ -123,6 +123,7 @@ type appleOnboardingBrowserState struct {
 	ServiceURL             string                  `json:"serviceUrl,omitempty"`
 	AuthVersion            string                  `json:"authVersion,omitempty"`
 	APIKey                 string                  `json:"apiKey,omitempty"`
+	AccountWidgetKey       string                  `json:"accountWidgetKey,omitempty"`
 	PrivateAliasReady      bool                    `json:"privateAliasReady,omitempty"`
 	FrameID                string                  `json:"frameId,omitempty"`
 	SetupClientID          string                  `json:"setupClientId,omitempty"`

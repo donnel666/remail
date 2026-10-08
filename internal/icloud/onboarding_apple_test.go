@@ -261,6 +261,171 @@ func TestAppleOnboardingPrepareFamilyDoesNotFetchInviteDetails(t *testing.T) {
 	}
 }
 
+func TestDeviceFamilyLogsIntoAccountBeforeOpeningInviteAndReusesSession(t *testing.T) {
+	now := time.Now().UTC()
+	session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{
+		{status: http.StatusOK, body: `{"serviceKey":"portal-key"}`},
+		{status: http.StatusOK, body: `<html></html>`, header: http.Header{"X-Apple-Id-Session-Id": {"session"}, "Scnt": {"signin-scnt"}}},
+		{status: http.StatusOK, body: `{}`},
+		{status: http.StatusOK, body: `{"b":"Ag==","c":"challenge","salt":"c2FsdA==","iteration":1,"protocol":"s2k"}`},
+		{status: http.StatusConflict, body: `{"authType":"hsa2"}`},
+		{status: http.StatusOK, body: `<html></html>`},
+		{status: http.StatusOK, body: `{"securityCode":{"valid":true}}`},
+		{status: http.StatusOK, body: `{}`},
+		{status: http.StatusOK, body: `{"apiKey":"account-api-key"}`},
+		{status: http.StatusOK, body: `<script type="application/json" id="boot_args">{"direct":{"authWidgetConfig":{"serviceKey":"family-key","domainId":"1"}}}</script>`},
+		{status: http.StatusOK, body: `<html></html>`, header: http.Header{"X-Apple-Id-Session-Id": {"family-session"}, "Scnt": {"family-scnt"}}},
+		{status: http.StatusOK, body: `{}`},
+		{status: http.StatusOK, body: `{"b":"Ag==","c":"challenge","salt":"c2FsdA==","iteration":1,"protocol":"s2k"}`},
+		{status: http.StatusConflict, body: `{"authType":"hsa2"}`},
+		{status: http.StatusOK, body: `<html></html>`},
+		{status: http.StatusOK, body: `{"securityCode":{"valid":true}}`},
+		{status: http.StatusOK, body: `{}`, header: http.Header{"X-Apple-Gs-Token": {"family-token"}}},
+		{status: http.StatusOK, body: `{"final":true}`},
+	}}
+	client := appleOnboardingTestClient(now, session)
+	request := AppleOnboardingRequest{Operation: appleOnboardingPrepareFamily, Email: "test@example.com",
+		Secret: iCloudOnboardingSecret{Password: "secret"}, UseDeviceCode: true, SkipPhoneEnrollment: true,
+		FamilyInviteURL: "https://setup.icloud.com/family/messages?inviteCode=invite-token"}
+	response, err := client.Execute(context.Background(), request)
+	if err != nil || response.Next != appleSMSFamilyLogin || len(session.requests) != 6 {
+		t.Fatalf("account login preparation: next=%q requests=%v err=%v", response.Next, session.requests, err)
+	}
+	if session.requests[0] != "GET https://account.apple.com/bootstrap/portal" ||
+		!strings.Contains(session.requests[1], "authVersion=8.0.2") || session.requestHeaders[1]["X-Apple-Domain-Id"] != "11" {
+		t.Fatalf("family login did not use the account portal: %v", session.requests)
+	}
+	for _, url := range session.requests {
+		if strings.Contains(url, "/family/") || strings.Contains(url, "/verify/phone") {
+			t.Fatalf("family or phone operation preceded account login: %s", url)
+		}
+	}
+	session.cookies = []msacl.SessionCookie{{Name: "myacinfo", Value: "account-cookie", Domain: ".apple.com", Host: "account.apple.com", Expires: now.Add(time.Hour)}}
+	request.Operation, request.SMSPurpose, request.Code, request.Session = appleOnboardingVerifySMS, appleSMSFamilyLogin, "000123", response.Session
+	response, err = client.Execute(context.Background(), request)
+	if err != nil || response.Next != "family_prepare" || len(session.requests) != 9 || !strings.Contains(session.requests[6], "/verify/trusteddevice/securitycode") {
+		t.Fatalf("account device verification: requests=%v err=%v", session.requests, err)
+	}
+	request.Operation, request.Session = appleOnboardingPrepareFamily, response.Session
+	response, err = client.Execute(context.Background(), request)
+	if err != nil || response.Next != appleSMSFamilyLogin || len(session.requests) != 15 || !strings.Contains(session.requests[9], "/family/messages?") || session.requestHeaders[10]["X-Apple-Domain-Id"] != "1" {
+		t.Fatalf("family invitation login after account login: next=%q requests=%v err=%v", response.Next, session.requests, err)
+	}
+	request.Operation, request.Session, request.Code = appleOnboardingVerifySMS, response.Session, "000456"
+	response, err = client.Execute(context.Background(), request)
+	if err != nil || len(session.requests) != 16 || !strings.Contains(session.requests[15], "/verify/trusteddevice/securitycode") {
+		t.Fatalf("second device verification: requests=%v err=%v", session.requests, err)
+	}
+	request.Operation, request.Session = appleOnboardingJoinFamily, response.Session
+	response, err = client.Execute(context.Background(), request)
+	if err != nil || response.Next != "ready" || len(session.requests) != 18 {
+		t.Fatalf("join using account cookies: next=%q requests=%v err=%v", response.Next, session.requests, err)
+	}
+	for index, endpoint := range []string{"/family/invite/gs/ws/token", "/family/invite/accept/familysharing?"} {
+		if !strings.Contains(session.requests[index+16], endpoint) {
+			t.Fatalf("family request %d: %s", index, session.requests[index+16])
+		}
+	}
+	request.Operation, request.Session = appleOnboardingPrepareManage, response.Session
+	response, err = client.Execute(context.Background(), request)
+	var state appleOnboardingBrowserState
+	if err != nil || json.Unmarshal(response.Session, &state) != nil || state.Mode != "manage" || state.DomainID != "11" || state.WidgetKey != "portal-key" || len(session.requests) != 18 || len(state.Cookies) != 1 || state.Cookies[0].Value != "account-cookie" {
+		t.Fatalf("phase 3 did not reuse account cookies: mode=%s requests=%v err=%v", state.Mode, session.requests, err)
+	}
+	if state.InviteToken != "" || state.GSToken != "" {
+		t.Fatal("phase 3 retained invitation request context")
+	}
+}
+
+func TestDeviceFamilyAccountCookieReuseRequiresUnexpiredCookie(t *testing.T) {
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		name      string
+		device    bool
+		expires   time.Time
+		auth      string
+		wantReuse bool
+	}{
+		{"valid", true, now.Add(time.Hour), appleOnboardingManageAuth, true},
+		{"session cookie", true, time.Time{}, appleOnboardingManageAuth, true},
+		{"expired", true, now.Add(-time.Second), appleOnboardingManageAuth, false},
+		{"SMS", false, now.Add(time.Hour), appleOnboardingManageAuth, false},
+		{"old invitation login", true, now.Add(time.Hour), appleOnboardingAuthVersion, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{{status: http.StatusOK, body: `{}`}}}
+			state := appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+				state.Mode, state.AuthVersion, state.DomainID = "family", tc.auth, "11"
+				if tc.auth == appleOnboardingManageAuth {
+					state.AccountWidgetKey = "account-widget"
+				}
+				state.Cookies = []msacl.SessionCookie{{Name: "myacinfo", Value: "account-cookie", Domain: ".apple.com", Expires: tc.expires}}
+			})
+			response, err := appleOnboardingTestClient(now, session).Execute(context.Background(), AppleOnboardingRequest{
+				Operation: appleOnboardingPrepareManage, Email: "test@example.com", Secret: iCloudOnboardingSecret{Password: "secret"}, UseDeviceCode: tc.device, Session: state,
+			})
+			if tc.wantReuse {
+				if err != nil || response.Next != "ready" || len(session.requests) != 0 {
+					t.Fatalf("valid account cookie was not reused: requests=%v err=%v", session.requests, err)
+				}
+			} else if err == nil || len(session.requests) != 1 || session.requests[0] != "GET https://account.apple.com/bootstrap/portal" {
+				t.Fatalf("fresh login did not start: requests=%v err=%v", session.requests, err)
+			}
+		})
+	}
+}
+
+func TestReusedFamilyAccountSessionRejectedByAppleRestartsManageLogin(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			now := time.Now().UTC()
+			session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{{status: status, body: `{}`}}}
+			client := appleOnboardingTestClient(now, session)
+			state := appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+				state.Mode, state.AuthVersion, state.DomainID = "family", appleOnboardingManageAuth, "11"
+				state.AccountWidgetKey = "account-widget"
+				state.Cookies = []msacl.SessionCookie{{Name: "myacinfo", Value: "revoked-cookie", Domain: ".apple.com", Expires: now.Add(time.Hour)}}
+			})
+			request := AppleOnboardingRequest{Operation: appleOnboardingPrepareManage, Email: "test@example.com", Secret: iCloudOnboardingSecret{Password: "secret"}, UseDeviceCode: true, Session: state}
+			response, err := client.Execute(context.Background(), request)
+			if err != nil || response.Next != "ready" || len(session.requests) != 0 {
+				t.Fatalf("prepare cookie reuse: requests=%v err=%v", session.requests, err)
+			}
+			request.Operation, request.Session = appleOnboardingFetchManage, response.Session
+			_, err = client.Execute(context.Background(), request)
+			var providerErr *AppleOnboardingError
+			if !errors.As(err, &providerErr) || providerErr.RestartStage != "manage_prepare" || len(session.requests) != 1 {
+				t.Fatalf("rejected cookie did not require fresh account login: requests=%v err=%v", session.requests, err)
+			}
+		})
+	}
+}
+
+func TestReusedFamilyAccountSessionWithoutAPIKeyRestartsManageLogin(t *testing.T) {
+	for _, reused := range []bool{false, true} {
+		t.Run(map[bool]string{false: "fresh login", true: "reused cookie"}[reused], func(t *testing.T) {
+			session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{
+				{status: http.StatusOK, body: `{}`}, {status: http.StatusOK, body: `{}`},
+			}}
+			state := appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+				if reused {
+					state.AccountWidgetKey = "account-widget"
+				}
+			})
+			_, err := appleOnboardingTestClient(time.Now(), session).Execute(context.Background(), AppleOnboardingRequest{
+				Operation: appleOnboardingFetchManage, Email: "test@example.com", UseDeviceCode: true, Session: state,
+			})
+			var providerErr *AppleOnboardingError
+			if !errors.As(err, &providerErr) {
+				t.Fatalf("expected account profile error: %v", err)
+			}
+			if reused && providerErr.RestartStage != "manage_prepare" || !reused && (providerErr.Category != "api_key_missing" || !providerErr.Retryable) {
+				t.Fatalf("incorrect API key recovery for reused=%t: %+v", reused, providerErr)
+			}
+		})
+	}
+}
+
 func TestAppleOnboardingKeepsICloudAndAccountHeadersSeparate(t *testing.T) {
 	flow, err := loadAppleOnboardingFlow(context.Background(), appleOnboardingTestClient(time.Now(), &appleOnboardingScriptedSession{}), appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
 		state.Mode = "family"
