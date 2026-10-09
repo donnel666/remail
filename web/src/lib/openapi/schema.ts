@@ -11,7 +11,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Liveness probe */
+        /**
+         * Liveness probe
+         * @description With ready=1, checks dependencies and workers and returns only a generic status without dependency details.
+         */
         get: operations["healthz"];
         put?: never;
         post?: never;
@@ -28,7 +31,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Readiness probe */
+        /**
+         * Readiness probe
+         * @description Requires a logged-in super administrator.
+         */
         get: operations["readyz"];
         put?: never;
         post?: never;
@@ -11489,7 +11495,9 @@ export type $defs = Record<string, never>;
 export interface operations {
     healthz: {
         parameters: {
-            query?: never;
+            query?: {
+                ready?: "1";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11498,6 +11506,15 @@ export interface operations {
         responses: {
             /** @description Service is alive */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+            /** @description Not ready (only when ready=1) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11525,13 +11542,15 @@ export interface operations {
                     "application/json": components["schemas"]["ReadyzResponse"];
                 };
             };
-            /** @description One or more dependencies unhealthy */
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Dependencies unhealthy or session authentication storage unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReadyzResponse"];
+                    "application/json": components["schemas"]["ReadyzResponse"] | components["schemas"]["Error"];
                 };
             };
         };

@@ -11,7 +11,7 @@
 - 生产必须把 `TRUSTED_PROXIES` 设置为应用容器实际看到的反向代理精确 IP/CIDR；反向代理必须覆盖客户端自带的 `X-Forwarded-For`，只传递规范客户端地址。
 - `PPROF_ADDR` 只能绑定 `localhost` 或回环 IP，禁止公网监听。
 - 雷池对 `/pickup`、`/v1/pickup` 关闭或脱敏 query 日志，并禁用验证码、JS Challenge 等会改变 API 响应的挑战。
-- 雷池必须阻止公网访问 `/metrics`，上传限制不得低于 100 MB，并传递 `Host`、`X-Forwarded-For`、`X-Forwarded-Proto`。
+- 上传限制不得低于 100 MB；雷池须传递 `Host`、`X-Forwarded-For`、`X-Forwarded-Proto` 和登录 Cookie。
 
 ## 积分单位一次性切换（迁移 68）
 
@@ -42,7 +42,9 @@
 
 ## 监控与告警
 
-Prometheus 从宿主机抓取 `http://127.0.0.1:8080/metrics`；雷池 WAF 不向公网暴露该端点。首次部署必须确认抓取成功和指标名称存在。首版只保留能直接指导排障的指标：
+`/metrics` 和 `/readyz` 复用现有 `sid` 登录会话，仅允许超级管理员访问；未登录或会话过期返回 `401`，其他角色（包括普通管理员）返回 `403`。直连源站也执行同样的校验。反向代理将这两个路径转发给应用鉴权；如雷池仍有旧的路径封禁规则，须在应用更新后移除，才能允许超级管理员访问。Prometheus 若需抓取 `/metrics`，必须携带有效的超级管理员登录 Cookie，会话过期后须更新。
+
+新镜像通过内置环境变量 `REMAIL_READINESS_PATH=/healthz?ready=1` 声明就绪探针路径；容器健康探针和发布/回滚等待在容器内读取它，旧镜像缺少该变量时使用原有 `/readyz`，避免将旧版存活检查误认为就绪检查。不要覆盖这个镜像内置值。CI 冒烟测试使用 `/healthz?ready=1`，与 `/readyz` 执行相同的 MySQL、Redis、MinIO 和 worker 就绪检查，但只返回 `200 {"status":"ok"}` 或 `503 {"status":"error"}`，不暴露依赖名称或错误详情。无参数 `/healthz` 仍只检查进程存活。首次部署须验证权限限制和容器健康状态。鉴权存储故障时，`/readyz` 返回通用 `Error` 格式的 503；通过鉴权后的依赖检查故障返回 `ReadyzResponse` 格式的 503。首版只保留能直接指导排障的指标：
 
 - `remail_http_requests_total`、`remail_http_request_duration_seconds`
 - `remail_db_open_connections`、`remail_db_in_use_connections`、`remail_db_wait_count_total`

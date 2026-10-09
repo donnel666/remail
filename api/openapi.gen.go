@@ -4707,6 +4707,21 @@ func (e TicketTypeQuery) Valid() bool {
 	}
 }
 
+// Defines values for HealthzParamsReady.
+const (
+	N1 HealthzParamsReady = "1"
+)
+
+// Valid indicates whether the value is a known member of the HealthzParamsReady enum.
+func (e HealthzParamsReady) Valid() bool {
+	switch e {
+	case N1:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetAdminAllocationsParamsType.
 const (
 	GetAdminAllocationsParamsTypeDomain    GetAdminAllocationsParamsType = "domain"
@@ -12991,11 +13006,24 @@ type cookieAuthContextKey string
 // systemKeyAuthContextKey is the context key for systemKeyAuth security scheme
 type systemKeyAuthContextKey string
 
+// HealthzParams defines parameters for Healthz.
+type HealthzParams struct {
+	Ready *HealthzParamsReady `form:"ready,omitempty" json:"ready,omitempty"`
+}
+
+// HealthzParamsReady defines parameters for Healthz.
+type HealthzParamsReady string
+
 // GetNodeLocCallbackParams defines parameters for GetNodeLocCallback.
 type GetNodeLocCallbackParams struct {
 	Code  *string `form:"code,omitempty" json:"code,omitempty"`
 	State *string `form:"state,omitempty" json:"state,omitempty"`
 	Error *string `form:"error,omitempty" json:"error,omitempty"`
+}
+
+// Readyz503JSONResponseBody defines parameters for Readyz.
+type Readyz503JSONResponseBody struct {
+	union json.RawMessage
 }
 
 // GetAdminAllocationsParams defines parameters for GetAdminAllocations.
@@ -17191,6 +17219,68 @@ func (t *ResourceBulkSelection) UnmarshalJSON(b []byte) error {
 	return err
 }
 
+// AsReadyzResponse returns the union data inside the Readyz503JSONResponseBody as a ReadyzResponse
+func (t Readyz503JSONResponseBody) AsReadyzResponse() (ReadyzResponse, error) {
+	var body ReadyzResponse
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromReadyzResponse overwrites any union data inside the Readyz503JSONResponseBody as the provided ReadyzResponse
+func (t *Readyz503JSONResponseBody) FromReadyzResponse(v ReadyzResponse) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeReadyzResponse performs a merge with any union data inside the Readyz503JSONResponseBody, using the provided ReadyzResponse
+func (t *Readyz503JSONResponseBody) MergeReadyzResponse(v ReadyzResponse) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsError returns the union data inside the Readyz503JSONResponseBody as a Error
+func (t Readyz503JSONResponseBody) AsError() (Error, error) {
+	var body Error
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromError overwrites any union data inside the Readyz503JSONResponseBody as the provided Error
+func (t *Readyz503JSONResponseBody) FromError(v Error) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeError performs a merge with any union data inside the Readyz503JSONResponseBody, using the provided Error
+func (t *Readyz503JSONResponseBody) MergeError(v Error) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t Readyz503JSONResponseBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *Readyz503JSONResponseBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
 // AsBotBindingResponse returns the union data inside the DeleteBotBinding503JSONResponseBody as a BotBindingResponse
 func (t DeleteBotBinding503JSONResponseBody) AsBotBindingResponse() (BotBindingResponse, error) {
 	var body BotBindingResponse
@@ -17621,7 +17711,7 @@ func (t *PostResourcePublish200JSONResponseBody) UnmarshalJSON(b []byte) error {
 type ServerInterface interface {
 	// Liveness probe
 	// (GET /healthz)
-	Healthz(c *gin.Context)
+	Healthz(c *gin.Context, params HealthzParams)
 	// Complete NodeLoc OAuth login or binding
 	// (GET /oauth/nodeloc)
 	GetNodeLocCallback(c *gin.Context, params GetNodeLocCallbackParams)
@@ -18848,6 +18938,20 @@ type MiddlewareFunc func(c *gin.Context)
 // Healthz operation middleware
 func (siw *ServerInterfaceWrapper) Healthz(c *gin.Context) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params HealthzParams
+
+	// ------------- Optional query parameter "ready" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "ready", c.Request.URL.Query(), &params.Ready, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ready: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -18855,7 +18959,7 @@ func (siw *ServerInterfaceWrapper) Healthz(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.Healthz(c)
+	siw.Handler.Healthz(c, params)
 }
 
 // GetNodeLocCallback operation middleware
@@ -18903,6 +19007,8 @@ func (siw *ServerInterfaceWrapper) GetNodeLocCallback(c *gin.Context) {
 
 // Readyz operation middleware
 func (siw *ServerInterfaceWrapper) Readyz(c *gin.Context) {
+
+	c.Set(string(CookieAuthScopes), []string{})
 
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)

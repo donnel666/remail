@@ -126,7 +126,7 @@ services:
       minio:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz | grep -q 'ok'"]
+      test: ["CMD-SHELL", "wget -qO- \"http://127.0.0.1:8080$${REMAIL_READINESS_PATH:-/readyz}\" | grep -q 'ok'"]
       interval: 10s
       timeout: 5s
       retries: 12

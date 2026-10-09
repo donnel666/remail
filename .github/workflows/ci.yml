@@ -56,6 +56,9 @@ jobs:
           go generate ./api
           git diff --exit-code -- api/openapi.gen.go
 
+      - name: Verify monitoring probe compatibility
+        run: python3 scripts/test_monitoring_probes.py
+
       - name: Run go vet
         run: go vet ./...
 
@@ -308,13 +311,24 @@ jobs:
           test "$HTTP_CODE" = "200"
           echo "$BODY" | grep -q '"ok"'
 
-      - name: Verify /readyz returns 200
+      - name: Verify dependency readiness without exposing details
         run: |
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/readyz)
-          BODY=$(curl -sf http://localhost:8080/readyz)
-          echo "GET /readyz -> $HTTP_CODE $BODY"
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8080/healthz?ready=1")
+          BODY=$(curl -sf "http://localhost:8080/healthz?ready=1")
+          echo "GET /healthz?ready=1 -> $HTTP_CODE $BODY"
           test "$HTTP_CODE" = "200"
           echo "$BODY" | grep -q '"ok"'
+
+      - name: Verify monitoring endpoints reject anonymous requests
+        run: |
+          for endpoint in metrics readyz; do
+            HTTP_CODE=$(curl -s -o "$RUNNER_TEMP/monitoring-response" -w "%{http_code}" "http://localhost:8080/$endpoint")
+            test "$HTTP_CODE" = "401"
+            if grep -Eq 'dependencies|go_info|remail_http_requests_total' "$RUNNER_TEMP/monitoring-response"; then
+              echo "Sensitive monitoring data exposed at /$endpoint" >&2
+              exit 1
+            fi
+          done
 
       - name: Verify migrations and critical tables
         run: |
@@ -560,7 +574,7 @@ jobs:
           fi
           wait_for_health() {
             for _ in $(seq 1 30); do
-              if docker compose --env-file .env -f compose.yml exec -T server wget -qO- http://127.0.0.1:8080/readyz | grep -q '"ok"'; then
+              if docker compose --env-file .env -f compose.yml exec -T server sh -c 'wget -qO- "http://127.0.0.1:8080${REMAIL_READINESS_PATH:-/readyz}"' | grep -q '"ok"'; then
                 return 0
               fi
               sleep 2

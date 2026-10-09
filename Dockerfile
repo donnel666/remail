@@ -33,6 +33,7 @@ RUN /opt/proto-venv/bin/python -I -c "import runpy; bridge = runpy.run_path('/tm
 # Stage 3: Runtime
 FROM alpine:3.21
 LABEL io.remail.points-unit="1"
+ENV REMAIL_READINESS_PATH="/healthz?ready=1"
 RUN apk add --no-cache ca-certificates tzdata chromium python3 libstdc++ libffi
 ENV TZ=Asia/Shanghai
 ENV PROTO_PYTHON_BIN=/opt/proto-venv/bin/python

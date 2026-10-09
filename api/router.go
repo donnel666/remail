@@ -67,11 +67,9 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 	// Health check endpoints (outside /v1)
 	h := health.NewHandler(p)
 	r.GET("/healthz", h.Healthz)
-	r.GET("/readyz", h.Readyz)
 	if sqlDB, err := p.DB.DB(); err == nil {
 		platform.SetMetricsDB(sqlDB)
 	}
-	r.GET("/metrics", gin.WrapH(platform.MetricsHandler()))
 
 	// API v1 routes
 	taskMux := asynq.NewServeMux()
@@ -168,6 +166,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 
 		// Generic administrator-managed system settings.
 		iamSessionFetcher := iamapi.NewSessionFetcher(iamMod.SessionStore, iamMod.UserRepo)
+		health.RegisterMonitoringRoutes(r, p, iamSessionFetcher)
 		systemsettingsapi.RegisterRoutes(v1, systemSettingsMod, iamSessionFetcher, iamMod.PermissionChecker)
 		v1.GET(
 			"/admin/monitoring",
