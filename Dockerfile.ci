@@ -25,6 +25,7 @@ RUN /opt/proto-venv/bin/python -I -c "import runpy; bridge = runpy.run_path('/tm
 
 FROM alpine:3.21
 LABEL io.remail.points-unit="1"
+ENV REMAIL_READINESS_PATH="/healthz?ready=1"
 # Local Gmail validation launches Chromium; CI uses this file for production images.
 RUN apk add --no-cache ca-certificates tzdata chromium python3 libstdc++ libffi \
     && chromium --version

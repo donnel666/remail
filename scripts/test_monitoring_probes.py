@@ -17,7 +17,14 @@ class MonitoringProbeTest(unittest.TestCase):
         probe = probe.replace("$$", "$")
         workflow = (ROOT / ".github/workflows/ci.yml").read_text()
         wait = re.search(r"          wait_for_health\(\) \{.*?\n          \}", workflow, re.S)[0]
-        image_path = re.search(r'ENV REMAIL_READINESS_PATH="([^"]+)"', (ROOT / "Dockerfile").read_text())[1]
+        image_paths = {"legacy": None}
+        dockerfiles = {"Dockerfile", *re.findall(r'^\s+file:\s+(Dockerfile\S*)\s*$', workflow, re.M)}
+        for dockerfile in sorted(dockerfiles):
+            runtime = (ROOT / dockerfile).read_text().rsplit("\nFROM ", 1)[1]
+            match = re.search(r'^ENV REMAIL_READINESS_PATH="([^"]+)"$', runtime, re.M)
+            self.assertIsNotNone(match, f"{dockerfile}: runtime readiness path is missing")
+            self.assertEqual(match[1], "/healthz?ready=1", dockerfile)
+            image_paths[dockerfile] = match[1]
         with tempfile.TemporaryDirectory() as directory:
             task = Path(directory)
             scripts = {
@@ -41,10 +48,11 @@ printf '{"status":"ok"}'
                 executable = task / name
                 executable.write_text(source)
                 executable.chmod(0o700)
-            for kind in ("legacy", "current"):
+            for image, image_path in image_paths.items():
+                kind = "legacy" if image == "legacy" else "current"
                 for failed in (False, True):
                     for name, command in (("compose", probe), ("deploy_and_rollback", wait + "\nwait_for_health")):
-                        with self.subTest(image=kind, failed=failed, probe=name):
+                        with self.subTest(image=image, failed=failed, probe=name):
                             log = task / "requests"
                             log.write_text("")
                             env = dict(os.environ, PATH=f"{task}:{os.environ['PATH']}", IMAGE_KIND=kind,
