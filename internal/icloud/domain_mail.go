@@ -96,7 +96,7 @@ func (s *Service) FetchMail(ctx context.Context, request MailFetchRequest) (*Mai
 		}
 	}
 	knownRowIDs := iCloudKnownInboundRowIDs(request.KnownMessageIDs)
-	candidates, err := s.fetchICloudMailCandidates(ctx, scopes, request.SinceAt, request.UntilAt, readLimit, knownRowIDs)
+	candidates, err := s.fetchICloudMailCandidates(ctx, scopes, request.SinceAt, request.UntilAt, readLimit, knownRowIDs, request.FullHistory)
 	if err != nil {
 		return nil, err
 	}
@@ -147,6 +147,7 @@ func (s *Service) fetchICloudMailCandidates(
 	untilAt time.Time,
 	readLimit int,
 	knownRowIDs []uint,
+	fullHistory bool,
 ) ([]iCloudMailCandidate, error) {
 	if readLimit <= 0 {
 		return nil, ErrICloudMailUnavailable
@@ -190,14 +191,32 @@ func (s *Service) fetchICloudMailCandidates(
 	}
 	seenRows := make(map[uint]struct{})
 	candidates := make([]iCloudMailCandidate, 0, readLimit)
+	prefilter := !fullHistory && len(scopes) == 1
 	for _, forwardToEmail := range mailboxes {
 		targetRoutes := routesByMailbox[forwardToEmail]
 		resolverRoutes := resolverRoutesByMailbox[forwardToEmail]
+		// Use the resolver snapshot so concurrent route updates remain visible.
+		var targetResolverRoutes []iCloudScopedMailRoute
+		if prefilter {
+			for _, route := range resolverRoutes {
+				if route.scope.AliasID == scopes[0].AliasID {
+					targetResolverRoutes = append(targetResolverRoutes, route)
+				}
+			}
+		}
 		mailboxSince := earliestICloudRouteSince(targetRoutes)
+		mailboxStart := len(candidates)
 		err := s.scanICloudMailboxRows(ctx, forwardToEmail, mailboxSince, untilAt, scanLimit, knownRowIDs, func(row iCloudForwardedMailRow) bool {
 			if _, exists := seenRows[row.ID]; exists {
 				return true
 			}
+			if prefilter && len(targetResolverRoutes) < len(resolverRoutes) && !slices.ContainsFunc(targetResolverRoutes, func(route iCloudScopedMailRoute) bool {
+				_, ok := decodeICloudRelaySenderForRoute(row.EnvelopeFrom, route.scope.AnonymousID, route.recipientMailID)
+				return ok
+			}) {
+				return true
+			}
+			// Keep whole-mailbox resolution to reject cross-alias ambiguity.
 			resolved, sender, recipientMailID, ok := resolveICloudMailboxAlias(row.EnvelopeFrom, resolverRoutes)
 			if !ok {
 				return true
@@ -213,7 +232,7 @@ func (s *Service) fetchICloudMailCandidates(
 					),
 				})
 			}
-			return true
+			return len(candidates)-mailboxStart < readLimit
 		})
 		if err != nil {
 			return nil, err
@@ -244,7 +263,7 @@ func (s *Service) loadICloudMailboxResolverRoutes(ctx context.Context, forwardTo
 	if err := s.db.WithContext(ctx).Table("icloud_aliases AS alias").
 		Select(`alias.resource_id, alias.id AS alias_id, alias.email AS alias_email,
 			alias.anonymous_id, alias.forward_to_email, alias.recipient_mail_id`).
-		Where("LOWER(alias.forward_to_email) = ? AND alias.status <> ?", forwardToEmail, iCloudResourceDeleted).
+		Where("alias.forward_to_email = ? AND alias.status <> ?", forwardToEmail, iCloudResourceDeleted).
 		Find(&current).Error; err != nil {
 		return nil, fmt.Errorf("%w: load mailbox aliases", ErrICloudMailUnavailable)
 	}
@@ -270,7 +289,7 @@ func (s *Service) loadICloudMailboxResolverRoutes(ctx context.Context, forwardTo
 		Select(`alias.resource_id, alias.id AS alias_id, alias.email AS alias_email,
 			alias.anonymous_id, route.forward_to_email, route.recipient_mail_id`).
 		Joins("JOIN icloud_aliases AS alias ON alias.id = route.alias_id AND alias.resource_id = route.resource_id").
-		Where("LOWER(route.forward_to_email) = ? AND alias.status <> ?", forwardToEmail, iCloudResourceDeleted).
+		Where("route.forward_to_email = ? AND alias.status <> ?", forwardToEmail, iCloudResourceDeleted).
 		Find(&persisted).Error; err != nil {
 		return nil, fmt.Errorf("%w: load mailbox alias routes", ErrICloudMailUnavailable)
 	}
