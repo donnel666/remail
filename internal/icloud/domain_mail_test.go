@@ -447,7 +447,7 @@ func TestFetchMailPrefilterUsesLatestMailboxResolverRoute(t *testing.T) {
 	if err := db.Callback().Query().After("gorm:query").Register("icloud:test-refresh-route", func(tx *gorm.DB) {
 		if tx.Statement.Table == "icloud_alias_routes" && !updated {
 			updated = true
-			tx.AddError(db.Model(&iCloudAliasModel{}).Where("id = ?", 5).Update("recipient_mail_id", "newroute").Error)
+			_ = tx.AddError(db.Model(&iCloudAliasModel{}).Where("id = ?", 5).Update("recipient_mail_id", "newroute").Error)
 		}
 	}); err != nil {
 		t.Fatalf("register route refresh: %v", err)
