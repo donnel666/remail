@@ -9,8 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/glebarez/sqlite"
+	"github.com/hibiken/asynq"
 	"gorm.io/gorm"
 )
 
@@ -1298,4 +1301,144 @@ func newICloudValidationAppleClient(t *testing.T, anonymousID, forwardToEmail st
 		}
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
 	})})
+}
+
+func TestProcessICloudCredentialCheckKeepsProvisionHeartbeat(t *testing.T) {
+	now := time.Date(2026, 10, 10, 14, 0, 0, 0, time.UTC)
+	db := openICloudValidationTestDB(t, "credential-keeps-heartbeat")
+	setICloudForwardingSuffixes(t, "relay.example")
+	if err := db.Create(&iCloudRootModel{ID: 1, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "owner@example.com", Status: iCloudResourceNormal,
+		ExpireAt: now.Add(time.Hour), CredentialRevision: 4, ValidationGeneration: 5,
+		AliasCount: 3, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com",
+		Cookie: "myacinfo=secret", Scnt: "scnt", APIKey: "api-key",
+		SessionStatus: iCloudSessionInvalid, SessionFailures: iCloudSessionFailureLimit,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	run := iCloudMaintenanceRunModel{
+		ResourceID: 1, ValidationGeneration: 5, Kind: iCloudMaintenanceValidation,
+		Status: iCloudMaintenanceRunning, Attempts: 1, MaxAttempts: iCloudValidationMaxFailures,
+		CredentialRevision: 4, QueuedAt: now, StartedAt: &now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&run).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	task := iCloudValidationTask{
+		ResourceID: 1, OwnerUserID: 7, ValidationGeneration: 5, ExpectedCredentialRevision: 4,
+		PreserveResourceStatus: true, MaintenanceRunID: run.ID, MaintenanceKind: iCloudMaintenanceValidation,
+	}
+	if err := service.ProcessICloudValidation(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.Status != iCloudResourceNormal || resource.ValidationFailures != 1 {
+		t.Fatalf("credential failure was not recorded on the resource: %#v", resource)
+	}
+	if resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(now.Add(iCloudProvisionRequeue)) {
+		t.Fatalf("failing credential check dropped the provision schedule: %#v", resource)
+	}
+	if err := db.Create(&iCloudResourceChannelModel{
+		ResourceID: 1, Kind: iCloudChannelFamilySession, SessionStatus: iCloudSessionValid,
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ProcessICloudValidation(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&resource, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(now.Add(iCloudProvisionRequeue)) {
+		t.Fatalf("family session was treated as a valid provisioning channel: %#v", resource)
+	}
+}
+
+func TestProcessICloudCredentialCheckResumesHealthyChannelAfterSiblingFailure(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 10, 10, 18, 1, 0, 0, time.UTC)
+	keepalive, expires := now.Add(6*time.Minute), now.Add(8*time.Minute)
+	db := openICloudValidationTestDB(t, "credential-healthy-sibling")
+	setICloudForwardingSuffixes(t, "relay.example")
+	task := createICloudValidationTestResource(t, db, now, now.Add(24*time.Hour))
+	task.PreserveResourceStatus = true
+	if err := db.Model(&iCloudResourceModel{}).Where("id = ?", task.ResourceID).Updates(map[string]any{
+		"status": iCloudResourceNormal, "alias_count": 8, "selected_forward_to": "mailbox@relay.example", "icloud_opened": true,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&[]iCloudResourceChannelModel{
+		{
+			ResourceID: task.ResourceID, Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com",
+			Cookie: "myacinfo=healthy", APIKey: "key", Scnt: "scnt", SessionStatus: iCloudSessionValid,
+			NextKeepaliveAt: &keepalive, ManageExpiresAt: &expires,
+			ProvisionWindowAt: &now, ProvisionWindowCount: uint8(iCloudChannelHourlyLimit(iCloudChannelAppleAccount)),
+			CreatedAt: now, UpdatedAt: now,
+		},
+		{
+			ResourceID: task.ResourceID, Kind: iCloudChannelWeb, Host: "p187-maildomainws.icloud.com",
+			Cookie: testICloudOldCookie, DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "master",
+			SessionStatus: iCloudSessionUnchecked, CreatedAt: now, UpdatedAt: now,
+		},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	redisServer := miniredis.RunT(t)
+	queue := asynq.NewClient(asynq.RedisClientOpt{Addr: redisServer.Addr()})
+	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: redisServer.Addr()})
+	t.Cleanup(func() {
+		_ = inspector.Close()
+		_ = queue.Close()
+	})
+	service := NewService(db, queue, nil)
+	service.now = func() time.Time { return now }
+	service.apple = NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("healthy Apple channel must wait for its keepalive and creation window")
+		return nil, nil
+	})})
+	webCalls := 0
+	service.hme = NewHMEClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		webCalls++
+		return &http.Response{StatusCode: http.StatusUnauthorized, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+	})})
+	if err := service.ProcessICloudValidation(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	var resource iCloudResourceModel
+	if err := db.First(&resource, task.ResourceID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.Status != iCloudResourceNormal || resource.ValidationFailures != 1 ||
+		resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(now) {
+		t.Fatalf("failed Web check postponed the healthy Apple channel: %#v", resource)
+	}
+	pending, err := inspector.ListPendingTasks(platform.QueueBackgroundICloudValidation)
+	if err != nil || len(pending) != 1 || pending[0].Type != typeICloudProvisionDispatcher {
+		t.Fatalf("healthy channel did not wake the provision dispatcher: tasks=%v err=%v", pending, err)
+	}
+	if err := service.ProcessICloudProvision(ctx, iCloudProvisionTask{ResourceID: task.ResourceID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&resource, task.ResourceID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(now.Add(2*time.Minute)) ||
+		resource.NextProvisionAt.After(keepalive) || webCalls != 1 {
+		t.Fatalf("provisioning ignored the healthy keepalive or failed channel cooldown: next=%v keepalive=%v web_calls=%d", resource.NextProvisionAt, keepalive, webCalls)
+	}
 }

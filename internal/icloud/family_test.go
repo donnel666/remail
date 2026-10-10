@@ -256,15 +256,19 @@ func TestICloudFamilySyncContinuesWithInvalidHMEChannel(t *testing.T) {
 	}
 	if err := db.Create(&iCloudResourceChannelModel{
 		ResourceID: resource.ID, Kind: iCloudChannelWeb, Cookie: "expired", SetupCookie: testICloudFamilyCookie,
-		SessionStatus: iCloudSessionInvalid, CreatedAt: now, UpdatedAt: now,
+		SessionStatus: iCloudSessionInvalid, CooldownUntil: iCloudTimePointer(now.Add(30 * time.Minute)),
+		CreatedAt: now, UpdatedAt: now,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
 	familyCalls := 0
 	service := NewService(db, nil, nil)
 	service.now = func() time.Time { return now }
-	service.family = newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+	service.family = newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
 		familyCalls++
+		if request.Header.Get("Cookie") != testICloudFamilyCookie {
+			t.Fatal("family sync did not use its independent setup cookie")
+		}
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(testICloudPrimaryFamilyResponse))}, nil
 	})})
 	if err := service.ProcessICloudProvision(context.Background(), iCloudProvisionTask{ResourceID: resource.ID}); err != nil {
@@ -273,7 +277,8 @@ func TestICloudFamilySyncContinuesWithInvalidHMEChannel(t *testing.T) {
 	if err := db.First(&resource, resource.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if familyCalls != 1 || resource.FamilySyncStatus != iCloudFamilySyncReady || resource.FamilyRemoteMemberCount != 1 {
+	if familyCalls != 1 || resource.FamilySyncStatus != iCloudFamilySyncReady || resource.FamilyRemoteMemberCount != 1 ||
+		resource.FamilyNextSyncAt == nil || !resource.FamilyNextSyncAt.Equal(now.Add(iCloudCookieKeepaliveInterval())) {
 		t.Fatalf("FamilyWS was blocked by invalid HME channel: calls=%d resource=%#v", familyCalls, resource)
 	}
 

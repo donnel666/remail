@@ -732,17 +732,21 @@ func (c *HMEClient) request(ctx context.Context, config hmeConfig, method, reque
 	return responseBody, updatedCookie, nil
 }
 
+// iCloudProviderRetryAfterCap bounds how long a provider Retry-After signal
+// can freeze a channel. Risk-control waves have returned multi-day delays;
+// honoring them verbatim stalls the whole fleet long after the wave lifts.
+const iCloudProviderRetryAfterCap = 6 * time.Hour
+
 func iCloudRetryAfter(value string, now time.Time) time.Duration {
 	value = strings.TrimSpace(value)
 	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil && seconds > 0 {
-		const maxDuration = time.Duration(1<<63 - 1)
-		if seconds > int64(maxDuration/time.Second) {
-			return maxDuration
+		if seconds > int64(iCloudProviderRetryAfterCap/time.Second) {
+			return iCloudProviderRetryAfterCap
 		}
 		return time.Duration(seconds) * time.Second
 	}
 	if retryAt, err := http.ParseTime(value); err == nil && retryAt.After(now) {
-		return retryAt.Sub(now)
+		return min(retryAt.Sub(now), iCloudProviderRetryAfterCap)
 	}
 	return 0
 }
@@ -780,9 +784,8 @@ func iCloudRetryAfterBody(values ...json.RawMessage) time.Duration {
 		if err != nil || seconds <= 0 || math.IsInf(seconds, 0) || math.IsNaN(seconds) {
 			continue
 		}
-		const maxDuration = time.Duration(1<<63 - 1)
-		if seconds >= float64(maxDuration/time.Second) {
-			return maxDuration
+		if seconds >= float64(iCloudProviderRetryAfterCap/time.Second) {
+			return iCloudProviderRetryAfterCap
 		}
 		return time.Duration(math.Ceil(seconds)) * time.Second
 	}

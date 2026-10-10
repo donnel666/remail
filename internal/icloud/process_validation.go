@@ -400,6 +400,7 @@ func (s *Service) applyICloudChannelValidationResult(ctx context.Context, task i
 	}
 	refreshCreated := false
 	credentialCheckSucceeded := false
+	hasValidProvisionChannel := false
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var root iCloudRootModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -499,8 +500,23 @@ func (s *Service) applyICloudChannelValidationResult(ctx context.Context, task i
 			if selectedForwardTo != "" || credentialCheckSucceeded {
 				updates["last_valid_at"] = now
 			}
-			if resource.ExpireAt.After(now) && resource.AliasCount < iCloudMaxAliases && (!task.PreserveResourceStatus || credentialCheckSucceeded) && len(allowedDomains) > 0 {
-				updates["next_provision_at"] = now
+			if resource.ExpireAt.After(now) && resource.AliasCount < iCloudMaxAliases && len(allowedDomains) > 0 {
+				if task.PreserveResourceStatus && !credentialCheckSucceeded {
+					var validChannels int64
+					if err := tx.Model(&iCloudResourceChannelModel{}).
+						Where("resource_id = ? AND kind IN ? AND session_status = ?", resource.ID,
+							[]string{iCloudChannelAppleAccount, iCloudChannelWeb}, iCloudSessionValid).
+						Count(&validChannels).Error; err != nil {
+						return err
+					}
+					hasValidProvisionChannel = validChannels > 0
+				}
+				if !task.PreserveResourceStatus || credentialCheckSucceeded || hasValidProvisionChannel {
+					updates["next_provision_at"] = now
+				} else {
+					// Keep probing failed channels without delaying a valid channel's keepalive.
+					updates["next_provision_at"] = now.Add(iCloudProvisionRequeue)
+				}
 			}
 			if resource.AccountRole == "primary" && (!task.PreserveResourceStatus || credentialCheckSucceeded) {
 				updates["family_next_sync_at"] = now
@@ -556,7 +572,7 @@ func (s *Service) applyICloudChannelValidationResult(ctx context.Context, task i
 	if refreshCreated {
 		_ = s.ScheduleICloudOnboardingDispatcher(context.WithoutCancel(ctx), 0)
 	}
-	if (!task.PreserveResourceStatus && selectedForwardTo != "") || (credentialCheckSucceeded && len(allowedDomains) > 0) {
+	if (!task.PreserveResourceStatus && selectedForwardTo != "") || (credentialCheckSucceeded && len(allowedDomains) > 0) || hasValidProvisionChannel {
 		_ = s.ScheduleICloudProvisionDispatcher(context.WithoutCancel(ctx), 0)
 	}
 	return nil

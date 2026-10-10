@@ -107,6 +107,248 @@ func appleOnboardingTestState(t *testing.T, mutate func(*appleOnboardingBrowserS
 	return data
 }
 
+func TestAppleOnboardingICloudVerificationKeepsTokenPurposesSeparate(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		device bool
+		repair bool
+	}{
+		{name: "device code", device: true},
+		{name: "SMS code"},
+		{name: "device code with repair", device: true, repair: true},
+		{name: "SMS code with repair", repair: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			verificationStatus := http.StatusOK
+			verificationPath := "/auth/verify/phone/securitycode"
+			if test.device {
+				verificationStatus = http.StatusNoContent
+				verificationPath = "/auth/verify/trusteddevice/securitycode"
+			}
+			session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{
+				{status: verificationStatus, body: `{}`, header: http.Header{"X-Apple-Session-Token": {"verified-session"}}},
+			}}
+			wantSession := "verified-session"
+			if test.repair {
+				session.responses = append(session.responses, appleOnboardingScriptedResponse{
+					status: http.StatusNoContent, header: http.Header{"X-Apple-Session-Token": {"repaired-session"}},
+				})
+				wantSession = "repaired-session"
+			}
+			session.responses = append(session.responses, appleOnboardingScriptedResponse{
+				status: http.StatusOK, body: `{"hsaChallengeRequired":false,"dsInfo":{"dsid":"123","hasICloudQualifyingDevice":false}}`,
+			})
+			client := appleOnboardingTestClient(time.Now(), session)
+			flow, err := loadAppleOnboardingFlow(context.Background(), client, appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+				state.Mode, state.AccountCountry = "icloud", "US"
+				state.AccountLoginURL = "https://setup.icloud.com/setup/ws/1/accountLogin"
+			}), "owner@example.com")
+			if err != nil {
+				t.Fatal(err)
+			}
+			headers := http.Header{"X-Apple-Session-Token": {"initial-session"}}
+			wantRepair := ""
+			if test.repair {
+				headers.Set("X-Apple-Repair-Session-Token", "repair-context")
+				wantRepair = "repair-context"
+			}
+			flow.absorb(headers, "idmsa.apple.com")
+			state, err := flow.snapshot()
+			if err != nil {
+				t.Fatal(err)
+			}
+			verified, err := client.Execute(context.Background(), AppleOnboardingRequest{
+				Operation: appleOnboardingVerifySMS, SMSPurpose: appleSMSICloudLogin,
+				UseDeviceCode: test.device, Code: "000123", Session: state,
+			})
+			if err != nil {
+				t.Fatalf("verify code: %v; requests=%v", err, session.requests)
+			}
+			if !strings.HasSuffix(session.requests[0], verificationPath) || session.requestHeaders[0]["X-Apple-Repair-Session-Token"] != wantRepair {
+				t.Fatalf("verification used the wrong repair context: requests=%v headers=%v", session.requests, session.requestHeaders[0])
+			}
+			wantRequests := 1
+			if test.repair {
+				wantRequests++
+				if len(session.requests) != wantRequests || !strings.HasSuffix(session.requests[1], "/auth/repair/complete") ||
+					session.requestHeaders[1]["X-Apple-Repair-Session-Token"] != "repair-context" {
+					t.Fatalf("genuine repair lost its own token: requests=%v headers=%v", session.requests, session.requestHeaders)
+				}
+			}
+			if len(session.requests) != wantRequests {
+				t.Fatalf("normal verification entered repair: %v", session.requests)
+			}
+			finished, err := client.Execute(context.Background(), AppleOnboardingRequest{Operation: appleOnboardingFinishICloud, Session: verified.Session})
+			if err != nil || finished.Next != "ready" {
+				t.Fatalf("finish iCloud authentication: next=%q err=%v", finished.Next, err)
+			}
+			if got := appleOnboardingMap(session.requestBodies[wantRequests])["dsWebAuthToken"]; got != wantSession {
+				t.Fatalf("accountLogin token=%v, want %q", got, wantSession)
+			}
+			var stored map[string]json.RawMessage
+			if err := json.Unmarshal(finished.Session, &stored); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := stored["repairToken"]; exists {
+				t.Fatal("completed authentication retained a repair token")
+			}
+		})
+	}
+}
+
+func TestAppleOnboardingICloudLoginRejectsIncompleteAuthentication(t *testing.T) {
+	for _, mode := range []string{"icloud", "icloud_cookie"} {
+		t.Run(mode, func(t *testing.T) {
+			session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{
+				{status: http.StatusOK, body: `{"hsaChallengeRequired":true,"hsaTrustedBrowser":false,"dsInfo":{"dsid":"123","hasICloudQualifyingDevice":false}}`},
+			}}
+			client := appleOnboardingTestClient(time.Now(), session)
+			flow, err := loadAppleOnboardingFlow(context.Background(), client, appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+				state.Mode, state.AccountCountry = mode, "US"
+				state.AccountLoginURL = "https://setup.icloud.com/setup/ws/1/accountLogin"
+			}), "owner@example.com")
+			if err != nil {
+				t.Fatal(err)
+			}
+			flow.absorb(http.Header{"X-Apple-Session-Token": {"incomplete-session"}}, "idmsa.apple.com")
+			state, err := flow.snapshot()
+			if err != nil {
+				t.Fatal(err)
+			}
+			operation := appleOnboardingFinishICloud
+			if mode == "icloud_cookie" {
+				operation = appleOnboardingFinishICloudCookie
+			}
+			response, err := client.Execute(context.Background(), AppleOnboardingRequest{Operation: operation, Session: state})
+			var providerErr *AppleOnboardingError
+			if !errors.As(err, &providerErr) || providerErr.Category != "icloud_auth_incomplete" || providerErr.RestartStage != mode+"_prepare" || providerErr.HTTPStatus != http.StatusOK {
+				t.Fatalf("incomplete authentication was accepted: next=%q err=%v", response.Next, err)
+			}
+			if response.Next != "" || response.OldChannel != nil || len(response.Session) != 0 {
+				t.Fatal("incomplete authentication exported a usable session")
+			}
+		})
+	}
+}
+
+func TestAppleOnboardingRestartsAmbiguousLegacyTokens(t *testing.T) {
+	old := &AppleOnboardingChannel{Kind: iCloudChannelWeb, Host: "p1-maildomainws.icloud.com", Cookie: testICloudOldCookie}
+	state := appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+		state.Version, state.Mode, state.RepairToken, state.OldChannel = 1, "icloud", "ambiguous-token", old
+	})
+	session := &appleOnboardingScriptedSession{}
+	_, err := appleOnboardingTestClient(time.Now(), session).Execute(context.Background(), AppleOnboardingRequest{
+		Operation: appleOnboardingVerifySMS, SMSPurpose: appleSMSICloudLogin, UseDeviceCode: true, Code: "000123", Session: state,
+	})
+	var providerErr *AppleOnboardingError
+	if !errors.As(err, &providerErr) || providerErr.Category != "invalid_session" || providerErr.RestartStage != "icloud_prepare" || len(session.requests) != 0 {
+		t.Fatalf("legacy tokens were reused: requests=%v err=%v", session.requests, err)
+	}
+	var checkpoint appleOnboardingBrowserState
+	if err := json.Unmarshal(appleOnboardingCheckpoint(state), &checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	if checkpoint.Version != appleOnboardingStateVersion || checkpoint.RepairToken != "" || checkpoint.OldChannel == nil || checkpoint.OldChannel.Cookie != old.Cookie {
+		t.Fatal("legacy restart did not preserve the channel while discarding ambiguous tokens")
+	}
+}
+
+func TestAppleOnboardingPreservesCookieRecoveryAcrossStateVersions(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		version int
+	}{
+		{name: "legacy", version: 1},
+		{name: "current", version: appleOnboardingStateVersion},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service, db, task, _ := newOnboardingStateTest(t)
+			if err := db.AutoMigrate(&iCloudResourceChannelModel{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&iCloudResourceChannelModel{
+				ResourceID: task.ID, Kind: iCloudChannelAppleAccount, SessionStatus: iCloudSessionInvalid,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			state := appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+				state.Version = test.version
+				state.Cookies = []msacl.SessionCookie{{Name: "myacinfo", Value: "working-session", Domain: ".apple.com"}}
+			})
+			if err := db.Model(task).Updates(map[string]any{
+				"status": iCloudResourceNormal, "task_kind": iCloudCookieRecoveryTaskKind,
+				"stage": "manage_profile", "dispatch_status": "running", "claim_token": "claim",
+				"attempts": 4, "max_attempts": 5, "device_code_api": "https://device.example/code",
+				"session_payload": iCloudJSON(state),
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.First(task, task.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{
+				{status: http.StatusOK, body: `{"timeOutInterval":15}`},
+				{status: http.StatusOK, body: `{"apiKey":"working-api-key"}`},
+			}}
+			service.onboardingApple = appleOnboardingTestClient(service.now(), session)
+			if err := service.fetchICloudOnboardingManage(context.Background(), task, iCloudOnboardingSecret{Password: "Secret1!"}); err != nil {
+				t.Fatal(err)
+			}
+			var stored iCloudOnboardingTaskModel
+			if err := db.First(&stored, task.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if stored.Status != iCloudOnboardingProcessing || stored.Stage != "cookie_recovery_export" || stored.Attempts != 4 || len(session.requests) != 2 {
+				t.Fatalf("usable session failed during upgrade: status=%s stage=%s attempts=%d error=%s requests=%v", stored.Status, stored.Stage, stored.Attempts, stored.LastErrorCategory, session.requests)
+			}
+			var saved appleOnboardingBrowserState
+			if err := json.Unmarshal(stored.SessionPayload, &saved); err != nil {
+				t.Fatal(err)
+			}
+			if saved.Version != appleOnboardingStateVersion || len(saved.Cookies) != 1 || saved.Cookies[0].Value != "working-session" {
+				t.Fatal("upgraded session did not preserve cookies or persist the current version")
+			}
+			var resource iCloudResourceModel
+			if err := db.First(&resource, task.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if iCloudCookieRecoveryTerminallyFailed(resource) {
+				t.Fatal("state upgrade blocked automatic cookie recovery")
+			}
+		})
+	}
+}
+
+func TestAppleOnboardingWebExportRequiresAuthenticationCookie(t *testing.T) {
+	for _, token := range []bool{false, true} {
+		session := &appleOnboardingScriptedSession{cookies: []msacl.SessionCookie{
+			{Name: "X-APPLE-DS-WEB-SESSION-TOKEN", Value: "session", Domain: ".icloud.com"},
+			{Name: "X-APPLE-WEBAUTH-USER", Value: "user", Domain: ".icloud.com"},
+		}}
+		if token {
+			session.cookies = append(session.cookies, msacl.SessionCookie{Name: "X-APPLE-WEBAUTH-TOKEN", Value: "authenticated", Domain: ".icloud.com"})
+		}
+		flow, err := loadAppleOnboardingFlow(context.Background(), appleOnboardingTestClient(time.Now(), session), appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+			state.PremiumMailURL, state.DSID, state.SetupClientID = "https://p1-maildomainws.icloud.com", "123", "client"
+			state.BuildNumber, state.MasteringNumber = "build", "master"
+		}), "owner@example.com")
+		if err != nil {
+			t.Fatal(err)
+		}
+		channel, err := flow.oldChannel()
+		if token {
+			if err != nil || channel == nil || !validICloudImportCookie(channel.Cookie) {
+				t.Fatalf("valid Web session was rejected: %v", err)
+			}
+		} else {
+			var providerErr *AppleOnboardingError
+			if !errors.As(err, &providerErr) || providerErr.Category != "old_cookie_missing" || channel != nil {
+				t.Fatal("Web session missing its authentication cookie was exported")
+			}
+		}
+	}
+}
+
 func TestAppleOnboardingDeviceICloudLoginAcceptsWebTerms(t *testing.T) {
 	session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{
 		{status: http.StatusOK, body: `{"termsUpdateNeeded":true,"dsInfo":{"dsid":"123","hasICloudQualifyingDevice":false}}`},
@@ -117,7 +359,7 @@ func TestAppleOnboardingDeviceICloudLoginAcceptsWebTerms(t *testing.T) {
 	response, err := appleOnboardingTestClient(time.Now(), session).Execute(context.Background(), AppleOnboardingRequest{
 		Operation: appleOnboardingFinishICloud, UseDeviceCode: true, SkipPhoneEnrollment: true,
 		Session: appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
-			state.Mode, state.RepairToken, state.AccountCountry = "icloud", "web-token", "US"
+			state.Mode, state.SessionToken, state.AccountCountry = "icloud", "web-token", "US"
 			state.AccountLoginURL = "https://setup.icloud.com/setup/ws/1/accountLogin"
 			state.GetTermsURL = "https://setup.icloud.com/setup/ws/1/getTerms"
 			state.RepairDoneURL = "https://setup.icloud.com/setup/ws/1/repairDone"

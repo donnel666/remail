@@ -364,7 +364,7 @@ func (f *appleOnboardingFlow) prepareFamily(request AppleOnboardingRequest) (App
 	if request.UseDeviceCode && f.state.Mode == "family_account_ready" {
 		// Keep the account Cookie jar while starting the invitation's own login.
 		f.state.Mode = "family"
-		f.state.SessionID, f.state.AuthAttributes, f.state.RepairToken, f.state.OAuthContext, f.state.GSToken = "", "", "", "", ""
+		f.state.SessionID, f.state.AuthAttributes, f.state.SessionToken, f.state.RepairToken, f.state.OAuthContext, f.state.GSToken = "", "", "", "", "", ""
 		delete(f.state.Scnt, appleOnboardingHost(f.state.ServiceURL))
 		f.state.FrameID = platform.NewUUIDV4String()
 		f.state.DomainID, f.state.AuthVersion = "", appleOnboardingAuthVersion
@@ -540,7 +540,7 @@ func (f *appleOnboardingFlow) prepareManage(request AppleOnboardingRequest) (App
 			if cookie.Name == "myacinfo" && cookie.Value != "" && (cookie.Expires.IsZero() || cookie.Expires.After(f.now())) {
 				f.state.Mode = "manage"
 				f.state.WidgetKey, f.state.DomainID, f.state.AuthVersion = f.state.AccountWidgetKey, "11", appleOnboardingManageAuth
-				f.state.SessionID, f.state.AuthAttributes, f.state.RepairToken, f.state.OAuthContext = "", "", "", ""
+				f.state.SessionID, f.state.AuthAttributes, f.state.SessionToken, f.state.RepairToken, f.state.OAuthContext = "", "", "", "", ""
 				delete(f.state.Scnt, appleOnboardingHost(f.state.ServiceURL))
 				f.state.InviteToken, f.state.FamilyOrganizerEmail, f.state.GSToken = "", "", ""
 				return AppleOnboardingResponse{Next: "ready"}, nil
@@ -1077,11 +1077,11 @@ func (f *appleOnboardingFlow) accountLogin(dsid string) (map[string]any, error) 
 	if f.state.Mode == "icloud_cookie" {
 		restartStage = "icloud_cookie_prepare"
 	}
-	if f.state.RepairToken == "" || f.state.AccountCountry == "" {
+	if f.state.SessionToken == "" || f.state.AccountCountry == "" {
 		return nil, appleOnboardingRestart(restartStage)
 	}
 	data, err := f.postObject(f.state.AccountLoginURL+"?"+f.icloudQuery(dsid), map[string]any{
-		"dsWebAuthToken": f.state.RepairToken, "accountCountryCode": f.state.AccountCountry, "extended_login": true,
+		"dsWebAuthToken": f.state.SessionToken, "accountCountryCode": f.state.AccountCountry, "extended_login": true,
 	}, "accountLogin", false, false, false)
 	if err != nil {
 		return nil, err
@@ -1091,6 +1091,9 @@ func (f *appleOnboardingFlow) accountLogin(dsid string) (map[string]any, error) 
 	}
 	if f.state.Status != http.StatusOK {
 		return nil, appleOnboardingPermanent("icloud_login_failed", "iCloud web sign-in failed.", data)
+	}
+	if appleOnboardingBool(data["hsaChallengeRequired"]) {
+		return nil, &AppleOnboardingError{Category: "icloud_auth_incomplete", SafeMessage: "iCloud sign-in still requires two-factor authentication.", RestartStage: restartStage}
 	}
 	f.absorbICloudSession(data)
 	return data, nil
@@ -1159,7 +1162,7 @@ func (f *appleOnboardingFlow) oldChannel() (*AppleOnboardingChannel, error) {
 		suffix = "icloud.com.cn"
 	}
 	cookie := appleOnboardingCookieString(cookies, suffix)
-	if cookie == "" {
+	if !validICloudImportCookie(cookie) {
 		return nil, &AppleOnboardingError{Category: "old_cookie_missing", SafeMessage: "iCloud did not return a usable V2 session cookie."}
 	}
 	browser := f.browserProfile()

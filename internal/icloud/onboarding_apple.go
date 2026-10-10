@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	appleOnboardingStateVersion = 1
+	appleOnboardingStateVersion = 2
 	appleOnboardingAuthVersion  = "latest"
 	appleOnboardingManageAuth   = "8.0.2"
 	appleOnboardingSKVersion    = "7"
@@ -141,6 +141,7 @@ type appleOnboardingBrowserState struct {
 	HashcashBits           int                     `json:"hashcashBits,omitempty"`
 	HashcashChallenge      string                  `json:"hashcashChallenge,omitempty"`
 	OAuthContext           string                  `json:"oauthContext,omitempty"`
+	SessionToken           string                  `json:"sessionToken,omitempty"`
 	RepairToken            string                  `json:"repairToken,omitempty"`
 	GSToken                string                  `json:"gsToken,omitempty"`
 	InviteToken            string                  `json:"inviteToken,omitempty"`
@@ -179,7 +180,14 @@ func loadAppleOnboardingFlow(ctx context.Context, client *appleOnboardingClient,
 		flow.state.UserAgent = appleweb.AutomatedBrowserProfile(email).UserAgent
 		return flow, nil
 	}
-	if err := json.Unmarshal(raw, &flow.state); err != nil || flow.state.Version != appleOnboardingStateVersion {
+	if err := json.Unmarshal(raw, &flow.state); err != nil {
+		return nil, &AppleOnboardingError{Category: "invalid_session", SafeMessage: "Stored Apple onboarding session is invalid."}
+	}
+	// Only legacy states without an ambiguous login/repair token can be reused.
+	if flow.state.Version == 1 && flow.state.RepairToken == "" {
+		flow.state.Version = appleOnboardingStateVersion
+	}
+	if flow.state.Version != appleOnboardingStateVersion {
 		return nil, &AppleOnboardingError{Category: "invalid_session", SafeMessage: "Stored Apple onboarding session is invalid."}
 	}
 	if flow.state.Scnt == nil {
@@ -269,7 +277,8 @@ func (f *appleOnboardingFlow) snapshot() (json.RawMessage, error) {
 
 func appleOnboardingCheckpoint(raw []byte) json.RawMessage {
 	var state appleOnboardingBrowserState
-	if len(raw) == 0 || json.Unmarshal(raw, &state) != nil || state.Version != appleOnboardingStateVersion {
+	// Version 1 mixed login token types; discard them while preserving channel snapshots.
+	if len(raw) == 0 || json.Unmarshal(raw, &state) != nil || (state.Version != 1 && state.Version != appleOnboardingStateVersion) {
 		return nil
 	}
 	checkpoint, err := json.Marshal(appleOnboardingBrowserState{
@@ -435,8 +444,8 @@ func (f *appleOnboardingFlow) headers(rawURL string, html, profile, sendHashcash
 		if f.state.OAuthContext != "" {
 			headers["X-Apple-OAuth-Context"] = f.state.OAuthContext
 		}
-		if f.state.RepairToken != "" {
-			headers["X-Apple-Session-Token"] = f.state.RepairToken
+		if token := firstNonEmpty(f.state.RepairToken, f.state.SessionToken); token != "" {
+			headers["X-Apple-Session-Token"] = token
 		}
 	}
 	return headers, nil
@@ -480,8 +489,9 @@ func (f *appleOnboardingFlow) absorb(headers http.Header, host string) {
 	}
 	if value := strings.TrimSpace(headers.Get("X-Apple-Repair-Session-Token")); value != "" {
 		f.state.RepairToken = value
-	} else if value := strings.TrimSpace(headers.Get("X-Apple-Session-Token")); value != "" {
-		f.state.RepairToken = value
+	}
+	if value := strings.TrimSpace(headers.Get("X-Apple-Session-Token")); value != "" {
+		f.state.SessionToken = value
 	}
 	location := strings.TrimSpace(headers.Get("Location"))
 	if strings.HasPrefix(location, "/") || strings.HasPrefix(location, "http://") || strings.HasPrefix(location, "https://") {
@@ -783,9 +793,10 @@ func (f *appleOnboardingFlow) completeRepair() error {
 	if f.state.Status != http.StatusOK && f.state.Status != http.StatusNoContent {
 		return appleOnboardingPermanent("repair_incomplete", "Apple Account repair could not be completed.", data)
 	}
-	if f.state.RepairToken == "" {
+	if f.state.SessionToken == "" {
 		return &AppleOnboardingError{Category: "invalid_response", SafeMessage: "Apple repair did not return a session token.", Retryable: true}
 	}
+	f.state.RepairToken = ""
 	return nil
 }
 

@@ -19,6 +19,15 @@ const (
 	iCloudCookieKeepaliveMax  = 12 * time.Minute
 	iCloudSessionFailureLimit = 3
 	iCloudSessionRetryBase    = 2 * time.Minute
+	// iCloudProvisionRequeue is the slow heartbeat written when no channel
+	// contributes a retry time (all invalid or proxy-exhausted). Without it
+	// next_provision_at was nulled and the resource left the sweeper forever.
+	iCloudProvisionRequeue = 30 * time.Minute
+	// Invalid channels are re-probed on a backoff instead of being skipped
+	// forever: a risk-control wave can invalidate live sessions that recover
+	// on their own once the wave passes.
+	iCloudInvalidChannelRetryBase = 30 * time.Minute
+	iCloudInvalidChannelRetryCap  = 6 * time.Hour
 )
 
 type iCloudProvisionTask struct {
@@ -50,6 +59,9 @@ func (s *Service) DispatchICloudProvisions(ctx context.Context, limit int) error
 	if err := s.clearICloudMaintenanceAtAliasLimit(ctx, 0, now); err != nil {
 		return err
 	}
+	if err := s.repairICloudProvisionSchedule(ctx, now); err != nil {
+		return ErrICloudValidationTemp
+	}
 	var resourceIDs []uint
 	err := s.db.WithContext(ctx).Table("icloud_resources AS ir").Distinct("ir.id").
 		Joins("JOIN icloud_resource_channels AS ch ON ch.resource_id = ir.id").
@@ -71,6 +83,22 @@ func (s *Service) DispatchICloudProvisions(ctx context.Context, limit int) error
 		}
 	}
 	return joined
+}
+
+// A dispatched credential check clears both schedules while keeping the resource normal.
+func (s *Service) repairICloudProvisionSchedule(ctx context.Context, now time.Time) error {
+	if len(iCloudForwardingDomains(runtimeconfig.String(runtimeconfig.ICloudForwardingSuffixesKey, ""))) == 0 {
+		return nil
+	}
+	return s.db.WithContext(ctx).Model(&iCloudResourceModel{}).
+		Where("status = ? AND alias_count < ? AND expire_at > ? AND next_provision_at IS NULL AND next_validation_at IS NULL",
+			iCloudResourceNormal, iCloudMaxAliases, now).
+		Where(`NOT EXISTS (SELECT 1 FROM icloud_maintenance_runs AS run
+			WHERE run.resource_id = icloud_resources.id AND run.kind = ? AND run.status IN ?
+			AND run.validation_generation = icloud_resources.validation_generation
+			AND run.credential_revision = icloud_resources.credential_revision)`,
+			iCloudMaintenanceValidation, []string{iCloudMaintenanceQueued, iCloudMaintenanceRunning}).
+		Update("next_provision_at", now).Error
 }
 
 func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisionTask) (resultErr error) {
@@ -110,19 +138,13 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 		if primaryWeb && !familyDue && scope.Resource.FamilyNextSyncAt != nil {
 			nextAt = earlierICloudProvisionAt(nextAt, *scope.Resource.FamilyNextSyncAt)
 		}
-		if channel.SessionStatus == iCloudSessionInvalid {
-			if familyDue {
-				familyNextAt, familyErr := s.syncICloudPrimaryFamilyScheduled(ctx, scope.Resource, *channel, now)
-				if familyErr != nil {
-					return familyErr
-				}
-				nextAt = earlierICloudProvisionAt(nextAt, familyNextAt)
-			}
-			continue
-		}
 		coolingDown := channel.CooldownUntil != nil && channel.CooldownUntil.After(now)
 		if coolingDown {
 			nextAt = earlierICloudProvisionAt(nextAt, *channel.CooldownUntil)
+			// FamilyWS uses its own setup cookie and schedule, independent of HME.
+			if !familyDue {
+				continue
+			}
 		}
 		resourceNeedsCookies := aliasCount < iCloudMaxAliases
 		resourceCanCreate := scope.Resource.ExpireAt.After(now) && resourceNeedsCookies && !providerLimitReached
@@ -180,7 +202,9 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 			}
 			if attemptErr != nil {
 				failureCount++
-				lastAttemptSafeError = safeICloudProvisionRequestError(attemptErr)
+				// Keep both channels' errors visible: a later web failure used
+				// to mask the apple account failure entirely.
+				lastAttemptSafeError = appendICloudProvisionSafeError(lastAttemptSafeError, safeICloudProvisionRequestError(attemptErr))
 			} else if madeCreationProgress {
 				creationProgress = true
 			}
@@ -511,6 +535,20 @@ func firstNonEmptyICloudSafeError(values ...string) string {
 	return ""
 }
 
+// appendICloudProvisionSafeError keeps per-channel failures visible: a later
+// web error used to overwrite (and hide) an earlier apple account error.
+func appendICloudProvisionSafeError(current, add string) string {
+	add = strings.TrimSpace(add)
+	if add == "" || strings.Contains(current, add) {
+		return current
+	}
+	current = strings.TrimSpace(current)
+	if current == "" {
+		return add
+	}
+	return current + "; " + add
+}
+
 func (s *Service) persistICloudProvisionSnapshot(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, list hmeListResult, now time.Time) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		locked, err := lockICloudProvisionResourceTx(ctx, tx, resource)
@@ -655,7 +693,7 @@ func (s *Service) applyICloudProvisionError(ctx context.Context, resource iCloud
 			updates["session_failures"] = failures
 			if failures >= iCloudSessionFailureLimit {
 				updates["session_status"] = iCloudSessionInvalid
-				updates["cooldown_until"] = nil
+				updates["cooldown_until"] = now.Add(iCloudInvalidChannelRetryDelay(failures))
 			} else {
 				updates["cooldown_until"] = now.Add(iCloudSessionRetryDelay(failures))
 			}
@@ -679,7 +717,7 @@ func (s *Service) applyICloudProvisionError(ctx context.Context, resource iCloud
 			if permanent {
 				updates["session_status"] = iCloudSessionInvalid
 				updates["next_keepalive_at"] = nil
-				updates["cooldown_until"] = nil
+				updates["cooldown_until"] = now.Add(iCloudInvalidChannelRetryDelay(max(locked.SessionFailures, iCloudSessionFailureLimit+2)))
 			}
 		}
 		return tx.Model(&iCloudResourceChannelModel{}).Where("id = ?", locked.ID).Updates(updates).Error
@@ -692,9 +730,6 @@ func (s *Service) applyICloudProvisionError(ctx context.Context, resource iCloud
 
 func iCloudProvisionRequestRetryAt(requestErr error, channel iCloudResourceChannelModel, now time.Time) time.Time {
 	if iCloudProxyRetryExhausted(requestErr) {
-		return time.Time{}
-	}
-	if channel.SessionStatus == iCloudSessionInvalid {
 		return time.Time{}
 	}
 	var retryAt time.Time
@@ -817,6 +852,11 @@ func (s *Service) finishICloudProvision(ctx context.Context, resource iCloudReso
 		}
 		if locked.Status != iCloudResourceNormal || locked.AliasCount >= iCloudMaxAliases {
 			nextAt = time.Time{}
+		} else if nextAt.IsZero() && locked.ExpireAt.After(now) {
+			// No channel contributed a retry time (all invalid or proxy
+			// exhausted): keep a slow heartbeat instead of nulling the
+			// schedule and dropping the resource out of the sweeper forever.
+			nextAt = now.Add(iCloudProvisionRequeue)
 		}
 		updates := map[string]any{"next_provision_at": nil, "updated_at": now}
 		if locked.AliasCount >= iCloudMaxAliases {
@@ -918,6 +958,20 @@ func iCloudSessionRetryDelay(failures uint8) time.Duration {
 		return iCloudSessionRetryBase
 	}
 	return 2 * iCloudSessionRetryBase
+}
+
+// iCloudInvalidChannelRetryDelay spaces out probes of an invalidated channel:
+// 30m after the third failure, doubling up to a 6h cap, so a risk-control
+// wave that invalidated live sessions is detected as cleared within hours.
+func iCloudInvalidChannelRetryDelay(failures uint8) time.Duration {
+	excess := uint8(0)
+	if failures > iCloudSessionFailureLimit {
+		excess = failures - iCloudSessionFailureLimit
+	}
+	if excess > 4 {
+		excess = 4
+	}
+	return min(iCloudInvalidChannelRetryBase<<excess, iCloudInvalidChannelRetryCap)
 }
 
 func appleAccountNextKeepalive(channel iCloudResourceChannelModel, now time.Time) *time.Time {
