@@ -229,7 +229,7 @@ func (s *Service) ProcessICloudProvision(ctx context.Context, task iCloudProvisi
 		}
 		*channel = updated
 		if familyDue {
-			familyNextAt, familyErr := s.syncICloudPrimaryFamilyScheduled(ctx, scope.Resource, updated, now)
+			familyNextAt, familyErr := s.syncICloudPrimaryFamilyScheduled(ctx, scope.Resource, now)
 			if familyErr != nil {
 				return familyErr
 			}

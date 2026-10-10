@@ -269,21 +269,37 @@ func validICloudFamilyCookie(value string) bool {
 	return false
 }
 
-func (s *Service) syncICloudPrimaryFamily(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, now time.Time) error {
-	_, err := s.syncICloudPrimaryFamilyScheduled(ctx, resource, channel, now)
+func (s *Service) syncICloudPrimaryFamily(ctx context.Context, resource iCloudResourceModel, now time.Time) error {
+	_, err := s.syncICloudPrimaryFamilyScheduled(ctx, resource, now)
 	return err
 }
 
-func (s *Service) syncICloudPrimaryFamilyScheduled(ctx context.Context, resource iCloudResourceModel, channel iCloudResourceChannelModel, now time.Time) (time.Time, error) {
-	if s == nil || s.db == nil || resource.ID == 0 || resource.AccountRole != "primary" || channel.Kind != iCloudChannelWeb {
+func (s *Service) syncICloudPrimaryFamilyScheduled(ctx context.Context, resource iCloudResourceModel, now time.Time) (time.Time, error) {
+	if s == nil || s.db == nil || resource.ID == 0 || resource.AccountRole != "primary" {
 		return time.Time{}, nil
+	}
+	channels, err := s.familyChannels(ctx, resource.ID)
+	if err != nil {
+		return time.Time{}, ErrICloudValidationTemp
 	}
 	ctx = withAppleRouteEmail(ctx, resource.PrimaryEmail)
 	client := s.family
 	if client == nil {
 		client = newRoutedICloudFamilyClient(s.appleRoutes)
 	}
-	snapshot, err := client.fetch(ctx, channel)
+	var snapshot iCloudFamilySnapshot
+	err = &iCloudFamilyError{Category: "session_invalid", SafeMessage: "iCloud family session is invalid."}
+	// FamilyWS requires myacinfo/caw; an authenticated HME Cookie alone cannot be used.
+	for _, channel := range channels {
+		if !usableFamilyCookie(channel) {
+			continue
+		}
+		snapshot, err = client.fetch(ctx, channel)
+		var providerErr *iCloudFamilyError
+		if err == nil || !errors.As(err, &providerErr) || providerErr.Category != "session_invalid" {
+			break
+		}
+	}
 	if err != nil {
 		category := "provider_unavailable"
 		retryable := true
@@ -304,7 +320,7 @@ func (s *Service) syncICloudPrimaryFamilyScheduled(ctx context.Context, resource
 		} else if retryable {
 			retryAt = now.Add(iCloudProvisionRetry)
 		}
-		return retryAt, s.persistICloudFamilyFailure(ctx, resource.ID, channel.ID, category, retryAt, now)
+		return retryAt, s.persistICloudFamilyFailure(ctx, resource.ID, category, retryAt, now)
 	}
 	nextSyncAt := now.Add(iCloudCookieKeepaliveInterval())
 	if !snapshot.Linked || !snapshot.Member {
@@ -314,7 +330,7 @@ func (s *Service) syncICloudPrimaryFamilyScheduled(ctx context.Context, resource
 		})
 	}
 	if !strings.EqualFold(snapshot.CurrentUserAppleID, resource.PrimaryEmail) {
-		return time.Time{}, s.persistICloudFamilyFailure(ctx, resource.ID, channel.ID, "family_identity_mismatch", time.Time{}, now)
+		return time.Time{}, s.persistICloudFamilyFailure(ctx, resource.ID, "family_identity_mismatch", time.Time{}, now)
 	}
 	if snapshot.CurrentDSID != snapshot.OrganizerDSID {
 		return nextSyncAt, s.persistICloudFamilyState(ctx, resource.ID, iCloudFamilyStateUpdate{
@@ -378,7 +394,7 @@ func (s *Service) persistICloudFamilyState(ctx context.Context, resourceID uint,
 	})
 }
 
-func (s *Service) persistICloudFamilyFailure(ctx context.Context, resourceID, channelID uint, category string, retryAt, now time.Time) error {
+func (s *Service) persistICloudFamilyFailure(ctx context.Context, resourceID uint, category string, retryAt, now time.Time) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var current iCloudResourceModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "account_role", "family_sync_error_category").First(&current, resourceID).Error; err != nil || current.AccountRole != "primary" {
@@ -394,13 +410,6 @@ func (s *Service) persistICloudFamilyFailure(ctx context.Context, resourceID, ch
 		result := tx.Model(&iCloudResourceModel{}).Where("id = ? AND account_role = ?", resourceID, "primary").Updates(updates)
 		if result.Error != nil || result.RowsAffected != 1 {
 			return ErrICloudValidationTemp
-		}
-		if (category == "session_invalid" || category == "family_identity_mismatch") && channelID != 0 {
-			if err := tx.Model(&iCloudResourceChannelModel{}).Where("id = ? AND resource_id = ?", channelID, resourceID).Updates(map[string]any{
-				"session_status": iCloudSessionInvalid, "next_keepalive_at": nil, "updated_at": now,
-			}).Error; err != nil {
-				return ErrICloudValidationTemp
-			}
 		}
 		return nil
 	})
