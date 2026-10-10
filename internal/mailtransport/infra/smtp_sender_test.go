@@ -203,8 +203,36 @@ func TestDeliveryErrorKeepsSentinelAndSafeDiagnostic(t *testing.T) {
 	assert.NotContains(t, err.Error(), "\n")
 }
 
+func TestSMTPFailureDistinguishesRecipientRejectionFromTransportPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		stage, status string
+		code          int
+		rejected      bool
+	}{
+		{"rcpt to failed", "5.1.1 unknown recipient", 550, true},
+		{"rcpt to failed", "5.2.1 mailbox disabled", 550, true},
+		{"data close failed", "5.1.1 unknown alias", 550, true},
+		{"data failed", "5.1.1 unknown alias", 550, true},
+		{"data failed", "5.2.1 mailbox disabled", 550, true},
+		{"data failed", "5.7.1 sender blocked", 550, false},
+		{"data failed", "5.1.8 sender domain invalid", 550, false},
+		{"data failed", "4.2.1 temporarily unavailable", 450, false},
+		{"rcpt to failed", "4.2.1 temporarily unavailable", 450, false},
+		{"rcpt to failed", "5.7.1 sender blocked", 550, false},
+		{"mail from failed", "5.1.1 sender invalid", 550, false},
+		{"rcpt to failed", "5.1.7 bad sender", 550, false},
+		{"data close failed", "5.1.8 sender domain invalid", 550, false},
+		{"mail from failed", "5.1.0 sender failure mentioning rcpt to failed:", 550, false},
+	} {
+		err := classifySMTPFailure("send failed", fmt.Errorf("%s: %w", tc.stage, &textproto.Error{Code: tc.code, Msg: tc.status}))
+		var failure *mailapp.OutboundSendFailure
+		require.ErrorAs(t, err, &failure)
+		require.Equal(t, tc.rejected, failure.RecipientRejected)
+	}
+}
+
 func TestSMTPDeliveryRequiresSTARTTLSBeforeAuth(t *testing.T) {
-	addr, stop := startFakeSMTPServer(t, false)
+	addr, stop := startFakeSMTPServer(t, false, "")
 	defer stop()
 
 	sender := NewSMTPDelivery(SMTPConfig{
@@ -229,7 +257,7 @@ func TestRequiresSTARTTLSForSubmissionAndAuth(t *testing.T) {
 }
 
 func TestSMTPDeliveryTreatsQuitFailureAfterDataAsAccepted(t *testing.T) {
-	addr, stop := startFakeSMTPServer(t, true)
+	addr, stop := startFakeSMTPServer(t, true, "")
 	defer stop()
 
 	sender := NewSMTPDelivery(SMTPConfig{Addr: addr, From: "no-reply@example.com"})
@@ -251,6 +279,17 @@ func TestSMTPDeliverySignsMessagesWhenDKIMEnabled(t *testing.T) {
 	assert.Contains(t, raw, "DKIM-Signature:")
 	assert.Contains(t, raw, "a=ed25519-sha256")
 	assert.Contains(t, raw, "From: <no-reply@example.com>")
+}
+
+func TestSMTPDeliveryRecognizesRecipientRejectionAtDATACommand(t *testing.T) {
+	addr, stop := startFakeSMTPServer(t, false, "550 5.1.1 unknown alias")
+	defer stop()
+	sender := NewSMTPDelivery(SMTPConfig{Addr: addr, From: "sender@example.com"})
+	err := sender.Send(context.Background(), mailapp.VerificationCodeMessage("alias@icloud.com", "123456"))
+	var failure *mailapp.OutboundSendFailure
+	require.ErrorAs(t, err, &failure)
+	require.True(t, failure.RecipientRejected)
+	require.False(t, failure.Retryable)
 }
 
 func TestDirectSMTPDeliveryUsesTCP4AndStandardSMTPFlow(t *testing.T) {
@@ -421,6 +460,57 @@ func TestDirectSMTPFailureClassificationKeepsAnyTemporarySMTPResultRetryable(t *
 	assert.True(t, failure.Retryable)
 }
 
+func TestDirectSMTPFailureClassificationKeepsStageAndStatusTogether(t *testing.T) {
+	for _, tc := range []struct {
+		firstStage, firstStatus, secondStage, secondStatus string
+		rejected                                           bool
+	}{
+		{"mail from failed", "5.1.7 bad sender address syntax", "rcpt to failed", "5.7.1 sender blocked", false},
+		{"mail from failed", "5.1.0 invalid sender", "rcpt to failed", "5.7.1 sender blocked", false},
+		{"rcpt to failed", "5.1.1 unknown alias", "mail from failed", "5.7.1 sender blocked", true},
+		{"rcpt to failed", "5.7.1 sender blocked", "rcpt to failed", "5.1.1 unknown alias", true},
+		{"rcpt to failed", "5.1.1 unknown alias", "rcpt to failed", "5.7.1 sender blocked", true},
+	} {
+		t.Run(tc.firstStatus, func(t *testing.T) {
+			err := classifyDirectSMTPFailures("direct smtp delivery failed", []error{
+				fmt.Errorf("mx1: %s: %w", tc.firstStage, &textproto.Error{Code: 550, Msg: tc.firstStatus}),
+				fmt.Errorf("mx2: %s: %w", tc.secondStage, &textproto.Error{Code: 550, Msg: tc.secondStatus}),
+			})
+			var failure *mailapp.OutboundSendFailure
+			require.ErrorAs(t, err, &failure)
+			require.Equal(t, tc.rejected, failure.RecipientRejected)
+			require.False(t, failure.Retryable)
+			require.ErrorIs(t, err, domain.ErrDeliveryUnavailable)
+			require.Contains(t, err.Error(), "mx1")
+			require.Contains(t, err.Error(), "mx2")
+		})
+	}
+}
+
+func TestDirectSMTPRecipientRejectionKeepsTemporaryAndInfrastructurePriority(t *testing.T) {
+	recipient := fmt.Errorf("rcpt to failed: %w", &textproto.Error{Code: 550, Msg: "5.1.1 unknown alias"})
+	for _, tc := range []struct {
+		err       error
+		retryable bool
+	}{
+		{fmt.Errorf("rcpt to failed: %w", &textproto.Error{Code: 450, Msg: "4.2.1 temporarily unavailable"}), true},
+		{errors.New("dial timeout"), false},
+	} {
+		for _, failures := range [][]error{{recipient, tc.err}, {tc.err, recipient}} {
+			err := classifyDirectSMTPFailures("direct smtp delivery failed", failures)
+			var failure *mailapp.OutboundSendFailure
+			classified := errors.As(err, &failure)
+			require.Equal(t, tc.retryable, classified)
+			if classified {
+				require.True(t, failure.Retryable)
+				require.False(t, failure.RecipientRejected)
+			} else {
+				require.ErrorIs(t, err, domain.ErrDeliveryUnavailable)
+			}
+		}
+	}
+}
+
 func TestDirectSMTPFailureClassificationGivesInfrastructurePriority(t *testing.T) {
 	err := classifyDirectSMTPFailures("direct smtp delivery failed", []error{
 		errors.New("dial timeout"),
@@ -545,7 +635,7 @@ func TestDirectSMTPAddressFilterRejectsSpecialUseRanges(t *testing.T) {
 	}
 }
 
-func startFakeSMTPServer(t *testing.T, closeOnQuit bool) (string, func()) {
+func startFakeSMTPServer(t *testing.T, closeOnQuit bool, dataFailure string) (string, func()) {
 	t.Helper()
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -584,6 +674,10 @@ func startFakeSMTPServer(t *testing.T, closeOnQuit bool) (string, func()) {
 			case strings.HasPrefix(cmd, "RCPT TO:"):
 				writeSMTPLine(t, rw, "250 OK")
 			case strings.HasPrefix(cmd, "DATA"):
+				if dataFailure != "" {
+					writeSMTPLine(t, rw, dataFailure)
+					continue
+				}
 				writeSMTPLine(t, rw, "354 End data with <CR><LF>.<CR><LF>")
 				for {
 					dataLine, err := rw.ReadString('\n')

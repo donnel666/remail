@@ -188,6 +188,8 @@ export function taskKindLabel(kind: AdminMicrosoftAsyncTaskKind) {
       return "Import";
     case "validation":
       return "Validation";
+    case "liveness":
+      return "Liveness check";
     case "alias":
       return "Alias replenishment";
     case "token":

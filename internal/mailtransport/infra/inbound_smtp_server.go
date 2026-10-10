@@ -138,11 +138,11 @@ func (s *inboundSMTPSession) Logout() error {
 }
 
 func (s *inboundSMTPSession) Mail(from string, _ *smtpserver.MailOptions) error {
-	from = envelopeAddress(from)
-	if from == "" {
+	address := envelopeAddress(from)
+	if from != "" && address == "" {
 		return smtpPermanent("sender rejected")
 	}
-	s.envelopeFrom = from
+	s.envelopeFrom = address
 	s.recipients = nil
 	return nil
 }
@@ -167,7 +167,8 @@ func (s *inboundSMTPSession) Rcpt(to string, _ *smtpserver.RcptOptions) error {
 }
 
 func (s *inboundSMTPSession) Data(r io.Reader) error {
-	if s.envelopeFrom == "" || len(s.recipients) == 0 {
+	// go-smtp checks MAIL/RCPT order; an empty reverse path is valid for a DSN.
+	if len(s.recipients) == 0 {
 		return smtpPermanent("message envelope rejected")
 	}
 	startedAt := time.Now()

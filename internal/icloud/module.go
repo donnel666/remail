@@ -7,6 +7,7 @@ import (
 
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
+	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
@@ -96,6 +97,10 @@ type Service struct {
 	now                 func() time.Time
 	validateImportOwner func(context.Context, uint) (bool, error)
 	backgroundExecution BackgroundExecutionGate
+	livenessSender      mailapp.SenderPort
+	livenessInbox       *mailapp.InboundService
+	livenessFrom        string
+	livenessLookupTXT   func(context.Context, string) ([]string, error)
 }
 
 func NewService(db *gorm.DB, queue *asynq.Client, files governanceapp.FilePort, redisClients ...redis.UniversalClient) *Service {
@@ -490,6 +495,10 @@ type iCloudMaintenanceRunModel struct {
 	StartedAt            *time.Time `gorm:"column:started_at"`
 	FinishedAt           *time.Time `gorm:"column:finished_at"`
 	LastSafeError        string     `gorm:"column:last_safe_error;type:varchar(500);not null"`
+	ProbeRecipient       string     `gorm:"column:probe_recipient;type:varchar(320);not null;default:''"`
+	ProbeSender          string     `gorm:"column:probe_sender;type:varchar(320);not null;default:''"`
+	ProbeSentAt          *time.Time `gorm:"column:probe_sent_at"`
+	NextCheckAt          *time.Time `gorm:"column:next_check_at"`
 	CreatedAt            time.Time  `gorm:"column:created_at;not null"`
 	UpdatedAt            time.Time  `gorm:"column:updated_at;not null"`
 }

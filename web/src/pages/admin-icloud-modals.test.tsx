@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   bindDevice: vi.fn(),
   copyText: vi.fn(),
   activate: vi.fn(),
+  liveness: vi.fn(),
   alias: vi.fn(),
   batchByFilter: vi.fn(),
   batchByIds: vi.fn(),
@@ -195,6 +196,7 @@ vi.mock("@/lib/admin-icloud-api", async (importOriginal) => ({
   getAdminICloudDeviceBinding: mocks.getDevice,
   bindAdminICloudDevice: mocks.bindDevice,
   activateAdminICloudResource: mocks.activate,
+  checkAdminICloudResourceLiveness: mocks.liveness,
   batchAdminICloudResourcesByFilter: mocks.batchByFilter,
   batchAdminICloudResourcesByIds: mocks.batchByIds,
   confirmAdminICloudOnboardingFamilyReset: mocks.confirmFamilyReset,
@@ -426,6 +428,7 @@ describe("admin iCloud modal workflows", () => {
     vi.clearAllMocks();
     mocks.permissions = {};
     mocks.activate.mockResolvedValue({ changed: true, version: 4 });
+    mocks.liveness.mockResolvedValue({ changed: true, version: 4 });
     mocks.alias.mockResolvedValue({ changed: true });
     mocks.createPreparation.mockResolvedValue(importPreparation());
     mocks.confirmFamilyReset.mockResolvedValue(onboardingTask());
@@ -480,21 +483,54 @@ describe("admin iCloud modal workflows", () => {
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Alias creation batch submitted.");
   });
 
-  it("queues an old Cookie refresh after iCloud is enabled manually", async () => {
+  it("queues an SMTP liveness check without an old Cookie or phone binding", async () => {
     render(
       <ICloudMaintenanceModal
         aliasLimit={750}
         onCancel={vi.fn()}
         onCompleted={vi.fn()}
-        target={{ item: { ...resource(), icloudOpened: false }, mode: "row" }}
+        target={{ item: { ...resource(), icloudOpened: false, oldSession: null, boundPhoneNumber: "", kitesimPhoneId: null }, mode: "row" }}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Fetch old Cookie/ }));
+    expect(screen.queryByRole("button", { name: /Fetch old Cookie/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Liveness check/ }));
     fireEvent.click(screen.getByRole("button", { name: "Submit maintenance task" }));
 
-    await waitFor(() => expect(mocks.activate).toHaveBeenCalledWith(41, 3));
-    expect(mocks.toastSuccess).toHaveBeenCalledWith("Old Cookie refresh submitted.");
+    await waitFor(() => expect(mocks.liveness).toHaveBeenCalledWith(41, 3));
+    expect(mocks.activate).not.toHaveBeenCalled();
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Liveness check batch submitted.");
+  });
+
+  it.each(["ids", "filter"] as const)("submits liveness checks for a bulk %s selection", async (mode) => {
+    mocks.batchByIds.mockResolvedValue({ affected: 2 });
+    mocks.batchByFilter.mockResolvedValue({ affected: 2 });
+    render(
+      <ICloudMaintenanceModal
+        aliasLimit={750}
+        onCancel={vi.fn()}
+        onCompleted={vi.fn()}
+        target={mode === "ids"
+          ? { count: 2, mode, resourceIds: [41, 42] }
+          : { count: 2, mode, filter: { status: "abnormal" } }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Liveness check/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit maintenance task" }));
+    if (mode === "ids") {
+      await waitFor(() => expect(mocks.batchByIds).toHaveBeenCalledWith("liveness", [41, 42]));
+    } else {
+      await waitFor(() => expect(mocks.batchByFilter).toHaveBeenCalledWith("liveness", { status: "abnormal" }));
+    }
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Liveness check batch submitted.");
+  });
+
+  it("disables liveness checks for resources without aliases", () => {
+    render(
+      <ICloudMaintenanceModal aliasLimit={750} onCancel={vi.fn()} onCompleted={vi.fn()}
+        target={{ item: { ...resource(), aliasCount: 0 }, mode: "row" }} />,
+    );
+    expect(screen.getByRole("button", { name: /Liveness check/ })).toBeDisabled();
   });
 
   it("confirms manual family sharing from the maintenance menu for automatic onboarding", async () => {

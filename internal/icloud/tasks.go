@@ -220,6 +220,7 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		return nil
 	})
 	mux.HandleFunc(typeICloudValidationDispatcher, func(ctx context.Context, _ *asynq.Task) error {
+		_ = service.DispatchICloudLivenessChecks(ctx)
 		queueName, _ := asynq.GetQueueName(ctx)
 		return handleICloudValidationDispatcher(ctx, service, queueName)
 	})
@@ -229,6 +230,22 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 	mux.HandleFunc(typeICloudOnboardingDispatcher, func(ctx context.Context, _ *asynq.Task) error {
 		_ = service.DispatchICloudOnboardingTasks(ctx, 100)
 		return nil
+	})
+	mux.HandleFunc(typeICloudLiveness, func(ctx context.Context, task *asynq.Task) error {
+		var payload struct {
+			RunID uint64 `json:"runId"`
+		}
+		if err := json.Unmarshal(task.Payload(), &payload); err != nil || payload.RunID == 0 {
+			return asynq.SkipRetry
+		}
+		if service.backgroundExecution != nil {
+			release, admitted := service.backgroundExecution.TryAcquire()
+			if !admitted {
+				return nil
+			}
+			defer release()
+		}
+		return service.ProcessICloudLivenessCheck(ctx, payload.RunID)
 	})
 	mux.HandleFunc(typeICloudOnboarding, func(ctx context.Context, task *asynq.Task) error {
 		payload, err := decodeICloudOnboardingTask(task)

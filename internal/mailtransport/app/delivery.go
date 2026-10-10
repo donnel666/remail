@@ -30,9 +30,10 @@ type OutboundAttachmentReader interface {
 // OutboundSendFailure is an explicit remote business result. Unknown sender
 // errors are infrastructure failures and must not consume the business budget.
 type OutboundSendFailure struct {
-	SafeMessage string
-	Retryable   bool
-	Cause       error
+	SafeMessage       string
+	Retryable         bool
+	RecipientRejected bool
+	Cause             error
 }
 
 func (e *OutboundSendFailure) Error() string {

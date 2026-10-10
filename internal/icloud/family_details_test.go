@@ -28,7 +28,7 @@ const familyDetailResponse = `{"currentDsid":"child","currentUserAppleId":"child
 func newFamilyDetailsTest(t *testing.T) (*Service, *gorm.DB, *miniredis.Miniredis) {
 	t.Helper()
 	s, db, task, _ := newOnboardingStateTest(t)
-	require.NoError(t, db.AutoMigrate(&iCloudResourceChannelModel{}))
+	require.NoError(t, db.AutoMigrate(&iCloudResourceChannelModel{}, &iCloudMaintenanceRunModel{}))
 	require.NoError(t, db.Model(task).Updates(map[string]any{"status": iCloudResourceNormal, "onboarding_status": iCloudOnboardingCompleted, "dispatch_status": "succeeded", "alias_count": 750}).Error)
 	red := miniredis.RunT(t)
 	s.deviceRedis = redis.NewClient(&redis.Options{Addr: red.Addr()})

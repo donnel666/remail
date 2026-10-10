@@ -11659,6 +11659,43 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /v1/admin/icloud/resources/batch/liveness:
+    post:
+      operationId: postAdminICloudResourcesCheckLiveness
+      summary: Queue SMTP liveness checks for selected iCloud resources
+      description: Sends a test email to an existing active alias through the configured SMTP transport. Temporary SMTP rejections retry another active alias on the same account after 30 seconds; the task persists its retry cursor and attempts, bounded by the active alias count at submission. Permanent recipient or mailbox failures mark the account abnormal; sender-policy and unknown delivery failures fail the check and preserve account health. Incoming bounce reports require a valid Apple DKIM signature covering From, To and Content-Type, an Apple mailer-daemon/postmaster sender, and a signed To matching this probe. Unauthenticated reports fail the check and preserve account health; temporary verification lookup failures retry with the same bounce-inspection backoff. SMTP acceptance without a bounce after two minutes marks it normal; late bounces are observed for 24 hours. Transport failures preserve account health. Bounce inspection failures retry every five minutes until the 24-hour observation deadline, then fail the check without changing account health. Requires inbound SMTP and a locally received SMTP sender domain. Cookie sessions are unchanged.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminICloudBulkCommandRequest"
+      responses:
+        "200":
+          description: Synchronous bounded selection result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudBulkResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /v1/admin/icloud/resources/batch/alias:
     post:
       operationId: postAdminICloudResourcesCreateAliases
@@ -12294,6 +12331,44 @@ paths:
       responses:
         "202":
           description: Validation queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/admin/icloud/resources/{resourceId}/liveness:
+    post:
+      operationId: postAdminICloudResourceCheckLiveness
+      summary: Queue one iCloud resource for an SMTP liveness check
+      description: Sends a test email to an existing active alias through the configured SMTP transport. Temporary SMTP rejections retry another active alias on the same account after 30 seconds; the task persists its retry cursor and attempts, bounded by the active alias count at submission. Permanent recipient or mailbox failures mark the account abnormal; sender-policy and unknown delivery failures fail the check and preserve account health. Incoming bounce reports require a valid Apple DKIM signature covering From, To and Content-Type, an Apple mailer-daemon/postmaster sender, and a signed To matching this probe. Unauthenticated reports fail the check and preserve account health; temporary verification lookup failures retry with the same bounce-inspection backoff. SMTP acceptance without a bounce after two minutes marks it normal; late bounces are observed for 24 hours. Transport failures preserve account health. Bounce inspection failures retry every five minutes until the 24-hour observation deadline, then fail the check without changing account health. Requires inbound SMTP and a locally received SMTP sender domain. Cookie sessions are unchanged.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/ExpectedAdminResourceVersion"
+        - $ref: "#/components/parameters/AdminStateCommandIdempotencyKey"
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "202":
+          description: SMTP liveness check queued
           content:
             application/json:
               schema:
@@ -25434,6 +25509,7 @@ components:
       enum:
         - import
         - validation
+        - liveness
         - alias
         - token
         - refresh

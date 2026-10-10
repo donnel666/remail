@@ -326,6 +326,9 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		cleanupFuncs = append(cleanupFuncs, gmailapi.RegisterTaskHandlers(taskMux, gmailMod.Service))
 		icloudMod = icloudapi.NewModule(p.DB, p.Asynq, fileStore, p.Redis)
 		icloudMod.Service.SetBackgroundExecutionGate(p.BackgroundLoad)
+		if p.SMTP.InboundEnabled {
+			icloudMod.Service.SetLivenessMail(sender, mailMod.InboundUseCase, outboundSender(p.SMTP))
+		}
 		icloudMod.Service.SetAppleProxyProvider(proxyMod.ProxyUseCase)
 		icloudMod.Service.SetImportOwnerValidator(func(ctx context.Context, ownerID uint) (bool, error) {
 			owner, err := iamMod.AdminResourceOwners.ValidateTargetOwner(ctx, ownerID)
@@ -460,33 +463,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 }
 
 func mailSender(cfg platform.SMTPConfig) (mailapp.SenderPort, error) {
-	dkimSigner, err := mailinfra.NewDKIMSigner(mailinfra.DKIMConfig{
-		Enabled:        cfg.DKIMEnabled,
-		Domain:         cfg.DKIMDomain,
-		Selector:       cfg.DKIMSelector,
-		Algorithm:      cfg.DKIMAlgorithm,
-		Identity:       cfg.DKIMIdentity,
-		PrivateKey:     cfg.DKIMPrivateKey,
-		PrivateKeyFile: cfg.DKIMPrivateKeyFile,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if cfg.Mode == "relay" {
-		return mailinfra.NewSMTPDelivery(mailinfra.SMTPConfig{
-			Addr:     cfg.Addr,
-			Username: cfg.Username,
-			Password: cfg.Password,
-			From:     cfg.From,
-			DKIM:     dkimSigner,
-		}), nil
-	}
-	return mailinfra.NewDirectSMTPDelivery(mailinfra.DirectSMTPConfig{
-		From:       cfg.From,
-		Domain:     cfg.Domain,
-		HELODomain: cfg.HELODomain,
-		DKIM:       dkimSigner,
-	}), nil
+	return mailinfra.NewConfiguredSMTPDelivery(cfg)
 }
 
 func outboundSender(cfg platform.SMTPConfig) string {

@@ -22,6 +22,7 @@ vi.mock("./idempotency", () => ({
 
 import {
   activateAdminICloudResource,
+  checkAdminICloudResourceLiveness,
   batchAdminICloudResourcesByFilter,
   batchAdminICloudResourcesByIds,
   confirmAdminICloudOnboardingFamilyReset,
@@ -160,6 +161,24 @@ const ONBOARDING_RESPONSE = {
 } satisfies AdminICloudOnboardingImportResponse;
 
 describe("admin iCloud API adapter", () => {
+  it("uses the SMTP liveness endpoints for one resource, ids, and filters", async () => {
+    apiMocks.POST.mockResolvedValue({ data: {} });
+    await checkAdminICloudResourceLiveness(7, 4);
+    await batchAdminICloudResourcesByIds("liveness", [7, 8]);
+    await batchAdminICloudResourcesByFilter("liveness", { status: "abnormal" });
+    expect(apiMocks.POST).toHaveBeenNthCalledWith(1,
+      "/v1/admin/icloud/resources/{resourceId}/liveness",
+      expect.objectContaining({ params: expect.objectContaining({ path: { resourceId: 7 }, query: { version: 4 } }) }),
+    );
+    expect(apiMocks.POST).toHaveBeenNthCalledWith(2,
+      "/v1/admin/icloud/resources/batch/liveness",
+      expect.objectContaining({ body: { selection: { mode: "ids", resourceIds: [7, 8] } } }),
+    );
+    expect(apiMocks.POST).toHaveBeenNthCalledWith(3,
+      "/v1/admin/icloud/resources/batch/liveness",
+      expect.objectContaining({ body: { selection: { mode: "filter", filter: { status: "abnormal" } } } }),
+    );
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     idempotencyMock.mockReturnValue("icloud-command-1");

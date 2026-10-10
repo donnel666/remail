@@ -28,6 +28,7 @@ const (
 
 	AdminTaskKindImport        = "import"
 	AdminTaskKindValidation    = "validation"
+	AdminTaskKindLiveness      = "liveness"
 	AdminTaskKindAlias         = "alias"
 	AdminTaskKindToken         = "token"
 	AdminTaskKindRefresh       = "refresh"
@@ -339,6 +340,7 @@ func isAdminTaskKind(value string) bool {
 	switch value {
 	case AdminTaskKindImport,
 		AdminTaskKindValidation,
+		AdminTaskKindLiveness,
 		AdminTaskKindAlias,
 		AdminTaskKindToken,
 		AdminTaskKindRefresh,

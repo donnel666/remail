@@ -5,8 +5,20 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
+
+func IsRecipientRejectionStatus(status string) bool {
+	fields := strings.Fields(status)
+	if len(fields) == 0 {
+		return false
+	}
+	status = fields[0]
+	// 5.1.7 and 5.1.8 describe the sender, even when reported during recipient or DATA checks.
+	return strings.HasPrefix(status, "5.2.") ||
+		(strings.HasPrefix(status, "5.1.") && status != "5.1.7" && status != "5.1.8")
+}
 
 type OutboundPurpose string
 

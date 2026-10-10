@@ -70,6 +70,7 @@ export type AdminICloudBulkResponse =
 export type AdminICloudImportErrorStrategy = "skip" | "abort";
 export type AdminICloudBatchAction =
   | "validate"
+  | "liveness"
   | "alias"
   | "disable"
   | "publish"
@@ -571,6 +572,23 @@ export async function activateAdminICloudResource(
   );
 }
 
+export async function checkAdminICloudResourceLiveness(
+  resourceId: number,
+  version: number,
+  signal?: AbortSignal,
+) {
+  return unwrap(
+    await client.POST("/v1/admin/icloud/resources/{resourceId}/liveness", {
+      params: {
+        header: commandHeaders(),
+        path: { resourceId },
+        query: { version },
+      },
+      signal,
+    }),
+  );
+}
+
 export async function refreshAdminICloudResourceCookies(
   resourceId: number,
   version: number,
@@ -772,6 +790,10 @@ async function batchAdminICloudResources(
     signal,
   };
   switch (action) {
+    case "liveness":
+      return unwrap(
+        await client.POST("/v1/admin/icloud/resources/batch/liveness", options),
+      );
     case "validate":
       return unwrap(
         await client.POST("/v1/admin/icloud/resources/batch/validation", options),

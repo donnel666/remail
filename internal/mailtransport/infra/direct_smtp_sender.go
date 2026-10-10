@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/mailtransport/domain"
 )
 
@@ -281,15 +282,24 @@ func classifyDirectSMTPFailures(stage string, failures []error) error {
 		if smtpError.Code < 500 && temporarySMTP == -1 {
 			temporarySMTP = i
 		}
-		if smtpError.Code >= 500 && permanentSMTP == -1 {
-			permanentSMTP = i
+		if smtpError.Code >= 500 {
+			var classified *mailapp.OutboundSendFailure
+			if permanentSMTP == -1 || (errors.As(classifySMTPFailure(stage, failure), &classified) && classified.RecipientRejected) {
+				permanentSMTP = i
+			}
 		}
 	}
+	selected := permanentSMTP
 	if temporarySMTP != -1 {
-		return classifySMTPFailure(stage, joinWithFirst(failures, temporarySMTP))
+		selected = temporarySMTP
 	}
-	if permanentSMTP != -1 {
-		return classifySMTPFailure(stage, joinWithFirst(failures, permanentSMTP))
+	if selected != -1 {
+		classified := classifySMTPFailure(stage, failures[selected])
+		var failure *mailapp.OutboundSendFailure
+		if errors.As(classified, &failure) {
+			failure.Cause = deliveryError(stage, joinWithFirst(failures, selected))
+		}
+		return classified
 	}
 	return permanentOutboundFailure("Recipient domain has no usable mail server.", deliveryError(stage, errors.Join(failures...)))
 }

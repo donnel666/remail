@@ -245,10 +245,14 @@ func classifySMTPFailure(stage string, err error) error {
 	if retryable {
 		message = "SMTP server temporarily rejected the message."
 	}
+	contextMessage := strings.TrimSuffix(err.Error(), smtpError.Error())
 	return &mailapp.OutboundSendFailure{
 		SafeMessage: message,
 		Retryable:   retryable,
-		Cause:       deliveryError(stage, err),
+		RecipientRejected: smtpError.Code >= 500 && smtpError.Code < 600 &&
+			(strings.Contains(contextMessage, "rcpt to failed:") || strings.Contains(contextMessage, "data failed:") || strings.Contains(contextMessage, "data close failed:")) &&
+			domain.IsRecipientRejectionStatus(smtpError.Msg),
+		Cause: deliveryError(stage, err),
 	}
 }
 

@@ -34,6 +34,7 @@ type AdminICloudCommand string
 
 const (
 	AdminICloudValidate  AdminICloudCommand = "validate"
+	AdminICloudLiveness  AdminICloudCommand = "liveness"
 	AdminICloudAlias     AdminICloudCommand = "alias"
 	AdminICloudEnable    AdminICloudCommand = "enable"
 	AdminICloudDisable   AdminICloudCommand = "disable"
@@ -92,6 +93,10 @@ func (s *Service) ApplyAdminICloudCommand(
 	if err != nil {
 		return nil, err
 	}
+	var livenessMailErr error
+	if command == AdminICloudLiveness {
+		livenessMailErr = s.checkICloudLivenessMail(ctx)
+	}
 	fingerprint, err := adminICloudCommandFingerprint(struct {
 		Version uint64 `json:"version"`
 	}{Version: version})
@@ -111,6 +116,9 @@ func (s *Service) ApplyAdminICloudCommand(
 		if err != nil || wasReplayed {
 			replayed = wasReplayed
 			return err
+		}
+		if livenessMailErr != nil {
+			return livenessMailErr
 		}
 		var state *AdminICloudMutationResult
 		var changed bool
@@ -154,6 +162,9 @@ func (s *Service) ApplyAdminICloudCommand(
 	if !replayed && result.Changed && (command == AdminICloudActivate || command == AdminICloudRefresh) {
 		_ = s.ScheduleICloudOnboardingDispatcher(context.WithoutCancel(ctx), 0)
 	}
+	if !replayed && result.Changed && command == AdminICloudLiveness {
+		_ = s.DispatchICloudLivenessChecks(context.WithoutCancel(ctx))
+	}
 	return result, nil
 }
 
@@ -177,6 +188,10 @@ func (s *Service) ApplyAdminICloudBatch(
 	selection, err = normalizeAdminICloudSelection(selection)
 	if err != nil {
 		return nil, err
+	}
+	var livenessMailErr error
+	if command == AdminICloudLiveness {
+		livenessMailErr = s.checkICloudLivenessMail(ctx)
 	}
 	if command == AdminICloudExpire {
 		if expireAt == nil {
@@ -217,6 +232,9 @@ func (s *Service) ApplyAdminICloudBatch(
 			return err
 		}
 		now := s.now().UTC()
+		if livenessMailErr != nil {
+			return livenessMailErr
+		}
 		resourceIDs, err := resolveAdminICloudSelectionTx(ctx, tx, selection)
 		if err != nil {
 			return err
@@ -266,6 +284,9 @@ func (s *Service) ApplyAdminICloudBatch(
 	}
 	if !replayed && result.Affected > 0 && (command == AdminICloudAlias || command == AdminICloudExpire) {
 		_ = s.ScheduleICloudProvisionDispatcher(context.WithoutCancel(ctx), 0)
+	}
+	if !replayed && result.Affected > 0 && command == AdminICloudLiveness {
+		_ = s.DispatchICloudLivenessChecks(context.WithoutCancel(ctx))
 	}
 	return result, nil
 }
@@ -341,7 +362,7 @@ func (s *Service) completeAdminICloudCommand(ctx context.Context, tx *gorm.DB, o
 
 func validAdminICloudCommand(command AdminICloudCommand) bool {
 	switch command {
-	case AdminICloudValidate, AdminICloudAlias, AdminICloudEnable, AdminICloudDisable, AdminICloudPublish,
+	case AdminICloudValidate, AdminICloudLiveness, AdminICloudAlias, AdminICloudEnable, AdminICloudDisable, AdminICloudPublish,
 		AdminICloudUnpublish, AdminICloudDelete, AdminICloudRecover, AdminICloudActivate, AdminICloudRefresh:
 		return true
 	default:
@@ -351,7 +372,7 @@ func validAdminICloudCommand(command AdminICloudCommand) bool {
 
 func validAdminICloudBatchCommand(command AdminICloudCommand) bool {
 	switch command {
-	case AdminICloudValidate, AdminICloudAlias, AdminICloudDisable, AdminICloudPublish, AdminICloudUnpublish, AdminICloudDelete, AdminICloudExpire:
+	case AdminICloudValidate, AdminICloudLiveness, AdminICloudAlias, AdminICloudDisable, AdminICloudPublish, AdminICloudUnpublish, AdminICloudDelete, AdminICloudExpire:
 		return true
 	default:
 		return false
@@ -444,6 +465,8 @@ func mutateAdminICloudResourceTx(
 	updates := make(map[string]any)
 	queuedGeneration := uint64(0)
 	switch command {
+	case AdminICloudLiveness:
+		return queueAdminICloudLivenessTx(ctx, tx, root, resource, now)
 	case AdminICloudValidate:
 		if resource.Status == iCloudResourceDeleted {
 			return nil, false, ErrICloudResourceNotFound
@@ -686,6 +709,8 @@ func appendAdminICloudSkip(result *AdminICloudBulkResult, reasons map[string]int
 
 func adminICloudSkipReason(err error) string {
 	switch {
+	case errors.Is(err, ErrICloudLivenessNoAlias):
+		return "no_alias"
 	case errors.Is(err, ErrICloudResourceNotFound):
 		return "not_found"
 	case errors.Is(err, ErrICloudResourceStatus):
@@ -725,6 +750,8 @@ func normalizeAdminICloudCommandError(err error) error {
 		errors.Is(err, ErrICloudResourceVersion), errors.Is(err, ErrICloudResourceOwner),
 		errors.Is(err, ErrICloudResourceAllocation), errors.Is(err, ErrICloudResourceUpdate),
 		errors.Is(err, ErrICloudResourceIdentity), errors.Is(err, ErrICloudCookieRefreshUnavailable),
+		errors.Is(err, ErrICloudLivenessNoAlias),
+		errors.Is(err, ErrICloudLivenessUnavailable),
 		errors.Is(err, ErrICloudCookieMaintenanceUnavailable),
 		errors.Is(err, ErrICloudOnboardingPhoneExclusive), errors.Is(err, ErrICloudOnboardingPhoneBlacklisted):
 		return err

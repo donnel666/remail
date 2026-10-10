@@ -33,7 +33,7 @@ import {
 } from "@douyinfe/semi-illustrations";
 import {
   AtSign,
-  CloudDownload,
+  MailCheck,
   FileText,
   RefreshCw,
   ShieldCheck,
@@ -67,7 +67,7 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import {
-  activateAdminICloudResource,
+  checkAdminICloudResourceLiveness,
   batchAdminICloudResourcesByFilter,
   batchAdminICloudResourcesByIds,
   confirmAdminICloudOnboardingFamilyReset,
@@ -166,18 +166,17 @@ type RowAction =
   | "recover"
   | "expiration";
 type ImportMode = "paste" | "file";
-type ICloudMaintenanceAction = "validate" | "alias";
-type ICloudTaskAction = ICloudMaintenanceAction | "cookieRefresh";
+type ICloudMaintenanceAction = "validate" | "alias" | "liveness";
+type ICloudTaskAction = Exclude<ICloudMaintenanceAction, "liveness"> | "cookieRefresh";
 type ICloudRowMaintenanceAction =
   | ICloudMaintenanceAction
-  | "familySharing"
-  | "oldCookie";
+  | "familySharing";
 type ICloudMaintenanceTarget =
   | { item: AdminICloudResourceItem; mode: "row" }
   | { count: number; mode: "ids"; resourceIds: number[] }
   | { count: number; filter: AdminICloudResourceListFilter; mode: "filter" };
 type ICloudBulkBusyAction =
-  | Exclude<AdminICloudBatchAction, "validate" | "alias">
+  | Exclude<AdminICloudBatchAction, ICloudMaintenanceAction>
   | "expiration";
 
 function phoneDigits(value: string) {
@@ -2021,17 +2020,14 @@ export function ICloudMaintenanceModal({
       label: "Create alias",
     },
   ];
+  actions.push({
+    description: "Send an SMTP test email to an existing alias. Temporary SMTP errors retry another alias. Mark the account abnormal on a permanent mailbox failure, or normal after 2 minutes without a bounce. Sender-policy errors fail the check without changing account health. Late bounces are checked for 24 hours.",
+    disabled: rowDisabled || (target.mode === "row" && (target.item.aliasCount === 0 || target.item.status === "validating")),
+    icon: MailCheck,
+    key: "liveness",
+    label: "Liveness check",
+  });
   if (target.mode === "row") {
-    actions.push({
-      description: "Use this after enabling iCloud manually. The existing refresh workflow logs in with the permanent eSIM phone and stores the old V2 Cookie.",
-      disabled:
-        rowDisabled ||
-        (!target.item.deviceCodeApiAvailable && (!target.item.boundPhoneNumber || !target.item.kitesimPhoneId)) ||
-        (target.item.icloudOpened && target.item.oldSession?.status === "valid"),
-      icon: CloudDownload,
-      key: "oldCookie",
-      label: "Fetch old Cookie",
-    });
     actions.push({
       description: "Confirm that family sharing has been enabled manually for an automatic onboarding resource before Apple account configuration continues.",
       disabled: rowDisabled,
@@ -2047,10 +2043,7 @@ export function ICloudMaintenanceModal({
     setSubmitting(true);
     try {
       let count = 1;
-      if (selected === "oldCookie") {
-        if (target.mode !== "row") return;
-        await activateAdminICloudResource(target.item.id, target.item.version);
-      } else if (selected === "familySharing") {
+      if (selected === "familySharing") {
         if (target.mode !== "row") return;
         const detailItem = target.item as AdminICloudResourceItem & {
           onboardingTask?: AdminICloudOnboardingTask | null;
@@ -2078,6 +2071,8 @@ export function ICloudMaintenanceModal({
             onCancel();
             return;
           }
+        } else if (selected === "liveness") {
+          await checkAdminICloudResourceLiveness(target.item.id, target.item.version);
         } else {
           await validateAdminICloudResource(target.item.id, target.item.version);
         }
@@ -2092,8 +2087,8 @@ export function ICloudMaintenanceModal({
           ? "Alias creation batch submitted."
           : selected === "familySharing"
             ? "Family sharing confirmed."
-            : selected === "oldCookie"
-              ? "Old Cookie refresh submitted."
+            : selected === "liveness"
+              ? "Liveness check batch submitted."
               : "Resource validation batch submitted.",
         { count },
       ));
@@ -3515,7 +3510,7 @@ export default function AdminICloudEmails() {
 
   const runBatch = useCallback(
     async (
-      action: Exclude<AdminICloudBatchAction, "validate" | "alias">,
+      action: Exclude<AdminICloudBatchAction, ICloudMaintenanceAction>,
       allMatching: boolean,
     ) => {
       const count = allMatching ? total : selectedKeys.length;
@@ -3556,7 +3551,7 @@ export default function AdminICloudEmails() {
   );
 
   const confirmBatch = useCallback(
-    (action: Exclude<AdminICloudBatchAction, "validate" | "alias">, allMatching: boolean) => {
+    (action: Exclude<AdminICloudBatchAction, ICloudMaintenanceAction>, allMatching: boolean) => {
       const count = allMatching ? total : selectedKeys.length;
       if (count === 0) {
         Toast.info(t("No resources to check."));

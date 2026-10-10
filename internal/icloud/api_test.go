@@ -63,6 +63,25 @@ func TestRequireICloudIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestAdminICloudLivenessEndpointQueuesWithoutExposingProbeAddress(t *testing.T) {
+	service, _, _ := newICloudLivenessTestService(t)
+	seedICloudLivenessResource(t, service, 1, iCloudResourceNormal, true)
+	request := httptest.NewRequest(http.MethodPost, "/v1/admin/icloud/resources/1/liveness?version=1", nil)
+	request.Header.Set("Idempotency-Key", "api-probe")
+	response := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(response)
+	c.Request = request
+	c.Params = gin.Params{{Key: "resourceId", Value: "1"}}
+	middleware.SetCurrentUser(c, 99, iamdomain.RoleAdmin, "admin@example.com", "session")
+	(&handler{service: service}).resourceCommand(AdminICloudLiveness)(c)
+	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"changed":true`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "probe") || strings.Contains(response.Body.String(), "alias1@") {
+		t.Fatalf("liveness response exposed internal mail facts: %s", response.Body.String())
+	}
+}
+
 func TestAdminICloudOnboardingRouteRequiresOperateAndTaskRead(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, test := range []struct {

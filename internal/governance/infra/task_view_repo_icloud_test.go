@@ -66,7 +66,8 @@ INSERT INTO icloud_maintenance_runs(
     max_attempts, credential_revision, queued_at, started_at, finished_at, updated_at
 ) VALUES
     (101, 7, 4, 'validation', 'succeeded', 1, 3, 2, '2026-08-08 00:00:00', '2026-08-08 00:00:01', '2026-08-08 00:00:02', '2026-08-08 00:00:02'),
-    (102, 7, 5, 'alias', 'running', 1, 3, 2, '2026-08-08 00:01:00', '2026-08-08 00:01:01', NULL, '2026-08-08 00:01:01');
+    (102, 7, 5, 'alias', 'running', 1, 3, 2, '2026-08-08 00:01:00', '2026-08-08 00:01:01', NULL, '2026-08-08 00:01:01'),
+    (103, 7, 6, 'liveness', 'running', 1, 1, 2, '2026-08-08 00:02:00', '2026-08-08 00:02:01', NULL, '2026-08-08 00:02:01');
 `).Error)
 
 	repo := NewAdminTaskViewRepo(db)
@@ -74,13 +75,15 @@ INSERT INTO icloud_maintenance_runs(
 		BizID: 7, Limit: 20,
 	}, iCloudValidationTaskSelect)
 	require.NoError(t, err)
-	require.Equal(t, int64(2), total)
+	require.Equal(t, int64(3), total)
 	require.Equal(t, int64(1), succeeded)
-	require.Len(t, items, 2)
-	require.Equal(t, "icloud_validation:102", items[0].TaskID())
-	require.Equal(t, governanceapp.AdminTaskKindAlias, items[0].Kind)
-	require.Equal(t, "icloud_validation:101", items[1].TaskID())
-	require.WithinDuration(t, time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC), items[1].QueuedAt.UTC(), time.Second)
+	require.Len(t, items, 3)
+	require.Equal(t, "icloud_validation:103", items[0].TaskID())
+	require.Equal(t, governanceapp.AdminTaskKindLiveness, items[0].Kind)
+	require.Equal(t, "icloud_validation:102", items[1].TaskID())
+	require.Equal(t, governanceapp.AdminTaskKindAlias, items[1].Kind)
+	require.Equal(t, "icloud_validation:101", items[2].TaskID())
+	require.WithinDuration(t, time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC), items[2].QueuedAt.UTC(), time.Second)
 }
 
 func TestAdminTaskViewRepoListsICloudRefreshTasks(t *testing.T) {

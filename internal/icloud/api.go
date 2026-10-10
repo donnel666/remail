@@ -44,6 +44,7 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 	resources.POST("/onboarding-tasks/:taskId/family-reset", middleware.PermissionRequired(checker, "core:resource", "operate"), h.confirmOnboardingFamilyReset)
 	resources.POST("/onboarding-tasks/:taskId/retry", middleware.PermissionRequired(checker, "core:resource", "operate"), h.retryOnboardingPostFamily)
 	resources.POST("/batch/validation", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudValidate))
+	resources.POST("/batch/liveness", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudLiveness))
 	resources.POST("/batch/alias", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudAlias))
 	resources.POST("/batch/disable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudDisable))
 	resources.POST("/batch/publish", middleware.PermissionRequired(checker, "core:resource", "operate"), h.batchResourceCommand(AdminICloudPublish))
@@ -60,6 +61,7 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 	resources.POST("/:resourceId/aliases", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudAlias))
 	resources.PATCH("/:resourceId", middleware.PermissionRequired(checker, "core:resource", "write"), h.patchResource)
 	resources.POST("/:resourceId/validation", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudValidate))
+	resources.POST("/:resourceId/liveness", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudLiveness))
 	resources.POST("/:resourceId/icloud-activation", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudActivate))
 	resources.POST("/:resourceId/cookie-refresh", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudRefresh))
 	resources.POST("/:resourceId/enable", middleware.PermissionRequired(checker, "core:resource", "operate"), h.resourceCommand(AdminICloudEnable))
@@ -705,7 +707,7 @@ func (h *handler) resourceCommand(command AdminICloudCommand) gin.HandlerFunc {
 		}
 		c.Header("Cache-Control", "no-store")
 		status := http.StatusOK
-		if command == AdminICloudValidate || command == AdminICloudActivate || command == AdminICloudRefresh || (command == AdminICloudAlias && result.Changed) {
+		if command == AdminICloudValidate || command == AdminICloudLiveness || command == AdminICloudActivate || command == AdminICloudRefresh || (command == AdminICloudAlias && result.Changed) {
 			status = http.StatusAccepted
 		}
 		c.JSON(status, result)
@@ -848,6 +850,10 @@ func writeICloudError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"message": "iCloud resource still has an active allocation.", "requestId": requestID})
 	case errors.Is(err, ErrICloudResourceOwner):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "iCloud resource owner is not eligible for public supply.", "requestId": requestID})
+	case errors.Is(err, ErrICloudLivenessNoAlias):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "No usable iCloud alias is available for a liveness check.", "requestId": requestID})
+	case errors.Is(err, ErrICloudLivenessUnavailable):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "SMTP liveness checks require an enabled inbound SMTP server and a sender domain that receives mail locally.", "requestId": requestID})
 	case errors.Is(err, errDeviceRechargeRejected):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": err.Error(), "requestId": requestID})
 	case errors.Is(err, errDeviceUnauthorized), errors.Is(err, errDeviceUnavailable), errors.Is(err, errDeviceResponse), errors.Is(err, errDeviceRechargeUncertain):

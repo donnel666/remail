@@ -4215,6 +4215,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/icloud/resources/batch/liveness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue SMTP liveness checks for selected iCloud resources
+         * @description Sends a test email to an existing active alias through the configured SMTP transport. Temporary SMTP rejections retry another active alias on the same account after 30 seconds; the task persists its retry cursor and attempts, bounded by the active alias count at submission. Permanent recipient or mailbox failures mark the account abnormal; sender-policy and unknown delivery failures fail the check and preserve account health. Incoming bounce reports require a valid Apple DKIM signature covering From, To and Content-Type, an Apple mailer-daemon/postmaster sender, and a signed To matching this probe. Unauthenticated reports fail the check and preserve account health; temporary verification lookup failures retry with the same bounce-inspection backoff. SMTP acceptance without a bounce after two minutes marks it normal; late bounces are observed for 24 hours. Transport failures preserve account health. Bounce inspection failures retry every five minutes until the 24-hour observation deadline, then fail the check without changing account health. Requires inbound SMTP and a locally received SMTP sender domain. Cookie sessions are unchanged.
+         */
+        post: operations["postAdminICloudResourcesCheckLiveness"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/icloud/resources/batch/alias": {
         parameters: {
             query?: never;
@@ -4497,6 +4517,26 @@ export interface paths {
         put?: never;
         /** Queue one iCloud resource for validation */
         post: operations["postAdminICloudResourceValidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/icloud/resources/{resourceId}/liveness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue one iCloud resource for an SMTP liveness check
+         * @description Sends a test email to an existing active alias through the configured SMTP transport. Temporary SMTP rejections retry another active alias on the same account after 30 seconds; the task persists its retry cursor and attempts, bounded by the active alias count at submission. Permanent recipient or mailbox failures mark the account abnormal; sender-policy and unknown delivery failures fail the check and preserve account health. Incoming bounce reports require a valid Apple DKIM signature covering From, To and Content-Type, an Apple mailer-daemon/postmaster sender, and a signed To matching this probe. Unauthenticated reports fail the check and preserve account health; temporary verification lookup failures retry with the same bounce-inspection backoff. SMTP acceptance without a bounce after two minutes marks it normal; late bounces are observed for 24 hours. Transport failures preserve account health. Bounce inspection failures retry every five minutes until the 24-hour observation deadline, then fail the check without changing account health. Requires inbound SMTP and a locally received SMTP sender domain. Cookie sessions are unchanged.
+         */
+        post: operations["postAdminICloudResourceCheckLiveness"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10203,7 +10243,7 @@ export interface components {
             removed: number;
         };
         /** @enum {string} */
-        AdminTaskKind: "import" | "validation" | "alias" | "token" | "refresh" | "fetch" | "history" | "bulk_validation" | "bulk_alias" | "bulk_history" | "bulk_token" | "bulk_publish" | "bulk_unpublish" | "bulk_delete" | "bulk_disable";
+        AdminTaskKind: "import" | "validation" | "liveness" | "alias" | "token" | "refresh" | "fetch" | "history" | "bulk_validation" | "bulk_alias" | "bulk_history" | "bulk_token" | "bulk_publish" | "bulk_unpublish" | "bulk_delete" | "bulk_disable";
         /** @enum {string} */
         AdminTaskStatus: "queued" | "running" | "succeeded" | "failed" | "uncertain" | "canceled";
         /** @enum {string} */
@@ -24477,6 +24517,41 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    postAdminICloudResourcesCheckLiveness: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminICloudBulkCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Synchronous bounded selection result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     postAdminICloudResourcesCreateAliases: {
         parameters: {
             query?: never;
@@ -25126,6 +25201,42 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Validation queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    postAdminICloudResourceCheckLiveness: {
+        parameters: {
+            query: {
+                /** @description Exact integer resource version from the latest administrator resource result. A stale value returns 409 without a partial write. */
+                version: components["parameters"]["ExpectedAdminResourceVersion"];
+            };
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Required retry identity for target-state administrator commands. Repeating an already-applied target state is a no-op. */
+                "Idempotency-Key": components["parameters"]["AdminStateCommandIdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SMTP liveness check queued */
             202: {
                 headers: {
                     [name: string]: unknown;
