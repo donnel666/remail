@@ -390,7 +390,8 @@ func TestDomainCodePickupDoesNotReadMailboxAfterDelivery(t *testing.T) {
 		},
 	}
 	repo.scopes = []OrderScope{scope}
-	uc := NewUseCase(repo, nil, nil, &matchResultStub{})
+	completion := &pickupCompletionRepoStub{domainMailboxRepoStub: repo, scope: scope, statusAfterMatch: "completed"}
+	uc := NewUseCase(completion, nil, nil, completion)
 	uc.now = func() time.Time { return now }
 
 	items, _, hasDelivery, _, err := uc.listOrderMailWithPickupCache(context.Background(), scope)
@@ -1307,7 +1308,7 @@ func TestListPickupMailBatchSkipsDeliveredDomainCodeMailbox(t *testing.T) {
 	delivery := domain.Message{ID: 7, Recipient: "user@example.com", VerificationCode: "123456", ReceivedAt: now}
 	repo := &pickupBatchReaderStub{reads: []PickupBatchRead{{
 		Scope: &OrderScope{
-			OrderID: 1, OrderNo: "ORDER-DOMAIN", ServiceMode: "code", OrderStatus: "active",
+			OrderID: 1, OrderNo: "ORDER-DOMAIN", ServiceMode: "code", OrderStatus: "completed",
 			AllocationType: domain.ResourceTypeDomain, EmailResourceID: 9, Recipient: "user@example.com",
 		},
 		Delivery: &OrderDelivery{Message: &delivery, ReceivedAt: now},
@@ -2207,7 +2208,7 @@ func TestCodePickupReadLimitStillAppliesAfterDelivery(t *testing.T) {
 	now := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
 	scope := OrderScope{
 		OrderID: 1, OrderNo: "OR_CODE", EmailResourceID: 1,
-		Recipient: "user@example.com", ServiceMode: "code", OrderStatus: "active",
+		Recipient: "user@example.com", ServiceMode: "code", OrderStatus: "completed",
 	}
 	delivered := domain.Message{ID: 1, ReceivedAt: now.Add(-2 * time.Minute), VerificationCode: "111111"}
 	other := domain.Message{ID: 2, ReceivedAt: now.Add(-time.Minute), VerificationCode: "222222"}

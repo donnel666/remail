@@ -800,6 +800,9 @@ func (uc *UseCase) listOrderMailFromBatch(
 	if !scopeReadable(scope, func() time.Time { return now }) {
 		return nil, nil, false, domain.ErrOrderUnavailable
 	}
+	if scope.ServiceMode == "code" && (read.Delivery == nil || scope.OrderStatus != "completed") {
+		return nil, nil, read.Delivery != nil, nil
+	}
 	limit := OrderReadLimit(scope)
 	messages := filterPickupMessages(scope, read.Messages, now)
 	if len(messages) > limit {
@@ -838,6 +841,15 @@ func (uc *UseCase) GetPickupMessage(ctx context.Context, token string, email str
 	if !scopeReadable(*scope, uc.now) {
 		return nil, domain.ErrOrderUnavailable
 	}
+	if scope.ServiceMode == "code" {
+		delivery, err := uc.repo.FindOrderDelivery(ctx, scope.OrderID)
+		if err != nil {
+			return nil, err
+		}
+		if delivery == nil || scope.OrderStatus != "completed" {
+			return nil, domain.ErrMessageNotFound
+		}
+	}
 	message, err := uc.repo.FindOrderMessage(ctx, scope.OrderID, messageID)
 	if err != nil {
 		return nil, err
@@ -857,6 +869,20 @@ func (uc *UseCase) listOrderMailByScope(ctx context.Context, scope OrderScope) (
 	delivery, err := uc.repo.FindOrderDelivery(ctx, scope.OrderID)
 	if err != nil {
 		return nil, nil, false, err
+	}
+	// Synchronous matching can complete the order after this scope was loaded.
+	if scope.ServiceMode == "code" && delivery != nil && scope.OrderStatus != "completed" {
+		current, err := uc.repo.LoadOrderScopeForServiceToken(ctx, scope.OrderNo)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		scope = *current
+		if !scopeReadable(scope, uc.now) {
+			return nil, nil, false, domain.ErrOrderUnavailable
+		}
+	}
+	if scope.ServiceMode == "code" && (delivery == nil || scope.OrderStatus != "completed") {
+		return nil, nil, delivery != nil, nil
 	}
 	limit := OrderReadLimit(scope)
 	messages, err := uc.repo.ListOrderMessages(ctx, scope, limit)
