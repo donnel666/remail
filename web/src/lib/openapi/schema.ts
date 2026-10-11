@@ -9730,7 +9730,12 @@ export interface components {
             total: number;
             offset: number;
             limit: number;
-            facets: components["schemas"]["AdminICloudFacets"];
+            facets: components["schemas"]["OwnedICloudFacets"];
+        };
+        OwnedICloudFacets: {
+            status: components["schemas"]["AdminICloudStatusFacet"];
+            forSale: components["schemas"]["AdminMicrosoftBooleanFacet"];
+            suffixes: components["schemas"]["AdminMicrosoftSuffixFacet"][];
         };
         OwnedICloudImportTask: {
             id: number;
@@ -9757,10 +9762,22 @@ export interface components {
             id: number;
             version: number;
         };
+        /** @description Supply exactly one of resources or filter. Filter commands affect at most 1000 matching resources owned by the current user; larger selections are rejected without changes. */
         OwnedICloudBatchCommand: {
             /** @enum {string} */
             command: "validate" | "publish" | "delete";
-            resources: components["schemas"]["OwnedICloudCommandItem"][];
+            resources?: components["schemas"]["OwnedICloudCommandItem"][];
+            filter?: components["schemas"]["OwnedICloudResourceFilter"];
+        };
+        OwnedICloudResourceFilter: {
+            search?: string;
+            suffix?: string;
+            status?: components["schemas"]["AdminICloudResourceStatus"];
+            forSale?: boolean;
+            /** Format: date-time */
+            createdFrom?: string;
+            /** Format: date-time */
+            createdTo?: string;
         };
         /** @enum {string} */
         AdminICloudResourceStatus: "pending" | "validating" | "normal" | "abnormal" | "disabled" | "deleted";

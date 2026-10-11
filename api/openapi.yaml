@@ -24438,7 +24438,20 @@ components:
           minimum: 1
           maximum: 100
         facets:
-          $ref: '#/components/schemas/AdminICloudFacets'
+          $ref: '#/components/schemas/OwnedICloudFacets'
+      additionalProperties: false
+    OwnedICloudFacets:
+      type: object
+      required: [status, forSale, suffixes]
+      properties:
+        status:
+          $ref: '#/components/schemas/AdminICloudStatusFacet'
+        forSale:
+          $ref: '#/components/schemas/AdminMicrosoftBooleanFacet'
+        suffixes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminMicrosoftSuffixFacet'
       additionalProperties: false
     OwnedICloudImportTask:
       type: object
@@ -24526,7 +24539,7 @@ components:
       type: object
       required:
       - command
-      - resources
+      description: Supply exactly one of resources or filter. Filter commands affect at most 1000 matching resources owned by the current user; larger selections are rejected without changes.
       properties:
         command:
           type: string
@@ -24540,6 +24553,26 @@ components:
           maxItems: 1000
           items:
             $ref: '#/components/schemas/OwnedICloudCommandItem'
+        filter:
+          $ref: '#/components/schemas/OwnedICloudResourceFilter'
+      additionalProperties: false
+    OwnedICloudResourceFilter:
+      type: object
+      properties:
+        search:
+          type: string
+        suffix:
+          type: string
+        status:
+          $ref: '#/components/schemas/AdminICloudResourceStatus'
+        forSale:
+          type: boolean
+        createdFrom:
+          type: string
+          format: date-time
+        createdTo:
+          type: string
+          format: date-time
       additionalProperties: false
 
     AdminICloudResourceStatus:

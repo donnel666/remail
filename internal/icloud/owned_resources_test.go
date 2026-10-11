@@ -278,6 +278,7 @@ func TestOwnedICloudResourcesEnforceOwnershipAndMutationRules(t *testing.T) {
 	require.EqualValues(t, 2, list.Total)
 	require.EqualValues(t, 2, list.Facets.Status.All)
 	require.EqualValues(t, 2, list.Facets.ForSale.All)
+	require.Equal(t, []OwnedICloudSuffixFacet{{Key: "example.com", Count: 2}}, list.Facets.Suffixes)
 	body, err := json.Marshal(list)
 	require.NoError(t, err)
 	for _, secret := range []string{"resource2@", "resource3@", "secret.example.com", "deviceCode", "owner8@", "cookie"} {
@@ -306,4 +307,48 @@ func TestOwnedICloudResourcesEnforceOwnershipAndMutationRules(t *testing.T) {
 	require.NoError(t, db.Model(&iCloudRootModel{}).Where("id = ?", 4).Update("owner_user_id", 8).Error)
 	_, err = s.ApplyOwnedICloudCommand(ctx, 7, AdminICloudValidate, 4, 1, "batch:4", "req", "/test")
 	require.ErrorIs(t, err, ErrICloudResourceNotFound)
+}
+
+func TestOwnedICloudFilterBatchScopesAllPagesAndRejectsOversizedSelection(t *testing.T) {
+	db := newAdminICloudCommandTestDB(t, t.Name())
+	require.NoError(t, db.AutoMigrate(&iCloudAdminTestUser{}, &iCloudAdminTestGroup{}, &iCloudAdminTestPhone{}))
+	now := time.Now().UTC()
+	for _, id := range []uint{7, 8} {
+		require.NoError(t, db.Create(&iCloudAdminTestUser{ID: id, Email: fmt.Sprintf("owner%d@example.com", id), Role: "user", Status: "active"}).Error)
+	}
+	for id := uint(1); id <= 104; id++ {
+		email := fmt.Sprintf("resource%d@example.com", id)
+		if id == 103 {
+			email = "different@other.test"
+		}
+		createAdminICloudCommandResource(t, db, now, iCloudResourceModel{ID: id, PrimaryEmail: email, Status: iCloudResourceNormal, CredentialRevision: 1, ValidationGeneration: 1, ExpireAt: now.Add(time.Hour)})
+	}
+	require.NoError(t, db.Model(&iCloudRootModel{}).Where("id = ?", 104).Update("owner_user_id", 8).Error)
+	s := NewService(db, nil, nil)
+	ctx := context.Background()
+	filter := AdminICloudResourceListFilter{Suffix: "example.com", OwnerUserID: 8, Limit: 20}
+	list, err := s.ListOwnedICloudResources(ctx, 7, filter)
+	require.NoError(t, err)
+	require.Len(t, list.Items, 20)
+	require.EqualValues(t, 102, list.Total)
+	require.Equal(t, []OwnedICloudSuffixFacet{{Key: "example.com", Count: 102}, {Key: "other.test", Count: 1}}, list.Facets.Suffixes)
+	result, err := s.ApplyOwnedICloudBatchByFilter(ctx, 7, AdminICloudDelete, filter, "filtered-delete", "req", "/test")
+	require.NoError(t, err)
+	require.Equal(t, 102, result.Affected)
+	var untouched int64
+	require.NoError(t, db.Model(&iCloudResourceModel{}).Where("id IN ? AND status = ?", []uint{103, 104}, iCloudResourceNormal).Count(&untouched).Error)
+	require.EqualValues(t, 2, untouched)
+
+	roots := make([]iCloudRootModel, 0, adminICloudBatchMax+1)
+	resources := make([]iCloudResourceModel, 0, adminICloudBatchMax+1)
+	for id := uint(10000); id <= 10000+adminICloudBatchMax; id++ {
+		roots = append(roots, iCloudRootModel{ID: id, Type: "icloud", OwnerUserID: 7, Version: 1, CreatedAt: now, UpdatedAt: now})
+		resources = append(resources, iCloudResourceModel{ID: id, ResourceType: "icloud", PrimaryEmail: fmt.Sprintf("resource%d@large.test", id), Status: iCloudResourceNormal, ExpireAt: now.Add(time.Hour), CredentialRevision: 1})
+	}
+	require.NoError(t, db.CreateInBatches(roots, 100).Error)
+	require.NoError(t, db.CreateInBatches(resources, 100).Error)
+	_, err = s.ApplyOwnedICloudBatchByFilter(ctx, 7, AdminICloudDelete, AdminICloudResourceListFilter{Suffix: "large.test"}, "oversized", "req", "/test")
+	require.ErrorIs(t, err, ErrICloudResourceSelection)
+	require.NoError(t, db.Model(&iCloudResourceModel{}).Where("id >= ? AND status = ?", 10000, iCloudResourceNormal).Count(&untouched).Error)
+	require.EqualValues(t, adminICloudBatchMax+1, untouched)
 }

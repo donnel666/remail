@@ -190,16 +190,28 @@ func (h *handler) ownedBatch(c *gin.Context) {
 	var input struct {
 		Command   AdminICloudCommand       `json:"command"`
 		Resources []OwnedICloudCommandItem `json:"resources"`
+		Filter    *struct {
+			AdminICloudResourceListFilter
+			Suffix string `json:"suffix"`
+		} `json:"filter"`
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 128<<10)
-	if c.ShouldBindJSON(&input) != nil {
+	if c.ShouldBindJSON(&input) != nil || (input.Filter != nil && input.Resources != nil) {
 		writeICloudError(c, ErrICloudResourceQuery)
 		return
 	}
 	if !ownedICloudPublishAllowed(c, input.Command) {
 		return
 	}
-	result, err := h.service.ApplyOwnedICloudBatch(c.Request.Context(), userID, input.Command, input.Resources, c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath())
+	var result *AdminICloudBulkResult
+	var err error
+	if input.Filter != nil {
+		filter := input.Filter.AdminICloudResourceListFilter
+		filter.Suffix = input.Filter.Suffix
+		result, err = h.service.ApplyOwnedICloudBatchByFilter(c.Request.Context(), userID, input.Command, filter, c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath())
+	} else {
+		result, err = h.service.ApplyOwnedICloudBatch(c.Request.Context(), userID, input.Command, input.Resources, c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c), c.FullPath())
+	}
 	if err != nil {
 		writeICloudError(c, err)
 		return

@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
+	coreapp "github.com/donnel666/remail/internal/core/app"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -36,7 +38,17 @@ type OwnedICloudResourceList struct {
 	Total  int64                     `json:"total"`
 	Offset int                       `json:"offset"`
 	Limit  int                       `json:"limit"`
-	Facets AdminICloudResourceFacets `json:"facets"`
+	Facets OwnedICloudResourceFacets `json:"facets"`
+}
+
+type OwnedICloudResourceFacets struct {
+	AdminICloudResourceFacets
+	Suffixes []OwnedICloudSuffixFacet `json:"suffixes"`
+}
+
+type OwnedICloudSuffixFacet struct {
+	Key   string `json:"key"`
+	Count int64  `json:"count"`
 }
 
 type OwnedICloudImportTask struct {
@@ -71,6 +83,10 @@ func (s *Service) ListOwnedICloudResources(ctx context.Context, userID uint, fil
 		return nil, ErrICloudResourceQuery
 	}
 	filter.OwnerUserID = userID
+	filter, err := normalizeAdminICloudResourceFilter(filter)
+	if err != nil {
+		return nil, err
+	}
 	list, err := s.ListAdminICloudResources(ctx, filter)
 	if err != nil {
 		return nil, err
@@ -82,7 +98,15 @@ func (s *Service) ListOwnedICloudResources(ctx context.Context, userID uint, fil
 			SelectedForwardTo: resource.SelectedForwardTo, ExpireAt: resource.ExpireAt,
 			CreatedAt: resource.CreatedAt, UpdatedAt: resource.UpdatedAt, LastSafeError: resource.LastSafeError}
 	}
-	return &OwnedICloudResourceList{Items: items, Total: list.Total, Offset: list.Offset, Limit: list.Limit, Facets: list.Facets}, nil
+	filter.Suffix = ""
+	suffixes := []OwnedICloudSuffixFacet{}
+	suffix := "LOWER(SUBSTR(ir.primary_email, INSTR(ir.primary_email, '@') + 1))"
+	if err := s.applyAdminICloudResourceFilter(s.adminICloudResourceQuery(ctx), filter, adminICloudFilterIgnore{}).
+		Select(suffix + " AS `key`, COUNT(*) AS count").Group(suffix).Order("count DESC, `key` ASC").Scan(&suffixes).Error; err != nil {
+		return nil, ErrICloudResourceQueryTemporary
+	}
+	return &OwnedICloudResourceList{Items: items, Total: list.Total, Offset: list.Offset, Limit: list.Limit,
+		Facets: OwnedICloudResourceFacets{AdminICloudResourceFacets: list.Facets, Suffixes: suffixes}}, nil
 }
 
 func (s *Service) AcceptOwnedICloudImport(ctx context.Context, userID uint, content []byte, key, requestID, path string) (*OwnedICloudImportView, bool, error) {
@@ -142,9 +166,17 @@ type OwnedICloudCommandItem struct {
 	Version uint64 `json:"version"`
 }
 
+func (s *Service) ApplyOwnedICloudBatchByFilter(ctx context.Context, userID uint, command AdminICloudCommand, filter AdminICloudResourceListFilter, key, requestID, path string) (*AdminICloudBulkResult, error) {
+	filter.OwnerUserID = userID
+	filter, err := normalizeAdminICloudResourceFilter(filter)
+	if err != nil {
+		return nil, err
+	}
+	return s.applyOwnedICloudBatch(ctx, userID, command, nil, &filter, key, requestID, path)
+}
+
 func (s *Service) ApplyOwnedICloudBatch(ctx context.Context, userID uint, command AdminICloudCommand, items []OwnedICloudCommandItem, key, requestID, path string) (*AdminICloudBulkResult, error) {
-	if userID == 0 || len(items) == 0 || len(items) > adminICloudBatchMax || len(strings.TrimSpace(key)) == 0 || len(key) > 80 ||
-		(command != AdminICloudValidate && command != AdminICloudPublish && command != AdminICloudDelete) {
+	if len(items) == 0 || len(items) > adminICloudBatchMax {
 		return nil, ErrICloudResourceQuery
 	}
 	seen := make(map[uint]bool, len(items))
@@ -154,26 +186,85 @@ func (s *Service) ApplyOwnedICloudBatch(ctx context.Context, userID uint, comman
 		}
 		seen[item.ID] = true
 	}
-	result := &AdminICloudBulkResult{Requested: len(items), AffectedResourceIDs: []uint{}, SkippedResourceIDs: []uint{}}
-	reasons := make(map[string]int64)
-	for _, item := range items {
-		changed, err := s.ApplyOwnedICloudCommand(ctx, userID, command, item.ID, item.Version, fmt.Sprintf("%s:%d", key, item.ID), requestID, path)
-		if err != nil {
-			reason := adminICloudSkipReason(err)
-			if errors.Is(err, ErrICloudResourceVersion) {
-				reason = "version_conflict"
-			}
-			if reason == "" {
-				return nil, err
-			}
-			appendAdminICloudSkip(result, reasons, item.ID, reason)
-		} else if !changed.Changed {
-			appendAdminICloudSkip(result, reasons, item.ID, "already_target")
-		} else {
-			result.AffectedResourceIDs = append(result.AffectedResourceIDs, item.ID)
-		}
+	items = append([]OwnedICloudCommandItem(nil), items...)
+	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+	return s.applyOwnedICloudBatch(ctx, userID, command, items, nil, key, requestID, path)
+}
+
+func (s *Service) applyOwnedICloudBatch(ctx context.Context, userID uint, command AdminICloudCommand, items []OwnedICloudCommandItem, filter *AdminICloudResourceListFilter, key, requestID, path string) (*AdminICloudBulkResult, error) {
+	key = strings.TrimSpace(key)
+	if s == nil || s.db == nil || s.operationLogs == nil || userID == 0 || key == "" || len(key) > 80 ||
+		(command != AdminICloudValidate && command != AdminICloudPublish && command != AdminICloudDelete) {
+		return nil, ErrICloudResourceQuery
 	}
-	result.Affected, result.Skipped = len(result.AffectedResourceIDs), len(result.SkippedResourceIDs)
-	result.ReasonCounts = adminICloudReasonCounts(reasons)
+	fingerprintValue := any(items)
+	if filter != nil {
+		fingerprintValue = struct {
+			AdminICloudResourceListFilter
+			Suffix string `json:"suffix"`
+		}{*filter, filter.Suffix}
+	}
+	fingerprint, err := adminICloudCommandFingerprint(fingerprintValue)
+	if err != nil {
+		return nil, ErrICloudResourceQueryTemporary
+	}
+	receipt := coreapp.AdminResourceCommandReceipt{
+		OperatorUserID: userID, IdempotencyKey: key,
+		Operation: "icloud.resource." + string(command) + "_batch", Subject: "icloud_resources:" + fingerprint,
+		RequestFingerprint: fingerprint,
+	}
+	result := &AdminICloudBulkResult{AffectedResourceIDs: []uint{}, SkippedResourceIDs: []uint{}, ReasonCounts: []AdminICloudReasonCount{}}
+	replayed := false
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		replayed, err = s.reserveAdminICloudCommand(ctx, tx, receipt, result)
+		if err != nil || replayed {
+			return err
+		}
+		scoped := *s
+		scoped.db = tx
+		// Dispatch only after the outer batch transaction commits.
+		scoped.queue = nil
+		if filter != nil {
+			if err := scoped.applyAdminICloudResourceFilter(scoped.adminICloudResourceQuery(ctx), *filter, adminICloudFilterIgnore{}).
+				Select("ir.id, er.version").Order("ir.id ASC").Limit(adminICloudBatchMax + 1).Scan(&items).Error; err != nil {
+				return err
+			}
+			if len(items) > adminICloudBatchMax {
+				return ErrICloudResourceSelection
+			}
+		}
+		result.Requested = len(items)
+		reasons := make(map[string]int64)
+		for _, item := range items {
+			changed, err := scoped.ApplyOwnedICloudCommand(ctx, userID, command, item.ID, item.Version, fmt.Sprintf("%s:%d", key, item.ID), requestID, path)
+			if err != nil {
+				reason := adminICloudSkipReason(err)
+				if errors.Is(err, ErrICloudResourceVersion) {
+					reason = "version_conflict"
+				}
+				if reason == "" {
+					return err
+				}
+				appendAdminICloudSkip(result, reasons, item.ID, reason)
+			} else if !changed.Changed {
+				appendAdminICloudSkip(result, reasons, item.ID, "already_target")
+			} else {
+				result.AffectedResourceIDs = append(result.AffectedResourceIDs, item.ID)
+			}
+		}
+		result.Affected, result.Skipped = len(result.AffectedResourceIDs), len(result.SkippedResourceIDs)
+		result.ReasonCounts = adminICloudReasonCounts(reasons)
+		return s.completeAdminICloudCommand(ctx, tx, userID, key, result)
+	})
+	if errors.Is(err, ErrICloudImportConflict) {
+		return nil, err
+	}
+	if err != nil {
+		return nil, normalizeAdminICloudCommandError(err)
+	}
+	if !replayed && result.Affected > 0 && commandQueuesICloudValidation(command) {
+		_ = s.ScheduleICloudValidationDispatcher(context.WithoutCancel(ctx), 0)
+	}
 	return result, nil
 }

@@ -11336,10 +11336,11 @@ type OrderStatusFacets struct {
 	Refunded       int64 `json:"refunded"`
 }
 
-// OwnedICloudBatchCommand defines model for OwnedICloudBatchCommand.
+// OwnedICloudBatchCommand Supply exactly one of resources or filter. Filter commands affect at most 1000 matching resources owned by the current user; larger selections are rejected without changes.
 type OwnedICloudBatchCommand struct {
 	Command   OwnedICloudBatchCommandCommand `json:"command"`
-	Resources []OwnedICloudCommandItem       `json:"resources"`
+	Filter    *OwnedICloudResourceFilter     `json:"filter,omitempty"`
+	Resources *[]OwnedICloudCommandItem      `json:"resources,omitempty"`
 }
 
 // OwnedICloudBatchCommandCommand defines model for OwnedICloudBatchCommand.Command.
@@ -11354,6 +11355,13 @@ type OwnedICloudCommand struct {
 type OwnedICloudCommandItem struct {
 	Id      int `json:"id"`
 	Version int `json:"version"`
+}
+
+// OwnedICloudFacets defines model for OwnedICloudFacets.
+type OwnedICloudFacets struct {
+	ForSale  AdminMicrosoftBooleanFacet  `json:"forSale"`
+	Status   AdminICloudStatusFacet      `json:"status"`
+	Suffixes []AdminMicrosoftSuffixFacet `json:"suffixes"`
 }
 
 // OwnedICloudImport defines model for OwnedICloudImport.
@@ -11396,9 +11404,19 @@ type OwnedICloudResource struct {
 	Version           int                       `json:"version"`
 }
 
+// OwnedICloudResourceFilter defines model for OwnedICloudResourceFilter.
+type OwnedICloudResourceFilter struct {
+	CreatedFrom *time.Time                 `json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time                 `json:"createdTo,omitempty"`
+	ForSale     *bool                      `json:"forSale,omitempty"`
+	Search      *string                    `json:"search,omitempty"`
+	Status      *AdminICloudResourceStatus `json:"status,omitempty"`
+	Suffix      *string                    `json:"suffix,omitempty"`
+}
+
 // OwnedICloudResourceList defines model for OwnedICloudResourceList.
 type OwnedICloudResourceList struct {
-	Facets AdminICloudFacets     `json:"facets"`
+	Facets OwnedICloudFacets     `json:"facets"`
 	Items  []OwnedICloudResource `json:"items"`
 	Limit  int                   `json:"limit"`
 	Offset int                   `json:"offset"`

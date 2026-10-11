@@ -42,3 +42,10 @@ export async function applyICloudCommand(command: ICloudCommand, resources: Pick
     body: { command, resources: resources.map(({ id, version }) => ({ id, version })) },
   }));
 }
+
+export async function applyICloudCommandByFilter(command: ICloudCommand, filter: Omit<ICloudListQuery, "offset" | "limit">) {
+  return unwrap(await apiClient.POST("/v1/icloud/resources/actions", {
+    params: { header: { ...csrfHeader(), "Idempotency-Key": generateIdempotencyKey() } },
+    body: { command, filter },
+  }));
+}

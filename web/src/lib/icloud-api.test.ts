@@ -6,10 +6,23 @@ vi.mock("./api-client", async (importOriginal) => {
   const { default: createClient } = await import("openapi-fetch");
   return { ...actual, apiClient: createClient({ baseUrl: "https://remail.test", fetch: (request: Request) => globalThis.fetch(request) }) };
 });
-import { applyICloudCommand, getICloudImport, importICloudResources, listICloudResources } from "./icloud-api";
+import { applyICloudCommand, applyICloudCommandByFilter, getICloudImport, importICloudResources, listICloudResources } from "./icloud-api";
 
 describe("owned Apple API", () => {
   afterEach(() => vi.unstubAllGlobals());
+  it("sends the whole filter through the owned batch endpoint with write protection", async () => {
+    const requests: Request[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (request: Request) => {
+      requests.push(request);
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+    document.cookie = "csrf_token=csrf";
+    await applyICloudCommandByFilter("delete", { suffix: "outlook.com", status: "abnormal", forSale: false });
+    expect(requests[0].url).toBe("https://remail.test/v1/icloud/resources/actions");
+    expect(requests[0].headers.get("X-CSRF-Token")).toBe("csrf");
+    expect(requests[0].headers.get("Idempotency-Key")).toBeTruthy();
+    expect(await requests[0].json()).toEqual({ command: "delete", filter: { suffix: "outlook.com", status: "abnormal", forSale: false } });
+  });
   it("uploads only the file and protects writes with CSRF and idempotency", async () => {
     const requests: Request[] = [];
     vi.stubGlobal("fetch", vi.fn(async (request: Request) => {

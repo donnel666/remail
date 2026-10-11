@@ -13,6 +13,7 @@ vi.mock("@douyinfe/semi-ui", () => ({
   Modal: ({ children, footer }: { children: ReactNode; footer: ReactNode }) => <div>{children}{footer}</div>,
   Space: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   TextArea: ({ value, onChange, ...props }: { value: string; onChange: (value: string) => void }) => <textarea {...props} value={value} onChange={(event) => onChange(event.target.value)} />,
+  Typography: { Text: ({ children }: { children: ReactNode }) => <span>{children}</span> },
   Toast: { success: mocks.success, error: mocks.error, info: mocks.info },
 }));
 import { ImportICloudEmailsModal } from "./import-icloud-emails-modal";
@@ -27,17 +28,30 @@ describe("console Apple imports", () => {
   afterEach(() => { cleanup(); vi.useRealTimers(); });
 
   it.each(["apple@example.com----password", content + "----invite", "apple@example.com----password----1234567", "apple@example.com----password----file:///tmp/code", "apple@example.com----password----https://user:secret@example.com/code"])("rejects unsupported fields before uploading: %s", async (input) => {
-    render(<ImportICloudEmailsModal onClose={vi.fn()} onAccepted={vi.fn()} />);
+    render(<ImportICloudEmailsModal open onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
     enter(input); submit();
     await waitFor(() => expect(mocks.error).toHaveBeenCalled());
     expect(mocks.upload).not.toHaveBeenCalled();
     expect(mocks.turnstile).not.toHaveBeenCalled();
   });
 
+  it("uses the file entry panel and clears the other input mode", () => {
+    render(<ImportICloudEmailsModal open onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
+    enter(content);
+    fireEvent.click(screen.getByRole("button", { name: "TXT file" }));
+    const file = new File([content], "accounts.txt", { type: "text/plain" });
+    fireEvent.drop(screen.getByRole("button", { name: /Click to select or drag file here/ }), { dataTransfer: { files: [file] } });
+    expect(screen.getByText("accounts.txt")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Import" }).hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Manual input" }));
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "TXT file" }));
+    expect(screen.queryByText("accounts.txt")).toBeNull();
+  });
   it("has no expiry selector and reuses the upload key after a lost response", async () => {
     const onAccepted = vi.fn();
     mocks.upload.mockRejectedValueOnce(new Error("Network error"));
-    render(<ImportICloudEmailsModal onClose={vi.fn()} onAccepted={onAccepted} />);
+    render(<ImportICloudEmailsModal open onOpenChange={vi.fn()} onSuccess={onAccepted} />);
     expect(screen.queryByRole("combobox")).toBeNull();
     expect(screen.getByText("Apple import lifetime")).toBeTruthy();
     enter(content); submit();
@@ -55,7 +69,7 @@ describe("console Apple imports", () => {
     vi.useFakeTimers();
     const onAccepted = vi.fn();
     mocks.progress.mockResolvedValue({ ...accepted, status: "failed", failed: 1, tasks: [{ ...accepted.tasks[0], status: "failed", lastSafeError: "Apple rejected the password." }] });
-    render(<ImportICloudEmailsModal onClose={vi.fn()} onAccepted={onAccepted} />);
+    render(<ImportICloudEmailsModal open onOpenChange={vi.fn()} onSuccess={onAccepted} />);
     enter(content);
     await act(async () => { submit(); });
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
@@ -69,12 +83,28 @@ describe("console Apple imports", () => {
   it("aborts pending progress requests when the dialog unmounts", async () => {
     vi.useFakeTimers();
     mocks.progress.mockReturnValue(new Promise(() => undefined));
-    const { unmount } = render(<ImportICloudEmailsModal onClose={vi.fn()} onAccepted={vi.fn()} />);
+    const { unmount } = render(<ImportICloudEmailsModal open onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
     enter(content);
     await act(async () => { submit(); });
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
     const signal = mocks.progress.mock.calls[0][1] as AbortSignal;
     unmount();
     expect(signal.aborted).toBe(true);
+  });
+
+  it("clears the previous import and cancels polling when closed and reopened", async () => {
+    vi.useFakeTimers();
+    mocks.progress.mockReturnValue(new Promise(() => undefined));
+    const props = { onOpenChange: vi.fn(), onSuccess: vi.fn() };
+    const { rerender } = render(<ImportICloudEmailsModal open {...props} />);
+    enter(content);
+    await act(async () => { submit(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    const signal = mocks.progress.mock.calls[0][1] as AbortSignal;
+    rerender(<ImportICloudEmailsModal open={false} {...props} />);
+    expect(signal.aborted).toBe(true);
+    rerender(<ImportICloudEmailsModal open {...props} />);
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
+    expect(screen.queryByText("apple@example.com")).toBeNull();
   });
 });
