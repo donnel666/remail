@@ -444,7 +444,7 @@ func (f *appleOnboardingFlow) headers(rawURL string, html, profile, sendHashcash
 		if f.state.OAuthContext != "" {
 			headers["X-Apple-OAuth-Context"] = f.state.OAuthContext
 		}
-		if token := firstNonEmpty(f.state.RepairToken, f.state.SessionToken); token != "" {
+		if token := firstNonEmpty(f.state.SessionToken, f.state.RepairToken); token != "" {
 			headers["X-Apple-Session-Token"] = token
 		}
 	}

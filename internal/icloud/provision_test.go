@@ -1973,7 +1973,7 @@ func TestAppendICloudProvisionSafeErrorKeepsBothChannels(t *testing.T) {
 	}
 }
 
-func TestICloudProvisionStopsDueFamilySyncWhenFamilySessionInvalid(t *testing.T) {
+func TestICloudProvisionRetriesFamilySessionWithoutBypassingHMECooldown(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:icloud-provision-family-park?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -2008,13 +2008,22 @@ func TestICloudProvisionStopsDueFamilySyncWhenFamilySessionInvalid(t *testing.T)
 	if err := db.First(&resource, 1).Error; err != nil {
 		t.Fatal(err)
 	}
-	if resource.FamilyNextSyncAt != nil || iCloudFamilySyncDue(resource, now) {
-		t.Fatalf("invalid family session stayed scheduled: %#v", resource)
+	retryAt := now.Add(iCloudProvisionRetry)
+	if resource.FamilyNextSyncAt == nil || !resource.FamilyNextSyncAt.Equal(retryAt) ||
+		iCloudFamilySyncDue(resource, now) || !iCloudFamilySyncDue(resource, retryAt) {
+		t.Fatalf("family session did not get an independent delayed retry: %#v", resource)
 	}
 	if resource.FamilySyncStatus != iCloudFamilySyncFailed || resource.FamilySyncErrorCategory != "session_invalid" {
 		t.Fatalf("invalid family session failure was not recorded: %#v", resource)
 	}
-	if resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(cooldown) {
-		t.Fatalf("resource was not rescheduled at the probe cooldown: %#v", resource)
+	if resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(retryAt) {
+		t.Fatalf("resource was not rescheduled for the family retry: %#v", resource)
+	}
+	var channel iCloudResourceChannelModel
+	if err := db.Where("resource_id = ? AND kind = ?", 1, iCloudChannelWeb).First(&channel).Error; err != nil {
+		t.Fatal(err)
+	}
+	if channel.CooldownUntil == nil || !channel.CooldownUntil.Equal(cooldown) || channel.SessionFailures != iCloudSessionFailureLimit {
+		t.Fatalf("family retry changed the HME cooldown: %#v", channel)
 	}
 }

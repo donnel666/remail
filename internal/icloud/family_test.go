@@ -342,21 +342,38 @@ func TestICloudPrimaryFamilySyncSelectsFamilyCookiesWithoutRestartingWebLogin(t 
 		appleCookie  string
 		webSetup     string
 		status       int
+		firstStatus  int
+		firstHeader  http.Header
 		body         string
 		wantCookies  string
 		wantStatus   string
 		wantCategory string
+		wantRetry    time.Duration
 	}{
 		{name: "management cookie", appleCookie: "myacinfo=management", status: http.StatusOK, body: testICloudPrimaryFamilyResponse,
 			wantCookies: "myacinfo=management", wantStatus: iCloudFamilySyncReady},
-		{name: "no family cookie", wantStatus: iCloudFamilySyncFailed, wantCategory: "session_invalid"},
+		{name: "no family cookie", wantStatus: iCloudFamilySyncFailed, wantCategory: "session_invalid", wantRetry: iCloudProvisionRetry},
 		{name: "family rejected", appleCookie: "myacinfo=management", status: http.StatusUnauthorized, body: `{}`,
-			wantCookies: "myacinfo=management", wantStatus: iCloudFamilySyncFailed, wantCategory: "session_invalid"},
+			wantCookies: "myacinfo=management", wantStatus: iCloudFamilySyncFailed, wantCategory: "session_invalid", wantRetry: iCloudProvisionRetry},
 		{name: "family identity mismatch", appleCookie: "myacinfo=management", status: http.StatusOK,
 			body:        strings.ReplaceAll(testICloudPrimaryFamilyResponse, "primary@example.com", "other@example.com"),
 			wantCookies: "myacinfo=management", wantStatus: iCloudFamilySyncFailed, wantCategory: "family_identity_mismatch"},
 		{name: "fallback family cookie", appleCookie: "myacinfo=stale", webSetup: "myacinfo=legacy-family", status: http.StatusOK, body: testICloudPrimaryFamilyResponse,
 			wantCookies: "myacinfo=stale,myacinfo=legacy-family", wantStatus: iCloudFamilySyncReady},
+		{name: "transient failure fallback", appleCookie: "myacinfo=management", webSetup: "myacinfo=legacy-family", firstStatus: http.StatusServiceUnavailable,
+			status: http.StatusOK, body: testICloudPrimaryFamilyResponse, wantCookies: "myacinfo=management,myacinfo=legacy-family", wantStatus: iCloudFamilySyncReady},
+		{name: "transient error survives rejected fallback", appleCookie: "myacinfo=management", webSetup: "myacinfo=legacy-family", firstStatus: http.StatusServiceUnavailable,
+			status: http.StatusUnauthorized, body: `{}`, wantCookies: "myacinfo=management,myacinfo=legacy-family",
+			wantStatus: iCloudFamilySyncFailed, wantCategory: "provider_unavailable", wantRetry: iCloudProvisionRetry},
+		{name: "rate limit stops fallback", appleCookie: "myacinfo=management", webSetup: "myacinfo=legacy-family", firstStatus: http.StatusTooManyRequests,
+			firstHeader: http.Header{"Retry-After": {"1200"}}, status: http.StatusOK, body: testICloudPrimaryFamilyResponse,
+			wantCookies: "myacinfo=management", wantStatus: iCloudFamilySyncFailed, wantCategory: "rate_limited", wantRetry: 20 * time.Minute},
+		{name: "provider retry delay stops fallback", appleCookie: "myacinfo=management", webSetup: "myacinfo=legacy-family", firstStatus: http.StatusServiceUnavailable,
+			firstHeader: http.Header{"Retry-After": {"1200"}}, status: http.StatusOK, body: testICloudPrimaryFamilyResponse,
+			wantCookies: "myacinfo=management", wantStatus: iCloudFamilySyncFailed, wantCategory: "provider_unavailable", wantRetry: 20 * time.Minute},
+		{name: "exhausted proxy stops fallback", appleCookie: "myacinfo=management", webSetup: "myacinfo=legacy-family", firstStatus: http.StatusServiceUnavailable,
+			firstHeader: http.Header{appleProxyRetryExhaustedHeader: {"1"}}, status: http.StatusOK, body: testICloudPrimaryFamilyResponse,
+			wantCookies: "myacinfo=management", wantStatus: iCloudFamilySyncFailed, wantCategory: "provider_unavailable"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -405,7 +422,11 @@ func TestICloudPrimaryFamilySyncSelectsFamilyCookiesWithoutRestartingWebLogin(t 
 				if cookie == "myacinfo=stale" {
 					status = http.StatusUnauthorized
 				}
-				return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(test.body))}, nil
+				header := make(http.Header)
+				if len(cookies) == 1 && test.firstStatus != 0 {
+					status, header = test.firstStatus, test.firstHeader
+				}
+				return &http.Response{StatusCode: status, Header: header, Body: io.NopCloser(strings.NewReader(test.body))}, nil
 			})})
 			if err := service.ProcessICloudProvision(ctx, iCloudProvisionTask{ResourceID: task.ResourceID}); err != nil {
 				t.Fatal(err)
@@ -417,9 +438,21 @@ func TestICloudPrimaryFamilySyncSelectsFamilyCookiesWithoutRestartingWebLogin(t 
 			if err := db.First(&resource, task.ResourceID).Error; err != nil {
 				t.Fatal(err)
 			}
+			wantNext := keepalive
+			if test.wantRetry > 0 {
+				retryAt := now.Add(test.wantRetry)
+				if resource.FamilyNextSyncAt == nil || !resource.FamilyNextSyncAt.Equal(retryAt) {
+					t.Fatalf("family retry schedule = %v, want %v", resource.FamilyNextSyncAt, retryAt)
+				}
+				if retryAt.Before(wantNext) {
+					wantNext = retryAt
+				}
+			} else if test.wantStatus == iCloudFamilySyncFailed && resource.FamilyNextSyncAt != nil {
+				t.Fatalf("terminal family failure was retried: %v", resource.FamilyNextSyncAt)
+			}
 			if resource.FamilySyncStatus != test.wantStatus || resource.FamilySyncErrorCategory != test.wantCategory ||
 				resource.Status != iCloudResourceNormal || resource.WorkflowTaskKind != "" || resource.OnboardingStatus != "" ||
-				resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(keepalive) {
+				resource.NextProvisionAt == nil || !resource.NextProvisionAt.Equal(wantNext) {
 				t.Fatalf("family sync restarted Cookie recovery or changed provisioning: %#v", resource)
 			}
 			var stored []iCloudResourceChannelModel
@@ -433,6 +466,76 @@ func TestICloudPrimaryFamilySyncSelectsFamilyCookiesWithoutRestartingWebLogin(t 
 				}
 			}
 		})
+	}
+}
+
+func TestICloudPrimaryFamilySyncRecoversAfterManagementKeepalive(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 10, 11, 2, 0, 0, 0, time.UTC)
+	startedAt := now
+	appleKeepalive, webKeepalive := now.Add(time.Minute), now.Add(30*time.Minute)
+	db := openICloudFamilyTestDB(t, "family-cookie-renewal")
+	resource := iCloudResourceModel{
+		ID: 1, ResourceType: "icloud", PrimaryEmail: "primary@example.com", AccountRole: "primary",
+		Status: iCloudResourceNormal, FamilySyncStatus: iCloudFamilySyncUnknown, ExpireAt: now.Add(2 * time.Hour),
+		AliasCount: 3, NextProvisionAt: &now, CredentialRevision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&resource).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&[]iCloudResourceChannelModel{
+		{ResourceID: 1, Kind: iCloudChannelAppleAccount, Host: "appleid.apple.com", Cookie: "myacinfo=old", Scnt: "scnt", APIKey: "key", SessionStatus: iCloudSessionValid,
+			NextKeepaliveAt: &appleKeepalive, ProvisionWindowAt: &startedAt, ProvisionWindowCount: 20, CreatedAt: now, UpdatedAt: now},
+		{ResourceID: 1, Kind: iCloudChannelWeb, Cookie: testICloudOldCookie, SetupCookie: testICloudOldCookie, SessionStatus: iCloudSessionValid,
+			NextKeepaliveAt: &webKeepalive, ProvisionWindowAt: &startedAt, ProvisionWindowCount: 5, CreatedAt: now, UpdatedAt: now},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(db, nil, nil)
+	service.now = func() time.Time { return now }
+	familyCalls := 0
+	service.family = newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		familyCalls++
+		status, body := http.StatusUnauthorized, `{}`
+		if strings.Contains(request.Header.Get("Cookie"), "myacinfo=fresh") {
+			status, body = http.StatusOK, testICloudPrimaryFamilyResponse
+		}
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+	})})
+	service.apple = NewAppleAccountClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		header := make(http.Header)
+		body := `{}`
+		switch request.URL.Path {
+		case appleAccountTokenPath:
+			body = `{"timeOutInterval":15}`
+			header.Set("scnt", "renewed-scnt")
+			header.Set("Set-Cookie", "myacinfo=fresh; Domain=.apple.com; Path=/")
+		case "/account/manage":
+			body = `{"apiKey":"renewed-key"}`
+		case appleAccountPrivateEmailPath:
+			body = `{"privateEmailList":[],"inactivePrivateEmailList":[],"forwardToEmailAddress":"mailbox@relay.example","maxLimitReached":false}`
+		default:
+			t.Fatalf("unexpected Apple request: %s", request.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})})
+	service.hme = NewHMEClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("Web keepalive is not due")
+		return nil, nil
+	})})
+	for _, elapsed := range []time.Duration{0, time.Minute, iCloudProvisionRetry} {
+		now = startedAt.Add(elapsed)
+		if err := service.ProcessICloudProvision(ctx, iCloudProvisionTask{ResourceID: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var stored iCloudResourceModel
+	if err := db.First(&stored, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if familyCalls != 2 || stored.FamilySyncStatus != iCloudFamilySyncReady || stored.FamilySyncErrorCategory != "" ||
+		stored.WorkflowTaskKind != "" || stored.Status != iCloudResourceNormal || stored.FamilyNextSyncAt == nil {
+		t.Fatalf("family sync did not recover after normal management keepalive: calls=%d resource=%#v", familyCalls, stored)
 	}
 }
 

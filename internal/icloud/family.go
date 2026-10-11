@@ -288,6 +288,7 @@ func (s *Service) syncICloudPrimaryFamilyScheduled(ctx context.Context, resource
 		client = newRoutedICloudFamilyClient(s.appleRoutes)
 	}
 	var snapshot iCloudFamilySnapshot
+	var deferredErr error
 	err = &iCloudFamilyError{Category: "session_invalid", SafeMessage: "iCloud family session is invalid."}
 	// FamilyWS requires myacinfo/caw; an authenticated HME Cookie alone cannot be used.
 	for _, channel := range channels {
@@ -295,12 +296,28 @@ func (s *Service) syncICloudPrimaryFamilyScheduled(ctx context.Context, resource
 			continue
 		}
 		snapshot, err = client.fetch(ctx, channel)
+		if err == nil {
+			break
+		}
 		var providerErr *iCloudFamilyError
-		if err == nil || !errors.As(err, &providerErr) || providerErr.Category != "session_invalid" {
+		if errors.As(err, &providerErr) {
+			if providerErr.Category == "rate_limited" || providerErr.RetryAfter > 0 || providerErr.ProxyRetryExhausted {
+				deferredErr = err
+				break
+			}
+			if providerErr.Category == "session_invalid" {
+				continue
+			}
+		}
+		deferredErr = err
+		if ctx.Err() != nil {
 			break
 		}
 	}
 	if err != nil {
+		if deferredErr != nil {
+			err = deferredErr
+		}
 		category := "provider_unavailable"
 		retryable := true
 		retryAt := time.Time{}
@@ -309,7 +326,7 @@ func (s *Service) syncICloudPrimaryFamilyScheduled(ctx context.Context, resource
 			if strings.TrimSpace(providerErr.Category) != "" {
 				category = providerErr.Category
 			}
-			retryable = providerErr.Retryable
+			retryable = !providerErr.ProxyRetryExhausted && (providerErr.Retryable || providerErr.Category == "session_invalid")
 			if retryable {
 				delay := providerErr.RetryAfter
 				if delay <= 0 {

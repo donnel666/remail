@@ -196,6 +196,43 @@ func TestAppleOnboardingICloudVerificationKeepsTokenPurposesSeparate(t *testing.
 	}
 }
 
+func TestAppleOnboardingEnrollmentUsesUpdatedSessionToken(t *testing.T) {
+	session := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{
+		{status: http.StatusOK, body: `{}`, header: http.Header{"X-Apple-Session-Token": {"upgrade-session"}}},
+		{status: http.StatusUnavailableForLegalReasons, body: `{"questions":[{"id":1,"question":"First question?"}]}`,
+			header: http.Header{"X-Apple-Session-Token": {"question-session"}}},
+		{status: http.StatusNoContent, header: http.Header{"X-Apple-Session-Token": {"verified-session"}}},
+		{status: http.StatusOK, body: `{}`},
+	}}
+	flow, err := loadAppleOnboardingFlow(context.Background(), appleOnboardingTestClient(time.Now(), session), appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
+		state.Mode, state.RepairToken = "icloud", "repair-context"
+	}), "owner@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := flow.prepareEnrollment(iCloudOnboardingSecret{SecurityAnswers: [3]iCloudSecurityAnswer{
+		{Question: "First question?", Answer: "Answer"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	wantTokens := []string{"repair-context", "upgrade-session", "question-session", "verified-session"}
+	if len(session.requestHeaders) != len(wantTokens) {
+		t.Fatalf("unexpected enrollment requests: %v", session.requests)
+	}
+	for index, want := range wantTokens {
+		if got := session.requestHeaders[index]["X-Apple-Session-Token"]; got != want {
+			t.Fatalf("request %d reused an old enrollment token: got %q, want %q", index, got, want)
+		}
+	}
+	headers, err := flow.headers("https://idmsa.apple.com/appleauth/auth/repair/complete", false, false, false, false, false, "application/json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headers["X-Apple-Repair-Session-Token"] != "repair-context" || flow.state.SessionToken != "verified-session" {
+		t.Fatal("enrollment token updates lost the separate repair context")
+	}
+}
+
 func TestAppleOnboardingICloudLoginRejectsIncompleteAuthentication(t *testing.T) {
 	for _, mode := range []string{"icloud", "icloud_cookie"} {
 		t.Run(mode, func(t *testing.T) {
