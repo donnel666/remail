@@ -3103,5 +3103,22 @@
   "Family refresh is rate limited. Please retry later.": "家庭组查询过于频繁，请稍后重试。",
   "Device login failed. Check the account credentials and device status.": "设备登录失败，请检查账号凭据和设备状态。",
   "Unable to obtain a device verification code.": "无法获取设备验证码，请检查设备状态后重试。",
-  "Family refresh failed. Please retry.": "家庭组刷新失败，请重试。"
+  "Family refresh failed. Please retry.": "家庭组刷新失败，请重试。",
+  "Apple Emails": "苹果邮箱",
+  "Import Apple Emails": "导入苹果邮箱",
+  "Apple account entries": "苹果邮箱账号列表",
+  "Apple import prerequisites": "导入前请先完成手机号验证、设备绑定和 iCloud+ 准备。系统会自动配置并验证转发邮箱，再校验账号并创建别名。接码 URL 需能在公网直接获取验证码。",
+  "Apple import lifetime": "自动创建别名的有效期固定为导入后 30 天。",
+  "Apple import format": "邮箱----密码----接码URL",
+  "Apple import accepts up to 100 accounts and a 1 MB TXT file.": "每次最多导入 100 个账号，TXT 文件不超过 1 MB。",
+  "Apple import progress": "共 {{total}} 个，已完成 {{completed}} 个，失败 {{failed}} 个，等待中 {{waiting}} 个。",
+  "Apple import has failures": "导入处理已结束，请查看下方失败原因。",
+  "Apple import completed": "导入处理完成，账号正在校验并生成别名。",
+  "Apple resource action result": "已处理 {{affected}} 个，跳过 {{skipped}} 个。",
+  "Apple delete confirmation": "确认删除选中的 {{count}} 个苹果邮箱？已出售或正在导入的账号会被跳过。",
+  "Apple publish confirmation": "确认出售选中的 {{count}} 个苹果邮箱？只有状态正常且符合出售条件的账号会被处理。",
+  "Failed to load import progress.": "获取导入进度失败，请重试。",
+  "Please select resources first.": "请先选择邮箱资源。",
+  "Failed to load email resources.": "获取邮箱资源失败。",
+  "Forwarding email": "转发邮箱"
 }

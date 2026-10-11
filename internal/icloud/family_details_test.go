@@ -310,8 +310,8 @@ func TestFamilyDeviceLoginWorksAt750AndFencesStaleCookies(t *testing.T) {
 			defer server.Close()
 			setDeviceTestSetting(t, runtimeconfig.ICloudDeviceAPIKey, "test-key")
 			setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, server.URL)
-			s.device.http.Transport = server.Client().Transport
-			require.NoError(t, db.Model(&iCloudResourceModel{}).Where("id = 1").Update("device_code_api", server.URL+"/api/free/v4/getcode?id=1").Error)
+			configureDeviceTestServer(t, s, server)
+			require.NoError(t, db.Model(&iCloudResourceModel{}).Where("id = 1").Update("device_code_api", deviceBaseURL()+"/api/free/v4/getcode?id=1").Error)
 			require.NoError(t, db.Create(&iCloudResourceChannelModel{ResourceID: 1, Kind: iCloudChannelAppleAccount, Cookie: "myacinfo=old", SessionStatus: iCloudSessionInvalid}).Error)
 			apple := &familyDeviceTestApple{t: t, db: db, stale: stale}
 			s.onboardingApple = apple
@@ -433,8 +433,8 @@ func TestFamilyRefreshRenewsLeaseAfterQueueDelay(t *testing.T) {
 	defer server.Close()
 	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceAPIKey, "test-key")
 	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, server.URL)
-	s.device.http.Transport = server.Client().Transport
-	require.NoError(t, db.Model(&iCloudResourceModel{}).Where("id = 1").Update("device_code_api", server.URL+"/api/free/v4/getcode?id=1").Error)
+	configureDeviceTestServer(t, s, server)
+	require.NoError(t, db.Model(&iCloudResourceModel{}).Where("id = 1").Update("device_code_api", deviceBaseURL()+"/api/free/v4/getcode?id=1").Error)
 	s.onboardingApple = delayedFamilyDeviceApple{familyDeviceTestApple: &familyDeviceTestApple{t: t, db: db}, redis: red}
 	s.family = newICloudFamilyClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(familyDetailResponse))}, nil

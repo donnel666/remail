@@ -209,6 +209,15 @@ UPDATE icloud_resources SET dispatch_status = 'pending' WHERE onboarding_status 
 	require.Equal(t, governanceapp.AdminTaskStatusRunning, items[0].Status)
 	require.Equal(t, 2, items[0].Attempts)
 	require.Equal(t, &governanceapp.AdminTaskProgress{Total: 3, Processed: 2, Succeeded: 1, Failed: 1, ReasonCounts: []governanceapp.AdminTaskReasonCount{}}, items[0].Progress)
+
+	require.NoError(t, db.Exec("UPDATE icloud_resources SET task_kind = 'user_import' WHERE import_id = 23 AND task_kind = 'onboarding'").Error)
+	userItems, userTotal, _, err := NewAdminTaskViewRepo(db).ListForICloudImports(context.Background(), governanceapp.AdminTaskListFilter{
+		BizType: governanceapp.AdminTaskBizICloudResourceImport, Source: governanceapp.AdminTaskSourceICloudOnboarding,
+		Status: governanceapp.AdminTaskStatusRunning, Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Equal(t, total, userTotal)
+	require.Equal(t, items, userItems, "user import progress must remain visible in the task center")
 }
 
 func TestAdminTaskViewRepoMarksFinishedMixedICloudOnboardingAsFailed(t *testing.T) {

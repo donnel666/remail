@@ -11172,6 +11172,438 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /v1/icloud/resources:
+    get:
+      operationId: getOwnedICloudResources
+      summary: List the current user's Apple email resources
+      tags:
+      - Resources
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: search
+        in: query
+        schema:
+          type: string
+          maxLength: 320
+      - name: status
+        in: query
+        schema:
+          $ref: '#/components/schemas/AdminICloudResourceStatus'
+      - name: forSale
+        in: query
+        schema:
+          type: boolean
+      - name: createdFrom
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: createdTo
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      - name: suffix
+        in: query
+        schema:
+          type: string
+          maxLength: 253
+      responses:
+        '200':
+          description: Successful request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnedICloudResourceList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/icloud/resources/imports:
+    post:
+      operationId: postOwnedICloudImport
+      summary: Import Apple accounts into management (phase 3) only
+      tags:
+      - Resources
+      security:
+      - cookieAuth: []
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      - name: Idempotency-Key
+        in: header
+        required: true
+        description: Reuse the same key and payload when retrying this request.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 80
+      - $ref: '#/components/parameters/TurnstileToken'
+      responses:
+        '202':
+          description: Successful request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnedICloudImport'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+      description: Accepts a UTF-8 TXT file, at most 1 MiB and 100 accounts. Each nonempty line must be exactly email----password----device-code-URL.
+        The URL must be publicly reachable HTTP(S) and work without server management credentials. Ownership is the current
+        user, expiry is fixed at 30 days from acceptance, and resources remain private. Starts with account management login,
+        forwarding verification and session export, followed by resource validation and alias provisioning. Does not initialize
+        iCloud, enroll phones/devices or join a family. Reusing an idempotency key preserves the original expiry.
+      x-turnstile-action: icloud_resource_import
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+              additionalProperties: false
+  /v1/icloud/resources/imports/{importId}:
+    get:
+      operationId: getOwnedICloudImport
+      summary: Get import progress for accounts still owned by the current user
+      tags:
+      - Resources
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: importId
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      responses:
+        '200':
+          description: Successful request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnedICloudImport'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/icloud/resources/actions:
+    post:
+      operationId: postOwnedICloudActions
+      summary: Validate, publish or delete selected owned Apple resources
+      tags:
+      - Resources
+      security:
+      - cookieAuth: []
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      - name: Idempotency-Key
+        in: header
+        required: true
+        description: Reuse the same key and payload when retrying this request.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 80
+      responses:
+        '200':
+          description: Successful request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminICloudBulkResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OwnedICloudBatchCommand'
+      description: Publication requires supplier access. Published resources cannot be deleted. Resources with active onboarding
+        cannot be changed. Ineligible or stale items are skipped independently with reason counts.
+  /v1/icloud/resources/{resourceId}/aliases:
+    get:
+      operationId: getOwnedICloudAliases
+      summary: List aliases of an owned Apple resource
+      tags:
+      - Resources
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: resourceId
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      responses:
+        '200':
+          description: Successful request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminICloudAliasListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/icloud/resources/{resourceId}/validation:
+    post:
+      operationId: postOwnedICloudValidation
+      summary: Queue an owned Apple resource for validation
+      tags:
+      - Resources
+      security:
+      - cookieAuth: []
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      - name: Idempotency-Key
+        in: header
+        required: true
+        description: Reuse the same key and payload when retrying this request.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 80
+      - name: resourceId
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      responses:
+        '200':
+          description: Successful request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminICloudMutationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OwnedICloudCommand'
+  /v1/icloud/resources/{resourceId}/publish:
+    post:
+      operationId: postOwnedICloudPublish
+      summary: Publish an owned Apple resource (supplier access required)
+      tags:
+      - Resources
+      security:
+      - cookieAuth: []
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      - name: Idempotency-Key
+        in: header
+        required: true
+        description: Reuse the same key and payload when retrying this request.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 80
+      - name: resourceId
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      responses:
+        '200':
+          description: Successful request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminICloudMutationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OwnedICloudCommand'
+  /v1/icloud/resources/{resourceId}:
+    delete:
+      operationId: deleteOwnedICloudResource
+      summary: Delete an unpublished owned Apple resource
+      tags:
+      - Resources
+      security:
+      - cookieAuth: []
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      - name: Idempotency-Key
+        in: header
+        required: true
+        description: Reuse the same key and payload when retrying this request.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 80
+      - name: resourceId
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      responses:
+        '200':
+          description: Successful request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminICloudMutationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OwnedICloudCommand'
+
   /v1/admin/icloud/resources:
     get:
       operationId: getAdminICloudResources
@@ -23934,6 +24366,182 @@ components:
           format: date-time
       additionalProperties: false
 
+    OwnedICloudResource:
+      type: object
+      required:
+      - id
+      - version
+      - status
+      - forSale
+      - aliasCount
+      - selectedForwardTo
+      - expireAt
+      - createdAt
+      - updatedAt
+      - lastSafeError
+      - email
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        version:
+          type: integer
+          minimum: 1
+        status:
+          $ref: '#/components/schemas/AdminICloudResourceStatus'
+        forSale:
+          type: boolean
+        aliasCount:
+          type: integer
+          minimum: 0
+        selectedForwardTo:
+          type: string
+          description: Last Apple HME forwarding mailbox observed during validation or provisioning.
+        expireAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        lastSafeError:
+          type: string
+          nullable: true
+        email:
+          type: string
+          format: email
+      additionalProperties: false
+    OwnedICloudResourceList:
+      type: object
+      required:
+      - items
+      - total
+      - offset
+      - limit
+      - facets
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OwnedICloudResource'
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        facets:
+          $ref: '#/components/schemas/AdminICloudFacets'
+      additionalProperties: false
+    OwnedICloudImportTask:
+      type: object
+      required:
+      - id
+      - email
+      - status
+      - stage
+      - lastSafeError
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        email:
+          type: string
+          format: email
+        status:
+          type: string
+        stage:
+          type: string
+        lastSafeError:
+          type: string
+      additionalProperties: false
+    OwnedICloudImport:
+      type: object
+      required:
+      - importId
+      - status
+      - accepted
+      - completed
+      - failed
+      - waiting
+      - tasks
+      properties:
+        importId:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum:
+          - processing
+          - completed
+          - failed
+          - partial
+        accepted:
+          type: integer
+          minimum: 0
+        completed:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        waiting:
+          type: integer
+          minimum: 0
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/OwnedICloudImportTask'
+      additionalProperties: false
+    OwnedICloudCommand:
+      type: object
+      required:
+      - version
+      properties:
+        version:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+    OwnedICloudCommandItem:
+      type: object
+      required:
+      - id
+      - version
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        version:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+    OwnedICloudBatchCommand:
+      type: object
+      required:
+      - command
+      - resources
+      properties:
+        command:
+          type: string
+          enum:
+          - validate
+          - publish
+          - delete
+        resources:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/OwnedICloudCommandItem'
+      additionalProperties: false
+
     AdminICloudResourceStatus:
       type: string
       enum: [pending, validating, normal, abnormal, disabled, deleted]
@@ -24352,7 +24960,7 @@ components:
           minimum: 1
         taskKind:
           type: string
-          enum: [onboarding, refresh, cookie_recovery]
+          enum: [onboarding, user_import, refresh, cookie_recovery]
         resourceId:
           type: integer
           minimum: 1

@@ -65,6 +65,7 @@ const pageLoaders = {
   orders: () => import("./pages/Orders"),
   tickets: () => import("./pages/Tickets"),
   microsoftEmails: () => import("./pages/MicrosoftEmails"),
+  icloudEmails: () => import("./pages/ICloudEmails"),
   domainEmails: () => import("./pages/DomainEmails"),
   adminDashboard: () => import("./pages/AdminDashboard"),
   adminSystemMonitoring: () => import("./pages/AdminSystemMonitoring"),
@@ -105,6 +106,7 @@ const PaymentReturn = lazy(pageLoaders.paymentReturn);
 const Orders = lazy(pageLoaders.orders);
 const Tickets = lazy(pageLoaders.tickets);
 const MicrosoftEmails = lazy(pageLoaders.microsoftEmails);
+const ICloudEmails = lazy(pageLoaders.icloudEmails);
 const DomainEmails = lazy(pageLoaders.domainEmails);
 const AdminDashboard = lazy(pageLoaders.adminDashboard);
 const AdminSystemMonitoring = lazy(pageLoaders.adminSystemMonitoring);
@@ -140,6 +142,7 @@ const routePreloadPriority = [
   "finance",
   "wallet",
   "microsoftEmails",
+  "icloudEmails",
   "domainEmails",
   "adminDashboard",
   "adminSystemMonitoring",
@@ -197,6 +200,7 @@ const preloadRouteByLoader: Partial<Record<PageLoaderKey, string>> = {
   finance: "/finance",
   invite: "/invite",
   microsoftEmails: "/microsoft",
+  icloudEmails: "/icloud",
   orders: "/orders",
   pickup: "/pickup",
   projects: "/projects",
@@ -556,6 +560,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/orders", component: Orders }),
   createRoute({ getParentRoute: () => rootRoute, path: "/tickets", component: Tickets }),
   createRoute({ getParentRoute: () => rootRoute, path: "/microsoft", component: MicrosoftEmails }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/icloud", component: ICloudEmails }),
   createRoute({ getParentRoute: () => rootRoute, path: "/domains", component: DomainEmails }),
   createRoute({ getParentRoute: () => rootRoute, path: "/invite", component: Invite }),
   createRoute({ getParentRoute: () => rootRoute, path: "/recharge", component: Recharge }),

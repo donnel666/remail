@@ -244,7 +244,7 @@ type iCloudOnboardingExistingResource struct {
 }
 
 func isICloudOnboardingRetryablePlaceholder(resource iCloudOnboardingExistingResource) bool {
-	return firstNonEmpty(strings.TrimSpace(resource.TaskKind), "onboarding") == "onboarding" &&
+	return isICloudOnboardingTaskKind(resource.TaskKind) &&
 		resource.OnboardingStatus == iCloudOnboardingFailed && !resource.ForSale
 }
 
@@ -603,6 +603,13 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 	resourceExpireAt time.Time,
 	idempotencyKey, requestID, pathValue string,
 ) (*OnboardingImportView, bool, error) {
+	return s.acceptICloudOnboardingImport(ctx, operatorUserID, ownerUserID, content, resourceExpireAt, idempotencyKey, requestID, pathValue, false)
+}
+
+func (s *Service) acceptICloudOnboardingImport(
+	ctx context.Context, operatorUserID, ownerUserID uint, content []byte, resourceExpireAt time.Time,
+	idempotencyKey, requestID, pathValue string, userImport bool,
+) (*OnboardingImportView, bool, error) {
 	if err := s.validateICloudImportOwner(ctx, ownerUserID); err != nil {
 		return nil, false, err
 	}
@@ -613,7 +620,30 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 	if err != nil {
 		return nil, false, err
 	}
+	if userImport {
+		if len(lines) > userICloudImportMaxAccounts {
+			return nil, false, ErrICloudOnboardingInvalid
+		}
+		for _, raw := range strings.Split(strings.TrimSpace(string(content)), "\n") {
+			if strings.TrimSpace(raw) != "" && len(strings.Split(raw, "----")) != 3 {
+				return nil, false, ErrICloudOnboardingInvalid
+			}
+		}
+		for _, line := range lines {
+			if !validPublicDeviceCodeURL(line.DeviceCodeAPI) {
+				return nil, false, ErrICloudOnboardingInvalid
+			}
+		}
+	}
+	operation := "icloud.admin_account_onboarding.import"
+	if userImport {
+		operation = "icloud.account_onboarding.import"
+	}
 	fingerprint := iCloudOnboardingFingerprint(ownerUserID, resourceExpireAt, content)
+	if userImport {
+		// The server assigns expiry once; replaying an upload must not change its identity.
+		fingerprint = iCloudOnboardingFingerprint(ownerUserID, time.Time{}, content)
+	}
 	emails := make([]string, len(lines))
 	for index, line := range lines {
 		emails[index] = iCloudImportEmailKey(line.PrimaryEmail)
@@ -627,7 +657,7 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 		receipt := coreapp.AdminResourceCommandReceipt{
 			OperatorUserID:     operatorUserID,
 			IdempotencyKey:     key,
-			Operation:          "icloud.admin_account_onboarding.import",
+			Operation:          operation,
 			Subject:            fmt.Sprintf("owner:%d", ownerUserID),
 			RequestFingerprint: fingerprint,
 		}
@@ -675,8 +705,11 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 		}
 		existingByEmail := make(map[string]iCloudOnboardingExistingResource, len(existing))
 		for _, resource := range existing {
+			if userImport && resource.Status == iCloudResourceDisabled {
+				return ErrICloudResourceIdentity
+			}
 			taskKind := firstNonEmpty(strings.TrimSpace(resource.TaskKind), "onboarding")
-			activeWorkflow := (taskKind == "onboarding" || taskKind == "refresh" || taskKind == iCloudCookieRecoveryTaskKind) &&
+			activeWorkflow := (isICloudOnboardingTaskKind(taskKind) || taskKind == "refresh" || taskKind == iCloudCookieRecoveryTaskKind) &&
 				(resource.OnboardingStatus == iCloudOnboardingProcessing || resource.OnboardingStatus == iCloudOnboardingWaiting)
 			if activeWorkflow {
 				return ErrICloudResourceIdentity
@@ -684,6 +717,14 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 			retryablePlaceholder := isICloudOnboardingRetryablePlaceholder(resource)
 			if resource.OwnerUserID != ownerUserID || (resource.AccountRole != "unknown" && !retryablePlaceholder) || (resource.Status == iCloudResourceDeleted && !retryablePlaceholder) {
 				return ErrICloudResourceIdentity
+			}
+			if userImport {
+				if resource.ForSale {
+					return ErrICloudResourceStatus
+				}
+				if err := assertNoActiveAdminICloudAllocationTx(ctx, tx, resource.ID); err != nil {
+					return err
+				}
 			}
 			existingByEmail[iCloudImportEmailKey(resource.PrimaryEmail)] = resource
 		}
@@ -707,6 +748,9 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 				}
 				value := existingResource.ID
 				resourceID = &value
+			}
+			if userImport {
+				line.ICloudOpened = false
 			}
 			boundPhone := line.PhoneNumber
 			boundPhoneCountryCode := ""
@@ -757,6 +801,10 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 				task.DeviceCodeAPI, task.DeviceBindStatus = line.DeviceCodeAPI, "success"
 				task.Stage = "icloud_prepare"
 			}
+			if userImport {
+				task.TaskKind = iCloudUserImportTaskKind
+				task.Stage = "manage_prepare"
+			}
 			if task.ResourceID == nil {
 				if err := createICloudOnboardingPlaceholderTx(tx, &iCloudOnboardingImportModel{OwnerUserID: ownerUserID, ResourceExpireAt: normalizeICloudResourceExpireAt(resourceExpireAt)}, &task, line.Secret, now); err != nil {
 					if errors.Is(err, ErrICloudResourceIdentity) || isICloudDuplicateError(err) {
@@ -775,7 +823,7 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 
 				}
 				updated := tx.Model(&iCloudResourceModel{}).
-					Where("id = ? AND ((status <> ? AND account_role = ?) OR (task_kind = ? AND onboarding_status = ? AND for_sale = ?))", *task.ResourceID, iCloudResourceDeleted, "unknown", "onboarding", iCloudOnboardingFailed, false).
+					Where("id = ? AND ((status <> ? AND account_role = ?) OR (task_kind IN ? AND onboarding_status = ? AND for_sale = ?))", *task.ResourceID, iCloudResourceDeleted, "unknown", []string{"onboarding", iCloudUserImportTaskKind}, iCloudOnboardingFailed, false).
 					Updates(map[string]any{
 						"status":       gorm.Expr("CASE WHEN status = ? THEN status ELSE ? END", iCloudResourceDisabled, iCloudResourcePending),
 						"account_role": line.AccountRole, "region": line.Region, "country_code": line.CountryCode,
@@ -793,6 +841,11 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 				}
 				if updated.RowsAffected != 1 {
 					return ErrICloudResourceIdentity
+				}
+				if userImport {
+					if err := tx.Model(&iCloudResourceModel{}).Where("id = ?", *task.ResourceID).Update("expire_at", resourceExpireAt).Error; err != nil {
+						return err
+					}
 				}
 				if err := tx.Model(&iCloudRootModel{}).Where("id = ?", *task.ResourceID).
 					Updates(map[string]any{"version": gorm.Expr("version + 1"), "updated_at": now}).Error; err != nil {
@@ -833,7 +886,7 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 			return ErrICloudImportDependency
 		}
 		if err := s.operationLogs.CreateInTx(ctx, tx, &governancedomain.OperationLog{
-			OperatorUserID: operatorUserID, OperationType: "icloud.admin_account_onboarding.import",
+			OperatorUserID: operatorUserID, OperationType: operation,
 			ResourceType: "icloud_resource", ResourceID: fmt.Sprintf("icloud-onboarding:%d", batchID),
 			Path: pathValue, Result: "success", SafeSummary: fmt.Sprintf("Accepted %d Apple account onboarding tasks.", len(lines)), RequestID: requestID,
 		}); err != nil {
@@ -846,6 +899,9 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, ErrICloudResourceStatus) || errors.Is(err, ErrICloudResourceAllocation) {
+			return nil, false, err
+		}
 		if errors.Is(err, ErrICloudOnboardingConflict) {
 			return nil, false, err
 		}
@@ -877,7 +933,11 @@ func (s *Service) AcceptAdminICloudOnboardingImport(
 			return nil, false, ErrICloudOnboardingTemporary
 		}
 	}
-	view, err := s.GetAdminICloudOnboardingImport(ctx, batchID)
+	viewOwner := uint(0)
+	if userImport {
+		viewOwner = ownerUserID
+	}
+	view, err := s.getICloudOnboardingImport(ctx, batchID, viewOwner)
 	if err != nil {
 		return nil, false, err
 	}
@@ -971,13 +1031,17 @@ func persistICloudOnboardingResourceStateTx(tx *gorm.DB, task *iCloudOnboardingT
 }
 
 func (s *Service) GetAdminICloudOnboardingImport(ctx context.Context, importID uint) (*OnboardingImportView, error) {
+	return s.getICloudOnboardingImport(ctx, importID, 0)
+}
+
+func (s *Service) getICloudOnboardingImport(ctx context.Context, importID, ownerUserID uint) (*OnboardingImportView, error) {
 	if s == nil || s.db == nil || importID == 0 {
 		return nil, ErrICloudOnboardingNotFound
 	}
 	if err := s.refreshICloudOnboardingImport(ctx, importID); err != nil {
 		return nil, err
 	}
-	model, err := s.loadICloudOnboardingImport(ctx, importID)
+	model, err := s.loadICloudOnboardingImportForOwner(ctx, importID, ownerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -996,11 +1060,20 @@ func (s *Service) GetAdminICloudOnboardingImport(ctx context.Context, importID u
 // loadICloudOnboardingImport derives the old batch projection from the
 // resource rows. It intentionally has no backing import table.
 func (s *Service) loadICloudOnboardingImport(ctx context.Context, importID uint) (*iCloudOnboardingImportModel, error) {
+	return s.loadICloudOnboardingImportForOwner(ctx, importID, 0)
+}
+
+func (s *Service) loadICloudOnboardingImportForOwner(ctx context.Context, importID, ownerUserID uint) (*iCloudOnboardingImportModel, error) {
 	if importID == 0 {
 		return nil, ErrICloudOnboardingNotFound
 	}
 	var tasks []iCloudOnboardingTaskModel
-	if err := s.db.WithContext(ctx).Where("import_id = ? AND task_kind IN ?", importID, []string{"", "onboarding", "refresh", iCloudCookieRecoveryTaskKind}).Order("line_number ASC, id ASC").Find(&tasks).Error; err != nil {
+	query := s.db.WithContext(ctx).Model(&iCloudOnboardingTaskModel{}).
+		Where("import_id = ? AND task_kind IN ?", importID, []string{"", "onboarding", iCloudUserImportTaskKind, "refresh", iCloudCookieRecoveryTaskKind})
+	if ownerUserID != 0 {
+		query = query.Where("id IN (SELECT id FROM email_resources WHERE type = ? AND owner_user_id = ?)", "icloud", ownerUserID)
+	}
+	if err := query.Order("line_number ASC, id ASC").Find(&tasks).Error; err != nil {
 		return nil, ErrICloudOnboardingTemporary
 	}
 	if len(tasks) == 0 {
@@ -1068,7 +1141,7 @@ func (s *Service) GetAdminICloudOnboardingTask(ctx context.Context, taskID uint)
 	}
 	var task iCloudOnboardingTaskModel
 	if err := s.db.WithContext(ctx).
-		Where("id = ? AND (task_kind IN ? OR (task_kind = ? AND import_id IS NOT NULL))", taskID, []string{"onboarding", "refresh", iCloudCookieRecoveryTaskKind}, "").
+		Where("id = ? AND (task_kind IN ? OR (task_kind = ? AND import_id IS NOT NULL))", taskID, []string{"onboarding", iCloudUserImportTaskKind, "refresh", iCloudCookieRecoveryTaskKind}, "").
 		First(&task).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrICloudOnboardingNotFound

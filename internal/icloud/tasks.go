@@ -20,6 +20,7 @@ const (
 	typeICloudProvision            = "icloud:resource_provision"
 	typeICloudProvisionDispatcher  = "icloud:resource_provision_dispatcher"
 	typeICloudOnboarding           = "icloud:account_onboarding"
+	typeICloudUserImport           = "icloud:user_import"
 	typeICloudOnboardingDispatcher = "icloud:account_onboarding_dispatcher"
 
 	iCloudDispatcherPeriod         = 30 * time.Second
@@ -65,7 +66,7 @@ func iCloudDispatcherPayload(delay time.Duration) []byte {
 	return payload
 }
 
-func (s *Service) enqueueICloudOnboardingTask(ctx context.Context, task iCloudOnboardingTask) (bool, error) {
+func (s *Service) enqueueICloudOnboardingTask(ctx context.Context, task iCloudOnboardingTask, kind string) (bool, error) {
 	if s == nil || s.queue == nil || task.TaskID == 0 || task.Generation == 0 {
 		return false, ErrICloudOnboardingTemporary
 	}
@@ -73,7 +74,11 @@ func (s *Service) enqueueICloudOnboardingTask(ctx context.Context, task iCloudOn
 	if err != nil {
 		return false, ErrICloudOnboardingTemporary
 	}
-	_, err = s.queue.EnqueueContext(ctx, asynq.NewTask(typeICloudOnboarding, payload),
+	taskType := typeICloudOnboarding
+	if kind == iCloudUserImportTaskKind {
+		taskType = typeICloudUserImport
+	}
+	_, err = s.queue.EnqueueContext(ctx, asynq.NewTask(taskType, payload),
 		asynq.Queue(platform.QueueBackgroundICloudValidation),
 		asynq.Unique(iCloudOnboardingTaskTimeout+iCloudOnboardingActivationWait),
 		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()), asynq.Timeout(iCloudOnboardingTaskTimeout),
@@ -247,7 +252,7 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		}
 		return service.ProcessICloudLivenessCheck(ctx, payload.RunID)
 	})
-	mux.HandleFunc(typeICloudOnboarding, func(ctx context.Context, task *asynq.Task) error {
+	handleOnboarding := func(ctx context.Context, task *asynq.Task) error {
 		payload, err := decodeICloudOnboardingTask(task)
 		if err != nil {
 			return err
@@ -273,7 +278,9 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, service *Service) func(context.Co
 		}
 		_ = service.ScheduleICloudOnboardingDispatcher(context.WithoutCancel(ctx), 0)
 		return nil
-	})
+	}
+	mux.HandleFunc(typeICloudOnboarding, handleOnboarding)
+	mux.HandleFunc(typeICloudUserImport, handleOnboarding)
 	mux.HandleFunc(typeICloudDeviceSync, func(ctx context.Context, _ *asynq.Task) error {
 		return service.syncDeviceBindings(ctx)
 	})

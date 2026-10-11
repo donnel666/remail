@@ -718,7 +718,7 @@ SELECT
 FROM (
     SELECT resource.*, ` + iCloudWorkflowStatusSQL + ` AS workflow_status
     FROM icloud_resources AS resource
-    WHERE resource.task_kind = 'onboarding' AND resource.import_id IS NOT NULL
+    WHERE resource.task_kind IN ('onboarding', 'user_import') AND resource.import_id IS NOT NULL
 ) AS resource
 GROUP BY resource.import_id`
 

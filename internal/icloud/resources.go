@@ -22,6 +22,8 @@ var (
 )
 
 type AdminICloudResourceListFilter struct {
+	OwnerUserID   uint       `json:"-"`
+	Suffix        string     `json:"-"`
 	Search        string     `json:"search,omitempty"`
 	Status        string     `json:"status,omitempty"`
 	ForSale       *bool      `json:"forSale,omitempty"`
@@ -324,7 +326,7 @@ func (s *Service) GetAdminICloudResource(ctx context.Context, resourceID uint) (
 	}
 	var refresh iCloudOnboardingTaskModel
 	var onboarding iCloudOnboardingTaskModel
-	if err := s.db.WithContext(ctx).Where("task_kind = ? AND resource_id = ?", "onboarding", resourceID).Order("id DESC").Take(&onboarding).Error; err == nil {
+	if err := s.db.WithContext(ctx).Where("task_kind IN ? AND resource_id = ?", []string{"onboarding", iCloudUserImportTaskKind}, resourceID).Order("id DESC").Take(&onboarding).Error; err == nil {
 		view := iCloudOnboardingTaskView(onboarding)
 		detail.OnboardingTask = &view
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -396,8 +398,9 @@ func includeAdminICloudListSection(value *bool) bool { return value == nil || *v
 
 func normalizeAdminICloudResourceFilter(filter AdminICloudResourceListFilter) (AdminICloudResourceListFilter, error) {
 	filter.Search = strings.ToLower(strings.TrimSpace(filter.Search))
+	filter.Suffix = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(filter.Suffix), "@"))
 	filter.Status = strings.ToLower(strings.TrimSpace(filter.Status))
-	if len(filter.Search) > 320 || filter.Offset < 0 || filter.CreatedFrom != nil && filter.CreatedTo != nil && !filter.CreatedTo.After(*filter.CreatedFrom) {
+	if len(filter.Search) > 320 || len(filter.Suffix) > 253 || strings.ContainsAny(filter.Suffix, "%_ ") || filter.Offset < 0 || filter.CreatedFrom != nil && filter.CreatedTo != nil && !filter.CreatedTo.After(*filter.CreatedFrom) {
 		return filter, ErrICloudResourceQuery
 	}
 	if filter.Status != "" && !validAdminICloudResourceStatus(filter.Status) {
@@ -478,9 +481,18 @@ func (s *Service) applyAdminICloudResourceFilter(query *gorm.DB, filter AdminICl
 }
 
 func applyAdminICloudResourceFilterDB(query *gorm.DB, filter AdminICloudResourceListFilter, ignore adminICloudFilterIgnore) *gorm.DB {
+	if filter.OwnerUserID != 0 {
+		query = query.Where("er.owner_user_id = ? AND ir.status <> ?", filter.OwnerUserID, iCloudResourceDeleted)
+	}
+	if filter.Suffix != "" {
+		query = query.Where("LOWER(ir.primary_email) LIKE ?", "%@"+strings.ToLower(filter.Suffix))
+	}
 	if filter.Search != "" {
 		like := "%" + filter.Search + "%"
-		query = query.Where(`(
+		if filter.OwnerUserID != 0 {
+			query = query.Where("(LOWER(ir.primary_email) LIKE ? OR EXISTS (SELECT 1 FROM icloud_aliases AS ia WHERE ia.resource_id = ir.id AND LOWER(ia.email) LIKE ?))", like, like)
+		} else {
+			query = query.Where(`(
 			LOWER(ir.primary_email) LIKE ? OR LOWER(u.email) LIKE ? OR LOWER(u.nickname) LIKE ? OR
 			LOWER(ir.region) LIKE ? OR LOWER(ir.country_code) LIKE ? OR LOWER(ir.account_role) LIKE ? OR
 			LOWER(ir.bound_phone_number) LIKE ? OR LOWER(COALESCE(family_primary.primary_email, '')) LIKE ? OR
@@ -489,6 +501,7 @@ func applyAdminICloudResourceFilterDB(query *gorm.DB, filter AdminICloudResource
 				WHERE ia.resource_id = ir.id AND (LOWER(ia.email) LIKE ? OR LOWER(ia.anonymous_id) LIKE ?)
 			)
 		)`, like, like, like, like, like, like, like, like, like, like, like, like)
+		}
 	}
 	if !ignore.status {
 		if filter.Status == "" {

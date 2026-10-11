@@ -85,6 +85,12 @@ func (s *Service) ApplyAdminICloudCommand(
 	requestID string,
 	path string,
 ) (*AdminICloudMutationResult, error) {
+	return s.applyICloudCommand(ctx, command, resourceID, version, operatorUserID, idempotencyKey, requestID, path, 0)
+}
+
+func (s *Service) applyICloudCommand(ctx context.Context, command AdminICloudCommand, resourceID uint, version uint64,
+	operatorUserID uint, idempotencyKey, requestID, path string, ownerUserID uint,
+) (*AdminICloudMutationResult, error) {
 	if s == nil || s.db == nil || s.operationLogs == nil || !validAdminICloudCommand(command) ||
 		resourceID == 0 || version == 0 || operatorUserID == 0 {
 		return nil, ErrICloudResourceQuery
@@ -103,19 +109,51 @@ func (s *Service) ApplyAdminICloudCommand(
 	if err != nil {
 		return nil, ErrICloudResourceQueryTemporary
 	}
+	operation := "icloud.admin_resource." + string(command)
+	if ownerUserID != 0 {
+		operation = "icloud.resource." + string(command)
+	}
 	receipt := coreapp.AdminResourceCommandReceipt{
 		OperatorUserID: operatorUserID, IdempotencyKey: idempotencyKey,
-		Operation: "icloud.admin_resource." + string(command), Subject: "icloud_resource:" + strconv.FormatUint(uint64(resourceID), 10),
+		Operation: operation, Subject: "icloud_resource:" + strconv.FormatUint(uint64(resourceID), 10),
 		RequestFingerprint: fingerprint,
 	}
 
 	result := &AdminICloudMutationResult{}
 	replayed := false
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if ownerUserID != 0 {
+			var root iCloudRootModel
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND type = ? AND owner_user_id = ?", resourceID, "icloud", ownerUserID).Take(&root).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return ErrICloudResourceNotFound
+				}
+				return err
+			}
+		}
 		wasReplayed, err := s.reserveAdminICloudCommand(ctx, tx, receipt, result)
 		if err != nil || wasReplayed {
 			replayed = wasReplayed
 			return err
+		}
+		if ownerUserID != 0 {
+			var resource iCloudResourceModel
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, resourceID).Error; err != nil {
+				return err
+			}
+			if isICloudOnboardingTaskKind(resource.WorkflowTaskKind) && (resource.OnboardingStatus == iCloudOnboardingProcessing || resource.OnboardingStatus == iCloudOnboardingWaiting) ||
+				command == AdminICloudDelete && resource.ForSale || command == AdminICloudPublish && resource.Status != iCloudResourceNormal {
+				return ErrICloudResourceStatus
+			}
+			if command == AdminICloudPublish {
+				var suppliers int64
+				if err := tx.Table("users").Where("id = ? AND status = ? AND role IN ?", ownerUserID, "active", []string{"supplier", "admin", "super_admin"}).Count(&suppliers).Error; err != nil {
+					return err
+				}
+				if suppliers != 1 {
+					return ErrICloudResourceOwner
+				}
+			}
 		}
 		if livenessMailErr != nil {
 			return livenessMailErr
@@ -138,7 +176,7 @@ func (s *Service) ApplyAdminICloudCommand(
 		}
 		if err := s.operationLogs.CreateInTx(ctx, tx, &governancedomain.OperationLog{
 			OperatorUserID: operatorUserID,
-			OperationType:  "icloud.admin_resource." + string(command),
+			OperationType:  operation,
 			ResourceType:   "icloud_resource",
 			ResourceID:     strconv.FormatUint(uint64(resourceID), 10),
 			Path:           strings.TrimSpace(path),
@@ -692,7 +730,9 @@ func assertAdminICloudOwnerEligibleTx(ctx context.Context, tx *gorm.DB, ownerUse
 
 func assertNoActiveAdminICloudAllocationTx(ctx context.Context, tx *gorm.DB, resourceID uint) error {
 	var count int64
+	// Read allocations committed while this transaction was waiting for the resource lock.
 	if err := tx.WithContext(ctx).Table("icloud_allocations").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("resource_id = ? AND status = ?", resourceID, "allocated").Count(&count).Error; err != nil {
 		return err
 	}

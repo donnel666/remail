@@ -776,6 +776,7 @@ const (
 	AdminICloudOnboardingTaskTaskKindCookieRecovery AdminICloudOnboardingTaskTaskKind = "cookie_recovery"
 	AdminICloudOnboardingTaskTaskKindOnboarding     AdminICloudOnboardingTaskTaskKind = "onboarding"
 	AdminICloudOnboardingTaskTaskKindRefresh        AdminICloudOnboardingTaskTaskKind = "refresh"
+	AdminICloudOnboardingTaskTaskKindUserImport     AdminICloudOnboardingTaskTaskKind = "user_import"
 )
 
 // Valid indicates whether the value is a known member of the AdminICloudOnboardingTaskTaskKind enum.
@@ -786,6 +787,8 @@ func (e AdminICloudOnboardingTaskTaskKind) Valid() bool {
 	case AdminICloudOnboardingTaskTaskKindOnboarding:
 		return true
 	case AdminICloudOnboardingTaskTaskKindRefresh:
+		return true
+	case AdminICloudOnboardingTaskTaskKindUserImport:
 		return true
 	default:
 		return false
@@ -3228,6 +3231,51 @@ func (e OrderResponseSupplyPolicy) Valid() bool {
 	case OrderResponseSupplyPolicyPrivateFirst:
 		return true
 	case OrderResponseSupplyPolicyPublicOnly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OwnedICloudBatchCommandCommand.
+const (
+	OwnedICloudBatchCommandCommandDelete   OwnedICloudBatchCommandCommand = "delete"
+	OwnedICloudBatchCommandCommandPublish  OwnedICloudBatchCommandCommand = "publish"
+	OwnedICloudBatchCommandCommandValidate OwnedICloudBatchCommandCommand = "validate"
+)
+
+// Valid indicates whether the value is a known member of the OwnedICloudBatchCommandCommand enum.
+func (e OwnedICloudBatchCommandCommand) Valid() bool {
+	switch e {
+	case OwnedICloudBatchCommandCommandDelete:
+		return true
+	case OwnedICloudBatchCommandCommandPublish:
+		return true
+	case OwnedICloudBatchCommandCommandValidate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OwnedICloudImportStatus.
+const (
+	OwnedICloudImportStatusCompleted  OwnedICloudImportStatus = "completed"
+	OwnedICloudImportStatusFailed     OwnedICloudImportStatus = "failed"
+	OwnedICloudImportStatusPartial    OwnedICloudImportStatus = "partial"
+	OwnedICloudImportStatusProcessing OwnedICloudImportStatus = "processing"
+)
+
+// Valid indicates whether the value is a known member of the OwnedICloudImportStatus enum.
+func (e OwnedICloudImportStatus) Valid() bool {
+	switch e {
+	case OwnedICloudImportStatusCompleted:
+		return true
+	case OwnedICloudImportStatusFailed:
+		return true
+	case OwnedICloudImportStatusPartial:
+		return true
+	case OwnedICloudImportStatusProcessing:
 		return true
 	default:
 		return false
@@ -6725,19 +6773,19 @@ func (e ListProtoResourcesParamsStatus) Valid() bool {
 
 // Defines values for PostProtoResourceBulkParamsCommand.
 const (
-	PostProtoResourceBulkParamsCommandDelete   PostProtoResourceBulkParamsCommand = "delete"
-	PostProtoResourceBulkParamsCommandPublish  PostProtoResourceBulkParamsCommand = "publish"
-	PostProtoResourceBulkParamsCommandValidate PostProtoResourceBulkParamsCommand = "validate"
+	Delete   PostProtoResourceBulkParamsCommand = "delete"
+	Publish  PostProtoResourceBulkParamsCommand = "publish"
+	Validate PostProtoResourceBulkParamsCommand = "validate"
 )
 
 // Valid indicates whether the value is a known member of the PostProtoResourceBulkParamsCommand enum.
 func (e PostProtoResourceBulkParamsCommand) Valid() bool {
 	switch e {
-	case PostProtoResourceBulkParamsCommandDelete:
+	case Delete:
 		return true
-	case PostProtoResourceBulkParamsCommandPublish:
+	case Publish:
 		return true
-	case PostProtoResourceBulkParamsCommandValidate:
+	case Validate:
 		return true
 	default:
 		return false
@@ -6887,19 +6935,19 @@ func (e GetTicketsParamsTicketType) Valid() bool {
 
 // Defines values for GetTicketsParamsStatus.
 const (
-	Closed     GetTicketsParamsStatus = "closed"
-	Open       GetTicketsParamsStatus = "open"
-	Processing GetTicketsParamsStatus = "processing"
+	GetTicketsParamsStatusClosed     GetTicketsParamsStatus = "closed"
+	GetTicketsParamsStatusOpen       GetTicketsParamsStatus = "open"
+	GetTicketsParamsStatusProcessing GetTicketsParamsStatus = "processing"
 )
 
 // Valid indicates whether the value is a known member of the GetTicketsParamsStatus enum.
 func (e GetTicketsParamsStatus) Valid() bool {
 	switch e {
-	case Closed:
+	case GetTicketsParamsStatusClosed:
 		return true
-	case Open:
+	case GetTicketsParamsStatusOpen:
 		return true
-	case Processing:
+	case GetTicketsParamsStatusProcessing:
 		return true
 	default:
 		return false
@@ -11288,6 +11336,75 @@ type OrderStatusFacets struct {
 	Refunded       int64 `json:"refunded"`
 }
 
+// OwnedICloudBatchCommand defines model for OwnedICloudBatchCommand.
+type OwnedICloudBatchCommand struct {
+	Command   OwnedICloudBatchCommandCommand `json:"command"`
+	Resources []OwnedICloudCommandItem       `json:"resources"`
+}
+
+// OwnedICloudBatchCommandCommand defines model for OwnedICloudBatchCommand.Command.
+type OwnedICloudBatchCommandCommand string
+
+// OwnedICloudCommand defines model for OwnedICloudCommand.
+type OwnedICloudCommand struct {
+	Version int `json:"version"`
+}
+
+// OwnedICloudCommandItem defines model for OwnedICloudCommandItem.
+type OwnedICloudCommandItem struct {
+	Id      int `json:"id"`
+	Version int `json:"version"`
+}
+
+// OwnedICloudImport defines model for OwnedICloudImport.
+type OwnedICloudImport struct {
+	Accepted  int                     `json:"accepted"`
+	Completed int                     `json:"completed"`
+	Failed    int                     `json:"failed"`
+	ImportId  int                     `json:"importId"`
+	Status    OwnedICloudImportStatus `json:"status"`
+	Tasks     []OwnedICloudImportTask `json:"tasks"`
+	Waiting   int                     `json:"waiting"`
+}
+
+// OwnedICloudImportStatus defines model for OwnedICloudImport.Status.
+type OwnedICloudImportStatus string
+
+// OwnedICloudImportTask defines model for OwnedICloudImportTask.
+type OwnedICloudImportTask struct {
+	Email         openapi_types.Email `json:"email"`
+	Id            int                 `json:"id"`
+	LastSafeError string              `json:"lastSafeError"`
+	Stage         string              `json:"stage"`
+	Status        string              `json:"status"`
+}
+
+// OwnedICloudResource defines model for OwnedICloudResource.
+type OwnedICloudResource struct {
+	AliasCount    int                 `json:"aliasCount"`
+	CreatedAt     time.Time           `json:"createdAt"`
+	Email         openapi_types.Email `json:"email"`
+	ExpireAt      time.Time           `json:"expireAt"`
+	ForSale       bool                `json:"forSale"`
+	Id            int                 `json:"id"`
+	LastSafeError *string             `json:"lastSafeError"`
+
+	// SelectedForwardTo Last Apple HME forwarding mailbox observed during validation or provisioning.
+	SelectedForwardTo string                    `json:"selectedForwardTo"`
+	Status            AdminICloudResourceStatus `json:"status"`
+	UpdatedAt         time.Time                 `json:"updatedAt"`
+	Version           int                       `json:"version"`
+}
+
+// OwnedICloudResourceList defines model for OwnedICloudResourceList.
+type OwnedICloudResourceList struct {
+	Facets AdminICloudFacets     `json:"facets"`
+	Items  []OwnedICloudResource `json:"items"`
+	Limit  int                   `json:"limit"`
+	Offset int                   `json:"offset"`
+	Total  int64                 `json:"total"`
+}
+
 // PasswordResetCodeRequest defines model for PasswordResetCodeRequest.
 type PasswordResetCodeRequest struct {
 	Email openapi_types.Email `json:"email"`
@@ -15523,6 +15640,77 @@ type GetSystemFAQsParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// GetOwnedICloudResourcesParams defines parameters for GetOwnedICloudResources.
+type GetOwnedICloudResourcesParams struct {
+	Search      *string                    `form:"search,omitempty" json:"search,omitempty"`
+	Status      *AdminICloudResourceStatus `form:"status,omitempty" json:"status,omitempty"`
+	ForSale     *bool                      `form:"forSale,omitempty" json:"forSale,omitempty"`
+	CreatedFrom *time.Time                 `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time                 `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+	Offset      *int                       `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit       *int                       `form:"limit,omitempty" json:"limit,omitempty"`
+	Suffix      *string                    `form:"suffix,omitempty" json:"suffix,omitempty"`
+}
+
+// PostOwnedICloudActionsParams defines parameters for PostOwnedICloudActions.
+type PostOwnedICloudActionsParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Reuse the same key and payload when retrying this request.
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// PostOwnedICloudImportMultipartBody defines parameters for PostOwnedICloudImport.
+type PostOwnedICloudImportMultipartBody struct {
+	File openapi_types.File `json:"file"`
+}
+
+// PostOwnedICloudImportParams defines parameters for PostOwnedICloudImport.
+type PostOwnedICloudImportParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Reuse the same key and payload when retrying this request.
+	IdempotencyKey string `json:"Idempotency-Key"`
+
+	// XTurnstileToken Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface.
+	XTurnstileToken *TurnstileToken `json:"X-Turnstile-Token,omitempty"`
+}
+
+// DeleteOwnedICloudResourceParams defines parameters for DeleteOwnedICloudResource.
+type DeleteOwnedICloudResourceParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Reuse the same key and payload when retrying this request.
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// GetOwnedICloudAliasesParams defines parameters for GetOwnedICloudAliases.
+type GetOwnedICloudAliasesParams struct {
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostOwnedICloudPublishParams defines parameters for PostOwnedICloudPublish.
+type PostOwnedICloudPublishParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Reuse the same key and payload when retrying this request.
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// PostOwnedICloudValidationParams defines parameters for PostOwnedICloudValidation.
+type PostOwnedICloudValidationParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// IdempotencyKey Reuse the same key and payload when retrying this request.
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // PostPublicLotteryEntryParams defines parameters for PostPublicLotteryEntry.
 type PostPublicLotteryEntryParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -16504,6 +16692,21 @@ type PostDomainJSONRequestBody = CreateDomainRequest
 
 // PostEmailCodeJSONRequestBody defines body for PostEmailCode for application/json ContentType.
 type PostEmailCodeJSONRequestBody = EmailCodeRequest
+
+// PostOwnedICloudActionsJSONRequestBody defines body for PostOwnedICloudActions for application/json ContentType.
+type PostOwnedICloudActionsJSONRequestBody = OwnedICloudBatchCommand
+
+// PostOwnedICloudImportMultipartRequestBody defines body for PostOwnedICloudImport for multipart/form-data ContentType.
+type PostOwnedICloudImportMultipartRequestBody PostOwnedICloudImportMultipartBody
+
+// DeleteOwnedICloudResourceJSONRequestBody defines body for DeleteOwnedICloudResource for application/json ContentType.
+type DeleteOwnedICloudResourceJSONRequestBody = OwnedICloudCommand
+
+// PostOwnedICloudPublishJSONRequestBody defines body for PostOwnedICloudPublish for application/json ContentType.
+type PostOwnedICloudPublishJSONRequestBody = OwnedICloudCommand
+
+// PostOwnedICloudValidationJSONRequestBody defines body for PostOwnedICloudValidation for application/json ContentType.
+type PostOwnedICloudValidationJSONRequestBody = OwnedICloudCommand
 
 // PostLoginJSONRequestBody defines body for PostLogin for application/json ContentType.
 type PostLoginJSONRequestBody = LoginRequest
@@ -18627,6 +18830,30 @@ type ServerInterface interface {
 	// List published frequently asked questions
 	// (GET /v1/faqs)
 	GetSystemFAQs(c *gin.Context, params GetSystemFAQsParams)
+	// List the current user's Apple email resources
+	// (GET /v1/icloud/resources)
+	GetOwnedICloudResources(c *gin.Context, params GetOwnedICloudResourcesParams)
+	// Validate, publish or delete selected owned Apple resources
+	// (POST /v1/icloud/resources/actions)
+	PostOwnedICloudActions(c *gin.Context, params PostOwnedICloudActionsParams)
+	// Import Apple accounts into management (phase 3) only
+	// (POST /v1/icloud/resources/imports)
+	PostOwnedICloudImport(c *gin.Context, params PostOwnedICloudImportParams)
+	// Get import progress for accounts still owned by the current user
+	// (GET /v1/icloud/resources/imports/{importId})
+	GetOwnedICloudImport(c *gin.Context, importId int)
+	// Delete an unpublished owned Apple resource
+	// (DELETE /v1/icloud/resources/{resourceId})
+	DeleteOwnedICloudResource(c *gin.Context, resourceId int, params DeleteOwnedICloudResourceParams)
+	// List aliases of an owned Apple resource
+	// (GET /v1/icloud/resources/{resourceId}/aliases)
+	GetOwnedICloudAliases(c *gin.Context, resourceId int, params GetOwnedICloudAliasesParams)
+	// Publish an owned Apple resource (supplier access required)
+	// (POST /v1/icloud/resources/{resourceId}/publish)
+	PostOwnedICloudPublish(c *gin.Context, resourceId int, params PostOwnedICloudPublishParams)
+	// Queue an owned Apple resource for validation
+	// (POST /v1/icloud/resources/{resourceId}/validation)
+	PostOwnedICloudValidation(c *gin.Context, resourceId int, params PostOwnedICloudValidationParams)
 	// Login and create a session
 	// (POST /v1/login)
 	PostLogin(c *gin.Context)
@@ -36285,6 +36512,545 @@ func (siw *ServerInterfaceWrapper) GetSystemFAQs(c *gin.Context) {
 	siw.Handler.GetSystemFAQs(c, params)
 }
 
+// GetOwnedICloudResources operation middleware
+func (siw *ServerInterfaceWrapper) GetOwnedICloudResources(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetOwnedICloudResourcesParams
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "forSale" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "forSale", c.Request.URL.Query(), &params.ForSale, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter forSale: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "suffix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "suffix", c.Request.URL.Query(), &params.Suffix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter suffix: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetOwnedICloudResources(c, params)
+}
+
+// PostOwnedICloudActions operation middleware
+func (siw *ServerInterfaceWrapper) PostOwnedICloudActions(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostOwnedICloudActionsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostOwnedICloudActions(c, params)
+}
+
+// PostOwnedICloudImport operation middleware
+func (siw *ServerInterfaceWrapper) PostOwnedICloudImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostOwnedICloudImportParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional header parameter "X-Turnstile-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Turnstile-Token")]; found {
+		var XTurnstileToken TurnstileToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Turnstile-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Turnstile-Token", valueList[0], &XTurnstileToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Turnstile-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XTurnstileToken = &XTurnstileToken
+
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostOwnedICloudImport(c, params)
+}
+
+// GetOwnedICloudImport operation middleware
+func (siw *ServerInterfaceWrapper) GetOwnedICloudImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetOwnedICloudImport(c, importId)
+}
+
+// DeleteOwnedICloudResource operation middleware
+func (siw *ServerInterfaceWrapper) DeleteOwnedICloudResource(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteOwnedICloudResourceParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteOwnedICloudResource(c, resourceId, params)
+}
+
+// GetOwnedICloudAliases operation middleware
+func (siw *ServerInterfaceWrapper) GetOwnedICloudAliases(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetOwnedICloudAliasesParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetOwnedICloudAliases(c, resourceId, params)
+}
+
+// PostOwnedICloudPublish operation middleware
+func (siw *ServerInterfaceWrapper) PostOwnedICloudPublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostOwnedICloudPublishParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostOwnedICloudPublish(c, resourceId, params)
+}
+
+// PostOwnedICloudValidation operation middleware
+func (siw *ServerInterfaceWrapper) PostOwnedICloudValidation(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostOwnedICloudValidationParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostOwnedICloudValidation(c, resourceId, params)
+}
+
 // PostLogin operation middleware
 func (siw *ServerInterfaceWrapper) PostLogin(c *gin.Context) {
 
@@ -40976,6 +41742,14 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/v1/domains/:domainId/mailboxes", wrapper.GetDomainMailboxes)
 	router.POST(options.BaseURL+"/v1/email/code", wrapper.PostEmailCode)
 	router.GET(options.BaseURL+"/v1/faqs", wrapper.GetSystemFAQs)
+	router.GET(options.BaseURL+"/v1/icloud/resources", wrapper.GetOwnedICloudResources)
+	router.POST(options.BaseURL+"/v1/icloud/resources/actions", wrapper.PostOwnedICloudActions)
+	router.POST(options.BaseURL+"/v1/icloud/resources/imports", wrapper.PostOwnedICloudImport)
+	router.GET(options.BaseURL+"/v1/icloud/resources/imports/:importId", wrapper.GetOwnedICloudImport)
+	router.DELETE(options.BaseURL+"/v1/icloud/resources/:resourceId", wrapper.DeleteOwnedICloudResource)
+	router.GET(options.BaseURL+"/v1/icloud/resources/:resourceId/aliases", wrapper.GetOwnedICloudAliases)
+	router.POST(options.BaseURL+"/v1/icloud/resources/:resourceId/publish", wrapper.PostOwnedICloudPublish)
+	router.POST(options.BaseURL+"/v1/icloud/resources/:resourceId/validation", wrapper.PostOwnedICloudValidation)
 	router.POST(options.BaseURL+"/v1/login", wrapper.PostLogin)
 	router.GET(options.BaseURL+"/v1/login/config", wrapper.GetLoginConfig)
 	router.GET(options.BaseURL+"/v1/lotteries/:token", wrapper.GetPublicLottery)

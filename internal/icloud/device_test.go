@@ -90,7 +90,7 @@ func TestManualDeviceURLOnboardingWithoutPhone(t *testing.T) {
 	for _, compact := range []bool{false, true} {
 		for _, codeURL := range []string{
 			"https://devices.example/code?id=1&token=secret-device-token",
-			"http://192.0.2.20:8818/api/Accounts/getCode?ID=1",
+			"http://8.8.8.8:8818/api/Accounts/getCode?ID=1",
 			"https://another-device.example/code?id=1",
 		} {
 			t.Run(fmt.Sprintf("compact=%t/%s", compact, codeURL), func(t *testing.T) {
@@ -109,7 +109,7 @@ func testManualDeviceURLOnboardingWithoutPhone(t *testing.T, compact bool, codeU
 	service.smsPhones = nil
 	apple := &manualDeviceApple{}
 	service.onboardingApple = apple
-	service.device.http.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+	service.device.publicHTTP.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 		require.Equal(t, codeURL, r.URL.String())
 		require.Equal(t, http.MethodGet, r.Method)
 		require.Empty(t, r.Header.Get("Authorization"))
@@ -355,7 +355,11 @@ func TestDeviceBindingDelaySharedPollingAndPersistence(t *testing.T) {
 	listCalls := 0
 	status := "processing"
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
+		if r.URL.Path == "/api/free/v4/getcode" {
+			require.Empty(t, r.Header.Get("Authorization"))
+		} else {
+			require.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
+		}
 		switch r.URL.Path {
 		case "/outapi/Account/importData":
 			require.Equal(t, http.MethodPost, r.Method)
@@ -388,9 +392,8 @@ func TestDeviceBindingDelaySharedPollingAndPersistence(t *testing.T) {
 		}
 	}))
 	t.Cleanup(server.Close)
-	s.device.http.Transport = server.Client().Transport
+	configureDeviceTestServer(t, s, server)
 	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceAPIKey, "test-key")
-	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, server.URL)
 	ctx := context.Background()
 	first, err := s.EnsureDeviceBinding(ctx, task.PrimaryEmail, "Secret1!", phoneID, task.BoundPhoneNumber, &task.ID, clock)
 	require.NoError(t, err)
@@ -498,37 +501,29 @@ func TestDeviceCodeAuthenticationNeverDispatchesSMS(t *testing.T) {
 	}
 }
 
-func TestDeviceCodeURLsKeepPlatformCredentialsOnPlatform(t *testing.T) {
+func TestDeviceCodeURLsNeverSendPlatformCredentials(t *testing.T) {
 	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, "https://devices.example")
 	setDeviceTestSetting(t, runtimeconfig.ICloudDeviceAPIKey, "test-key")
-	for index, tc := range []struct{ codeURL, authorization string }{
-		{"https://devices.example/code?id=1", "Bearer test-key"},
-		{"https://devices.example/code?token=" + strings.Repeat("x", 2048), "Bearer test-key"},
-		{"http://devices.example/code?id=1", ""},
-		{"http://192.0.2.20:8818/api/Accounts/getCode?ID=1", ""},
-		{"https://192.0.2.20:8818/api/Accounts/getCode?ID=1", ""},
-		{"https://another-device.example/code?id=1", ""},
-		{"https://devices.example:9443/code?id=1", ""},
+	for _, codeURL := range []string{
+		"https://devices.example/code?id=1", "http://devices.example/code?id=1",
+		"http://8.8.8.8:8818/api/Accounts/getCode?ID=1", "https://8.8.8.8:8818/api/Accounts/getCode?ID=1",
+		"https://another-device.example/code?id=1", "https://devices.example:9443/code?id=1",
 	} {
-		t.Run(fmt.Sprint(index), func(t *testing.T) {
+		t.Run(codeURL, func(t *testing.T) {
 			s := &Service{device: newDeviceClient()}
-			requests := 0
-			s.device.http.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-				requests++
-				require.Equal(t, tc.codeURL, r.URL.String())
+			s.device.http.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+				t.Fatal("verification code used the management client")
+				return nil, errDeviceUnavailable
+			})
+			s.device.publicHTTP.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+				require.Equal(t, codeURL, r.URL.String())
 				require.Equal(t, http.MethodGet, r.Method)
-				require.Equal(t, tc.authorization, r.Header.Get("Authorization"))
+				require.Empty(t, r.Header.Get("Authorization"))
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("AppleID 登录验证码:000123"))}, nil
 			})
-			code, err := s.FetchDeviceCode(context.Background(), tc.codeURL)
+			code, err := s.FetchDeviceCode(context.Background(), codeURL)
 			require.NoError(t, err)
 			require.Equal(t, "000123", code)
-			require.Equal(t, 1, requests)
-			if tc.authorization == "" {
-				_, err = s.device.request(context.Background(), http.MethodPost, tc.codeURL, map[string]string{"secret": "test"})
-				require.ErrorIs(t, err, errDeviceResponse)
-				require.Equal(t, 1, requests, "platform management must reject other destinations before making a request")
-			}
 		})
 	}
 }
@@ -539,11 +534,11 @@ func TestOtherDeviceCodeProviderAccessDenied(t *testing.T) {
 	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			s := &Service{device: newDeviceClient()}
-			s.device.http.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			s.device.publicHTTP.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 				require.Empty(t, r.Header.Get("Authorization"))
 				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(""))}, nil
 			})
-			_, err := s.FetchDeviceCode(context.Background(), "http://192.0.2.20:8818/code?id=1")
+			_, err := s.FetchDeviceCode(context.Background(), "http://8.8.8.8:8818/code?id=1")
 			require.ErrorIs(t, err, errDeviceUnauthorized)
 			require.NotContains(t, err.Error(), "API key")
 		})
@@ -565,7 +560,8 @@ func TestDeviceCodeHTTPRedirectIsNotFollowed(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	s := &Service{device: newDeviceClient()}
-	_, err := s.FetchDeviceCode(context.Background(), server.URL)
+	configureDeviceTestServer(t, s, server)
+	_, err := s.FetchDeviceCode(context.Background(), deviceBaseURL())
 	require.ErrorIs(t, err, errDeviceUnavailable)
 	require.Zero(t, redirected)
 }
@@ -582,10 +578,9 @@ func TestDeviceCodeUsesSMSCodeExtraction(t *testing.T) {
 		t.Run(tc.body, func(t *testing.T) {
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = fmt.Fprint(w, tc.body) }))
 			t.Cleanup(server.Close)
-			setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, server.URL)
 			s := &Service{device: newDeviceClient()}
-			s.device.http.Transport = server.Client().Transport
-			code, err := s.FetchDeviceCode(context.Background(), server.URL)
+			configureDeviceTestServer(t, s, server)
+			code, err := s.FetchDeviceCode(context.Background(), deviceBaseURL())
 			if tc.code == "" {
 				require.ErrorIs(t, err, errDeviceNoCode)
 			} else {
@@ -619,7 +614,7 @@ func TestDeviceFamilyAccountVerificationContinuesToInvitationLogin(t *testing.T)
 	s, db, task, _ := newOnboardingStateTest(t)
 	s.onboardingApple = &manualDeviceApple{verifyNext: "family_prepare"}
 	require.NoError(t, db.Model(task).Updates(map[string]any{
-		"device_code_api": "http://192.0.2.20/code", "stage": "sms_verify", "pending_sms_purpose": appleSMSFamilyLogin,
+		"device_code_api": "http://8.8.8.8/code", "stage": "sms_verify", "pending_sms_purpose": appleSMSFamilyLogin,
 		"manual_verification_code": "123456", "sms_poll_deadline": s.now().Add(time.Minute),
 	}).Error)
 	processOnboardingStageForTest(t, s, db, task)
@@ -640,11 +635,11 @@ func TestDeviceRejectedCodePreservesSessionAndWaitsForDifferentCode(t *testing.T
 	s.onboardingApple = appleOnboardingTestClient(s.now(), session)
 	session.cookies = []msacl.SessionCookie{{Name: "myacinfo", Value: "session-cookie", Domain: ".apple.com"}}
 	require.NoError(t, db.Model(task).Updates(map[string]any{
-		"device_code_api": "http://192.0.2.20/code", "stage": "sms_verify", "pending_sms_purpose": appleSMSFamilyLogin,
+		"device_code_api": "http://8.8.8.8/code", "stage": "sms_verify", "pending_sms_purpose": appleSMSFamilyLogin,
 		"session_payload": iCloudJSON(state), "manual_verification_code": "123456", "sms_poll_deadline": deadline,
 	}).Error)
 	code := "123456"
-	s.device.http.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+	s.device.publicHTTP.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(code))}, nil
 	})
 	processOnboardingStageForTest(t, s, db, task)
@@ -665,7 +660,7 @@ func TestDeviceRejectedCodePreservesSessionAndWaitsForDifferentCode(t *testing.T
 }
 
 func TestFamilySharingRetainsOnlyDeviceAccountSessions(t *testing.T) {
-	for _, deviceURL := range []string{"", "http://192.0.2.20:8818/code?id=1"} {
+	for _, deviceURL := range []string{"", "http://8.8.8.8:8818/code?id=1"} {
 		t.Run(fmt.Sprintf("device=%t", deviceURL != ""), func(t *testing.T) {
 			s, db, task, _ := newOnboardingStateTest(t)
 			session := json.RawMessage(`{"version":1,"mode":"family","domainId":"11","authVersion":"8.0.2","cookies":[{"name":"myacinfo","value":"private-account-cookie","domain":".apple.com"}]}`)
@@ -797,8 +792,7 @@ func TestDeviceBindingUnknownOrInvalidResultFails(t *testing.T) {
 				}})
 			}))
 			t.Cleanup(server.Close)
-			setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, server.URL)
-			s.device.http.Transport = server.Client().Transport
+			configureDeviceTestServer(t, s, server)
 			require.NoError(t, s.syncDeviceBindings(ctx))
 			processOnboardingStageForTest(t, s, db, task)
 			require.Equal(t, "failed", task.DeviceBindStatus)
@@ -817,9 +811,8 @@ func TestDeviceWorkflowCoversMultipleCodesAndCookieRecovery(t *testing.T) {
 			s.smsPhones = phones
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = fmt.Fprint(w, "AppleID 登录验证码:123456") }))
 			defer server.Close()
-			setDeviceTestSetting(t, runtimeconfig.ICloudDeviceBaseURLKey, server.URL)
-			s.device.http.Transport = server.Client().Transport
-			require.NoError(t, db.Model(task).Updates(map[string]any{"task_kind": tc.kind, "device_code_api": server.URL + "/code", "device_bind_status": "success", "pending_sms_purpose": tc.purpose, "stage": "sms_send", "dispatch_status": "running", "claim_token": "device-test"}).Error)
+			configureDeviceTestServer(t, s, server)
+			require.NoError(t, db.Model(task).Updates(map[string]any{"task_kind": tc.kind, "device_code_api": deviceBaseURL() + "/code", "device_bind_status": "success", "pending_sms_purpose": tc.purpose, "stage": "sms_send", "dispatch_status": "running", "claim_token": "device-test"}).Error)
 			require.NoError(t, db.First(task, task.ID).Error)
 			for round := 0; round < 2; round++ {
 				require.NoError(t, s.sendICloudOnboardingSMS(context.Background(), task, iCloudOnboardingSecret{}))

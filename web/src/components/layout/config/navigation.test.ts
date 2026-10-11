@@ -14,6 +14,13 @@ function visiblePaths(permissions: string[]) {
 }
 
 describe("admin navigation permissions", () => {
+  it("opens Apple email management to ordinary console users", () => {
+    expect(visiblePaths([])).toContain("/icloud");
+    expect(getSidebarRouteRequiredPermissions("/icloud")).toEqual([]);
+    const appSource = readFileSync(new URL("../../../App.tsx", import.meta.url), "utf8");
+    expect(appSource).toContain('import("./pages/ICloudEmails")');
+    expect(appSource).toMatch(/path:\s*"\/icloud", component: ICloudEmails/);
+  });
   it("keeps Proto resource management only in the authorized admin menu", () => {
     expect(visiblePaths([])).not.toContain("/proto");
     expect(visiblePaths([])).not.toContain("/admin/proto");

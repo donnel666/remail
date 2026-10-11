@@ -27,7 +27,10 @@ var (
 	errDeviceRechargeUncertain = errors.New("device recharge result is uncertain; refresh the balance before retrying")
 )
 
-type deviceClient struct{ http *http.Client }
+type deviceClient struct {
+	http       *http.Client
+	publicHTTP *http.Client
+}
 
 // DeviceBalance reports the vendor's balance without converting points to local currency.
 type DeviceBalance struct {
@@ -96,7 +99,10 @@ func (s *Service) rechargeDeviceBalance(ctx context.Context, card string) (*Devi
 }
 
 func newDeviceClient() *deviceClient {
-	return &deviceClient{http: &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	return &deviceClient{
+		http:       &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		publicHTTP: newPublicDeviceCodeClient(),
+	}
 }
 
 // DeviceCodeConfigured enables device enrollment for newly initialized accounts.
@@ -153,22 +159,6 @@ func (c *deviceClient) request(ctx context.Context, method, path string, payload
 	if payload != nil {
 		r.Header.Set("Content-Type", "application/json")
 	}
-	return c.do(r)
-}
-
-func (c *deviceClient) requestCode(ctx context.Context, codeAPI string) ([]byte, error) {
-	if validDevicePlatformURL(codeAPI) {
-		return c.request(ctx, http.MethodGet, codeAPI, nil)
-	}
-	if !validDeviceCodeURL(codeAPI) {
-		return nil, errDeviceResponse
-	}
-	// Other providers never receive the configured platform's management key.
-	r, err := http.NewRequestWithContext(ctx, http.MethodGet, codeAPI, nil)
-	if err != nil {
-		return nil, errDeviceResponse
-	}
-	r.Header.Set("Accept", "application/json, text/plain")
 	return c.do(r)
 }
 

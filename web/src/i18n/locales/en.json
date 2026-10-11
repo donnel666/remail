@@ -3103,5 +3103,22 @@
   "Family refresh is rate limited. Please retry later.": "Family refresh is rate limited. Please retry later.",
   "Device login failed. Check the account credentials and device status.": "Device login failed. Check the account credentials and device status.",
   "Unable to obtain a device verification code.": "Unable to obtain a device verification code.",
-  "Family refresh failed. Please retry.": "Family refresh failed. Please retry."
+  "Family refresh failed. Please retry.": "Family refresh failed. Please retry.",
+  "Apple Emails": "Apple Emails",
+  "Import Apple Emails": "Import Apple Emails",
+  "Apple account entries": "Apple account entries",
+  "Apple import prerequisites": "Complete phone verification, device binding and iCloud+ setup before importing. The system configures and verifies forwarding, validates the account and creates aliases. The code URL must return verification codes directly over the public internet.",
+  "Apple import lifetime": "Automatic alias creation is available for 30 days from import.",
+  "Apple import format": "email----password----device-code-URL",
+  "Apple import accepts up to 100 accounts and a 1 MB TXT file.": "Import up to 100 accounts at a time, in a TXT file of up to 1 MB.",
+  "Apple import progress": "{{total}} accounts: {{completed}} completed, {{failed}} failed, {{waiting}} waiting.",
+  "Apple import has failures": "Import processing finished. Review the failures below.",
+  "Apple import completed": "Import processing completed. Accounts are being validated and aliases provisioned.",
+  "Apple resource action result": "Processed {{affected}} resources; skipped {{skipped}}.",
+  "Apple delete confirmation": "Delete the {{count}} selected Apple email resources? Published resources and accounts being imported will be skipped.",
+  "Apple publish confirmation": "Publish the {{count}} selected Apple email resources? Only healthy, eligible accounts will be processed.",
+  "Failed to load import progress.": "Failed to load import progress. Please retry.",
+  "Please select resources first.": "Please select resources first.",
+  "Failed to load email resources.": "Failed to load email resources.",
+  "Forwarding email": "Forwarding email"
 }
