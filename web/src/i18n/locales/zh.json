@@ -3120,5 +3120,11 @@
   "Failed to load import progress.": "获取导入进度失败，请重试。",
   "Please select resources first.": "请先选择邮箱资源。",
   "Failed to load email resources.": "获取邮箱资源失败。",
-  "Forwarding email": "转发邮箱"
+  "Forwarding email": "转发邮箱",
+  "Pending settlement": "待结算收入",
+  "Settlement released": "冻结收入转出",
+  "Supplier settlement": "结算到账",
+  "Settlement refund": "退款扣回",
+  "Supplier balance is insufficient to reverse this settlement.": "供应商可用余额不足，无法扣回本次结算。请处理供应商余额后重试退款。",
+  "买家售价与供应商结算价均采用商品倍率与用户分组倍率中的较低值；1 为原价": "买家售价与供应商结算价均采用商品倍率与用户分组倍率中的较低值；1 为原价"
 }

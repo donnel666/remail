@@ -35,7 +35,7 @@ function ProductMultiplierSection({ options, onBulkSave }: SectionProps) {
     } finally { setSaving(false); }
   };
 
-  return <SettingsSection title={<SettingsCardHeader icon={<BadgePercent size={16} />} title={t("商品促销倍率")} description={t("结算采用商品倍率与用户分组倍率中的较低值；1 为原价")} />}>
+  return <SettingsSection title={<SettingsCardHeader icon={<BadgePercent size={16} />} title={t("商品促销倍率")} description={t("买家售价与供应商结算价均采用商品倍率与用户分组倍率中的较低值；1 为原价")} />}>
     <SettingsFormGrid className="mt-4">
       {MULTIPLIER_FIELDS.map(([key, label]) => <SettingsNumberField key={key} label={t(label)} value={form[key]} onChange={(value) => setForm((current) => ({ ...current, [key]: value }))} min={0} max={1} precision={6} step={0.01} />)}
     </SettingsFormGrid>

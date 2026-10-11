@@ -137,6 +137,11 @@ func (r *Repo) Create(ctx context.Context, params aftersaleapp.CreateTicketParam
 		model.AfterSaleUntil = params.Order.AfterSaleUntil
 	}
 	err := r.withTx(ctx, func(txCtx context.Context) error {
+		if params.ValidateOrder != nil {
+			if err := params.ValidateOrder(txCtx); err != nil {
+				return err
+			}
+		}
 		if err := r.dbFor(txCtx).Create(&model).Error; err != nil {
 			return fmt.Errorf("create ticket: %w", err)
 		}

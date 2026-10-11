@@ -200,6 +200,7 @@ func (a coreOrderingAdapter) GetOrderingQuote(ctx context.Context, projectID uin
 		ProductID:               quote.ProductID,
 		ProductType:             domain.ProductType(quote.ProductType),
 		PayAmount:               quote.PayAmount,
+		SupplierAmount:          quote.SupplierAmount,
 		CodeWindowMinutes:       quote.CodeWindowMinutes,
 		ActivationWindowMinutes: quote.ActivationWindowMinutes,
 		WarrantyMinutes:         quote.WarrantyMinutes,
@@ -356,6 +357,13 @@ func applyOrderingDiscount(quote *tradeapp.OrderingQuote, groupRatio string) err
 		return fmt.Errorf("discount order amount: %w", err)
 	}
 	quote.PayAmount = moneyfmt.Format(value.Mul(ratio))
+	if quote.SupplierAmount != "" {
+		supplier, err := moneyfmt.Parse(quote.SupplierAmount)
+		if err != nil || supplier.IsNegative() {
+			return fmt.Errorf("invalid supplier amount")
+		}
+		quote.SupplierAmount = moneyfmt.Format(supplier.Mul(ratio))
+	}
 	return nil
 }
 

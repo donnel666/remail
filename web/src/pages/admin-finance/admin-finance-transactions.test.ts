@@ -13,6 +13,15 @@ import { listFinanceTransactions } from "./admin-finance-api";
 describe("admin finance transaction filters", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  it("preserves the server's order linkage for reversal controls", async () => {
+    apiMocks.GET.mockResolvedValue({ data: {
+      items: [{ id: 7, orderLinked: true, userRole: "user" }], total: 1, offset: 0, limit: 20,
+      facets: { all: 1, recharge: 0, spend: 1, refund: 0, referralCashback: 0, activity: 0 },
+    } });
+    const result = await listFinanceTransactions({ category: "all" });
+    expect(result.items[0].orderLinked).toBe(true);
+  });
+
   it.each(["all", "referral_cashback", "activity"] as const)(
     "sends the %s business category and returns server-side facets",
     async (category) => {

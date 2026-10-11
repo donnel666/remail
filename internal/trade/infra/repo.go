@@ -23,6 +23,8 @@ import (
 )
 
 type OrderModel struct {
+	SupplierAmount                 sql.NullString `gorm:"type:decimal(18,6);column:supplier_amount"`
+	SupplierUserID                 *uint          `gorm:"column:supplier_user_id"`
 	ID                             uint           `gorm:"primaryKey;autoIncrement"`
 	OrderNo                        string         `gorm:"type:varchar(64);not null;column:order_no"`
 	UserID                         uint           `gorm:"not null;column:user_id"`
@@ -226,6 +228,7 @@ func (r *Repo) LoadOrCreatePendingOrder(ctx context.Context, cmd tradeapp.Create
 			Status:                  string(domain.OrderStatusPendingPayment),
 			FailureCode:             "",
 			PayAmount:               cmd.PayAmount,
+			SupplierAmount:          sql.NullString{String: cmd.SupplierAmount, Valid: cmd.SupplierAmount != ""},
 			RefundAmount:            "0.00",
 			CodeWindowMinutes:       cmd.CodeWindowMinutes,
 			ActivationWindowMinutes: cmd.ActivationWindowMinutes,
@@ -369,10 +372,12 @@ func (r *Repo) MarkPaid(ctx context.Context, cmd tradeapp.MarkPaidCommand) (*dom
 		result := tx.Model(&OrderModel{}).
 			Where("order_no = ? AND status = ?", orderNo, string(domain.OrderStatusPendingPayment)).
 			Updates(map[string]any{
-				"status":      string(domain.OrderStatusPaid),
-				"pay_amount":  payAmount,
-				"debit_tx_id": cmd.DebitTxID,
-				"version":     gorm.Expr("version + 1"),
+				"status":           string(domain.OrderStatusPaid),
+				"pay_amount":       payAmount,
+				"supplier_amount":  sql.NullString{String: cmd.SupplierAmount, Valid: cmd.SupplierAmount != ""},
+				"supplier_user_id": cmd.SupplierUserID,
+				"debit_tx_id":      cmd.DebitTxID,
+				"version":          gorm.Expr("version + 1"),
 			})
 		if result.Error != nil {
 			return fmt.Errorf("mark order paid: %w", result.Error)
@@ -595,8 +600,14 @@ func (r *Repo) CompleteExpiredOrder(ctx context.Context, orderNo string, reason 
 	changed := false
 	err := r.WithTx(ctx, func(txCtx context.Context) error {
 		tx := r.dbFor(txCtx)
-		if err := lockOrder(txCtx, tx, orderNo, &model); err != nil {
-			return err
+		model, changed = OrderModel{}, false
+		// Lifecycle scans must not wait behind a busy order before reaching supplier settlement.
+		locked := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).Where("order_no = ?", orderNo).Limit(1).Find(&model)
+		if locked.Error != nil {
+			return fmt.Errorf("lock expired order: %w", locked.Error)
+		}
+		if locked.RowsAffected == 0 {
+			return nil
 		}
 		current := domain.OrderStatus(model.Status)
 		if current == domain.OrderStatusCompleted {
@@ -625,6 +636,9 @@ func (r *Repo) CompleteExpiredOrder(ctx context.Context, orderNo string, reason 
 	})
 	if err != nil {
 		return nil, false, err
+	}
+	if model.ID == 0 {
+		return nil, false, nil
 	}
 	order := orderModelToDomain(model)
 	return &order, changed, nil
@@ -1338,6 +1352,8 @@ func orderModelToDomain(model OrderModel) domain.Order {
 		Status:                         domain.OrderStatus(model.Status),
 		FailureCode:                    domain.OrderFailureCode(model.FailureCode),
 		PayAmount:                      normalizeStoredMoney(model.PayAmount),
+		SupplierAmount:                 normalizeStoredOptionalMoney(model.SupplierAmount),
+		SupplierUserID:                 model.SupplierUserID,
 		LegacyRandomMicrosoftPayAmount: normalizeStoredOptionalMoney(model.LegacyRandomMicrosoftPayAmount),
 		LegacyRandomDomainPayAmount:    normalizeStoredOptionalMoney(model.LegacyRandomDomainPayAmount),
 		RefundAmount:                   normalizeStoredMoney(model.RefundAmount),

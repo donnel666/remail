@@ -2505,6 +2505,8 @@ func TestConcurrentCheckoutReplayAndRefundPathsDoNotDuplicateFactsMySQL(t *testi
 		require.NoError(t, err)
 		require.Equal(t, tradedomain.OrderStatusActive, created[i].Order.Status)
 	}
+	// A failed checkout has no frozen proceeds; unwind the synthetic active fixture first.
+	require.NoError(t, billingapp.NewWalletUseCase(billinginfra.NewBillingRepo(db)).CancelSupplierSettlement(context.Background(), created[1].Order.OrderNo))
 	require.NoError(t, db.Table("orders").
 		Where("order_no = ?", created[1].Order.OrderNo).
 		Updates(map[string]any{
@@ -2591,7 +2593,7 @@ func TestConcurrentCheckoutReplayAndRefundPathsDoNotDuplicateFactsMySQL(t *testi
 	require.Equal(t, factsBefore["orders"], factsAfter["orders"])
 	require.Equal(t, factsBefore["microsoft_allocations"], factsAfter["microsoft_allocations"])
 	require.Equal(t, factsBefore["order_tokens"], factsAfter["order_tokens"])
-	require.Equal(t, factsBefore["wallet_transactions"]+2, factsAfter["wallet_transactions"])
+	require.Equal(t, factsBefore["wallet_transactions"]+3, factsAfter["wallet_transactions"])
 	require.Equal(t, factsBefore["order_events"]+2, factsAfter["order_events"])
 
 	for i, order := range created {

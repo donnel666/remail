@@ -353,6 +353,8 @@ func badRequest(c *gin.Context) {
 func writeAftersaleError(c *gin.Context, err error) {
 	requestID := middleware.GetRequestID(c)
 	switch {
+	case errors.Is(err, domain.ErrSupplierSettlementBalance):
+		c.JSON(http.StatusConflict, gin.H{"message": "Supplier balance is insufficient to reverse this settlement.", "requestId": requestID})
 	case errors.Is(err, domain.ErrTicketNotFound), errors.Is(err, domain.ErrAttachmentNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"message": "Ticket not found.", "requestId": requestID})
 	case errors.Is(err, domain.ErrTicketForbidden):

@@ -7390,6 +7390,8 @@ export interface components {
             userRole: string;
             userGroupName: string;
             reversed: boolean;
+            /** @description Whether an order references this debit or refund; linked entries cannot be reversed independently. */
+            orderLinked: boolean;
             reversedByNo?: string | null;
             reversalOfNo?: string | null;
         };

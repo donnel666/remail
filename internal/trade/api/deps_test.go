@@ -27,16 +27,33 @@ func TestApplyOrderingDiscountUsesLowerMultiplierAtLedgerPrecision(t *testing.T)
 	runtimeconfig.Replace([]settingsdomain.Setting{{Key: runtimeconfig.MicrosoftPriceMultiplierKey, Value: "0.80"}})
 	t.Cleanup(func() { runtimeconfig.Replace(nil) })
 	quote := &tradeapp.OrderingQuote{
-		ProductType: domain.ProductTypeMicrosoft,
-		PayAmount:   "10.00",
+		ProductType:    domain.ProductTypeMicrosoft,
+		PayAmount:      "10.00",
+		SupplierAmount: "6.00",
 	}
 	require.NoError(t, applyOrderingDiscount(quote, "0.90"))
 	require.Equal(t, "8.00", quote.PayAmount)
+	require.Equal(t, "4.80", quote.SupplierAmount)
 
-	groupPromotion := &tradeapp.OrderingQuote{ProductType: domain.ProductTypeMicrosoft, PayAmount: "10.00"}
+	groupPromotion := &tradeapp.OrderingQuote{ProductType: domain.ProductTypeMicrosoft, PayAmount: "10.00", SupplierAmount: "6.00"}
 	require.NoError(t, applyOrderingDiscount(groupPromotion, "0.70"))
 	require.Equal(t, "7.00", groupPromotion.PayAmount)
+	require.Equal(t, "4.20", groupPromotion.SupplierAmount)
 	require.Error(t, applyOrderingDiscount(groupPromotion, "1.01"))
+}
+
+func TestOrderingSharedDiscountPreservesPrecisionAndZeroPrice(t *testing.T) {
+	runtimeconfig.Replace(nil)
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
+	quote := &tradeapp.OrderingQuote{ProductType: domain.ProductTypeMicrosoft, PayAmount: "0.012345", SupplierAmount: "0.007777"}
+	require.NoError(t, applyOrderingDiscount(quote, "0.8"))
+	require.Equal(t, "0.009876", quote.PayAmount)
+	require.Equal(t, "0.006222", quote.SupplierAmount)
+	require.NoError(t, applyOrderingDiscount(quote, "0"))
+	require.Equal(t, "0.00", quote.PayAmount)
+	require.Equal(t, "0.00", quote.SupplierAmount)
+	quote.SupplierAmount = "-1"
+	require.Error(t, applyOrderingDiscount(quote, "0.8"))
 }
 
 func TestProjectProductIDCachesDatabaseMapping(t *testing.T) {

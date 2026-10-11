@@ -3120,5 +3120,11 @@
   "Failed to load import progress.": "Failed to load import progress. Please retry.",
   "Please select resources first.": "Please select resources first.",
   "Failed to load email resources.": "Failed to load email resources.",
-  "Forwarding email": "Forwarding email"
+  "Forwarding email": "Forwarding email",
+  "Pending settlement": "Pending settlement",
+  "Settlement released": "Settlement released",
+  "Supplier settlement": "Supplier settlement",
+  "Settlement refund": "Settlement refund",
+  "Supplier balance is insufficient to reverse this settlement.": "Supplier balance is insufficient to reverse this settlement.",
+  "买家售价与供应商结算价均采用商品倍率与用户分组倍率中的较低值；1 为原价": "Buyer prices and supplier payouts both use the lower of the product and user-group multipliers; 1 keeps regular prices."
 }

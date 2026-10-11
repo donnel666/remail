@@ -3,6 +3,8 @@ package domain
 import "errors"
 
 var (
+	ErrSupplierSettlementConflict  = errors.New("billing: supplier settlement state conflict")
+	ErrSupplierSettlementBalance   = errors.New("billing: supplier balance insufficient to reverse settlement")
 	ErrInvalidAmount               = errors.New("billing: invalid amount")
 	ErrInvalidBalanceBucket        = errors.New("billing: invalid balance bucket")
 	ErrInvalidTransactionType      = errors.New("billing: invalid transaction type")

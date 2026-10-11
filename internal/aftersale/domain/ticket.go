@@ -119,6 +119,7 @@ var (
 	ErrAttachmentNotFound          = errors.New("aftersale: attachment not found")
 	ErrAttachmentInvalid           = errors.New("aftersale: invalid attachment")
 	ErrAttachmentTooLarge          = errors.New("aftersale: attachment too large")
+	ErrSupplierSettlementBalance   = errors.New("aftersale: supplier balance insufficient to reverse settlement")
 	ErrInsufficientSupplierBalance = errors.New("aftersale: insufficient supplier balance")
 	ErrSupplierWalletUnavailable   = errors.New("aftersale: supplier wallet unavailable")
 )

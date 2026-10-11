@@ -98,6 +98,7 @@ type AdminCardRedemption struct {
 
 type AdminTransaction struct {
 	Transaction  domain.Transaction
+	OrderLinked  bool
 	Reversed     bool
 	ReversedByNo *string
 	User         *UserDirectoryEntry
@@ -402,7 +403,7 @@ func (uc *WalletUseCase) ReverseTransaction(ctx context.Context, req ReverseTran
 	if err != nil {
 		return nil, err
 	}
-	if original.Transaction.ReversalOfNo != nil {
+	if original.OrderLinked || original.Transaction.ReversalOfNo != nil {
 		return nil, domain.ErrTransactionNotReversible
 	}
 	if original.Reversed {

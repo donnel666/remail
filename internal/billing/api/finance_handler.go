@@ -356,6 +356,7 @@ func cardRedemptionResponse(r billingapp.AdminCardRedemption) CardRedemptionResp
 func adminTransactionItem(at billingapp.AdminTransaction) AdminTransactionItem {
 	t := at.Transaction
 	item := AdminTransactionItem{
+		OrderLinked:     at.OrderLinked,
 		ID:              t.ID,
 		TransactionNo:   t.TransactionNo,
 		UserID:          t.UserID,

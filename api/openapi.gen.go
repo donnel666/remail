@@ -9390,13 +9390,16 @@ type AdminTransactionItem struct {
 	BalanceAfter NonNegativeLedgerAmountResponse `json:"balanceAfter"`
 
 	// BalanceBefore Non-negative point amount with up to 6 decimal places.
-	BalanceBefore   NonNegativeLedgerAmountResponse     `json:"balanceBefore"`
-	BalanceBucket   AdminTransactionItemBalanceBucket   `json:"balanceBucket"`
-	BizId           string                              `json:"bizId"`
-	BizType         string                              `json:"bizType"`
-	CreatedAt       time.Time                           `json:"createdAt"`
-	Direction       AdminTransactionItemDirection       `json:"direction"`
-	Id              int                                 `json:"id"`
+	BalanceBefore NonNegativeLedgerAmountResponse   `json:"balanceBefore"`
+	BalanceBucket AdminTransactionItemBalanceBucket `json:"balanceBucket"`
+	BizId         string                            `json:"bizId"`
+	BizType       string                            `json:"bizType"`
+	CreatedAt     time.Time                         `json:"createdAt"`
+	Direction     AdminTransactionItemDirection     `json:"direction"`
+	Id            int                               `json:"id"`
+
+	// OrderLinked Whether an order references this debit or refund; linked entries cannot be reversed independently.
+	OrderLinked     bool                                `json:"orderLinked"`
 	ReversalOfNo    *string                             `json:"reversalOfNo,omitempty"`
 	Reversed        bool                                `json:"reversed"`
 	ReversedByNo    *string                             `json:"reversedByNo,omitempty"`

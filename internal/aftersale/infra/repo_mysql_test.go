@@ -11,6 +11,7 @@ import (
 
 	aftersaleapp "github.com/donnel666/remail/internal/aftersale/app"
 	"github.com/donnel666/remail/internal/aftersale/domain"
+	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/platform/testmysql"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -27,6 +28,24 @@ func TestMain(m *testing.M) {
 func newAftersaleTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	return aftersaleMySQLTestServer.Database(t, aftersaleMigrationsDir(t))
+}
+
+func TestOrderTicketRevalidatesInsideTransactionMySQL(t *testing.T) {
+	db := newAftersaleTestDB(t)
+	repo := NewRepo(db)
+	_, err := repo.Create(context.Background(), aftersaleapp.CreateTicketParams{
+		TicketNo: "AS-EXPIRED", TicketType: domain.TicketTypeOrder, Title: "Expired warranty", RequesterUserID: 7,
+		Order: &domain.OrderSnapshot{OrderNo: "OR-EXPIRED", PayAmount: "80.00"}, FirstMessage: userMessage("refund"),
+		ValidateOrder: func(ctx context.Context) error {
+			_, inTx := platform.GormTxFromContext(ctx)
+			require.True(t, inTx)
+			return domain.ErrOrderNotEligible
+		},
+	})
+	require.ErrorIs(t, err, domain.ErrOrderNotEligible)
+	var count int64
+	require.NoError(t, db.Model(&TicketModel{}).Count(&count).Error)
+	require.Zero(t, count)
 }
 
 func aftersaleMigrationsDir(t *testing.T) string {

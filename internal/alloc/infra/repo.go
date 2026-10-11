@@ -184,9 +184,10 @@ func (r *Repo) dbFor(ctx context.Context) *gorm.DB {
 }
 
 type OrderGuardModel struct {
-	OrderNo   string    `gorm:"primaryKey;column:order_no"`
-	Type      string    `gorm:"type:varchar(32);not null"`
-	CreatedAt time.Time `gorm:"not null;autoCreateTime;column:created_at"`
+	OwnerUserID *uint     `gorm:"column:owner_user_id"`
+	OrderNo     string    `gorm:"primaryKey;column:order_no"`
+	Type        string    `gorm:"type:varchar(32);not null"`
+	CreatedAt   time.Time `gorm:"not null;autoCreateTime;column:created_at"`
 }
 
 func (OrderGuardModel) TableName() string { return "allocation_order_guards" }
@@ -1688,6 +1689,9 @@ func (r *Repo) CreateMicrosoftAllocation(ctx context.Context, allocation *domain
 		}
 		return fmt.Errorf("create microsoft allocation: %w", err)
 	}
+	if err := r.snapshotAllocationSupplier(ctx, allocation.OrderNo, allocation.ResourceID); err != nil {
+		return err
+	}
 	*allocation = model.toDomain()
 	return nil
 }
@@ -1710,6 +1714,9 @@ func (r *Repo) CreateGmailAllocation(ctx context.Context, allocation *domain.Gma
 		}
 		return fmt.Errorf("create Gmail allocation: %w", err)
 	}
+	if err := r.snapshotAllocationSupplier(ctx, allocation.OrderNo, allocation.ResourceID); err != nil {
+		return err
+	}
 	*allocation = model.toDomain()
 	return nil
 }
@@ -1728,6 +1735,9 @@ func (r *Repo) CreateICloudAllocation(ctx context.Context, allocation *domain.IC
 		}
 		return fmt.Errorf("create iCloud allocation: %w", err)
 	}
+	if err := r.snapshotAllocationSupplier(ctx, allocation.OrderNo, allocation.ResourceID); err != nil {
+		return err
+	}
 	*allocation = model.toDomain()
 	return nil
 }
@@ -1745,6 +1755,9 @@ func (r *Repo) CreateDomainAllocation(ctx context.Context, allocation *domain.Ge
 			return domain.ErrInvalidAllocationRequest
 		}
 		return fmt.Errorf("create domain allocation: %w", err)
+	}
+	if err := r.snapshotAllocationSupplier(ctx, allocation.OrderNo, allocation.ResourceID); err != nil {
+		return err
 	}
 	*allocation = model.toDomain()
 	return nil

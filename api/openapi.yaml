@@ -18590,6 +18590,7 @@ components:
         - userRole
         - userGroupName
         - reversed
+        - orderLinked
       properties:
         id:
           type: integer
@@ -18629,6 +18630,9 @@ components:
           type: string
         reversed:
           type: boolean
+        orderLinked:
+          type: boolean
+          description: Whether an order references this debit or refund; linked entries cannot be reversed independently.
         reversedByNo:
           type: string
           nullable: true

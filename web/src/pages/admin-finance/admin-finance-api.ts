@@ -121,6 +121,7 @@ export interface FinanceCardKeyRedemption {
 }
 
 export interface FinanceTransaction {
+  orderLinked: boolean;
   id: number;
   transactionNo: string;
   userId: number;
@@ -401,6 +402,7 @@ export function walletToFinanceBalance(wallet: WalletResponse): FinanceUserBalan
 function transactionItemToFinance(item: TransactionItem): FinanceTransaction {
   return {
     ...item,
+    orderLinked: false,
     userEmail: "",
     userNickname: "",
     userRole: "user",

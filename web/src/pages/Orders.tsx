@@ -38,6 +38,7 @@ import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { IamApiError } from "@/lib/api-client";
 import { copyText } from "@/lib/clipboard";
 import { getIamErrorMessage } from "@/lib/iam-errors";
+import { getOrderAfterSaleState } from "./tickets/tickets-api";
 import {
   readPickupMail,
   readPickupMessage,
@@ -106,12 +107,9 @@ function orderCanUseService(order: OrderResponse) {
   return isFutureTime(orderReceiveUntil(order));
 }
 
-// Order tickets stay within the after-sale window (INV-AS1): active orders
-// can always raise one, completed orders only until afterSaleUntil passes.
 function orderCanSubmitTicket(order: OrderResponse) {
-  if (order.status === "active") return true;
-  if (order.status !== "completed") return false;
-  return isFutureTime(order.afterSaleUntil);
+  if (order.status !== "active" && order.status !== "completed") return false;
+  return getOrderAfterSaleState(order).eligible;
 }
 
 function toMailboxMessages(items: OrderMailResponse["items"]): WorkbenchMessage[] {

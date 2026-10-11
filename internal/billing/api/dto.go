@@ -329,6 +329,7 @@ type CardRedemptionListResponse struct {
 }
 
 type AdminTransactionItem struct {
+	OrderLinked     bool      `json:"orderLinked"`
 	ID              uint      `json:"id"`
 	TransactionNo   string    `json:"transactionNo"`
 	UserID          uint      `json:"userId"`

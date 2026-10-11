@@ -176,6 +176,9 @@ func (r *Repo) CreateProtoAllocation(ctx context.Context, allocation *domain.Pro
 		}
 		return fmt.Errorf("create Proto allocation: %w", err)
 	}
+	if err := r.snapshotAllocationSupplier(ctx, allocation.OrderNo, allocation.ResourceID); err != nil {
+		return err
+	}
 	*allocation = model.toDomain()
 	return nil
 }

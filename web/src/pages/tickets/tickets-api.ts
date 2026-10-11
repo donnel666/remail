@@ -357,7 +357,7 @@ export function getOrderAfterSaleState(
     return { eligible: false, reason: "not_delivered" };
   }
   const deadline = order.afterSaleUntil ?? order.receiveUntil ?? undefined;
-  if (order.status === "active") {
+  if (order.status === "active" && !deadline) {
     return { eligible: true, deadline };
   }
   if (deadline && new Date(deadline).getTime() > Date.now()) {

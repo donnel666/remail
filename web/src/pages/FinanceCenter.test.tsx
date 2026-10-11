@@ -42,9 +42,16 @@ vi.mock("@/lib/wallet-api", () => ({
 }));
 
 vi.mock("@/components/semi/card-table", () => ({
-  CardTable: ({ dataSource, loading }: any) => (
+  CardTable: ({ dataSource, loading, columns }: any) => (
     <div data-loading={String(loading)} data-testid="transactions">
       {dataSource.length}
+      {dataSource.map((item: any, index: number) => (
+        <div key={index}>
+          {columns.map((column: any) => (
+            <span key={column.dataIndex}>{column.render(item[column.dataIndex], item)}</span>
+          ))}
+        </div>
+      ))}
     </div>
   ),
 }));
@@ -119,6 +126,18 @@ const wallet = {
 };
 
 describe("FinanceCenter", () => {
+  it("shows supplier settlement stages and their order numbers", async () => {
+    mocks.listWalletTransactions.mockResolvedValue({ items: [
+      { transactionType: "credit", balanceBucket: "supplier_frozen", direction: "in", bizType: "supplier_settlement", bizId: "OR-FROZEN", amount: "48", balanceAfter: "48", createdAt: "2026-10-11T00:00:00Z" },
+      { transactionType: "transfer", balanceBucket: "supplier_frozen", direction: "out", bizType: "supplier_settlement", bizId: "OR-RELEASED", amount: "-48", balanceAfter: "0", createdAt: "2026-10-11T00:00:00Z" },
+      { transactionType: "credit", balanceBucket: "supplier_available", direction: "in", bizType: "supplier_settlement", bizId: "OR-CREDITED", amount: "48", balanceAfter: "48", createdAt: "2026-10-11T00:00:00Z" },
+      { transactionType: "manual_adjustment", balanceBucket: "supplier_available", direction: "out", bizType: "supplier_settlement_cancel", bizId: "OR-REFUNDED", amount: "-48", balanceAfter: "0", createdAt: "2026-10-11T00:00:00Z" },
+    ] });
+    render(<FinanceCenter />);
+    for (const label of ["Pending settlement", "Settlement released", "Supplier settlement", "Settlement refund", "OR-FROZEN", "OR-RELEASED", "OR-CREDITED", "OR-REFUNDED"]) {
+      expect(await screen.findByText(label)).toBeInTheDocument();
+    }
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getWallet.mockResolvedValue(wallet);

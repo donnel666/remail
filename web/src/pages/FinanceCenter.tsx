@@ -364,11 +364,16 @@ export default function FinanceCenter() {
         title: t("Type"),
         dataIndex: "transactionType",
         width: 115,
-        render: (value: unknown, record: TransactionItem) => (
-          <Tag color={record.direction === "in" ? "green" : "orange"} shape="circle">
-            {t(String(value))}
-          </Tag>
-        ),
+        render: (value: unknown, record: TransactionItem) => {
+          let label = String(value);
+          if (record.bizType === "supplier_settlement_cancel") label = "Settlement refund";
+          if (record.bizType === "supplier_settlement") {
+            label = record.balanceBucket === "supplier_available"
+              ? "Supplier settlement"
+              : record.direction === "in" ? "Pending settlement" : "Settlement released";
+          }
+          return <Tag color={record.direction === "in" ? "green" : "orange"} shape="circle">{t(label)}</Tag>;
+        },
       },
       {
         title: t("Account"),
@@ -402,6 +407,13 @@ export default function FinanceCenter() {
         render: (value: unknown) => (
           <span className="font-mono-data">{formatPointsValue(String(value))}</span>
         ),
+      },
+      {
+        title: t("Order number"),
+        dataIndex: "bizId",
+        width: 250,
+        render: (value: unknown, record: TransactionItem) =>
+          record.bizType.startsWith("supplier_settlement") ? String(value) : "—",
       },
       {
         title: t("Created at"),

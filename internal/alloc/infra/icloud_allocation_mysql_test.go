@@ -50,7 +50,10 @@ func TestICloudAllocationConcurrentMySQL(t *testing.T) {
 	if os.Getenv("REMAIL_ICLOUD_BENCHMARK") == "1" {
 		resources, aliases, requests, workers = 32768, 8, 1500, 300
 	}
-	db := newAllocMySQLTestDB(t)
+	server := testmysql.New("remail_icloud_allocation_migration_test")
+	t.Cleanup(func() { require.NoError(t, server.Close(context.Background())) })
+	migrationsDir := testmysql.MigrationsThrough(t, allocMigrationsDir(t), 146)
+	db := server.Database(t, migrationsDir)
 	seedICloudAllocationInventory(t, db, resources, aliases)
 	require.NoError(t, db.Exec(`
 INSERT INTO allocation_order_guards(order_no, type)
@@ -65,8 +68,11 @@ FROM icloud_aliases WHERE CAST(anonymous_id AS UNSIGNED) < ?`, aliases*3/4).Erro
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.SetDialect("mysql"))
-	require.NoError(t, goose.DownTo(sqlDB, allocMigrationsDir(t), 142))
-	require.NoError(t, goose.UpTo(sqlDB, allocMigrationsDir(t), 144))
+	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 142))
+	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 144))
+
+	// Current allocation writes supplier snapshots; old migration checks run before that upgrade.
+	require.NoError(t, goose.Up(sqlDB, allocMigrationsDir(t)))
 
 	capture := &candidateSQLCapture{Interface: db.Logger, match: "FROM icloud_"}
 	repo := NewRepo(db.Session(&gorm.Session{Logger: capture}))

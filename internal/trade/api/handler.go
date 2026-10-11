@@ -783,6 +783,8 @@ func orderEventResponse(item domain.OrderEvent) OrderEventResponse {
 func writeTradeError(c *gin.Context, err error) {
 	requestID := middleware.GetRequestID(c)
 	switch {
+	case errors.Is(err, domain.ErrSupplierSettlementBalance):
+		c.JSON(http.StatusConflict, gin.H{"message": "Supplier balance is insufficient to reverse this settlement.", "requestId": requestID})
 	case errors.Is(err, domain.ErrIdempotencyRequired):
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Idempotency-Key is required.", "requestId": requestID})
 	case errors.Is(err, domain.ErrIdempotencyConflict):

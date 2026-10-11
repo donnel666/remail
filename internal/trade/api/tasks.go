@@ -43,7 +43,7 @@ func runOrderLifecycleScan(ctx context.Context, module *Module) {
 	result, err := module.UseCase.ExpireDueOrders(ctx, 0)
 	if err != nil {
 		platform.RecordBusinessEvent("order_lifecycle", "failed")
-		slog.Warn("trade lifecycle scanner failed", "error", err)
+		slog.Warn("trade lifecycle scanner failed", "error", err, "progress", result)
 		return
 	}
 	if result == nil {
@@ -54,7 +54,7 @@ func runOrderLifecycleScan(ctx context.Context, module *Module) {
 	} else {
 		platform.RecordBusinessEvent("order_lifecycle", "succeeded")
 	}
-	if result.CodeTimedOut == 0 &&
+	if result.SupplierSettled == 0 && result.CodeTimedOut == 0 &&
 		result.CheckoutRecovered == 0 &&
 		result.ResourceUnavailableRefunded == 0 &&
 		result.PurchaseActivationCompleted == 0 &&
@@ -67,6 +67,7 @@ func runOrderLifecycleScan(ctx context.Context, module *Module) {
 	}
 	slog.Info(
 		"trade lifecycle scanner finished",
+		"supplier_settled", result.SupplierSettled,
 		"checkout_recovered", result.CheckoutRecovered,
 		"code_timed_out", result.CodeTimedOut,
 		"resource_unavailable_refunded", result.ResourceUnavailableRefunded,

@@ -89,6 +89,8 @@ const (
 )
 
 type Order struct {
+	SupplierAmount                 string // Empty means the order predates supplier settlement.
+	SupplierUserID                 *uint
 	ID                             uint
 	OrderNo                        string
 	UserID                         uint
@@ -139,6 +141,7 @@ type OrderEvent struct {
 }
 
 var (
+	ErrSupplierSettlementBalance    = errors.New("trade: supplier balance insufficient to reverse settlement")
 	ErrInvalidOrderRequest          = errors.New("trade: invalid order request")
 	ErrOrderNotFound                = errors.New("trade: order not found")
 	ErrOrderForbidden               = errors.New("trade: order forbidden")

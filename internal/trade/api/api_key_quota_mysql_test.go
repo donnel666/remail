@@ -145,31 +145,35 @@ func TestAPIKeyPointQuotaMigrationMySQL(t *testing.T) {
 	creditBuyer(t, db, 2, "100000.00")
 	require.NoError(t, db.Exec(`INSERT INTO api_keys(id, user_id, key_prefix, key_plain, quota_limit, quota_used)
 		VALUES (7, 2, 'legacy-key', 'rk-legacy-key', 1000, 200), (8, 2, 'unused-key', 'rk-unused-key', NULL, 50)`).Error)
-	orders := newTradeUseCase(db)
-	for i := range 2 {
-		order, err := orders.Checkout(ctx, tradeapp.CheckoutRequest{
-			UserID: 2, ProjectID: 10, ProductID: 20, ServiceMode: "code", SupplyPolicy: "public_only",
-			IdempotencyKey: fmt.Sprintf("legacy-order-%d", i),
-		})
-		require.NoError(t, err)
-		if i == 1 {
-			_, err = orders.AdminRefundOrder(ctx, tradeapp.AdminOrderCommandRequest{
-				OrderNo: order.Order.OrderNo, Reason: "legacy refund", IdempotencyKey: "legacy-refund",
+	// Seed pre-settlement facts directly: current checkout requires the new financial snapshots.
+	wallet := billingapp.NewWalletUseCase(billinginfra.NewBillingRepo(db))
+	keyID := uint(7)
+	for i := range 3 {
+		orderNo := fmt.Sprintf("legacy-order-%d", i)
+		order := tradeinfra.OrderModel{
+			OrderNo: orderNo, UserID: 2, ProjectID: 10, ProjectProductID: 20,
+			ProductType: "microsoft", ServiceMode: "code", SupplyPolicy: "public_only",
+			Status: "pending_payment", PayAmount: "50000.00", RefundAmount: "0.00",
+			ClientChannel: "api_key", APIKeyID: &keyID, IdempotencyKey: orderNo,
+			RequestFingerprint: strings.Repeat("a", 64), ServiceCleanupStatus: "none",
+		}
+		if i < 2 {
+			debit, err := wallet.DebitConsumer(ctx, billingapp.AdjustConsumerBalanceRequest{
+				UserID: 2, Amount: "12345.123456", Reason: "order:" + orderNo, IdempotencyKey: orderNo + ":debit",
 			})
 			require.NoError(t, err)
+			order.Status, order.PayAmount, order.DebitTxID = "paid", "12345.123456", &debit.Transaction.ID
+			if i == 1 {
+				refund, err := wallet.RefundConsumer(ctx, billingapp.AdjustConsumerBalanceRequest{
+					UserID: 2, Amount: order.PayAmount, Reason: "order:" + orderNo, IdempotencyKey: orderNo + ":refund",
+				})
+				require.NoError(t, err)
+				order.Status, order.RefundAmount, order.RefundTxID = "refunded", order.PayAmount, &refund.Transaction.ID
+			}
 		}
-		require.NoError(t, db.Table("orders").Where("order_no = ?", order.Order.OrderNo).
-			Updates(map[string]any{"client_channel": "api_key", "api_key_id": 7}).Error)
+		require.NoError(t, db.Omit("SupplierAmount", "SupplierUserID").Create(&order).Error)
 	}
-	keyID := uint(7)
-	_, _, err := tradeinfra.NewRepo(db).LoadOrCreatePendingOrder(ctx, tradeapp.CreatePendingOrderCommand{
-		OrderNo: "legacy-unpaid", UserID: 2, ProjectID: 10, ProjectProductID: 20,
-		ProductType: tradedomain.ProductTypeMicrosoft, ServiceMode: tradedomain.ServiceModeCode,
-		SupplyPolicy: tradedomain.SupplyPolicyPublicOnly, PayAmount: "50000.00", CodeWindowMinutes: 10,
-		ClientChannel: tradedomain.ClientChannelAPIKey, APIKeyID: &keyID, IdempotencyKey: "legacy-unpaid",
-		RequestFingerprint: strings.Repeat("a", 64), Now: time.Now().UTC(),
-	})
-	require.NoError(t, err)
+
 	require.NoError(t, db.Table("api_keys").Where("id = ?", 7).Updates(map[string]any{"enabled": false, "deleted_at": time.Now().UTC()}).Error)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)

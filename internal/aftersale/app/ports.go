@@ -193,6 +193,8 @@ type AttachmentInsert struct {
 }
 
 type CreateTicketParams struct {
+	// Recheck under the ticket transaction so warranty expiry cannot race settlement.
+	ValidateOrder   func(context.Context) error
 	TicketNo        string
 	TicketType      domain.TicketType
 	Title           string

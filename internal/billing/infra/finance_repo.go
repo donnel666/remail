@@ -127,13 +127,23 @@ func (r *BillingRepo) ListCardRedemptions(ctx context.Context, cardKey string, l
 
 // ---- Transactions -------------------------------------------------------
 
+type adminTransactionModel struct {
+	WalletTransactionModel
+	OrderLinked bool `gorm:"column:order_linked"`
+}
+
+// Both references are indexed; legacy order debits were recorded as manual adjustments.
+const adminTransactionColumns = `wallet_transactions.*,
+    (EXISTS (SELECT 1 FROM orders WHERE debit_tx_id = wallet_transactions.id)
+     OR EXISTS (SELECT 1 FROM orders WHERE refund_tx_id = wallet_transactions.id)) AS order_linked`
+
 const (
 	adminTransactionRechargeCondition = "transaction_type IN ('recharge', 'card_redeem')"
 	adminTransactionSpendCondition    = "transaction_type = 'debit'"
 	adminTransactionRefundCondition   = "transaction_type = 'refund'"
 	adminTransactionReferralCondition = "transaction_type = 'credit' AND biz_type IN ('referral_transfer', 'invitation_reward')"
 	adminTransactionActivityCondition = "transaction_type = 'credit' AND biz_type IN ('daily_checkin', 'leaderboard_reward', 'registration_reward')"
-	adminTransactionAllCondition      = "((" + adminTransactionRechargeCondition + ") OR (" + adminTransactionSpendCondition + ") OR (" + adminTransactionRefundCondition + ") OR (" + adminTransactionReferralCondition + ") OR (" + adminTransactionActivityCondition + "))"
+	adminTransactionAllCondition      = "((" + adminTransactionRechargeCondition + ") OR (" + adminTransactionSpendCondition + ") OR (" + adminTransactionRefundCondition + ") OR (" + adminTransactionReferralCondition + ") OR (" + adminTransactionActivityCondition + ") OR biz_type IN ('supplier_settlement', 'supplier_settlement_cancel'))"
 	adminTransactionFacetSelect       = "COUNT(*) AS all_count, " +
 		"COALESCE(SUM(CASE WHEN " + adminTransactionRechargeCondition + " THEN 1 ELSE 0 END), 0) AS recharge, " +
 		"COALESCE(SUM(CASE WHEN " + adminTransactionSpendCondition + " THEN 1 ELSE 0 END), 0) AS spend, " +
@@ -238,8 +248,9 @@ func (r *BillingRepo) ListAdminTransactions(ctx context.Context, filter billinga
 	default:
 		total = 0
 	}
-	var models []WalletTransactionModel
+	var models []adminTransactionModel
 	if err := applyAdminTransactionFilter(r.db.WithContext(ctx).Model(&WalletTransactionModel{}), filter).
+		Select(adminTransactionColumns).
 		Order("id DESC").
 		Offset(offset).
 		Limit(limit).
@@ -262,8 +273,8 @@ func (r *BillingRepo) ListAdminTransactions(ctx context.Context, filter billinga
 }
 
 func (r *BillingRepo) GetAdminTransaction(ctx context.Context, id uint) (*billingapp.AdminTransaction, error) {
-	var model WalletTransactionModel
-	if err := r.db.WithContext(ctx).First(&model, "id = ?", id).Error; err != nil {
+	var model adminTransactionModel
+	if err := r.db.WithContext(ctx).Model(&WalletTransactionModel{}).Select(adminTransactionColumns).First(&model, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, domain.ErrTransactionNotFound
 		}
@@ -300,8 +311,8 @@ func (r *BillingRepo) reversalsByOriginalNo(ctx context.Context, nos []string) (
 	return out, nil
 }
 
-func adminTransactionFromModel(model WalletTransactionModel, reversedBy map[string]string) billingapp.AdminTransaction {
-	at := billingapp.AdminTransaction{Transaction: transactionModelToDomain(model)}
+func adminTransactionFromModel(model adminTransactionModel, reversedBy map[string]string) billingapp.AdminTransaction {
+	at := billingapp.AdminTransaction{Transaction: transactionModelToDomain(model.WalletTransactionModel), OrderLinked: model.OrderLinked}
 	if no, ok := reversedBy[model.TransactionNo]; ok {
 		at.Reversed = true
 		reversedByNo := no
@@ -341,8 +352,8 @@ func (r *BillingRepo) ReverseTransaction(ctx context.Context, cmd billingapp.Rev
 }
 
 func (r *BillingRepo) reverseTransactionInTx(ctx context.Context, tx *gorm.DB, cmd billingapp.ReverseTransactionCommand) (*billingapp.ReverseTransactionResult, error) {
-	var original WalletTransactionModel
-	if err := tx.WithContext(ctx).
+	var original adminTransactionModel
+	if err := tx.WithContext(ctx).Model(&WalletTransactionModel{}).Select(adminTransactionColumns).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		First(&original, "id = ?", cmd.Original.ID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -350,7 +361,7 @@ func (r *BillingRepo) reverseTransactionInTx(ctx context.Context, tx *gorm.DB, c
 		}
 		return nil, fmt.Errorf("lock transaction: %w", err)
 	}
-	if original.BizType == "historical_order" {
+	if original.OrderLinked || original.BizType == "historical_order" || strings.HasPrefix(original.BizType, "supplier_settlement") {
 		return nil, domain.ErrTransactionNotReversible
 	}
 	if original.ReversalOfNo != nil {
@@ -409,7 +420,7 @@ func (r *BillingRepo) reverseTransactionInTx(ctx context.Context, tx *gorm.DB, c
 	reversedByNo := created.Transaction.TransactionNo
 	return &billingapp.ReverseTransactionResult{
 		Original: billingapp.AdminTransaction{
-			Transaction:  transactionModelToDomain(original),
+			Transaction:  transactionModelToDomain(original.WalletTransactionModel),
 			Reversed:     true,
 			ReversedByNo: &reversedByNo,
 		},
@@ -669,7 +680,7 @@ func (r *BillingRepo) FinanceLedgerBuckets(ctx context.Context, granularity stri
 		COALESCE(SUM(CASE WHEN transaction_type = 'debit' THEN ABS(amount) ELSE 0 END),0) AS spend,
 		COALESCE(SUM(CASE WHEN transaction_type = 'withdrawal' THEN ABS(amount) ELSE 0 END),0) AS withdraw,
 		COALESCE(SUM(CASE WHEN transaction_type = 'refund' THEN ABS(amount) ELSE 0 END),0) AS refund,
-		COALESCE(SUM(CASE WHEN balance_bucket = 'supplier_available' AND direction = 'in' THEN ABS(amount) ELSE 0 END),0) AS supplier_settlement,
+		COALESCE(SUM(CASE WHEN balance_bucket = 'supplier_available' AND (direction = 'in' OR biz_type = 'supplier_settlement_cancel') THEN amount ELSE 0 END),0) AS supplier_settlement,
 		COALESCE(SUM(CASE WHEN transaction_type = 'credit' AND biz_type LIKE 'referral%%' THEN ABS(amount) ELSE 0 END),0) AS account_revenue`, format)
 
 	var rows []struct {

@@ -303,6 +303,16 @@ func TestReverseTransactionRequiresIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestReverseTransactionRejectsOrderLinkedEntry(t *testing.T) {
+	uc := NewWalletUseCase(financeStubRepo{getTxn: &AdminTransaction{
+		Transaction: domain.Transaction{ID: 5, TransactionNo: "TX-ORDER", UserID: 7}, OrderLinked: true,
+	}})
+	_, err := uc.ReverseTransaction(context.Background(), ReverseTransactionRequest{TransactionID: 5, IdempotencyKey: "k"})
+	if err != domain.ErrTransactionNotReversible {
+		t.Fatalf("want ErrTransactionNotReversible, got %v", err)
+	}
+}
+
 func TestReverseTransactionHappyPath(t *testing.T) {
 	var gotCmd ReverseTransactionCommand
 	repo := financeStubRepo{

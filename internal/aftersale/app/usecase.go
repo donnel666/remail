@@ -128,6 +128,7 @@ func (uc *UseCase) CreateTicket(ctx context.Context, req CreateTicketRequest) (*
 	}
 
 	var snapshot *domain.OrderSnapshot
+	var validateOrder func(context.Context) error
 	if req.TicketType == domain.TicketTypeOrder {
 		orderNo := strings.TrimSpace(req.OrderNo)
 		if orderNo == "" {
@@ -141,9 +142,17 @@ func (uc *UseCase) CreateTicket(ctx context.Context, req CreateTicketRequest) (*
 			return nil, err
 		}
 		snapshot = buildSnapshot(info)
+		validateOrder = func(ctx context.Context) error {
+			current, err := uc.orders.GetOrderForTicket(ctx, orderNo, req.RequesterUserID)
+			if err != nil {
+				return err
+			}
+			return uc.checkOrderEligibility(current)
+		}
 	}
 
 	return uc.persistNewTicket(ctx, CreateTicketParams{
+		ValidateOrder:   validateOrder,
 		TicketType:      req.TicketType,
 		Title:           title,
 		RequesterUserID: req.RequesterUserID,
@@ -458,6 +467,9 @@ func (uc *UseCase) checkOrderEligibility(info *OrderInfo) error {
 	case "refunded", "pending_payment", "paid", "failed":
 		return domain.ErrOrderNotEligible
 	case "active":
+		if deadline := afterSaleDeadline(info); deadline != nil && !deadline.After(uc.now()) {
+			return domain.ErrOrderNotEligible
+		}
 		return nil
 	default: // completed, closed
 		deadline := afterSaleDeadline(info)

@@ -4,6 +4,8 @@ const RECHARGE_SOURCE_LABELS: Record<string, string> = {
 };
 
 export function transactionTypeLabel(transactionType: string, bizType: string) {
+  if (bizType === "supplier_settlement_cancel") return "Settlement refund";
+  if (bizType === "supplier_settlement") return "Supplier settlement";
   return transactionType === "recharge"
     ? RECHARGE_SOURCE_LABELS[bizType] ?? transactionType
     : transactionType;

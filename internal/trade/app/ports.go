@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 )
 
 type OrderingQuote struct {
+	SupplierAmount           string
 	ProjectID                uint
 	ProductID                uint
 	ProductType              domain.ProductType
@@ -272,6 +274,7 @@ type HistoricalGmailOrderRepository interface {
 }
 
 type CreatePendingOrderCommand struct {
+	SupplierAmount          string
 	OrderNo                 string
 	UserID                  uint
 	ProjectID               uint
@@ -302,9 +305,11 @@ type MarkActiveCommand struct {
 }
 
 type MarkPaidCommand struct {
-	OrderNo   string
-	DebitTxID uint
-	PayAmount string
+	SupplierUserID *uint
+	SupplierAmount string
+	OrderNo        string
+	DebitTxID      uint
+	PayAmount      string
 }
 
 type MarkFailedCommand struct {
@@ -513,6 +518,7 @@ type AdminOrderCommandRequest struct {
 }
 
 type ExpireOrdersResult struct {
+	SupplierSettled             int
 	CheckoutRecovered           int
 	CodeTimedOut                int
 	ResourceUnavailableRefunded int
@@ -525,6 +531,7 @@ type ExpireOrdersResult struct {
 }
 
 type UseCase struct {
+	settlements                SupplierSettlementPort
 	repo                       Repository
 	ordering                   OrderingPort
 	wallet                     WalletPort
@@ -540,6 +547,8 @@ type UseCase struct {
 	historicalGmailAllocations HistoricalGmailAllocationPort
 	now                        func() time.Time
 	deliveryNotificationCursor atomic.Uint64
+	supplierScanMu             sync.Mutex
+	supplierScanAfter          *SupplierSettlementOrder
 	checkoutBatches            *checkoutBatchGate
 }
 
@@ -553,6 +562,7 @@ func NewUseCase(repo Repository, ordering OrderingPort, wallet WalletPort, alloc
 		now:             func() time.Time { return time.Now().UTC() },
 		checkoutBatches: newCheckoutBatchGate(),
 	}
+	uc.settlements, _ = wallet.(SupplierSettlementPort)
 	uc.historicalOrders, _ = repo.(HistoricalOrderRepository)
 	uc.historicalGmailOrders, _ = repo.(HistoricalGmailOrderRepository)
 	uc.historicalAllocations, _ = allocation.(HistoricalMicrosoftAllocationPort)
@@ -1129,6 +1139,7 @@ func (uc *UseCase) checkoutPrepared(ctx context.Context, prepared checkoutPrepar
 		ServiceMode:             prepared.mode,
 		SupplyPolicy:            prepared.policy,
 		PayAmount:               prepared.quote.PayAmount,
+		SupplierAmount:          prepared.quote.SupplierAmount,
 		CodeWindowMinutes:       prepared.quote.CodeWindowMinutes,
 		ActivationWindowMinutes: prepared.quote.ActivationWindowMinutes,
 		WarrantyMinutes:         prepared.quote.WarrantyMinutes,
@@ -2128,7 +2139,7 @@ func (uc *UseCase) AdminRetryOrderRefund(ctx context.Context, req AdminOrderComm
 		return nil, err
 	}
 	err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
-		if err := uc.wallet.LockConsumer(txCtx, owner.UserID); err != nil {
+		if err := uc.lockOrderWallets(txCtx, *owner); err != nil {
 			return err
 		}
 		locked, err := uc.repo.LockOrderForUpdate(txCtx, orderNo)
@@ -2274,22 +2285,28 @@ func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrder
 		return nil, err
 	}
 	for _, orderNo := range purchaseActivationExpired {
-		if err := uc.completeExpiredOrder(ctx, orderNo, "Purchase activation window expired."); err != nil {
+		changed, err := uc.completeExpiredOrder(ctx, orderNo, "Purchase activation window expired.")
+		if err != nil {
 			result.Failed++
 			continue
 		}
-		result.PurchaseActivationCompleted++
+		if changed {
+			result.PurchaseActivationCompleted++
+		}
 	}
 	purchaseWarrantyExpired, err := uc.repo.ListExpiredPurchaseWarrantyOrderNos(ctx, now, limit)
 	if err != nil {
 		return nil, err
 	}
 	for _, orderNo := range purchaseWarrantyExpired {
-		if err := uc.completeExpiredOrder(ctx, orderNo, "Purchase warranty window expired."); err != nil {
+		changed, err := uc.completeExpiredOrder(ctx, orderNo, "Purchase warranty window expired.")
+		if err != nil {
 			result.Failed++
 			continue
 		}
-		result.PurchaseWarrantyCompleted++
+		if changed {
+			result.PurchaseWarrantyCompleted++
+		}
 	}
 	codeCleanup, err := uc.repo.ListCodeOrderNosReadyForCleanup(ctx, now, limit)
 	if err != nil {
@@ -2317,6 +2334,9 @@ func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrder
 			continue
 		}
 		result.CleanupRetried++
+	}
+	if err := uc.settleDueSuppliers(ctx, now, limit, result); err != nil {
+		return result, err
 	}
 	return result, nil
 }
@@ -2406,18 +2426,27 @@ func (uc *UseCase) NotifyMatchedCode(ctx context.Context, req MatchCodeResultReq
 		}
 		afterSaleUntil := purchaseWarrantyUntil(*order, quote.WarrantyMinutes, matchedAt)
 		return uc.repo.WithTx(ctx, func(txCtx context.Context) error {
-			_, _, err := uc.repo.ActivatePurchaseOrder(txCtx, orderNo, matchedAt, afterSaleUntil)
-			return err
+			updated, changed, err := uc.repo.ActivatePurchaseOrder(txCtx, orderNo, matchedAt, afterSaleUntil)
+			if err != nil {
+				return err
+			}
+			return uc.rescheduleSupplier(txCtx, updated, changed)
 		})
+	}
+	if order.Status == domain.OrderStatusCompleted {
+		return nil
 	}
 	readUntil := matchedAt.Add(time.Hour)
 	return uc.repo.WithTx(ctx, func(txCtx context.Context) error {
-		_, changed, err := uc.repo.CompleteCodeOrder(txCtx, orderNo, matchedAt, readUntil)
+		updated, changed, err := uc.repo.CompleteCodeOrder(txCtx, orderNo, matchedAt, readUntil)
 		if err != nil {
 			return err
 		}
 		if !changed {
 			return nil
+		}
+		if err := uc.rescheduleSupplier(txCtx, updated, changed); err != nil {
+			return err
 		}
 		return uc.tokens.ExtendOrderToken(txCtx, orderNo, readUntil)
 	})
@@ -2469,9 +2498,9 @@ func (uc *UseCase) expireCodeOrder(ctx context.Context, orderNo string, _ time.T
 	return uc.cleanupOrderService(ctx, *order, true, "Code order expired.", "")
 }
 
-func (uc *UseCase) completeExpiredOrder(ctx context.Context, orderNo string, reason string) error {
-	_, _, err := uc.repo.CompleteExpiredOrder(ctx, strings.TrimSpace(orderNo), reason)
-	return err
+func (uc *UseCase) completeExpiredOrder(ctx context.Context, orderNo string, reason string) (bool, error) {
+	_, changed, err := uc.repo.CompleteExpiredOrder(ctx, strings.TrimSpace(orderNo), reason)
+	return changed, err
 }
 
 func (uc *UseCase) cleanupExpiredCodeOrder(ctx context.Context, orderNo string) error {
@@ -2499,7 +2528,7 @@ func (uc *UseCase) refundOrder(ctx context.Context, req refundOrderRequest) (*do
 		return nil, false, err
 	}
 	err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
-		if err := uc.wallet.LockConsumer(txCtx, owner.UserID); err != nil {
+		if err := uc.lockOrderWallets(txCtx, *owner); err != nil {
 			return err
 		}
 		locked, err := uc.repo.LockOrderForUpdate(txCtx, orderNo)
@@ -2528,6 +2557,9 @@ func (uc *UseCase) refundOrder(ctx context.Context, req refundOrderRequest) (*do
 				}
 				return uc.NotifyMatchedCode(txCtx, MatchCodeResultRequest{OrderNo: locked.OrderNo, MatchedAt: matchedAt})
 			}
+		}
+		if err := uc.cancelSupplier(txCtx, *locked); err != nil {
+			return err
 		}
 		refund, err := uc.wallet.RefundConsumer(txCtx, WalletCommand{
 			UserID:         locked.UserID,
@@ -2666,7 +2698,7 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 				}
 				return &CheckoutResult{Order: *failed}, err
 			}
-			updated, err := uc.payPendingCheckout(ctx, order.OrderNo, order.UserID, payAmount, requestID)
+			updated, err := uc.payPendingCheckout(ctx, order, *allocation, payAmount, requestID)
 			if err != nil {
 				if errors.Is(err, domain.ErrInsufficientBalance) {
 					failed, markErr := uc.failPendingCheckout(ctx, MarkFailedCommand{
@@ -2762,7 +2794,7 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 				}
 				return nil, err
 			}
-			activated, err := uc.repo.MarkActive(ctx, MarkActiveCommand{
+			activated, err := uc.activateAndFreezeSupplier(ctx, order, MarkActiveCommand{
 				OrderNo:          order.OrderNo,
 				AllocationType:   allocation.Type,
 				AllocationID:     allocation.ID,
@@ -2828,9 +2860,14 @@ func (uc *UseCase) resumeCheckout(ctx context.Context, order domain.Order, quote
 	}
 }
 
-func (uc *UseCase) payPendingCheckout(ctx context.Context, orderNo string, userID uint, payAmount, requestID string) (*domain.Order, error) {
+func (uc *UseCase) payPendingCheckout(ctx context.Context, pending domain.Order, allocation AllocationResult, payAmount, requestID string) (*domain.Order, error) {
+	payAmount, supplierAmount, supplierID, err := uc.checkoutAmounts(ctx, pending, allocation, payAmount)
+	if err != nil {
+		return nil, err
+	}
+	orderNo, userID := pending.OrderNo, pending.UserID
 	var order *domain.Order
-	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
+	err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
 		if err := uc.wallet.LockConsumer(txCtx, userID); err != nil {
 			return err
 		}
@@ -2863,9 +2900,11 @@ func (uc *UseCase) payPendingCheckout(ctx context.Context, orderNo string, userI
 			return domain.ErrInvalidOrderRequest
 		}
 		paid, err := uc.repo.MarkPaid(txCtx, MarkPaidCommand{
-			OrderNo:   orderNo,
-			DebitTxID: debit.ID,
-			PayAmount: payAmount,
+			OrderNo:        orderNo,
+			DebitTxID:      debit.ID,
+			PayAmount:      payAmount,
+			SupplierAmount: supplierAmount,
+			SupplierUserID: supplierID,
 		})
 		if err != nil {
 			return err
@@ -2915,7 +2954,7 @@ func (uc *UseCase) failPendingCheckout(ctx context.Context, cmd MarkFailedComman
 func (uc *UseCase) compensatePaidCheckout(ctx context.Context, order domain.Order, failureCode domain.OrderFailureCode, reason string) (*domain.Order, error) {
 	var result *domain.Order
 	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
-		if err := uc.wallet.LockConsumer(txCtx, order.UserID); err != nil {
+		if err := uc.lockOrderWallets(txCtx, order); err != nil {
 			return err
 		}
 		locked, err := uc.repo.LockOrderForUpdate(txCtx, order.OrderNo)
@@ -3081,6 +3120,7 @@ func orderingQuoteFromOrder(order domain.Order) (*OrderingQuote, error) {
 		ProductID:               order.ProjectProductID,
 		ProductType:             order.ProductType,
 		PayAmount:               order.PayAmount,
+		SupplierAmount:          order.SupplierAmount,
 		CodeWindowMinutes:       order.CodeWindowMinutes,
 		ActivationWindowMinutes: order.ActivationWindowMinutes,
 		WarrantyMinutes:         order.WarrantyMinutes,

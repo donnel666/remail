@@ -9,6 +9,7 @@ import (
 	"github.com/donnel666/remail/internal/aftersale/infra"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
+	"github.com/donnel666/remail/internal/platform"
 	tradeapp "github.com/donnel666/remail/internal/trade/app"
 	tradedomain "github.com/donnel666/remail/internal/trade/domain"
 	"gorm.io/gorm"
@@ -43,6 +44,11 @@ type tradeOrderAdapter struct {
 }
 
 func (a tradeOrderAdapter) GetOrderForTicket(ctx context.Context, orderNo string, requesterUserID uint) (*aftersaleapp.OrderInfo, error) {
+	if _, inTx := platform.GormTxFromContext(ctx); inTx {
+		if err := a.trade.LockOrderForTicket(ctx, orderNo, requesterUserID); err != nil {
+			return nil, mapTradeOrderError(err)
+		}
+	}
 	result, err := a.trade.GetOrder(ctx, orderNo, requesterUserID, false)
 	if err != nil {
 		return nil, mapTradeOrderError(err)
@@ -119,6 +125,8 @@ func mapTradeOrderError(err error) error {
 
 func mapTradeRefundError(err error) error {
 	switch {
+	case errors.Is(err, tradedomain.ErrSupplierSettlementBalance):
+		return domain.ErrSupplierSettlementBalance
 	case errors.Is(err, tradedomain.ErrOrderNotFound):
 		return domain.ErrTicketNotFound
 	case errors.Is(err, tradedomain.ErrOrderForbidden):
