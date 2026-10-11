@@ -14,6 +14,47 @@ type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
 
+func TestValidICloudHMEHost(t *testing.T) {
+	for _, host := range []string{
+		"p119-maildomainws.icloud.com", "p235-maildomainws-china.icloud.com",
+		"p222-maildomainws-china.icloud.com", "p119-maildomainws.icloud.com.cn",
+		"new-mail-service.icloud.com", "new-mail-service.region.icloud.com.cn",
+		" P235-MAILDOMAINWS-CHINA.ICLOUD.COM ",
+	} {
+		if !validICloudHMEHost(host) {
+			t.Errorf("rejected iCloud host %q", host)
+		}
+	}
+	for _, host := range []string{
+		"", "icloud.com", "evilicloud.com", "evilicloud.com.cn",
+		"p235-maildomainws-china.icloud.com.evil.example", "node.icloud.com.cn.evil.example",
+		"127.0.0.1", "localhost", "[::1]", "https://node.icloud.com",
+		"evil.example@node.icloud.com", "node.icloud.com:443", "node.icloud.com/path",
+		".icloud.com", "node..icloud.com", "-node.icloud.com", "node-.icloud.com",
+		"node_name.icloud.com", "node/other.icloud.com", "node\\other.icloud.com",
+		strings.Repeat("a", 64) + ".icloud.com", strings.Repeat("node.", 50) + "icloud.com",
+	} {
+		if validICloudHMEHost(host) {
+			t.Errorf("accepted invalid iCloud host %q", host)
+		}
+	}
+}
+
+func TestICloudPremiumMailHostRejectsUnsafeURLs(t *testing.T) {
+	for _, value := range []string{
+		"http://node.icloud.com", "https://node.icloud.com:8443",
+		"https://user@node.icloud.com", "https://node.icloud.com.evil.example",
+		"https://127.0.0.1", "https://node..icloud.com",
+	} {
+		if _, err := iCloudPremiumMailHost(value); err == nil {
+			t.Errorf("accepted unsafe service URL %q", value)
+		}
+	}
+	if host, err := iCloudPremiumMailHost("https://new-mail-service.region.icloud.com:443/"); err != nil || host != "new-mail-service.region.icloud.com" {
+		t.Fatalf("rejected iCloud service URL: host=%q err=%v", host, err)
+	}
+}
+
 func TestHMEListBuildsSafeRequestAndMergesSetCookie(t *testing.T) {
 	const cookie = "X-APPLE-DS-WEB-SESSION-TOKEN=session; X-APPLE-WEBAUTH-USER=user; X-APPLE-WEBAUTH-TOKEN=token"
 	const importedUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0"
@@ -26,13 +67,14 @@ func TestHMEListBuildsSafeRequestAndMergesSetCookie(t *testing.T) {
 		}, nil
 	})})
 	result, err := client.list(context.Background(), hmeConfig{
-		Host: "p119-maildomainws.icloud.com", DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering", Cookie: cookie,
+		Host: "p235-maildomainws-china.icloud.com", DSID: "123", ClientID: "client", ClientBuildNumber: "build", ClientMasteringNumber: "mastering", Cookie: cookie,
 		UserAgent: importedUserAgent,
 	})
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
-	if seen == nil || seen.URL.Path != "/v2/hme/list" || seen.URL.Query().Get("dsid") != "123" || seen.Header.Get("Cookie") != cookie {
+	if seen == nil || seen.URL.Scheme != "https" || seen.URL.Host != "p235-maildomainws-china.icloud.com" ||
+		seen.URL.Path != "/v2/hme/list" || seen.URL.Query().Get("dsid") != "123" || seen.Header.Get("Cookie") != cookie {
 		t.Fatalf("unexpected HME request: %#v", seen)
 	}
 	if seen.Header.Get("User-Agent") != importedUserAgent || seen.Header.Get("Sec-CH-UA-Platform") != "" {
@@ -81,6 +123,49 @@ func TestHMERefreshSessionRotatesCookiesAndDiscoversCurrentPod(t *testing.T) {
 	if refreshed.Host != "p216-maildomainws.icloud.com.cn" || !strings.Contains(refreshed.Cookie, "X-APPLE-WEBAUTH-TOKEN=rotated") ||
 		strings.Contains(refreshed.Cookie, "setup-only=value") || !strings.Contains(refreshed.SetupCookie, "setup-only=value") {
 		t.Fatalf("unexpected refreshed session: %#v", refreshed)
+	}
+}
+
+func TestHMERefreshSessionAcceptsChinaPodAndRenamedService(t *testing.T) {
+	client := NewHMEClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Scheme != "https" || request.URL.Host != "setup.icloud.com" || request.URL.Path != "/setup/ws/1/validate" {
+			t.Fatalf("unexpected refresh endpoint: %s", request.URL.String())
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body: io.NopCloser(strings.NewReader(
+				`{"dsInfo":{"dsid":"123"},"webservices":{"premiummailsettings":{"url":"https://mail.region.icloud.com/"}}}`,
+			)),
+		}, nil
+	})})
+	refreshed, err := client.refreshSession(context.Background(), hmeConfig{
+		Host: "p222-maildomainws-china.icloud.com", DSID: "123", ClientID: "client",
+		ClientBuildNumber: "build", ClientMasteringNumber: "master", Cookie: testICloudOldCookie,
+	})
+	if err != nil || refreshed.Host != "mail.region.icloud.com" {
+		t.Fatalf("refresh rejected iCloud service: host=%q err=%v", refreshed.Host, err)
+	}
+}
+
+func TestHMEListDoesNotFollowRedirects(t *testing.T) {
+	calls := 0
+	client := NewHMEClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		if calls > 1 {
+			t.Fatal("HME request followed a redirect")
+		}
+		return &http.Response{
+			StatusCode: http.StatusFound,
+			Header:     http.Header{"Location": {"https://evil.example/v2/hme/list"}},
+			Body:       io.NopCloser(strings.NewReader("")),
+		}, nil
+	})})
+	_, err := client.list(context.Background(), hmeConfig{
+		Host: "mail.region.icloud.com", DSID: "123", ClientID: "client",
+		ClientBuildNumber: "build", ClientMasteringNumber: "master", Cookie: testICloudOldCookie,
+	})
+	if calls != 1 || err == nil {
+		t.Fatalf("redirect was not rejected: calls=%d err=%v", calls, err)
 	}
 }
 

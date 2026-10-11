@@ -715,7 +715,10 @@ func (s *Service) applyICloudProvisionError(ctx context.Context, resource iCloud
 				updates["cooldown_until"] = cooldownUntil
 			}
 			if permanent {
-				updates["session_status"] = iCloudSessionInvalid
+				// Local HME context errors do not establish whether the Cookie is valid.
+				if hmeErr == nil || category != "invalid_context" {
+					updates["session_status"] = iCloudSessionInvalid
+				}
 				updates["next_keepalive_at"] = nil
 				updates["cooldown_until"] = now.Add(iCloudInvalidChannelRetryDelay(max(locked.SessionFailures, iCloudSessionFailureLimit+2)))
 			}

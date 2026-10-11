@@ -1260,13 +1260,77 @@ func TestICloudProvisionRequiresThreeSessionFailuresBeforeInvalidation(t *testin
 	}
 }
 
+func TestICloudProvisionInvalidHMEContextDoesNotStartCookieRecovery(t *testing.T) {
+	for _, status := range []string{iCloudSessionUnchecked, iCloudSessionValid} {
+		t.Run(status, func(t *testing.T) {
+			ctx := context.Background()
+			now := time.Date(2026, 10, 11, 4, 0, 0, 0, time.UTC)
+			db := newICloudRefreshTestDB(t)
+			resource := seedICloudRefreshResource(t, db, now)
+			resource.Status = iCloudResourceNormal
+			if err := db.Model(&resource).Update("status", resource.Status).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&iCloudResourceChannelModel{}).Where("resource_id = ?", resource.ID).
+				Update("session_status", iCloudSessionValid).Error; err != nil {
+				t.Fatal(err)
+			}
+			// Keep real recovery credentials so this catches accidental re-login.
+			if err := db.Model(&iCloudResourceChannelModel{}).Where("resource_id = ? AND kind = ?", resource.ID, iCloudChannelWeb).
+				Updates(map[string]any{
+					"cookie": testICloudOldCookie, "setup_cookie": testICloudOldCookie,
+					"dsid": "123", "client_id": "client", "client_build_number": "build",
+					"client_mastering_number": "", "session_status": status, "session_failures": 1,
+				}).Error; err != nil {
+				t.Fatal(err)
+			}
+			service := NewService(db, nil, nil)
+			service.now = func() time.Time { return now }
+			service.hme = NewHMEClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+				t.Fatal("invalid local context must not send an HTTP request")
+				return nil, nil
+			})})
+			for range 2 {
+				var channel iCloudResourceChannelModel
+				if err := db.Where("resource_id = ? AND kind = ?", resource.ID, iCloudChannelWeb).First(&channel).Error; err != nil {
+					t.Fatal(err)
+				}
+				_, _, err := service.provisionICloudWeb(ctx, resource, channel, false, now)
+				var hmeErr *hmeError
+				if !errors.As(err, &hmeErr) || hmeErr.Category != "invalid_context" {
+					t.Fatalf("expected local context error, got %v", err)
+				}
+				if err := db.First(&channel, channel.ID).Error; err != nil {
+					t.Fatal(err)
+				}
+				if channel.SessionStatus != status || channel.SessionFailures != 1 || channel.LastValidAt != nil {
+					t.Fatalf("local error changed cookie health: status=%q failures=%d lastValid=%v", channel.SessionStatus, channel.SessionFailures, channel.LastValidAt)
+				}
+				if channel.CooldownUntil == nil || !channel.CooldownUntil.After(now) {
+					t.Fatal("local error must delay the next attempt")
+				}
+				if err := db.Transaction(func(tx *gorm.DB) error {
+					created, err := service.ensureICloudCookieMaintenanceTx(ctx, tx, resource.ID, false, false)
+					if created {
+						t.Error("local context error started a cookie recovery workflow")
+					}
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				now = *channel.CooldownUntil
+			}
+		})
+	}
+}
+
 func TestICloudProvisionPermanentProviderErrorsParkOnProbeCooldown(t *testing.T) {
 	now := time.Date(2026, 8, 14, 11, 25, 0, 0, time.UTC)
 	for _, test := range []struct {
 		name string
 		err  error
 	}{
-		{name: "invalid HME context", err: &hmeError{Category: "invalid_context", SafeMessage: "invalid context"}},
+		{name: "HME rejected request", err: &hmeError{Category: "provider_rejected", SafeMessage: "rejected"}},
 		{name: "Apple rejected request", err: &appleAccountError{Category: "provider_rejected", SafeMessage: "rejected"}},
 		{name: "invalid Apple response", err: &appleAccountError{Category: "provider_response", SafeMessage: "invalid response"}},
 	} {

@@ -31,7 +31,7 @@ const (
 	iCloudHMEResponseMaxBytes         = 10 << 20
 )
 
-var iCloudHMEHostPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?-maildomainws\.icloud\.com(?:\.cn)?$`)
+var iCloudHMEHostPattern = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+icloud\.com(?:\.cn)?$`)
 
 var requiredICloudCookieNames = []string{
 	"X-APPLE-DS-WEB-SESSION-TOKEN",
@@ -847,7 +847,8 @@ func normalizeHMEConfig(config hmeConfig) hmeConfig {
 }
 
 func validICloudHMEHost(host string) bool {
-	return iCloudHMEHostPattern.MatchString(strings.ToLower(strings.TrimSpace(host)))
+	host = strings.ToLower(strings.TrimSpace(host))
+	return len(host) <= 253 && iCloudHMEHostPattern.MatchString(host)
 }
 
 func defaultICloudHMEContext(host string) (langCode, origin, referer string) {

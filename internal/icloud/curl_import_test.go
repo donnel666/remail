@@ -27,6 +27,8 @@ func TestParseICloudImportSupportsCompleteCredentialLines(t *testing.T) {
 		wantKinds []string
 	}{
 		{name: "old channel", line: "owner@icloud.com----" + testICloudOldCurl, wantKinds: []string{iCloudChannelWeb}},
+		{name: "old channel china node", line: "owner@icloud.com----" + strings.ReplaceAll(testICloudOldCurl, "p119-maildomainws.icloud.com.cn", "p222-maildomainws-china.icloud.com"), wantKinds: []string{iCloudChannelWeb}},
+		{name: "old channel renamed node", line: "owner@icloud.com----" + strings.ReplaceAll(testICloudOldCurl, "p119-maildomainws.icloud.com.cn", "mail.region.icloud.com.cn"), wantKinds: []string{iCloudChannelWeb}},
 		{name: "new channel", line: "owner@icloud.com----" + testICloudNewCurl, wantKinds: []string{iCloudChannelAppleAccount}},
 		{name: "both channels", line: "owner@icloud.com----" + testICloudNewCurl + "----" + testICloudOldCurl, wantKinds: []string{iCloudChannelAppleAccount, iCloudChannelWeb}},
 		{name: "both channels reversed", line: "owner@icloud.com----" + testICloudOldCurl + "----" + testICloudNewCurl, wantKinds: []string{iCloudChannelWeb, iCloudChannelAppleAccount}},
