@@ -3107,7 +3107,7 @@
   "Apple Emails": "苹果邮箱",
   "Import Apple Emails": "导入苹果邮箱",
   "Apple account entries": "苹果邮箱账号列表",
-  "Apple import prerequisites": "导入前请先完成手机号验证、设备绑定和 iCloud+ 准备。系统会自动配置并验证转发邮箱，再校验账号并创建别名。接码 URL 需能在公网直接获取验证码。",
+  "Apple import prerequisites": "导入前请先完成手机号验证、设备绑定，并加入已开启 iCloud+ 共享的家庭组。系统会先确认家庭成员身份，再配置并验证转发邮箱、校验账号及创建别名。接码 URL 需能在公网直接获取验证码。",
   "Apple import lifetime": "自动创建别名的有效期固定为导入后 30 天。",
   "Apple import format": "邮箱----密码----接码URL",
   "Apple import accepts up to 100 accounts and a 1 MB TXT file.": "每次最多导入 100 个账号，TXT 文件不超过 1 MB。",

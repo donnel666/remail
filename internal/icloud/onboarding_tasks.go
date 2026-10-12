@@ -336,7 +336,7 @@ func (s *Service) processICloudOnboardingStage(ctx context.Context, task *iCloud
 		}
 	}
 	switch task.Stage {
-	case "icloud_prepare", "old_cookie_prepare", "icloud_cookie_prepare", "family_prepare", "manage_prepare":
+	case "icloud_prepare", "old_cookie_prepare", "icloud_cookie_prepare", "family_prepare", "family_membership_prepare", "manage_prepare":
 		ready, err := s.checkICloudOnboardingSMSPhone(ctx, task)
 		if err != nil || !ready {
 			return err
@@ -381,6 +381,10 @@ func (s *Service) processICloudOnboardingStage(ctx context.Context, task *iCloud
 		return s.advanceICloudOnboardingTask(ctx, task, "family_join_apply", nil, nil)
 	case "family_join_apply":
 		return s.joinICloudOnboardingFamily(ctx, task, secret)
+	case "family_membership_prepare":
+		return s.prepareICloudOnboardingApple(ctx, task, secret, appleOnboardingPrepareFamilyMembership, "family_membership_verify")
+	case "family_membership_verify":
+		return s.verifyICloudOnboardingFamilyMembership(ctx, task, secret)
 	case "manage_prepare":
 		return s.prepareICloudOnboardingApple(ctx, task, secret, appleOnboardingPrepareManage, "manage_profile")
 	case "manage_profile":
@@ -544,7 +548,7 @@ func (s *Service) prepareICloudOnboardingAppleWithInvite(ctx context.Context, ta
 	if isICloudOldCookieBackfill(task) && response.Next == appleSMSICloudLogin {
 		response.Next = appleSMSOldCookieLogin
 	}
-	if response.Next != "ready" && response.Next != "" && response.Next != appleSMSICloudLogin && response.Next != appleSMSOldCookieLogin && response.Next != appleSMSICloudCookieLogin && response.Next != appleSMSPhoneEnrollment && response.Next != appleSMSFamilyLogin && response.Next != appleSMSFamilyReconcileLogin && response.Next != appleSMSManageLogin {
+	if response.Next != "ready" && response.Next != "" && response.Next != appleSMSICloudLogin && response.Next != appleSMSOldCookieLogin && response.Next != appleSMSICloudCookieLogin && response.Next != appleSMSPhoneEnrollment && response.Next != appleSMSFamilyLogin && response.Next != appleSMSFamilyReconcileLogin && response.Next != appleSMSFamilyMembershipLogin && response.Next != appleSMSManageLogin {
 		return s.failICloudOnboardingTask(ctx, task, "unsupported_challenge", "Apple returned an unsupported authentication challenge.")
 	}
 	if pendingPhoneBinding {
@@ -830,11 +834,12 @@ func (s *Service) verifyICloudOnboardingSMS(ctx context.Context, task *iCloudOnb
 	}
 	next := map[string]string{
 		appleSMSICloudLogin: "icloud_finish", appleSMSPhoneEnrollment: "icloud_finish",
-		appleSMSOldCookieLogin:       "old_cookie_finish",
-		appleSMSICloudCookieLogin:    "icloud_cookie_finish",
-		appleSMSFamilyLogin:          "family_join_intent",
-		appleSMSFamilyReconcileLogin: "family_join_apply",
-		appleSMSManageLogin:          "manage_profile",
+		appleSMSOldCookieLogin:        "old_cookie_finish",
+		appleSMSICloudCookieLogin:     "icloud_cookie_finish",
+		appleSMSFamilyLogin:           "family_join_intent",
+		appleSMSFamilyReconcileLogin:  "family_join_apply",
+		appleSMSFamilyMembershipLogin: "family_membership_verify",
+		appleSMSManageLogin:           "manage_profile",
 	}[task.PendingSMSPurpose]
 	if next == "" {
 		return s.failICloudOnboardingTask(ctx, task, "invalid_sms_state", "Apple SMS verification state is invalid.")
@@ -911,7 +916,7 @@ func (s *Service) prepareICloudOnboardingSMSVerification(ctx context.Context, ta
 
 func (s *Service) recoverICloudOnboardingSMSVerification(ctx context.Context, task *iCloudOnboardingTaskModel) error {
 	switch task.PendingSMSPurpose {
-	case appleSMSICloudLogin, appleSMSOldCookieLogin, appleSMSICloudCookieLogin, appleSMSPhoneEnrollment, appleSMSFamilyLogin, appleSMSFamilyReconcileLogin, appleSMSManageLogin:
+	case appleSMSICloudLogin, appleSMSOldCookieLogin, appleSMSICloudCookieLogin, appleSMSPhoneEnrollment, appleSMSFamilyLogin, appleSMSFamilyReconcileLogin, appleSMSFamilyMembershipLogin, appleSMSManageLogin:
 	default:
 		return s.failICloudOnboardingTask(ctx, task, "invalid_sms_state", "Apple SMS verification recovery state is invalid.")
 	}
@@ -1114,26 +1119,42 @@ func (s *Service) joinICloudOnboardingFamily(ctx context.Context, task *iCloudOn
 	if len(response.Session) > 0 {
 		updates["session_payload"] = iCloudJSON(response.Session)
 	}
-	// Match cmd/icloudvalidate: accept/update success is sufficient. The WEB
-	// workflow deliberately pauses at the manual sharing checkpoint; it does
-	// not call familyws.icloud.apple.com or inspect a primary account.
 	if task.TaskKind == "onboarding" && task.AccountRole == "child" && hasICloudDirectFamilyInvite(task) {
-		waitUpdates := map[string]any{
-			"stage": iCloudOnboardingStageFamilySharing, "session_payload": iCloudOnboardingPostFamilyCheckpoint(task, response.Session),
-			"pending_sms_purpose": "", "manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil,
-			"family_primary_resource_id": nil, "family_reservation_confirmed": true,
-		}
-		return s.waitICloudOnboardingTaskWithUpdates(ctx, task, nil, "waiting", "Waiting for manual family sharing setup.", waitUpdates)
+		updates["family_primary_resource_id"] = nil
+		updates["family_id"] = ""
+		updates["family_reservation_confirmed"] = true
+		return s.advanceICloudOnboardingTask(ctx, task, "family_membership_verify", nil, updates)
 	}
 	return s.advanceICloudOnboardingTask(ctx, task, "manage_prepare", nil, updates)
+}
+
+func (s *Service) verifyICloudOnboardingFamilyMembership(ctx context.Context, task *iCloudOnboardingTaskModel, secret iCloudOnboardingSecret) error {
+	response, err := s.executeICloudOnboardingApple(ctx, task, secret, AppleOnboardingRequest{Operation: appleOnboardingVerifyFamilyMembership})
+	if err != nil {
+		return s.handleICloudOnboardingAppleError(ctx, task, err)
+	}
+	if strings.TrimSpace(response.FamilyID) == "" {
+		return s.handleICloudOnboardingAppleError(ctx, task, &AppleOnboardingError{
+			Category: "family_membership_unconfirmed", SafeMessage: "Apple has not confirmed this account as a member of the family; onboarding cannot continue.", Retryable: true,
+		})
+	}
+	return s.waitICloudOnboardingTaskWithUpdates(ctx, task, nil, "waiting", "Waiting for manual family sharing setup.", map[string]any{
+		"stage": iCloudOnboardingStageFamilySharing, "session_payload": iCloudOnboardingPostFamilyCheckpoint(task, response.Session),
+		"pending_sms_purpose": "", "manual_verification_code": "", "sms_sent_at": nil, "sms_poll_deadline": nil,
+		"family_primary_resource_id": nil, "family_reservation_confirmed": true,
+		"family_id": response.FamilyID, "last_error_category": "",
+	})
 }
 
 func (s *Service) fetchICloudOnboardingManage(ctx context.Context, task *iCloudOnboardingTaskModel, secret iCloudOnboardingSecret) error {
 	request := AppleOnboardingRequest{
 		Operation: appleOnboardingFetchManage, SkipPrivateAlias: task.TaskKind == "refresh" || isICloudCookieRecoveryTask(task),
+		RequireFamilyMembership: task.TaskKind == iCloudUserImportTaskKind,
 	}
-	if task.TaskKind == "onboarding" && task.AccountRole == "child" {
-		request.FamilyInviteURL = task.FamilyInviteURL
+	// Older administrator checkpoints reached phase 3 without confirming membership.
+	if task.TaskKind == "onboarding" && task.AccountRole == "child" && task.FamilyID == "" {
+		request.RequireFamilyMembership = true
+		request.RequireFamilyChild = true
 	}
 	response, err := s.executeICloudOnboardingApple(ctx, task, secret, request)
 	if err != nil {
@@ -1145,6 +1166,9 @@ func (s *Service) fetchICloudOnboardingManage(ctx context.Context, task *iCloudO
 	}
 	if code := strings.ToUpper(strings.TrimSpace(response.CountryCode)); code != "" {
 		updates["country_code"] = code
+	}
+	if response.FamilyID != "" {
+		updates["family_id"] = response.FamilyID
 	}
 	if task.DeviceCodeAPI == "" && task.KitesimPhoneID == nil {
 		binding, err := s.bindICloudOnboardingTrustedPhone(ctx, task, response.TrustedPhoneLastTwo, false)
@@ -1561,7 +1585,7 @@ func (s *Service) handleICloudOnboardingAppleError(ctx context.Context, task *iC
 			}
 		}
 		switch restart {
-		case "icloud_prepare", "old_cookie_prepare", "icloud_cookie_prepare", "family_prepare", "manage_prepare",
+		case "icloud_prepare", "old_cookie_prepare", "icloud_cookie_prepare", "family_prepare", "family_membership_prepare", "manage_prepare",
 			"forwarding_prepare", "forwarding_add_intent", "forwarding_add_apply", "forwarding_wait",
 			"forwarding_verify_intent", "forwarding_verify_apply", "resource_import", "cookie_recovery_export":
 		default:
@@ -1680,7 +1704,7 @@ func iCloudOnboardingTaskPhase(task *iCloudOnboardingTaskModel) int {
 	}
 	if strings.HasPrefix(strings.TrimSpace(task.Stage), "sms_") {
 		switch strings.TrimSpace(task.PendingSMSPurpose) {
-		case appleSMSFamilyLogin, appleSMSFamilyReconcileLogin:
+		case appleSMSFamilyLogin, appleSMSFamilyReconcileLogin, appleSMSFamilyMembershipLogin:
 			return 2
 		case appleSMSManageLogin:
 			return 3
@@ -1697,7 +1721,7 @@ func iCloudOnboardingPhase(stage string) int {
 		"sms_send", "sms_wait", "sms_verify", "sms_verify_recover",
 		"icloud_finish", "old_cookie_finish", "icloud_cookie_finish":
 		return 1
-	case "family_prepare", "family_join_intent", "family_join_apply":
+	case "family_prepare", "family_join_intent", "family_join_apply", "family_membership_prepare", "family_membership_verify":
 		return 2
 	case "manage_prepare", "manage_profile", "forwarding_prepare", "forwarding_add_intent", "forwarding_add_apply",
 		"forwarding_wait", "forwarding_verify_intent", "forwarding_verify_apply", "resource_import":
@@ -1778,14 +1802,16 @@ func iCloudPostFamilyRecoveryStage(task iCloudOnboardingTaskModel) string {
 	switch task.Stage {
 	case "family_prepare", "family_join_intent":
 		return "family_prepare"
-	case "family_join_apply":
-		return "family_join_apply"
+	case "family_join_apply", "family_membership_prepare", "family_membership_verify":
+		return task.Stage
 	case "sms_send", "sms_wait", "sms_verify", "sms_verify_recover":
 		switch task.PendingSMSPurpose {
 		case appleSMSICloudCookieLogin:
 			return "icloud_cookie_prepare"
-		case appleSMSFamilyReconcileLogin:
+		case appleSMSFamilyLogin, appleSMSFamilyReconcileLogin:
 			return "family_prepare"
+		case appleSMSFamilyMembershipLogin:
+			return "family_membership_prepare"
 		case appleSMSManageLogin:
 			return "manage_prepare"
 		default:

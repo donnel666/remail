@@ -388,6 +388,8 @@ func (f *onboardingFakeApple) Execute(_ context.Context, request AppleOnboarding
 			return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "invalid_code", SafeMessage: "Invalid code.", CodeRejected: true}
 		}
 		return AppleOnboardingResponse{Session: session}, nil
+	case appleOnboardingVerifyFamilyMembership:
+		return AppleOnboardingResponse{Session: session, Next: "ready", FamilyID: "family-1"}, nil
 	default:
 		return AppleOnboardingResponse{Session: session, Next: "ready"}, nil
 	}
@@ -621,7 +623,7 @@ type onboardingJoinedFamilyApple struct {
 
 func (p *onboardingJoinedFamilyApple) Execute(_ context.Context, request AppleOnboardingRequest) (AppleOnboardingResponse, error) {
 	p.requests = append(p.requests, request)
-	return AppleOnboardingResponse{Next: "ready", FamilyChannel: &AppleOnboardingChannel{
+	return AppleOnboardingResponse{Next: "ready", FamilyID: "family-1", FamilyChannel: &AppleOnboardingChannel{
 		Kind: iCloudChannelFamilySession, Cookie: testICloudFamilyCookie, SetupCookie: testICloudFamilyCookie,
 	}}, nil
 }
@@ -1447,14 +1449,14 @@ func TestICloudOnboardingWorkerNormalizesEmptyTaskKindAndLegacyFamilyStage(t *te
 		t.Fatal(err)
 	}
 
-	for range 3 {
+	for range 4 {
 		processOnboardingStageForTest(t, service, db, task)
 	}
 	if task.TaskKind != "onboarding" || task.Stage != iCloudOnboardingStageFamilySharing ||
 		task.Status != iCloudOnboardingWaiting || task.DispatchStatus != "waiting" || task.FamilyPrimaryResourceID != nil || !task.FamilyReservationConfirmed ||
-		len(apple.requests) != 2 || apple.requests[0].Operation != appleOnboardingPrepareFamily ||
+		len(apple.requests) != 3 || apple.requests[0].Operation != appleOnboardingPrepareFamily ||
 		apple.requests[0].FamilyInviteURL != "https://setup.icloud.com/family/messages?inviteCode=direct" ||
-		apple.requests[1].Operation != appleOnboardingJoinFamily {
+		apple.requests[1].Operation != appleOnboardingJoinFamily || apple.requests[2].Operation != appleOnboardingVerifyFamilyMembership {
 		t.Fatalf("legacy worker continuation = task=%+v requests=%+v", task, apple.requests)
 	}
 	var state appleOnboardingBrowserState
@@ -1563,7 +1565,7 @@ func TestICloudOnboardingDirectInviteFailureDoesNotReselectPrimary(t *testing.T)
 	}
 }
 
-func TestICloudOnboardingDirectInviteSkipsFamilySessionReconcile(t *testing.T) {
+func TestICloudOnboardingDirectInviteVerifiesBeforeWaitingForSharing(t *testing.T) {
 	service, db, task, _ := newOnboardingStateTest(t)
 	old := &AppleOnboardingChannel{Kind: iCloudChannelWeb, Host: "p1-maildomainws.icloud.com", Cookie: "old=value"}
 	session := appleOnboardingTestState(t, func(state *appleOnboardingBrowserState) {
@@ -1594,6 +1596,10 @@ func TestICloudOnboardingDirectInviteSkipsFamilySessionReconcile(t *testing.T) {
 	if err := db.First(task, task.ID).Error; err != nil {
 		t.Fatal(err)
 	}
+	if task.Stage != "family_membership_verify" || iCloudOnboardingTaskPhase(task) != 2 {
+		t.Fatalf("invite completion skipped membership check: stage=%s", task.Stage)
+	}
+	processOnboardingStageForTest(t, service, db, task)
 	if familyCalls != 0 || task.Stage != iCloudOnboardingStageFamilySharing || task.Status != iCloudOnboardingWaiting ||
 		task.DispatchStatus != "waiting" || !task.FamilyReservationConfirmed {
 		t.Fatalf("direct invite was unexpectedly reconciled: family_calls=%d task=%+v", familyCalls, task)

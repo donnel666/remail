@@ -106,7 +106,9 @@ type accountCheckpoint struct {
 	ICloudReady            bool                           `json:"icloudReady,omitempty"`
 	ICloudOpened           bool                           `json:"icloudOpened,omitempty"`
 	FamilyAuthenticated    bool                           `json:"familyAuthenticated,omitempty"`
+	FamilyInviteAccepted   bool                           `json:"familyInviteAccepted,omitempty"`
 	FamilyJoined           bool                           `json:"familyJoined,omitempty"`
+	FamilyID               string                         `json:"familyId,omitempty"`
 	FamilySharingConfirmed bool                           `json:"familySharingConfirmed,omitempty"`
 	ManageAuthenticated    bool                           `json:"manageAuthenticated,omitempty"`
 	ManageReady            bool                           `json:"manageReady,omitempty"`
@@ -643,25 +645,53 @@ func (d *debugger) run(binding *kitesim.SMSPhoneBinding, config options) error {
 					return err
 				}
 			}
-			if d.checkpoint == nil || !d.checkpoint.FamilyAuthenticated {
+			if d.checkpoint == nil || !d.checkpoint.FamilyInviteAccepted && d.checkpoint.Stage != "family_membership_verify" {
+				if d.checkpoint == nil || !d.checkpoint.FamilyAuthenticated {
+					if err := d.checkSMSPhoneBeforePhase(binding, "family"); err != nil {
+						return err
+					}
+					if _, err := d.authWithRequest(icloud.AppleOnboardingRequest{
+						Operation: icloud.AppleOnboardingPrepareFamily, FamilyInviteURL: d.input.FamilyInviteURL,
+					}, "family login", binding); err != nil {
+						return err
+					}
+					if err := d.markCheckpoint(func(cp *accountCheckpoint) { cp.FamilyAuthenticated = true; cp.Stage = "family_authenticated" }); err != nil {
+						return err
+					}
+				}
+				if _, err := d.execute(icloud.AppleOnboardingRequest{Operation: icloud.AppleOnboardingJoinFamily}); err != nil {
+					return err
+				}
+				if err := d.markCheckpoint(func(cp *accountCheckpoint) { cp.Stage = "family_membership_verify" }); err != nil {
+					return err
+				}
+			}
+			if err := d.markCheckpoint(func(cp *accountCheckpoint) { cp.FamilyInviteAccepted = true }); err != nil {
+				return err
+			}
+			if d.checkpoint != nil && !d.checkpoint.FamilyAuthenticated {
 				if err := d.checkSMSPhoneBeforePhase(binding, "family"); err != nil {
 					return err
 				}
-				operation := icloud.AppleOnboardingPrepareFamily
-				if _, err := d.authWithRequest(icloud.AppleOnboardingRequest{
-					Operation: operation, FamilyInviteURL: d.input.FamilyInviteURL,
-				}, "family login", binding); err != nil {
+				if _, err := d.auth(icloud.AppleOnboardingPrepareFamilyMembership, "family membership login", binding); err != nil {
 					return err
 				}
-				if err := d.markCheckpoint(func(cp *accountCheckpoint) { cp.FamilyAuthenticated = true; cp.Stage = "family_authenticated" }); err != nil {
+				if err := d.markCheckpoint(func(cp *accountCheckpoint) { cp.FamilyAuthenticated = true; cp.Stage = "family_membership_verify" }); err != nil {
 					return err
 				}
 			}
-			_, err := d.execute(icloud.AppleOnboardingRequest{Operation: icloud.AppleOnboardingJoinFamily})
+			family, err := d.execute(icloud.AppleOnboardingRequest{Operation: icloud.AppleOnboardingVerifyFamilyMembership})
 			if err != nil {
 				return err
 			}
-			if err := d.markCheckpoint(func(cp *accountCheckpoint) { cp.FamilyJoined = true; cp.Stage = "family_joined" }); err != nil {
+			if family.FamilyID == "" {
+				return errors.New("family membership was not confirmed by Apple")
+			}
+			if err := d.markCheckpoint(func(cp *accountCheckpoint) {
+				cp.FamilyJoined = true
+				cp.FamilyID = family.FamilyID
+				cp.Stage = "family_joined"
+			}); err != nil {
 				return err
 			}
 			familyCompleted = true
@@ -727,12 +757,13 @@ func (d *debugger) run(binding *kitesim.SMSPhoneBinding, config options) error {
 			d.logf("checkpoint=resume stage=manage_authenticated expires_at=%s\n", d.checkpoint.ManageSessionExpiresAt.UTC().Format(time.RFC3339))
 		}
 		if d.checkpoint == nil || !d.checkpoint.ManageReady {
-			profile, err := d.execute(icloud.AppleOnboardingRequest{Operation: icloud.AppleOnboardingFetchManage, FamilyInviteURL: d.input.FamilyInviteURL})
+			profile, err := d.execute(icloud.AppleOnboardingRequest{
+				Operation:               icloud.AppleOnboardingFetchManage,
+				RequireFamilyMembership: d.input.FamilyInviteURL != "" && d.checkpoint.FamilyID == "",
+				RequireFamilyChild:      true,
+			})
 			if err != nil {
 				return err
-			}
-			if profile.FamilyID != "" {
-				d.logf("family_membership=verified family_id=%s\n", profile.FamilyID)
 			}
 			if err := d.markCheckpoint(func(cp *accountCheckpoint) {
 				cp.ManageReady = true
@@ -1281,7 +1312,7 @@ func (d *debugger) restartAt(stage string) error {
 		stage = "family_prepare"
 	}
 	switch stage {
-	case "icloud_prepare", "icloud_cookie_prepare", "family_prepare", "manage_prepare":
+	case "icloud_prepare", "icloud_cookie_prepare", "family_prepare", "family_membership_prepare", "manage_prepare":
 	default:
 		return fmt.Errorf("unsupported Apple restart stage %q", stage)
 	}
@@ -1299,9 +1330,11 @@ func (d *debugger) restartAt(stage string) error {
 		case "icloud_cookie_prepare":
 			cp.ICloudCookieAuth = false
 			cp.OldChannel = nil
-		case "family_prepare":
+		case "family_prepare", "family_membership_prepare":
 			cp.FamilyAuthenticated = false
+			cp.FamilyInviteAccepted = stage == "family_membership_prepare"
 			cp.FamilyJoined = false
+			cp.FamilyID = ""
 		case "manage_prepare":
 			cp.ManageAuthenticated = false
 			cp.ManageReady = false
@@ -1512,7 +1545,7 @@ func isApplePrepareOperation(operation string) bool {
 	switch operation {
 	case icloud.AppleOnboardingPrepareICloud, icloud.AppleOnboardingPrepareICloudCookie,
 		icloud.AppleOnboardingPrepareFamily, icloud.AppleOnboardingPrepareFamilyReconcile,
-		icloud.AppleOnboardingPrepareManage:
+		icloud.AppleOnboardingPrepareFamilyMembership, icloud.AppleOnboardingPrepareManage:
 		return true
 	default:
 		return false
@@ -1522,7 +1555,7 @@ func isApplePrepareOperation(operation string) bool {
 func isSMSPurpose(value string) bool {
 	switch value {
 	case icloud.AppleSMSICloudLogin, icloud.AppleSMSICloudCookieLogin, icloud.AppleSMSPhoneEnrollment,
-		icloud.AppleSMSFamilyLogin, icloud.AppleSMSFamilyReconcileLogin, icloud.AppleSMSManageLogin:
+		icloud.AppleSMSFamilyLogin, icloud.AppleSMSFamilyReconcileLogin, icloud.AppleSMSFamilyMembershipLogin, icloud.AppleSMSManageLogin:
 		return true
 	default:
 		return false
@@ -1539,6 +1572,8 @@ func appleRestartStage(purpose string) string {
 		return "family_prepare"
 	case icloud.AppleSMSFamilyReconcileLogin:
 		return "family_prepare"
+	case icloud.AppleSMSFamilyMembershipLogin:
+		return "family_membership_prepare"
 	case icloud.AppleSMSManageLogin:
 		return "manage_prepare"
 	default:

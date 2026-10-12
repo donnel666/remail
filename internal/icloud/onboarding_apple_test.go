@@ -753,6 +753,9 @@ func TestAppleOnboardingInvalidStoredSessionRestartsAtSafeStage(t *testing.T) {
 		{appleOnboardingFinishICloud, "", "icloud_prepare"},
 		{appleOnboardingFinishICloudCookie, "", "icloud_cookie_prepare"},
 		{appleOnboardingJoinFamily, "", "family_prepare"},
+		{appleOnboardingPrepareFamilyMembership, "", "family_membership_prepare"},
+		{appleOnboardingVerifyFamilyMembership, "", "family_membership_prepare"},
+		{appleOnboardingVerifySMS, appleSMSFamilyMembershipLogin, "family_membership_prepare"},
 		{appleOnboardingFetchManage, "", "manage_prepare"},
 		{appleOnboardingSendSMS, appleSMSManageLogin, "manage_prepare"},
 	}
@@ -1264,7 +1267,7 @@ func TestAppleOnboardingChecksOwnFamilyBeforePrivateAliases(t *testing.T) {
 				session.responses = append(session.responses, appleOnboardingScriptedResponse{status: http.StatusOK, body: `{"privateEmailList":[{"emailAddress":"ready@icloud.com"}],"inactivePrivateEmailList":[]}`})
 			}
 			response, err := appleOnboardingTestClient(time.Now(), session).Execute(context.Background(), AppleOnboardingRequest{
-				Operation: appleOnboardingFetchManage, Email: "child@example.com", FamilyInviteURL: "https://setup.icloud.com/family/messages?inviteCode=test", Session: appleOnboardingTestState(t, nil),
+				Operation: appleOnboardingFetchManage, Email: "child@example.com", RequireFamilyMembership: true, Session: appleOnboardingTestState(t, nil),
 			})
 			if tc.allowed {
 				if err != nil || response.FamilyID != "family-1" || len(session.requests) != 4 {

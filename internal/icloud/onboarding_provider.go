@@ -11,76 +11,84 @@ import (
 )
 
 const (
-	appleOnboardingPrepareICloud          = "prepare_icloud"
-	appleOnboardingPrepareICloudCookie    = "prepare_icloud_cookie"
-	appleOnboardingSendSMS                = "send_sms"
-	appleOnboardingVerifySMS              = "verify_sms"
-	appleOnboardingFinishICloud           = "finish_icloud"
-	appleOnboardingFinishICloudCookie     = "finish_icloud_cookie"
-	appleOnboardingPrepareFamily          = "prepare_family"
-	appleOnboardingPrepareFamilyReconcile = "prepare_family_reconcile"
-	appleOnboardingJoinFamily             = "join_family"
-	appleOnboardingPrepareManage          = "prepare_manage"
-	appleOnboardingFetchManage            = "fetch_manage"
-	appleOnboardingAddForward             = "add_forward"
-	appleOnboardingVerifyForward          = "verify_forward"
-	appleOnboardingExport                 = "export"
-	appleOnboardingExportSession          = "export_session"
+	appleOnboardingPrepareICloud           = "prepare_icloud"
+	appleOnboardingPrepareICloudCookie     = "prepare_icloud_cookie"
+	appleOnboardingSendSMS                 = "send_sms"
+	appleOnboardingVerifySMS               = "verify_sms"
+	appleOnboardingFinishICloud            = "finish_icloud"
+	appleOnboardingFinishICloudCookie      = "finish_icloud_cookie"
+	appleOnboardingPrepareFamily           = "prepare_family"
+	appleOnboardingPrepareFamilyReconcile  = "prepare_family_reconcile"
+	appleOnboardingJoinFamily              = "join_family"
+	appleOnboardingPrepareFamilyMembership = "prepare_family_membership"
+	appleOnboardingVerifyFamilyMembership  = "verify_family_membership"
+	appleOnboardingPrepareManage           = "prepare_manage"
+	appleOnboardingFetchManage             = "fetch_manage"
+	appleOnboardingAddForward              = "add_forward"
+	appleOnboardingVerifyForward           = "verify_forward"
+	appleOnboardingExport                  = "export"
+	appleOnboardingExportSession           = "export_session"
 
-	appleSMSICloudLogin          = "icloud_login"
-	appleSMSOldCookieLogin       = "old_cookie_login"
-	appleSMSICloudCookieLogin    = "icloud_cookie_login"
-	appleSMSPhoneEnrollment      = "phone_enrollment"
-	appleSMSFamilyLogin          = "family_login"
-	appleSMSFamilyReconcileLogin = "family_reconcile_login"
-	appleSMSManageLogin          = "manage_login"
+	appleSMSICloudLogin           = "icloud_login"
+	appleSMSOldCookieLogin        = "old_cookie_login"
+	appleSMSICloudCookieLogin     = "icloud_cookie_login"
+	appleSMSPhoneEnrollment       = "phone_enrollment"
+	appleSMSFamilyLogin           = "family_login"
+	appleSMSFamilyReconcileLogin  = "family_reconcile_login"
+	appleSMSFamilyMembershipLogin = "family_membership_login"
+	appleSMSManageLogin           = "manage_login"
 )
 
 // The exported names are intentionally small aliases for internal command
 // tools. Production onboarding continues to use the unexported constants.
 const (
-	AppleOnboardingPrepareICloud          = appleOnboardingPrepareICloud
-	AppleOnboardingPrepareICloudCookie    = appleOnboardingPrepareICloudCookie
-	AppleOnboardingSendSMS                = appleOnboardingSendSMS
-	AppleOnboardingVerifySMS              = appleOnboardingVerifySMS
-	AppleOnboardingFinishICloud           = appleOnboardingFinishICloud
-	AppleOnboardingFinishICloudCookie     = appleOnboardingFinishICloudCookie
-	AppleOnboardingPrepareFamily          = appleOnboardingPrepareFamily
-	AppleOnboardingPrepareFamilyReconcile = appleOnboardingPrepareFamilyReconcile
-	AppleOnboardingJoinFamily             = appleOnboardingJoinFamily
-	AppleOnboardingPrepareManage          = appleOnboardingPrepareManage
-	AppleOnboardingFetchManage            = appleOnboardingFetchManage
-	AppleOnboardingAddForward             = appleOnboardingAddForward
-	AppleOnboardingVerifyForward          = appleOnboardingVerifyForward
-	AppleOnboardingExport                 = appleOnboardingExport
-	AppleSMSICloudLogin                   = appleSMSICloudLogin
-	AppleSMSICloudCookieLogin             = appleSMSICloudCookieLogin
-	AppleSMSPhoneEnrollment               = appleSMSPhoneEnrollment
-	AppleSMSFamilyLogin                   = appleSMSFamilyLogin
-	AppleSMSFamilyReconcileLogin          = appleSMSFamilyReconcileLogin
-	AppleSMSManageLogin                   = appleSMSManageLogin
+	AppleOnboardingPrepareICloud           = appleOnboardingPrepareICloud
+	AppleOnboardingPrepareICloudCookie     = appleOnboardingPrepareICloudCookie
+	AppleOnboardingSendSMS                 = appleOnboardingSendSMS
+	AppleOnboardingVerifySMS               = appleOnboardingVerifySMS
+	AppleOnboardingFinishICloud            = appleOnboardingFinishICloud
+	AppleOnboardingFinishICloudCookie      = appleOnboardingFinishICloudCookie
+	AppleOnboardingPrepareFamily           = appleOnboardingPrepareFamily
+	AppleOnboardingPrepareFamilyReconcile  = appleOnboardingPrepareFamilyReconcile
+	AppleOnboardingJoinFamily              = appleOnboardingJoinFamily
+	AppleOnboardingPrepareFamilyMembership = appleOnboardingPrepareFamilyMembership
+	AppleOnboardingVerifyFamilyMembership  = appleOnboardingVerifyFamilyMembership
+	AppleOnboardingPrepareManage           = appleOnboardingPrepareManage
+	AppleOnboardingFetchManage             = appleOnboardingFetchManage
+	AppleOnboardingAddForward              = appleOnboardingAddForward
+	AppleOnboardingVerifyForward           = appleOnboardingVerifyForward
+	AppleOnboardingExport                  = appleOnboardingExport
+	AppleSMSICloudLogin                    = appleSMSICloudLogin
+	AppleSMSICloudCookieLogin              = appleSMSICloudCookieLogin
+	AppleSMSPhoneEnrollment                = appleSMSPhoneEnrollment
+	AppleSMSFamilyLogin                    = appleSMSFamilyLogin
+	AppleSMSFamilyReconcileLogin           = appleSMSFamilyReconcileLogin
+	AppleSMSFamilyMembershipLogin          = appleSMSFamilyMembershipLogin
+	AppleSMSManageLogin                    = appleSMSManageLogin
 )
 
 var ErrICloudOnboardingProvider = errors.New("icloud: Apple onboarding provider unavailable")
 
 type AppleOnboardingRequest struct {
-	Operation            string
-	Email                string
-	Secret               iCloudOnboardingSecret
-	Session              json.RawMessage
-	SMSPurpose           string
-	PhoneNumber          string
-	PhoneCountryCode     string
-	TrustedPhoneAttempt  int
-	Code                 string
-	FamilyInviteURL      string
-	FamilyOrganizerEmail string
-	ForwardToEmail       string
-	ForwardCode          string
-	SkipPhoneEnrollment  bool
-	SkipOldChannel       bool
-	SkipPrivateAlias     bool
-	UseDeviceCode        bool
+	Operation               string
+	Email                   string
+	Secret                  iCloudOnboardingSecret
+	Session                 json.RawMessage
+	SMSPurpose              string
+	PhoneNumber             string
+	PhoneCountryCode        string
+	TrustedPhoneAttempt     int
+	Code                    string
+	FamilyInviteURL         string
+	FamilyOrganizerEmail    string
+	ForwardToEmail          string
+	ForwardCode             string
+	SkipPhoneEnrollment     bool
+	SkipOldChannel          bool
+	SkipPrivateAlias        bool
+	RequireFamilyMembership bool
+	RequireFamilyChild      bool
+	UseDeviceCode           bool
 }
 
 // AppleSecurityAnswer and AppleOnboardingSecret expose only the input shape
@@ -221,7 +229,12 @@ func (c *appleOnboardingClient) Execute(ctx context.Context, request AppleOnboar
 		response, err = flow.prepareFamily(request)
 	case appleOnboardingJoinFamily:
 		response, err = flow.joinFamily(request)
-	case appleOnboardingPrepareManage:
+	case appleOnboardingVerifyFamilyMembership:
+		response.FamilyID, err = flow.verifyOwnFamilyMembership(request.Email, "family_membership_prepare", true)
+		if err == nil {
+			response.Next = "ready"
+		}
+	case appleOnboardingPrepareManage, appleOnboardingPrepareFamilyMembership:
 		response, err = flow.prepareManage(request)
 	case appleOnboardingFetchManage:
 		response, err = flow.fetchManage(request)
@@ -244,6 +257,10 @@ func (c *appleOnboardingClient) Execute(ctx context.Context, request AppleOnboar
 		if errors.As(err, &familyErr) && familyErr.RestartStage == "manage_prepare" &&
 			(request.Operation == appleOnboardingPrepareFamily || request.Operation == appleOnboardingVerifySMS && request.SMSPurpose == appleSMSFamilyLogin) {
 			familyErr.RestartStage = "family_prepare"
+		}
+		if errors.As(err, &familyErr) && familyErr.RestartStage == "manage_prepare" &&
+			(request.Operation == appleOnboardingPrepareFamilyMembership || request.SMSPurpose == appleSMSFamilyMembershipLogin) {
+			familyErr.RestartStage = "family_membership_prepare"
 		}
 		var verificationErr *AppleOnboardingError
 		if request.UseDeviceCode && errors.As(err, &verificationErr) && verificationErr.CodeRejected {
@@ -312,6 +329,8 @@ func appleOnboardingOperationRestartStage(request AppleOnboardingRequest) string
 		return "family_prepare"
 	case appleOnboardingPrepareFamilyReconcile, appleOnboardingJoinFamily:
 		return "family_prepare"
+	case appleOnboardingPrepareFamilyMembership, appleOnboardingVerifyFamilyMembership:
+		return "family_membership_prepare"
 	case appleOnboardingPrepareManage, appleOnboardingFetchManage, appleOnboardingAddForward,
 		appleOnboardingVerifyForward, appleOnboardingExport:
 		return "manage_prepare"

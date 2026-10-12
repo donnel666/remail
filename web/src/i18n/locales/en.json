@@ -3107,7 +3107,7 @@
   "Apple Emails": "Apple Emails",
   "Import Apple Emails": "Import Apple Emails",
   "Apple account entries": "Apple account entries",
-  "Apple import prerequisites": "Complete phone verification, device binding and iCloud+ setup before importing. The system configures and verifies forwarding, validates the account and creates aliases. The code URL must return verification codes directly over the public internet.",
+  "Apple import prerequisites": "Complete phone verification and device binding, and join a family with iCloud+ sharing enabled before importing. The system confirms family membership before configuring and verifying forwarding, validating the account and creating aliases. The code URL must return verification codes directly over the public internet.",
   "Apple import lifetime": "Automatic alias creation is available for 30 days from import.",
   "Apple import format": "email----password----device-code-URL",
   "Apple import accepts up to 100 accounts and a 1 MB TXT file.": "Import up to 100 accounts at a time, in a TXT file of up to 1 MB.",

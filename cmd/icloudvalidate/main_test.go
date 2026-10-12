@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -235,6 +236,91 @@ func TestCompletedPhasesResumeAtManage(t *testing.T) {
 	}
 }
 
+func TestFamilyMembershipResumeDoesNotRepeatInvitation(t *testing.T) {
+	notMember := &icloud.AppleOnboardingError{Category: "family_membership_unconfirmed", SafeMessage: "Membership is not confirmed.", Retryable: true}
+	provider := &recordingAppleProvider{err: notMember}
+	cp := accountCheckpoint{ICloudReady: true, FamilyAuthenticated: true, Stage: "family_membership_verify",
+		DeviceCodeAPI: "https://device.example/code", Session: json.RawMessage(`{"mode":"family"}`)}
+	state := checkpointFile{Version: 1, Accounts: map[string]accountCheckpoint{}}
+	d := &debugger{ctx: context.Background(), input: accountInput{Email: "example@example.com", CountryCode: "US", FamilyInviteURL: "https://setup.icloud.com/family/messages?inviteCode=test"},
+		runtime: &runtime{apple: provider}, checkpoint: &cp, state: &state, stateKey: "example@example.com",
+		statePath: filepath.Join(t.TempDir(), "checkpoint.json"), session: cp.Session}
+	if err := d.run(nil, options{}); !errors.Is(err, notMember) || provider.calls != 1 || provider.request.Operation != icloud.AppleOnboardingVerifyFamilyMembership || cp.FamilyJoined {
+		t.Fatalf("unconfirmed membership advanced the workflow: err=%v calls=%d stage=%s", err, provider.calls, cp.Stage)
+	}
+	provider.err = nil
+	provider.response = icloud.AppleOnboardingResponse{Next: "ready", FamilyID: "family-1"}
+	if err := d.run(nil, options{}); !errors.Is(err, errFamilySharingRequired) || provider.calls != 2 || provider.request.Operation != icloud.AppleOnboardingVerifyFamilyMembership || !cp.FamilyJoined || cp.FamilyID != "family-1" {
+		t.Fatalf("verified membership did not pause for sharing: err=%v calls=%d stage=%s", err, provider.calls, cp.Stage)
+	}
+}
+
+func TestFamilyMembershipExpiredCookieResumesAccountLogin(t *testing.T) {
+	provider := &scriptedAppleProvider{steps: []appleProviderStep{
+		{err: &icloud.AppleOnboardingError{Category: "family_session_invalid", RestartStage: "family_membership_prepare"}},
+		{response: icloud.AppleOnboardingResponse{Next: icloud.AppleSMSFamilyMembershipLogin, Session: json.RawMessage(`{"mode":"family_membership"}`)}},
+		{response: icloud.AppleOnboardingResponse{}},
+		{response: icloud.AppleOnboardingResponse{}},
+		{response: icloud.AppleOnboardingResponse{Next: "ready", FamilyID: "family-1"}},
+	}}
+	cp := accountCheckpoint{ICloudReady: true, FamilyAuthenticated: true, Stage: "family_membership_verify", Session: json.RawMessage(`{"mode":"family"}`)}
+	state := checkpointFile{Version: 1, Accounts: map[string]accountCheckpoint{}}
+	d := &debugger{ctx: context.Background(), input: accountInput{Email: "example@example.com", CountryCode: "US", FamilyInviteURL: "https://setup.icloud.com/family/messages?inviteCode=expired"},
+		runtime: &runtime{apple: provider}, reader: bufio.NewReader(strings.NewReader("123456\n")),
+		checkpoint: &cp, state: &state, stateKey: "example@example.com", statePath: filepath.Join(t.TempDir(), "checkpoint.json"), session: cp.Session}
+	err := d.run(nil, options{})
+	var providerErr *icloud.AppleOnboardingError
+	if !errors.As(err, &providerErr) || providerErr.RestartStage != "family_membership_prepare" {
+		t.Fatalf("expected membership login recovery: %v", err)
+	}
+	if err := d.restartAt(providerErr.RestartStage); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadCheckpoint(d.statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp = loaded.Accounts[d.stateKey]
+	if !cp.FamilyInviteAccepted || cp.FamilyAuthenticated || cp.FamilyJoined {
+		t.Fatal("account login recovery lost invitation progress")
+	}
+	if err := d.run(nil, options{}); !errors.Is(err, errFamilySharingRequired) {
+		t.Fatalf("recovered membership must wait for manual sharing: %v", err)
+	}
+	want := []string{icloud.AppleOnboardingVerifyFamilyMembership, icloud.AppleOnboardingPrepareFamilyMembership,
+		icloud.AppleOnboardingSendSMS, icloud.AppleOnboardingVerifySMS, icloud.AppleOnboardingVerifyFamilyMembership}
+	if len(provider.requests) != len(want) {
+		t.Fatalf("unexpected operation count: %d", len(provider.requests))
+	}
+	for i, operation := range want {
+		if provider.requests[i].Operation != operation || provider.requests[i].FamilyInviteURL != "" {
+			t.Fatalf("recovery operation %d unexpectedly used an invitation: %s", i, provider.requests[i].Operation)
+		}
+	}
+	for _, i := range []int{2, 3} {
+		if provider.requests[i].SMSPurpose != icloud.AppleSMSFamilyMembershipLogin {
+			t.Fatal("verification lost its phase-two login purpose")
+		}
+	}
+	if !cp.FamilyJoined || cp.FamilyID != "family-1" || cp.Stage != "waiting_family_sharing" {
+		t.Fatal("verified membership was not saved")
+	}
+}
+
+func TestFamilyMembershipInterruptedCodePreservesInvitationProgress(t *testing.T) {
+	cp := accountCheckpoint{ICloudReady: true, FamilyInviteAccepted: true, Stage: "sms_verify_recover",
+		PendingSMSPurpose: icloud.AppleSMSFamilyMembershipLogin, Session: json.RawMessage(`{"mode":"family_membership"}`)}
+	state := checkpointFile{Version: 1, Accounts: map[string]accountCheckpoint{}}
+	d := &debugger{ctx: context.Background(), checkpoint: &cp, state: &state, stateKey: "example@example.com",
+		statePath: filepath.Join(t.TempDir(), "checkpoint.json"), session: cp.Session}
+	if err := d.recoverPendingSMSCheckpoint(); err != nil {
+		t.Fatal(err)
+	}
+	if cp.Stage != "family_membership_prepare" || !cp.FamilyInviteAccepted || cp.FamilyAuthenticated || cp.PendingSMSPurpose != "" || len(cp.Session) != 0 {
+		t.Fatal("interrupted verification did not preserve its membership recovery checkpoint")
+	}
+}
+
 func TestFamilySharingPauseSurvivesResume(t *testing.T) {
 	compact := func(raw json.RawMessage) string {
 		if len(raw) == 0 {
@@ -260,7 +346,7 @@ func TestFamilySharingPauseSurvivesResume(t *testing.T) {
 				DeviceCodeAPI: tc.deviceAPI, ManageAuthenticated: true, ManageReady: true,
 				ManageSessionExpiresAt: time.Now().Add(temporaryManageSessionTTL), Session: json.RawMessage(`{"mode":"manage"}`)}
 			state := checkpointFile{Version: 1, Accounts: map[string]accountCheckpoint{}}
-			provider := &recordingAppleProvider{response: icloud.AppleOnboardingResponse{Next: "ready"}}
+			provider := &recordingAppleProvider{response: icloud.AppleOnboardingResponse{Next: "ready", FamilyID: "family-1"}}
 			d := &debugger{ctx: context.Background(), input: accountInput{Email: "example@example.com", CountryCode: "US", FamilyInviteURL: "https://setup.icloud.com/family/messages?inviteCode=test"},
 				runtime: &runtime{apple: provider}, checkpoint: &cp, state: &state, stateKey: "example@example.com",
 				statePath: filepath.Join(t.TempDir(), "checkpoint.json"), session: cp.Session}
@@ -269,9 +355,9 @@ func TestFamilySharingPauseSurvivesResume(t *testing.T) {
 			}
 			wantCalls := 0
 			if !tc.joined {
-				wantCalls = 1
+				wantCalls = 2
 			}
-			if provider.calls != wantCalls || (!tc.joined && provider.request.Operation != icloud.AppleOnboardingJoinFamily) {
+			if provider.calls != wantCalls || (!tc.joined && provider.request.Operation != icloud.AppleOnboardingVerifyFamilyMembership) {
 				t.Fatalf("unexpected Apple calls before sharing confirmation: %d, %s", provider.calls, provider.request.Operation)
 			}
 			loaded, err := loadCheckpoint(d.statePath)
@@ -480,12 +566,13 @@ func TestICloudCheckpointReadyRequiresOldCookieForOpenedAccounts(t *testing.T) {
 
 func TestAppleRestartStageCoversEverySMSPurpose(t *testing.T) {
 	for purpose, want := range map[string]string{
-		icloud.AppleSMSICloudLogin:          "icloud_prepare",
-		icloud.AppleSMSICloudCookieLogin:    "icloud_cookie_prepare",
-		icloud.AppleSMSPhoneEnrollment:      "icloud_prepare",
-		icloud.AppleSMSFamilyLogin:          "family_prepare",
-		icloud.AppleSMSFamilyReconcileLogin: "family_prepare",
-		icloud.AppleSMSManageLogin:          "manage_prepare",
+		icloud.AppleSMSICloudLogin:           "icloud_prepare",
+		icloud.AppleSMSICloudCookieLogin:     "icloud_cookie_prepare",
+		icloud.AppleSMSPhoneEnrollment:       "icloud_prepare",
+		icloud.AppleSMSFamilyLogin:           "family_prepare",
+		icloud.AppleSMSFamilyReconcileLogin:  "family_prepare",
+		icloud.AppleSMSFamilyMembershipLogin: "family_membership_prepare",
+		icloud.AppleSMSManageLogin:           "manage_prepare",
 	} {
 		if got := appleRestartStage(purpose); got != want {
 			t.Fatalf("appleRestartStage(%q) = %q, want %q", purpose, got, want)

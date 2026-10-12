@@ -102,7 +102,7 @@ func (f *appleOnboardingFlow) sendSMS(request AppleOnboardingRequest) (AppleOnbo
 		return AppleOnboardingResponse{}, nil
 	}
 	switch request.SMSPurpose {
-	case appleSMSICloudLogin, appleSMSOldCookieLogin, appleSMSICloudCookieLogin, appleSMSFamilyLogin, appleSMSFamilyReconcileLogin, appleSMSManageLogin:
+	case appleSMSICloudLogin, appleSMSOldCookieLogin, appleSMSICloudCookieLogin, appleSMSFamilyLogin, appleSMSFamilyReconcileLogin, appleSMSFamilyMembershipLogin, appleSMSManageLogin:
 		phoneID, err := appleOnboardingRawValue(f.state.PendingTrustedPhoneID)
 		if err != nil {
 			return AppleOnboardingResponse{}, appleOnboardingRestart(appleOnboardingRestartStage(request.SMSPurpose))
@@ -161,7 +161,7 @@ func (f *appleOnboardingFlow) verifySMS(request AppleOnboardingRequest) (AppleOn
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "verification_code_missing", SafeMessage: "Apple verification code is missing.", CodeRejected: true}
 	}
 	switch request.SMSPurpose {
-	case appleSMSICloudLogin, appleSMSOldCookieLogin, appleSMSICloudCookieLogin, appleSMSFamilyLogin, appleSMSFamilyReconcileLogin, appleSMSManageLogin:
+	case appleSMSICloudLogin, appleSMSOldCookieLogin, appleSMSICloudCookieLogin, appleSMSFamilyLogin, appleSMSFamilyReconcileLogin, appleSMSFamilyMembershipLogin, appleSMSManageLogin:
 		phoneID, err := appleOnboardingRawValue(f.state.PendingTrustedPhoneID)
 		if err != nil {
 			return AppleOnboardingResponse{}, appleOnboardingRestart(appleOnboardingRestartStage(request.SMSPurpose))
@@ -287,7 +287,7 @@ func (f *appleOnboardingFlow) finishHSA2Login(purpose string) error {
 		if !hasCookie {
 			return appleOnboardingRestart(appleOnboardingRestartStage(purpose))
 		}
-	case appleSMSManageLogin:
+	case appleSMSManageLogin, appleSMSFamilyMembershipLogin:
 		if f.state.RepairToken != "" && !hasCookie {
 			if err := f.completeRepair(); err != nil {
 				return err
@@ -522,8 +522,7 @@ func (f *appleOnboardingFlow) joinFamily(request AppleOnboardingRequest) (AppleO
 }
 
 func (f *appleOnboardingFlow) familyJoinResponse() (AppleOnboardingResponse, error) {
-	// Stage 2 pauses for manual sharing after accept/update. Stage 3 verifies
-	// membership with the authenticated account session before creating aliases.
+	// The caller verifies membership with the account Cookie before waiting for sharing.
 	return AppleOnboardingResponse{Next: "ready"}, nil
 }
 
@@ -531,7 +530,8 @@ func (f *appleOnboardingFlow) prepareManage(request AppleOnboardingRequest) (App
 	if err := validateAppleOnboardingCredentials(request); err != nil {
 		return AppleOnboardingResponse{}, err
 	}
-	if request.UseDeviceCode && f.state.Mode == "family" && f.state.AccountWidgetKey != "" {
+	if request.Operation != appleOnboardingPrepareFamilyMembership && request.UseDeviceCode &&
+		(f.state.Mode == "family" || f.state.Mode == "family_membership") && f.state.AccountWidgetKey != "" {
 		cookies, err := f.http.SnapshotCookies(f.endpoints.Account, f.endpoints.AppleID)
 		if err != nil {
 			return AppleOnboardingResponse{}, err
@@ -555,6 +555,10 @@ func (f *appleOnboardingFlow) prepareManage(request AppleOnboardingRequest) (App
 	f.state.RememberMe = true
 	f.state.AuthVersion = appleOnboardingManageAuth
 	smsPurpose, restartStage := appleSMSManageLogin, "manage_prepare"
+	if request.Operation == appleOnboardingPrepareFamilyMembership {
+		f.state.Mode = "family_membership"
+		smsPurpose, restartStage = appleSMSFamilyMembershipLogin, "family_membership_prepare"
+	}
 	portal, err := f.getObject(strings.TrimRight(f.endpoints.Account, "/")+"/bootstrap/portal", "bootstrap", false, false, false, "application/json, text/plain, */*")
 	if err != nil {
 		return AppleOnboardingResponse{}, err
@@ -565,6 +569,9 @@ func (f *appleOnboardingFlow) prepareManage(request AppleOnboardingRequest) (App
 	}
 	if f.state.WidgetKey == "" {
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "invalid_response", SafeMessage: "Apple Account bootstrap did not return a service key.", Retryable: true}
+	}
+	if request.Operation == appleOnboardingPrepareFamilyMembership {
+		f.state.AccountWidgetKey = f.state.WidgetKey
 	}
 	if err := f.authorize(); err != nil {
 		return AppleOnboardingResponse{}, err
@@ -646,8 +653,8 @@ func (f *appleOnboardingFlow) fetchManage(request AppleOnboardingRequest) (Apple
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "api_key_missing", SafeMessage: "Apple Account profile did not return an API key.", Retryable: true}
 	}
 	familyID := ""
-	if strings.TrimSpace(request.FamilyInviteURL) != "" {
-		familyID, err = f.verifyOwnFamilyMembership(request.Email)
+	if request.RequireFamilyMembership {
+		familyID, err = f.verifyOwnFamilyMembership(request.Email, "manage_prepare", request.RequireFamilyChild)
 		if err != nil {
 			return AppleOnboardingResponse{}, err
 		}
@@ -661,21 +668,21 @@ func (f *appleOnboardingFlow) fetchManage(request AppleOnboardingRequest) (Apple
 	return AppleOnboardingResponse{Next: "ready", CountryCode: f.state.AccountCountry, TrustedPhoneLastTwo: lastTwo, FamilyID: familyID}, nil
 }
 
-func (f *appleOnboardingFlow) verifyOwnFamilyMembership(email string) (string, error) {
+func (f *appleOnboardingFlow) verifyOwnFamilyMembership(email, restartStage string, requireChild bool) (string, error) {
 	body, err := f.request(http.MethodGet, iCloudFamilyMembersEndpoint, nil, false, false, false, false, true, "application/json")
 	if err != nil {
 		return "", err
 	}
 	if f.state.Status == http.StatusUnauthorized || f.state.Status == http.StatusForbidden {
-		return "", &AppleOnboardingError{Category: "family_session_invalid", SafeMessage: "Apple family membership query rejected the current session.", RestartStage: "manage_prepare"}
+		return "", &AppleOnboardingError{Category: "family_session_invalid", SafeMessage: "Apple family membership query rejected the current session.", RestartStage: restartStage}
 	}
 	var payload iCloudFamilyMembersResponse
 	if f.state.Status != http.StatusOK || json.Unmarshal(body, &payload) != nil {
-		return "", &AppleOnboardingError{Category: "family_membership_unavailable", SafeMessage: "Apple family membership could not be loaded; phase 3 cannot continue.", Retryable: true}
+		return "", &AppleOnboardingError{Category: "family_membership_unavailable", SafeMessage: "Apple family membership could not be loaded; onboarding cannot continue.", Retryable: true}
 	}
 	snapshot, err := validateICloudFamilyMembers(payload)
-	if err != nil || !snapshot.Linked || !snapshot.Member || !strings.EqualFold(strings.TrimSpace(email), snapshot.CurrentUserAppleID) || snapshot.CurrentDSID == snapshot.OrganizerDSID {
-		return "", &AppleOnboardingError{Category: "family_membership_unconfirmed", SafeMessage: "Apple has not confirmed this account as a member of the family; phase 3 cannot continue.", Retryable: true}
+	if err != nil || !snapshot.Linked || !snapshot.Member || !strings.EqualFold(strings.TrimSpace(email), snapshot.CurrentUserAppleID) || requireChild && snapshot.CurrentDSID == snapshot.OrganizerDSID {
+		return "", &AppleOnboardingError{Category: "family_membership_unconfirmed", SafeMessage: "Apple has not confirmed this account as a member of the family; onboarding cannot continue.", Retryable: true}
 	}
 	return snapshot.FamilyID, nil
 }
@@ -1245,6 +1252,8 @@ func appleOnboardingRestartStage(purpose string) string {
 		return "family_prepare"
 	case appleSMSFamilyReconcileLogin:
 		return "family_prepare"
+	case appleSMSFamilyMembershipLogin:
+		return "family_membership_prepare"
 	case appleSMSManageLogin:
 		return "manage_prepare"
 	default:

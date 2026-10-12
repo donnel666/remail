@@ -76,6 +76,7 @@ type iCloudOnboardingTaskModel struct {
 	PrimaryEmail                string     `gorm:"column:primary_email"`
 	AccountRole                 string     `gorm:"column:account_role"`
 	FamilyPrimaryResourceID     *uint      `gorm:"column:family_primary_resource_id"`
+	FamilyID                    string     `gorm:"column:family_id"`
 	FamilyReservationConfirmed  bool       `gorm:"column:family_reservation_confirmed"`
 	Region                      string     `gorm:"column:region"`
 	CountryCode                 string     `gorm:"column:country_code"`

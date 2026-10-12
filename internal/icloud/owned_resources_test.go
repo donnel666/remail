@@ -247,7 +247,7 @@ func TestOwnedICloudReimportProtectsPublishedAndAllocatedResources(t *testing.T)
 }
 
 func TestOwnedICloudWorkflowCannotEnterOtherPhases(t *testing.T) {
-	for _, stage := range []string{"accepted", "icloud_prepare", "family_prepare", "sms_send"} {
+	for _, stage := range []string{"accepted", "icloud_prepare", "family_prepare", "family_membership_prepare", "family_membership_verify", "sms_send"} {
 		t.Run(stage, func(t *testing.T) {
 			s, db, task, apple := newOnboardingStateTest(t)
 			require.NoError(t, db.Model(task).Updates(map[string]any{"task_kind": iCloudUserImportTaskKind, "stage": stage, "pending_sms_purpose": appleSMSPhoneEnrollment}).Error)

@@ -55,6 +55,8 @@ func (p *manualDeviceApple) Execute(_ context.Context, request AppleOnboardingRe
 		response.ICloudOpened = &opened
 	case appleOnboardingPrepareFamily:
 		response.Next = appleSMSFamilyLogin
+	case appleOnboardingVerifyFamilyMembership:
+		response.FamilyID = "family-1"
 	case appleOnboardingPrepareManage:
 		response.Next = appleSMSManageLogin
 	case appleOnboardingVerifySMS:
@@ -155,7 +157,7 @@ func testManualDeviceURLOnboardingWithoutPhone(t *testing.T, compact bool, codeU
 	require.NoError(t, err)
 	require.NotContains(t, string(payload), "secret-device-token")
 	require.NotContains(t, string(payload), codeURL)
-	for _, stage := range []string{"sms_send", "sms_wait", "sms_verify", "icloud_finish", "family_prepare", "sms_send", "sms_wait", "sms_verify", "family_join_intent", "family_join_apply", iCloudOnboardingStageFamilySharing} {
+	for _, stage := range []string{"sms_send", "sms_wait", "sms_verify", "icloud_finish", "family_prepare", "sms_send", "sms_wait", "sms_verify", "family_join_intent", "family_join_apply", "family_membership_verify", iCloudOnboardingStageFamilySharing} {
 		processOnboardingStageForTest(t, service, db, task)
 		require.Equal(t, stage, task.Stage)
 	}
@@ -598,16 +600,19 @@ func TestDeviceOnboardingStillWaitsForManualFamilySharing(t *testing.T) {
 		"stage": "family_join_apply", "family_invite_url": "https://setup.icloud.com/family/messages?inviteCode=test",
 	}).Error)
 	processOnboardingStageForTest(t, s, db, task)
+	require.Equal(t, "family_membership_verify", task.Stage)
+	require.Equal(t, 2, iCloudOnboardingTaskPhase(task))
+	processOnboardingStageForTest(t, s, db, task)
 	require.Equal(t, iCloudOnboardingStageFamilySharing, task.Stage)
 	require.Equal(t, "waiting", task.DispatchStatus)
 	require.Nil(t, task.NextAttemptAt)
-	require.Equal(t, []string{appleOnboardingJoinFamily + ":"}, apple.operations)
+	require.Equal(t, []string{appleOnboardingJoinFamily + ":", appleOnboardingVerifyFamilyMembership + ":"}, apple.operations)
 	// A queued wakeup must not advance an unconfirmed manual checkpoint.
 	require.NoError(t, db.Model(task).Update("dispatch_status", "pending").Error)
 	processOnboardingStageForTest(t, s, db, task)
 	require.Equal(t, iCloudOnboardingStageFamilySharing, task.Stage)
 	require.Equal(t, "waiting", task.DispatchStatus)
-	require.Len(t, apple.operations, 1)
+	require.Len(t, apple.operations, 2)
 }
 
 func TestDeviceFamilyAccountVerificationContinuesToInvitationLogin(t *testing.T) {
@@ -668,6 +673,7 @@ func TestFamilySharingRetainsOnlyDeviceAccountSessions(t *testing.T) {
 			require.NoError(t, db.Model(task).Updates(map[string]any{
 				"device_code_api": deviceURL, "stage": "family_join_apply", "family_invite_url": "invite",
 			}).Error)
+			processOnboardingStageForTest(t, s, db, task)
 			processOnboardingStageForTest(t, s, db, task)
 			require.Equal(t, iCloudOnboardingStageFamilySharing, task.Stage)
 			for checkpoint := 0; checkpoint < 2; checkpoint++ {
