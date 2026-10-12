@@ -709,13 +709,15 @@ func (s *Service) acceptICloudOnboardingImport(
 			if userImport && resource.Status == iCloudResourceDisabled {
 				return ErrICloudResourceIdentity
 			}
+			// Deleted resources may retain a completed or still-running Cookie task.
+			restoringDeleted := userImport && resource.Status == iCloudResourceDeleted
 			taskKind := firstNonEmpty(strings.TrimSpace(resource.TaskKind), "onboarding")
 			activeWorkflow := (isICloudOnboardingTaskKind(taskKind) || taskKind == "refresh" || taskKind == iCloudCookieRecoveryTaskKind) &&
 				(resource.OnboardingStatus == iCloudOnboardingProcessing || resource.OnboardingStatus == iCloudOnboardingWaiting)
-			if activeWorkflow {
+			if activeWorkflow && !restoringDeleted {
 				return ErrICloudResourceIdentity
 			}
-			retryablePlaceholder := isICloudOnboardingRetryablePlaceholder(resource)
+			retryablePlaceholder := isICloudOnboardingRetryablePlaceholder(resource) || restoringDeleted
 			if resource.OwnerUserID != ownerUserID || (resource.AccountRole != "unknown" && !retryablePlaceholder) || (resource.Status == iCloudResourceDeleted && !retryablePlaceholder) {
 				return ErrICloudResourceIdentity
 			}
@@ -824,7 +826,7 @@ func (s *Service) acceptICloudOnboardingImport(
 
 				}
 				updated := tx.Model(&iCloudResourceModel{}).
-					Where("id = ? AND ((status <> ? AND account_role = ?) OR (task_kind IN ? AND onboarding_status = ? AND for_sale = ?))", *task.ResourceID, iCloudResourceDeleted, "unknown", []string{"onboarding", iCloudUserImportTaskKind}, iCloudOnboardingFailed, false).
+					Where("id = ? AND ((status <> ? AND account_role = ?) OR (task_kind IN ? AND onboarding_status = ? AND for_sale = ?) OR (? AND status = ?))", *task.ResourceID, iCloudResourceDeleted, "unknown", []string{"onboarding", iCloudUserImportTaskKind}, iCloudOnboardingFailed, false, userImport, iCloudResourceDeleted).
 					Updates(map[string]any{
 						"status":       gorm.Expr("CASE WHEN status = ? THEN status ELSE ? END", iCloudResourceDisabled, iCloudResourcePending),
 						"account_role": line.AccountRole, "region": line.Region, "country_code": line.CountryCode,
@@ -859,7 +861,8 @@ func (s *Service) acceptICloudOnboardingImport(
 			}
 			importID := batchID
 			task.ImportID = &importID
-			if hasExistingResource && isICloudOnboardingRetryablePlaceholder(existingResource) && existingResource.ImportID != nil {
+			if hasExistingResource && existingResource.ImportID != nil &&
+				(isICloudOnboardingRetryablePlaceholder(existingResource) || userImport && existingResource.Status == iCloudResourceDeleted) {
 				if err := releaseICloudAppleIDReservationTx(tx, iCloudAppleIDReservationOnboarding, *existingResource.ImportID, line.PrimaryEmail); err != nil {
 					return err
 				}

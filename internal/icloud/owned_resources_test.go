@@ -246,6 +246,111 @@ func TestOwnedICloudReimportProtectsPublishedAndAllocatedResources(t *testing.T)
 	}
 }
 
+func TestOwnedICloudReimportAfterDelete(t *testing.T) {
+	for _, test := range []struct{ name, kind, status string }{
+		{"completed import", iCloudUserImportTaskKind, iCloudOnboardingCompleted},
+		{"active cookie recovery", iCloudCookieRecoveryTaskKind, iCloudOnboardingProcessing},
+		{"failed cookie recovery", iCloudCookieRecoveryTaskKind, iCloudOnboardingFailed},
+		{"completed cookie refresh", "refresh", iCloudOnboardingCompleted},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s, db, task, apple := newOnboardingStateTest(t)
+			s.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
+			require.NoError(t, db.AutoMigrate(&iCloudAdminCommandAllocation{}, &iCloudMaintenanceRunModel{}, &deviceBindingModel{}))
+			require.NoError(t, db.Model(task).Updates(map[string]any{
+				"account_role": "primary", "task_kind": test.kind, "onboarding_status": test.status,
+				"stage": "manage_prepare", "dispatch_status": "pending", "status": iCloudResourcePending,
+				"device_code_api": "https://codes.example.com/old", "device_bind_status": "success",
+			}).Error)
+			require.NoError(t, db.First(task, task.ID).Error)
+			oldGeneration, oldCredential := task.Generation, task.ExpectedCredentialRevision
+			require.NoError(t, db.Create(&iCloudAppleIDReservationModel{
+				EmailKey: task.PrimaryEmail, OwnerKind: iCloudAppleIDReservationOnboarding, OwnerID: *task.ImportID,
+			}).Error)
+			deleted, err := s.ApplyOwnedICloudCommand(context.Background(), 1, AdminICloudDelete, task.ID, 1, "delete-before-reimport", "delete", "/actions")
+			require.NoError(t, err)
+			require.Equal(t, iCloudResourceDeleted, deleted.Status)
+			var deletedResource iCloudResourceModel
+			require.NoError(t, db.First(&deletedResource, task.ID).Error)
+			require.Empty(t, deletedResource.DeviceCodeAPI)
+			content := []byte("new@example.com----new-password----https://codes.example.com/new\nchild@example.com----replacement-password----https://codes.example.com/replacement")
+			view, reused, err := s.AcceptOwnedICloudImport(context.Background(), 1, content, "reimport-deleted", "reimport", "/imports")
+			require.NoError(t, err)
+			require.False(t, reused)
+			require.Len(t, view.Tasks, 2)
+			require.Equal(t, task.ID, view.Tasks[1].ID)
+			require.NotEqual(t, *task.ImportID, view.ImportID, "the new batch must release the previous reservation")
+			require.NoError(t, db.First(task, task.ID).Error)
+			require.Equal(t, iCloudUserImportTaskKind, task.TaskKind)
+			require.Equal(t, "manage_prepare", task.Stage)
+			require.Equal(t, "pending", task.DispatchStatus)
+			require.Equal(t, iCloudOnboardingProcessing, task.Status)
+			require.Equal(t, oldGeneration+1, task.Generation)
+			require.Equal(t, oldCredential+1, task.ExpectedCredentialRevision)
+			require.Equal(t, "https://codes.example.com/replacement", task.DeviceCodeAPI)
+			require.Equal(t, s.now().Add(userICloudResourceLifetime), task.ExpireAt)
+			var credential iCloudResourceCredentialModel
+			require.NoError(t, db.First(&credential, task.ID).Error)
+			require.Equal(t, "replacement-password", credential.ApplePassword)
+			var root iCloudRootModel
+			require.NoError(t, db.First(&root, task.ID).Error)
+			require.EqualValues(t, 1, root.OwnerUserID)
+			require.Equal(t, deleted.Version+1, root.Version)
+			var reservation iCloudAppleIDReservationModel
+			require.NoError(t, db.Where("email_key = ?", task.PrimaryEmail).First(&reservation).Error)
+			require.Equal(t, view.ImportID, reservation.OwnerID)
+			before := *task
+			require.NoError(t, s.ProcessICloudOnboardingTask(context.Background(), iCloudOnboardingTask{TaskID: task.ID, Generation: oldGeneration}))
+			require.NoError(t, db.First(task, task.ID).Error)
+			require.Equal(t, before, *task, "a queued worker from before deletion must not claim the new import")
+			require.Empty(t, apple.operations)
+			replay, reused, err := s.AcceptOwnedICloudImport(context.Background(), 1, content, "reimport-deleted", "replay", "/imports")
+			require.NoError(t, err)
+			require.True(t, reused)
+			require.Equal(t, view.ImportID, replay.ImportID)
+			require.NoError(t, db.First(task, task.ID).Error)
+			require.Equal(t, oldGeneration+1, task.Generation)
+		})
+	}
+}
+
+func TestOwnedICloudDeletedReimportKeepsOwnershipAndAllocationChecks(t *testing.T) {
+	for _, test := range []struct {
+		name               string
+		owner              uint
+		forSale, allocated bool
+		wantErr            error
+	}{
+		{name: "different owner", owner: 2, wantErr: ErrICloudResourceIdentity},
+		{name: "published", owner: 1, forSale: true, wantErr: ErrICloudResourceStatus},
+		{name: "allocated", owner: 1, allocated: true, wantErr: ErrICloudResourceAllocation},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s, db, task, _ := newOnboardingStateTest(t)
+			s.SetImportOwnerValidator(func(context.Context, uint) (bool, error) { return true, nil })
+			require.NoError(t, db.AutoMigrate(&iCloudAdminCommandAllocation{}))
+			require.NoError(t, db.Model(task).Updates(map[string]any{
+				"status": iCloudResourceDeleted, "task_kind": iCloudCookieRecoveryTaskKind,
+				"onboarding_status": iCloudOnboardingFailed, "for_sale": test.forSale,
+			}).Error)
+			if test.allocated {
+				require.NoError(t, db.Create(&iCloudAdminCommandAllocation{ResourceID: task.ID, Status: "allocated"}).Error)
+			}
+			var before, after iCloudResourceModel
+			require.NoError(t, db.First(&before, task.ID).Error)
+			view, _, err := s.AcceptOwnedICloudImport(context.Background(), test.owner,
+				[]byte("new@example.com----secret----https://codes.example.com/new\nchild@example.com----replacement----https://codes.example.com/new"), "rejected-reimport", "req", "/imports")
+			require.ErrorIs(t, err, test.wantErr)
+			require.Nil(t, view)
+			require.NoError(t, db.First(&after, task.ID).Error)
+			require.Equal(t, before, after)
+			var count int64
+			require.NoError(t, db.Model(&iCloudResourceModel{}).Count(&count).Error)
+			require.EqualValues(t, 1, count, "the rejected upload must roll back the whole batch")
+		})
+	}
+}
+
 func TestOwnedICloudWorkflowCannotEnterOtherPhases(t *testing.T) {
 	for _, stage := range []string{"accepted", "icloud_prepare", "family_prepare", "family_membership_prepare", "family_membership_verify", "sms_send"} {
 		t.Run(stage, func(t *testing.T) {
