@@ -314,6 +314,8 @@ func (h *Handler) Delete(c *gin.Context) {
 
 func isSensitiveKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "icloud_liveness_smtp_enabled", "icloud_liveness_smtp_servers", "icloud_liveness_smtp_interval_seconds", "icloud_liveness_smtp_addr", "icloud_liveness_smtp_username", "icloud_liveness_smtp_password", "icloud_liveness_smtp_from":
+		return true
 	case "icloud_device_api_key", "icloud_device_base_url", "icloud_device_sms_base_url":
 		return true
 	case "github_client_id", "github_client_secret", "github_callback_url",
@@ -329,6 +331,8 @@ func isSensitiveKey(key string) bool {
 
 func isWriteOnlyKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "icloud_liveness_smtp_password":
+		return true
 	case "icloud_device_api_key":
 		return true
 	case "epay_merchant_key", "epay_private_key", "epusdt_api_key", "epusdt_api_secret", "github_client_id", "github_client_secret", "linuxdo_client_id", "linuxdo_client_secret", "nodeloc_client_id", "nodeloc_client_secret", "points_unit_migration_v1":
@@ -409,6 +413,9 @@ func mutationMeta(c *gin.Context) app.MutationMeta {
 }
 
 func toDTO(setting domain.Setting) settingDTO {
+	if strings.EqualFold(strings.TrimSpace(setting.Key), runtimeconfig.ICloudLivenessSMTPServersKey) {
+		setting.Value = runtimeconfig.RedactICloudLivenessSMTPServers(setting.Value)
+	}
 	return settingDTO{
 		Key:       strings.ToLower(strings.TrimSpace(setting.Key)),
 		Value:     setting.Value,

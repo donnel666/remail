@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	DefaultSettingsCount                         = 297
+	DefaultSettingsCount                         = 300
 	ICloudDeviceBaseURLKey                       = "icloud_device_base_url"
 	ICloudDeviceAPIKey                           = "icloud_device_api_key"
 	ICloudDeviceSMSBaseURLKey                    = "icloud_device_sms_base_url"
@@ -58,6 +58,9 @@ func DefaultSettings() []domain.Setting {
 }
 
 var defaultSettings = []domain.Setting{
+	{Key: "icloud_liveness_smtp_enabled", Value: "false"},
+	{Key: "icloud_liveness_smtp_servers", Value: "[]"},
+	{Key: "icloud_liveness_smtp_interval_seconds", Value: "60"},
 	{Key: ICloudDeviceBaseURLKey, Value: "https://devices.orangeid.top:56133"},
 	{Key: ICloudDeviceAPIKey, Value: ""},
 	{Key: ICloudDeviceSMSBaseURLKey, Value: "https://remail.aishop6.com"},

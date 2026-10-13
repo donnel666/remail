@@ -853,7 +853,7 @@ func writeICloudError(c *gin.Context, err error) {
 	case errors.Is(err, ErrICloudLivenessNoAlias):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "No usable iCloud alias is available for a liveness check.", "requestId": requestID})
 	case errors.Is(err, ErrICloudLivenessUnavailable):
-		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "SMTP liveness checks require an enabled inbound SMTP server and a sender domain that receives mail locally.", "requestId": requestID})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Liveness checks require inbound mail and a valid dedicated SMTP configuration or a locally received system sender domain.", "requestId": requestID})
 	case errors.Is(err, errDeviceRechargeRejected):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": err.Error(), "requestId": requestID})
 	case errors.Is(err, errDeviceUnauthorized), errors.Is(err, errDeviceUnavailable), errors.Is(err, errDeviceResponse), errors.Is(err, errDeviceRechargeUncertain):

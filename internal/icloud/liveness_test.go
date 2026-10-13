@@ -203,13 +203,118 @@ func TestICloudLivenessAcceptsThenObservesLateBounce(t *testing.T) {
 	require.Len(t, sender.messages, 1)
 }
 
+func addICloudLivenessReceipt(t *testing.T, s *Service, run iCloudMaintenanceRunModel, message maildomain.OutboundMessage, receivedAt time.Time) string {
+	t.Helper()
+	require.NoError(t, s.db.AutoMigrate(&iCloudDotAliasModel{}, &iCloudPlusAliasModel{}))
+	require.NoError(t, s.db.Model(&iCloudAliasModel{}).Where("resource_id=? AND email=?", run.ResourceID, run.ProbeRecipient).
+		Updates(map[string]any{"anonymous_id": "abc", "forward_to_email": "relay@example.com"}).Error)
+	key := fmt.Sprintf("received-probe-%d-%d", run.ID, run.Attempts)
+	raw := fmt.Sprintf("From: %s\r\nTo: %s\r\nX-ICLOUD-HME: p=%s; s=%s\r\nSubject: %s\r\n\r\nProbe", message.From, message.To, message.To, message.From, message.Subject)
+	_, err := s.files.SavePrivate(context.Background(), governancedomain.PrivateFile{ObjectKey: key, ContentBytes: []byte(raw)})
+	require.NoError(t, err)
+	require.NoError(t, s.db.Create(&mailinfra.InboundMailModel{
+		EnvelopeFrom: strings.NewReplacer("@", "_at_", ".", "_").Replace(run.ProbeSender) + "_abc@icloud.com",
+		HeaderFrom:   message.From, Recipient: "relay@example.com", MailboxKey: "relay@example.com", ResourceType: "domain",
+		Subject: message.Subject, SourceObjectKey: key, Status: "stored", CreatedAt: receivedAt, UpdatedAt: receivedAt,
+	}).Error)
+	return key
+}
+
+func TestICloudLivenessDirectReceiptShortCircuitsBounceCheck(t *testing.T) {
+	for _, phase := range []string{"early receipt", "receipt and bounce", "receipt during late observation", "sending worker expired"} {
+		t.Run(phase, func(t *testing.T) {
+			s, sender, now := newICloudLivenessTestService(t)
+			seedICloudLivenessResource(t, s, 1, iCloudResourceAbnormal, true)
+			run := queueICloudLivenessTestRun(t, s)
+			require.NoError(t, s.ProcessICloudLivenessCheck(context.Background(), run.ID))
+			require.Len(t, sender.messages, 1)
+			switch phase {
+			case "sending worker expired":
+				*now = now.Add(iCloudLivenessWorkerTimeout)
+				require.NoError(t, s.db.Model(&iCloudMaintenanceRunModel{}).Where("id=?", run.ID).Update("probe_sent_at", nil).Error)
+			case "receipt during late observation":
+				*now = now.Add(iCloudLivenessBounceWait)
+				require.NoError(t, s.ProcessICloudLivenessCheck(context.Background(), run.ID))
+				*now = now.Add(time.Hour)
+			case "receipt and bounce":
+				*now = now.Add(iCloudLivenessBounceWait)
+			default:
+				*now = now.Add(iCloudLivenessReceiptPoll)
+			}
+			require.NoError(t, s.db.Take(&run, run.ID).Error)
+			addICloudLivenessReceipt(t, s, run, sender.messages[0], *now)
+			if phase != "early receipt" {
+				addICloudLivenessBounce(t, s, run.ID, livenessDSN(run.ProbeRecipient, "failed", "5.1.1"))
+				s.livenessLookupTXT = func(context.Context, string) ([]string, error) {
+					t.Error("a received probe must skip bounce authentication")
+					return nil, errors.New("must not inspect bounces")
+				}
+			}
+			require.NoError(t, s.ProcessICloudLivenessCheck(context.Background(), run.ID))
+			var finished iCloudMaintenanceRunModel
+			require.NoError(t, s.db.Take(&finished, run.ID).Error)
+			require.Equal(t, iCloudMaintenanceSucceeded, finished.Status)
+			require.Nil(t, finished.NextCheckAt)
+			require.NoError(t, s.finishICloudLivenessCheck(context.Background(), run, iCloudResourceAbnormal, iCloudMaintenanceFailed, "stale bounce result", false))
+			*now = now.Add(time.Hour)
+			require.NoError(t, s.ProcessICloudLivenessCheck(context.Background(), run.ID))
+			var resource iCloudResourceModel
+			require.NoError(t, s.db.Take(&resource, 1).Error)
+			require.Equal(t, iCloudResourceNormal, resource.Status)
+			require.Len(t, sender.messages, 1)
+		})
+	}
+}
+
+func TestICloudLivenessDirectReceiptRequiresCurrentProbe(t *testing.T) {
+	for _, mismatch := range []string{"subject", "sender", "recipient", "old mail", "unreadable mail"} {
+		t.Run(mismatch, func(t *testing.T) {
+			s, sender, now := newICloudLivenessTestService(t)
+			seedICloudLivenessResource(t, s, 1, iCloudResourceAbnormal, true)
+			run := queueICloudLivenessTestRun(t, s)
+			require.NoError(t, s.ProcessICloudLivenessCheck(context.Background(), run.ID))
+			require.NoError(t, s.db.Take(&run, run.ID).Error)
+			message := sender.messages[0]
+			receivedAt := now.Add(time.Second)
+			switch mismatch {
+			case "subject":
+				message.Subject = "ReMail iCloud liveness another-attempt"
+			case "sender":
+				message.From = "other@example.com"
+			case "recipient":
+				message.To = "another@icloud.com"
+			case "old mail":
+				receivedAt = now.Add(-time.Second)
+			}
+			key := addICloudLivenessReceipt(t, s, run, message, receivedAt)
+			if mismatch == "unreadable mail" {
+				require.NoError(t, s.files.DeletePrivate(context.Background(), key))
+			}
+			*now = now.Add(iCloudLivenessReceiptPoll)
+			require.NoError(t, s.ProcessICloudLivenessCheck(context.Background(), run.ID))
+			var resource iCloudResourceModel
+			require.NoError(t, s.db.Take(&resource, 1).Error)
+			require.Equal(t, iCloudResourceAbnormal, resource.Status)
+			require.NoError(t, s.db.Take(&run, run.ID).Error)
+			require.Equal(t, iCloudMaintenanceRunning, run.Status)
+			*now = run.ProbeSentAt.Add(iCloudLivenessBounceWait)
+			require.NoError(t, s.ProcessICloudLivenessCheck(context.Background(), run.ID))
+			require.NoError(t, s.db.Take(&resource, 1).Error)
+			require.Equal(t, iCloudResourceNormal, resource.Status, "the original direct-transport condition remains an independent success path")
+			require.NoError(t, s.db.Take(&run, run.ID).Error)
+			require.NotNil(t, run.NextCheckAt, "without a receipt, late bounce observation continues")
+			require.Len(t, sender.messages, 1)
+		})
+	}
+}
+
 func TestICloudLivenessSendFailuresDoNotMisclassifyAccounts(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		err  error
 		want string
 	}{
-		{"network", errors.New("dial timeout"), iCloudResourceNormal},
+		{"network", &mailapp.OutboundNotAcceptedError{Cause: errors.New("dial timeout")}, iCloudResourceNormal},
 		{"temporary SMTP", &mailapp.OutboundSendFailure{Retryable: true}, iCloudResourceNormal},
 		{"SMTP policy", &mailapp.OutboundSendFailure{}, iCloudResourceNormal},
 		{"invalid recipient", &mailapp.OutboundSendFailure{RecipientRejected: true}, iCloudResourceAbnormal},
@@ -679,6 +784,131 @@ func TestICloudLivenessExpiresSendingWithoutResending(t *testing.T) {
 	var resource iCloudResourceModel
 	require.NoError(t, s.db.Take(&resource, 1).Error)
 	require.Equal(t, iCloudResourceNormal, resource.Status)
+}
+
+func TestICloudLivenessUnconfirmedSendWaitsForReceipt(t *testing.T) {
+	for _, kind := range []string{iCloudMaintenanceLiveness, iCloudMaintenanceLivenessSMTP} {
+		for _, interrupted := range []bool{false, true} {
+			for _, outcome := range []string{"received", "timeout abnormal", "timeout normal", "late receipt"} {
+				t.Run(fmt.Sprintf("%s/interrupted=%t/%s", kind, interrupted, outcome), func(t *testing.T) {
+					s, sender, now := newICloudLivenessTestService(t)
+					if kind == iCloudMaintenanceLivenessSMTP {
+						enableLivenessSMTPTest(t, s, sender)
+					}
+					initialHealth := iCloudResourceAbnormal
+					if outcome == "timeout normal" {
+						initialHealth = iCloudResourceNormal
+					}
+					seedICloudLivenessResource(t, s, 1, initialHealth, true)
+					require.NoError(t, s.db.Create(&iCloudAliasModel{ResourceID: 1, AnonymousID: "other", Email: "other@icloud.com", Status: iCloudResourceNormal}).Error)
+					var run iCloudMaintenanceRunModel
+					if kind == iCloudMaintenanceLivenessSMTP {
+						run = queueSMTPTestRun(t, s)
+					} else {
+						run = queueICloudLivenessTestRun(t, s)
+					}
+					started := *now
+					if !interrupted {
+						sender.err = errors.New("connection lost after DATA terminator")
+					}
+					require.NoError(t, s.ProcessICloudLivenessCheck(context.Background(), run.ID))
+					if interrupted {
+						require.NoError(t, s.db.Model(&iCloudMaintenanceRunModel{}).Where("id=?", run.ID).
+							Updates(map[string]any{"probe_sent_at": nil, "next_check_at": started.Add(iCloudLivenessWorkerTimeout)}).Error)
+					}
+					worker := NewService(s.db, nil, s.files, s.deviceRedis)
+					worker.now, worker.newLivenessSMTP = s.now, s.newLivenessSMTP
+					worker.SetLivenessMail(sender, s.livenessInbox, s.livenessFrom)
+					*now = started.Add(iCloudLivenessWorkerTimeout)
+					require.NoError(t, worker.ProcessICloudLivenessCheck(context.Background(), run.ID))
+					require.NoError(t, s.db.Take(&run, run.ID).Error)
+					require.Equal(t, iCloudMaintenanceRunning, run.Status)
+					require.Nil(t, run.ProbeSentAt, "an unconfirmed send must never qualify for no-bounce success")
+					require.Contains(t, run.LastSafeError, "unconfirmed")
+					var resource iCloudResourceModel
+					require.NoError(t, s.db.Take(&resource, 1).Error)
+					require.Equal(t, initialHealth, resource.Status)
+					deadline := started.Add(iCloudLivenessReceiptWait)
+					if outcome == "received" {
+						*now = started.Add(5 * time.Minute)
+						addICloudLivenessReceipt(t, s, run, sender.messages[0], *now)
+					} else {
+						*now = deadline.Add(-time.Second)
+						require.NoError(t, worker.ProcessICloudLivenessCheck(context.Background(), run.ID))
+						require.NoError(t, s.db.Take(&run, run.ID).Error)
+						require.Equal(t, iCloudMaintenanceRunning, run.Status)
+						require.Equal(t, deadline, *run.NextCheckAt)
+						*now = deadline
+						if outcome == "late receipt" {
+							*now = deadline.Add(time.Minute)
+							addICloudLivenessReceipt(t, s, run, sender.messages[0], *now)
+						}
+					}
+					require.NoError(t, worker.ProcessICloudLivenessCheck(context.Background(), run.ID))
+					var finished iCloudMaintenanceRunModel
+					require.NoError(t, s.db.Take(&finished, run.ID).Error)
+					require.NoError(t, s.db.Take(&resource, 1).Error)
+					if outcome == "received" {
+						require.Equal(t, iCloudMaintenanceSucceeded, finished.Status)
+						require.Equal(t, iCloudResourceNormal, resource.Status)
+					} else {
+						require.Equal(t, iCloudMaintenanceFailed, finished.Status)
+						require.Equal(t, initialHealth, resource.Status)
+						require.Contains(t, finished.LastSafeError, "not confirmed within 10 minutes")
+					}
+					require.Nil(t, finished.NextCheckAt)
+					require.Equal(t, 1, finished.Attempts)
+					require.Equal(t, "alias1@icloud.com", finished.ProbeRecipient)
+					require.NoError(t, worker.ProcessICloudLivenessCheck(context.Background(), run.ID))
+					require.Len(t, sender.messages, 1)
+				})
+			}
+		}
+	}
+}
+
+type canceledICloudProbeSender struct {
+	*iCloudLivenessMailStub
+	cancel context.CancelFunc
+}
+
+func (s canceledICloudProbeSender) Send(ctx context.Context, message maildomain.OutboundMessage) error {
+	_ = s.iCloudLivenessMailStub.Send(ctx, message)
+	s.cancel()
+	return ctx.Err()
+}
+
+func TestICloudLivenessCanceledSendPersistsReceiptWait(t *testing.T) {
+	for _, kind := range []string{iCloudMaintenanceLiveness, iCloudMaintenanceLivenessSMTP} {
+		t.Run(kind, func(t *testing.T) {
+			s, sender, now := newICloudLivenessTestService(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			canceledSender := canceledICloudProbeSender{iCloudLivenessMailStub: sender, cancel: cancel}
+			var run iCloudMaintenanceRunModel
+			seedICloudLivenessResource(t, s, 1, iCloudResourceAbnormal, true)
+			if kind == iCloudMaintenanceLivenessSMTP {
+				enableLivenessSMTPTest(t, s, sender)
+				s.newLivenessSMTP = func(mailinfra.SMTPConfig) mailapp.SenderPort { return canceledSender }
+				run = queueSMTPTestRun(t, s)
+			} else {
+				s.livenessSender = canceledSender
+				run = queueICloudLivenessTestRun(t, s)
+			}
+			require.NoError(t, s.ProcessICloudLivenessCheck(ctx, run.ID))
+			require.ErrorIs(t, ctx.Err(), context.Canceled)
+			require.NoError(t, s.db.Take(&run, run.ID).Error)
+			require.Equal(t, iCloudMaintenanceRunning, run.Status)
+			require.Nil(t, run.ProbeSentAt)
+			require.Equal(t, now.Add(iCloudLivenessReceiptPoll), *run.NextCheckAt)
+			*now = now.Add(time.Minute)
+			addICloudLivenessReceipt(t, s, run, sender.messages[0], *now)
+			require.NoError(t, s.ProcessICloudLivenessCheck(context.Background(), run.ID))
+			require.NoError(t, s.db.Take(&run, run.ID).Error)
+			require.Equal(t, iCloudMaintenanceSucceeded, run.Status)
+			require.Len(t, sender.messages, 1)
+		})
+	}
 }
 
 func TestICloudLivenessStopsWatchingAfterLastWindowCheck(t *testing.T) {

@@ -67,7 +67,8 @@ var integerRanges = map[string]integerRange{
 	"auxiliary_domain_refresh_interval_seconds": positive(86400), "max_inbound_header_runes": positive(10000), "max_inbound_preview_runes": positive(10000), "max_inbound_body_bytes": positive(100 << 20),
 	"max_inbound_body_runes": positive(1_000_000), "max_inbound_mime_depth": positive(50), "mail_dispatcher_interval_seconds": positive(3600), "alias_dispatcher_interval_seconds": positive(3600),
 	"token_refresh_dispatcher_interval_seconds": positive(3600), "legacy_alias_retry_delay_seconds": positive(3600),
-	"smtp_task_retry_count": {min: 0, max: 20},
+	"smtp_task_retry_count":       {min: 0, max: 20},
+	ICloudLivenessSMTPIntervalKey: positive(86400),
 
 	"background_load_overload_percent": {min: 11, max: 100}, "background_worker_minimum": positive(8096), "background_worker_initial": positive(8096),
 	"background_worker_increase_step": positive(8096), "background_recovery_samples": positive(100), "background_metric_failure_limit": positive(100),
@@ -105,7 +106,8 @@ var removedKeys = map[string]struct{}{
 }
 
 var booleanKeys = map[string]struct{}{
-	"register_enabled": {}, "captcha_enabled": {}, "announcement_enabled": {}, "announcement_email_enabled": {}, "faq_enabled": {}, "epay_enabled": {}, "epusdt_enabled": {},
+	ICloudLivenessSMTPEnabledKey: {},
+	"register_enabled":           {}, "captcha_enabled": {}, "announcement_enabled": {}, "announcement_email_enabled": {}, "faq_enabled": {}, "epay_enabled": {}, "epusdt_enabled": {},
 	"daily_checkin_enabled": {}, "leaderboard_reward_enabled": {}, "linuxdo_oauth_enabled": {}, "github_oauth_enabled": {}, "nodeloc_oauth_enabled": {},
 	"default_project_microsoft_code_enabled": {}, "default_project_microsoft_purchase_enabled": {},
 	"default_project_domain_code_enabled": {}, "default_project_domain_purchase_enabled": {},
@@ -136,6 +138,9 @@ func Validate(key, value string) error {
 		return nil
 	}
 	switch key {
+	case ICloudLivenessSMTPServersKey:
+		_, err := ParseICloudLivenessSMTPServers(rawValue)
+		return err
 	case ICloudDeviceBaseURLKey, ICloudDeviceSMSBaseURLKey:
 		parsed, err := url.Parse(value)
 		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || strings.Trim(parsed.Path, "/") != "" {
@@ -514,6 +519,11 @@ func sanitizeRelationships(values map[string]string) {
 }
 
 func validateRelationships(values map[string]string) error {
+	if values[ICloudLivenessSMTPServersKey] != "" {
+		if fields := invalidICloudLivenessSMTPFields(values); len(fields) > 0 {
+			return &domain.InvalidValueFieldsError{Fields: fields}
+		}
+	}
 	value := func(key string, fallback int) int {
 		number, err := strconv.Atoi(strings.TrimSpace(values[key]))
 		if err != nil {

@@ -208,26 +208,35 @@ func TestSMTPFailureDistinguishesRecipientRejectionFromTransportPolicy(t *testin
 		stage, status string
 		code          int
 		rejected      bool
+		temporary     bool
 	}{
-		{"rcpt to failed", "5.1.1 unknown recipient", 550, true},
-		{"rcpt to failed", "5.2.1 mailbox disabled", 550, true},
-		{"data close failed", "5.1.1 unknown alias", 550, true},
-		{"data failed", "5.1.1 unknown alias", 550, true},
-		{"data failed", "5.2.1 mailbox disabled", 550, true},
-		{"data failed", "5.7.1 sender blocked", 550, false},
-		{"data failed", "5.1.8 sender domain invalid", 550, false},
-		{"data failed", "4.2.1 temporarily unavailable", 450, false},
-		{"rcpt to failed", "4.2.1 temporarily unavailable", 450, false},
-		{"rcpt to failed", "5.7.1 sender blocked", 550, false},
-		{"mail from failed", "5.1.1 sender invalid", 550, false},
-		{"rcpt to failed", "5.1.7 bad sender", 550, false},
-		{"data close failed", "5.1.8 sender domain invalid", 550, false},
-		{"mail from failed", "5.1.0 sender failure mentioning rcpt to failed:", 550, false},
+		{"rcpt to failed", "5.1.1 unknown recipient", 550, true, false},
+		{"rcpt to failed", "5.2.1 mailbox disabled", 550, true, false},
+		{"data close failed", "5.1.1 unknown alias", 550, true, false},
+		{"data failed", "5.1.1 unknown alias", 550, true, false},
+		{"data failed", "5.2.1 mailbox disabled", 550, true, false},
+		{"data failed", "5.7.1 sender blocked", 550, false, false},
+		{"data failed", "5.1.8 sender domain invalid", 550, false, false},
+		{"data failed", "4.2.1 temporarily unavailable", 450, false, true},
+		{"rcpt to failed", "4.2.1 temporarily unavailable", 450, false, true},
+		{"data close failed", "4.1.1 temporarily unavailable", 450, false, true},
+		{"rcpt to failed", "5.7.1 sender blocked", 550, false, false},
+		{"mail from failed", "5.1.1 sender invalid", 550, false, false},
+		{"rcpt to failed", "5.1.7 bad sender", 550, false, false},
+		{"data close failed", "5.1.8 sender domain invalid", 550, false, false},
+		{"mail from failed", "5.1.0 sender failure mentioning rcpt to failed:", 550, false, false},
+		{"rcpt to failed", "4.7.1 try later", 451, false, false},
+		{"rcpt to failed", "4.1.7 sender unavailable", 450, false, false},
+		{"data close failed", "4.1.8 sender domain unavailable", 450, false, false},
+		{"mail from failed", "4.1.0 sender failure mentioning rcpt to failed:", 450, false, false},
+		{"dial failed", "4.2.0 authentication temporarily unavailable", 454, false, false},
+		{"rcpt to failed", "4.2.0 inconsistent reply class", 550, false, false},
 	} {
 		err := classifySMTPFailure("send failed", fmt.Errorf("%s: %w", tc.stage, &textproto.Error{Code: tc.code, Msg: tc.status}))
 		var failure *mailapp.OutboundSendFailure
 		require.ErrorAs(t, err, &failure)
 		require.Equal(t, tc.rejected, failure.RecipientRejected)
+		require.Equal(t, tc.temporary, failure.RecipientTemporary, "%s: %s", tc.stage, tc.status)
 	}
 }
 
@@ -635,7 +644,7 @@ func TestDirectSMTPAddressFilterRejectsSpecialUseRanges(t *testing.T) {
 	}
 }
 
-func startFakeSMTPServer(t *testing.T, closeOnQuit bool, dataFailure string) (string, func()) {
+func startFakeSMTPServer(t *testing.T, closeOnQuit bool, dataFailure string, finalDataResponse ...string) (string, func()) {
 	t.Helper()
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -688,7 +697,14 @@ func startFakeSMTPServer(t *testing.T, closeOnQuit bool, dataFailure string) (st
 						break
 					}
 				}
-				writeSMTPLine(t, rw, "250 queued")
+				if len(finalDataResponse) > 0 {
+					if finalDataResponse[0] == "" {
+						return
+					}
+					writeSMTPLine(t, rw, finalDataResponse[0])
+				} else {
+					writeSMTPLine(t, rw, "250 queued")
+				}
 			case strings.HasPrefix(cmd, "QUIT"):
 				if closeOnQuit {
 					return
@@ -998,4 +1014,41 @@ func renderSMTPMessage(t *testing.T, msg interface {
 	_, err := msg.WriteTo(&buf)
 	require.NoError(t, err)
 	return buf.String()
+}
+
+func TestSMTPDeliveryClassifiesSafeRelayFailover(t *testing.T) {
+	addr, stop := startFakeSMTPServer(t, false, "")
+	defer stop()
+	sender := NewSMTPDelivery(SMTPConfig{Addr: addr, Username: "sender@example.com", Password: "secret", From: "sender@example.com"})
+	err := sender.Send(context.Background(), mailapp.VerificationCodeMessage("alias@icloud.com", "123456"))
+	var unaccepted *mailapp.OutboundNotAcceptedError
+	require.ErrorAs(t, err, &unaccepted)
+	require.ErrorIs(t, err, domain.ErrDeliveryUnavailable)
+	var business *mailapp.OutboundSendFailure
+	require.False(t, errors.As(err, &business), "an infrastructure error must not become a business failure")
+}
+
+func TestSMTPDeliveryOnlyFailsOverOnDefiniteDataRejection(t *testing.T) {
+	for _, tc := range []struct {
+		name, response     string
+		safe               bool
+		recipientTemporary bool
+	}{
+		{"lost acknowledgement", "", false, false},
+		{"temporary rejection", "451 4.3.0 try later", true, false},
+		{"temporary recipient rejection", "450 4.2.0 mailbox temporarily unavailable", true, true},
+		{"sender policy rejection", "550 5.7.0 sending not allowed", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			addr, stop := startFakeSMTPServer(t, false, "", tc.response)
+			defer stop()
+			sender := NewSMTPDelivery(SMTPConfig{Addr: addr, From: "probe@example.com"})
+			err := sender.Send(context.Background(), mailapp.VerificationCodeMessage("alias@icloud.com", "123456"))
+			require.Error(t, err)
+			var unaccepted *mailapp.OutboundNotAcceptedError
+			require.Equal(t, tc.safe, errors.As(err, &unaccepted))
+			var failure *mailapp.OutboundSendFailure
+			require.Equal(t, tc.recipientTemporary, errors.As(err, &failure) && failure.RecipientTemporary)
+		})
+	}
 }

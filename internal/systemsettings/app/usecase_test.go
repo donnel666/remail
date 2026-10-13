@@ -454,3 +454,15 @@ func TestSystemSettingMutationsPublishRuntimeChanges(t *testing.T) {
 		t.Fatalf("published notifications = %d, want 2", publisher.count)
 	}
 }
+
+func TestLivenessSMTPRelatedMutationPreservesPassword(t *testing.T) {
+	const key = "icloud_liveness_smtp_servers"
+	repo := &persistedSnapshotRepository{fakeRepository: &fakeRepository{}, persisted: []domain.Setting{{Key: key, Value: `[{"id":"qq-a","name":"A","enabled":true,"addr":"smtp.qq.com:465","username":"a@qq.com","password":"saved-secret","from":"a@qq.com"}]`}}}
+	uc := NewSystemSettingsUseCase(repo, &fakeOperationLogs{})
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
+	saved, err := uc.MutateWithSettings(context.Background(), []domain.Setting{{Key: key, Value: runtimeconfig.RedactICloudLivenessSMTPServers(repo.persisted[0].Value)}}, func(context.Context) error { return nil })
+	require.NoError(t, err)
+	require.Len(t, saved, 1)
+	require.Contains(t, saved[0].Value, "saved-secret")
+	require.True(t, repo.listed)
+}

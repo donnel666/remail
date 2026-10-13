@@ -86,41 +86,46 @@ func (s *SMTPDelivery) Send(ctx context.Context, message domain.OutboundMessage)
 	if err != nil {
 		return permanentOutboundFailure("Outbound mail configuration is invalid.", deliveryError("smtp client failed", err))
 	}
-	if err := sendRawMailWithAcceptedClose(ctx, client, from, to, rawMessage); err != nil {
-		return classifySMTPFailure("smtp send failed", err)
+	if notAccepted, err := sendRawMailWithAcceptedClose(ctx, client, from, to, rawMessage); err != nil {
+		failure := classifySMTPFailure("smtp send failed", err)
+		if notAccepted {
+			return &mailapp.OutboundNotAcceptedError{Cause: failure}
+		}
+		return failure
 	}
 	return nil
 }
 
-func sendRawMailWithAcceptedClose(ctx context.Context, client *gomail.Client, from string, to string, rawMessage []byte) error {
+func sendRawMailWithAcceptedClose(ctx context.Context, client *gomail.Client, from string, to string, rawMessage []byte) (notAccepted bool, err error) {
 	smtpClient, err := client.DialToSMTPClientWithContext(ctx)
 	if err != nil {
-		return fmt.Errorf("dial failed: %w", err)
+		return true, fmt.Errorf("dial failed: %w", err)
 	}
 	if err := smtpClient.Mail(from); err != nil {
 		_ = client.CloseWithSMTPClient(smtpClient)
-		return fmt.Errorf("mail from failed: %w", err)
+		return true, fmt.Errorf("mail from failed: %w", err)
 	}
 	if err := smtpClient.Rcpt(to); err != nil {
 		_ = client.CloseWithSMTPClient(smtpClient)
-		return fmt.Errorf("rcpt to failed: %w", err)
+		return true, fmt.Errorf("rcpt to failed: %w", err)
 	}
 	writer, err := smtpClient.Data()
 	if err != nil {
 		_ = client.CloseWithSMTPClient(smtpClient)
-		return fmt.Errorf("data failed: %w", err)
+		return true, fmt.Errorf("data failed: %w", err)
 	}
 	if _, err := io.Copy(writer, bytes.NewReader(rawMessage)); err != nil {
 		_ = writer.Close()
 		_ = client.CloseWithSMTPClient(smtpClient)
-		return fmt.Errorf("write failed: %w", err)
+		return false, fmt.Errorf("write failed: %w", err)
 	}
 	if err := writer.Close(); err != nil {
 		_ = client.CloseWithSMTPClient(smtpClient)
-		return fmt.Errorf("data close failed: %w", err)
+		var rejection *textproto.Error
+		return errors.As(err, &rejection) && rejection.Code >= 400 && rejection.Code < 600, fmt.Errorf("data close failed: %w", err)
 	}
 	_ = client.CloseWithSMTPClient(smtpClient)
-	return nil
+	return false, nil
 }
 
 func normalizeSMTPAddr(addr string) string {
@@ -246,13 +251,14 @@ func classifySMTPFailure(stage string, err error) error {
 		message = "SMTP server temporarily rejected the message."
 	}
 	contextMessage := strings.TrimSuffix(err.Error(), smtpError.Error())
+	recipientStage := strings.Contains(contextMessage, "rcpt to failed:") || strings.Contains(contextMessage, "data failed:") || strings.Contains(contextMessage, "data close failed:")
 	return &mailapp.OutboundSendFailure{
 		SafeMessage: message,
 		Retryable:   retryable,
-		RecipientRejected: smtpError.Code >= 500 && smtpError.Code < 600 &&
-			(strings.Contains(contextMessage, "rcpt to failed:") || strings.Contains(contextMessage, "data failed:") || strings.Contains(contextMessage, "data close failed:")) &&
+		RecipientRejected: smtpError.Code >= 500 && smtpError.Code < 600 && recipientStage &&
 			domain.IsRecipientRejectionStatus(smtpError.Msg),
-		Cause: deliveryError(stage, err),
+		RecipientTemporary: retryable && recipientStage && domain.IsTemporaryRecipientStatus(smtpError.Msg),
+		Cause:              deliveryError(stage, err),
 	}
 }
 

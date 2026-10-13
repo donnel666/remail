@@ -3,6 +3,7 @@ package icloud
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -16,6 +17,42 @@ import (
 )
 
 var iCloudOnboardingMigrationMySQL = testmysql.New("remail_icloud_onboarding_migration")
+
+func TestICloudLivenessSMTPKindMigrationMySQL(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	source := filepath.Clean(filepath.Join(filepath.Dir(file), "../..", "migrations"))
+	fixture := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(fixture, "00001_fixture.sql"), []byte(`-- +goose Up
+CREATE TABLE icloud_maintenance_runs (
+    id BIGINT UNSIGNED PRIMARY KEY,
+    kind VARCHAR(24) NOT NULL,
+    CONSTRAINT chk_icloud_maintenance_kind CHECK (kind IN ('validation', 'alias', 'liveness'))
+);
+-- +goose Down
+DROP TABLE icloud_maintenance_runs;
+`), 0600))
+	server := testmysql.New("remail_icloud_liveness_migration")
+	t.Cleanup(func() { require.NoError(t, server.Close(context.Background())) })
+	db := server.Database(t, fixture)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("INSERT INTO icloud_maintenance_runs (id, kind) VALUES (1, 'liveness')").Error)
+	migration, err := os.ReadFile(filepath.Join(source, "00148_icloud_liveness_smtp_kind.sql"))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(fixture, "00148_icloud_liveness_smtp_kind.sql"), migration, 0600))
+	require.NoError(t, platform.RunMigrations(sqlDB, fixture))
+	require.NoError(t, db.Exec("INSERT INTO icloud_maintenance_runs (id, kind) VALUES (2, 'liveness_smtp')").Error)
+	require.Error(t, db.Exec("INSERT INTO icloud_maintenance_runs (id, kind) VALUES (3, 'invalid')").Error)
+	require.Error(t, goose.DownTo(sqlDB, fixture, 1), "rollback must retain SMTP probe history")
+	var kind string
+	require.NoError(t, db.Raw("SELECT kind FROM icloud_maintenance_runs WHERE id = 2").Scan(&kind).Error)
+	require.Equal(t, iCloudMaintenanceLivenessSMTP, kind)
+	require.NoError(t, db.Exec("DELETE FROM icloud_maintenance_runs WHERE id = 2").Error)
+	require.NoError(t, goose.DownTo(sqlDB, fixture, 1))
+	require.NoError(t, db.Raw("SELECT kind FROM icloud_maintenance_runs WHERE id = 1").Scan(&kind).Error)
+	require.Equal(t, iCloudMaintenanceLiveness, kind)
+}
 
 func TestICloudAllocationGuardSeesConcurrentCommitMySQL(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)

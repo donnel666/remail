@@ -60,6 +60,7 @@ type MailFetchRequest struct {
 	MaxMessages     int
 	FullHistory     bool
 	KnownMessageIDs []string
+	Subject         string
 }
 
 type MailFetchedMessage struct {
@@ -96,7 +97,7 @@ func (s *Service) FetchMail(ctx context.Context, request MailFetchRequest) (*Mai
 		}
 	}
 	knownRowIDs := iCloudKnownInboundRowIDs(request.KnownMessageIDs)
-	candidates, err := s.fetchICloudMailCandidates(ctx, scopes, request.SinceAt, request.UntilAt, readLimit, knownRowIDs, request.FullHistory)
+	candidates, err := s.fetchICloudMailCandidates(ctx, scopes, request.SinceAt, request.UntilAt, readLimit, knownRowIDs, request.FullHistory, request.Subject)
 	if err != nil {
 		return nil, err
 	}
@@ -148,6 +149,7 @@ func (s *Service) fetchICloudMailCandidates(
 	readLimit int,
 	knownRowIDs []uint,
 	fullHistory bool,
+	subject string,
 ) ([]iCloudMailCandidate, error) {
 	if readLimit <= 0 {
 		return nil, ErrICloudMailUnavailable
@@ -206,7 +208,7 @@ func (s *Service) fetchICloudMailCandidates(
 		}
 		mailboxSince := earliestICloudRouteSince(targetRoutes)
 		mailboxStart := len(candidates)
-		err := s.scanICloudMailboxRows(ctx, forwardToEmail, mailboxSince, untilAt, scanLimit, knownRowIDs, func(row iCloudForwardedMailRow) bool {
+		err := s.scanICloudMailboxRows(ctx, forwardToEmail, mailboxSince, untilAt, scanLimit, knownRowIDs, subject, func(row iCloudForwardedMailRow) bool {
 			if _, exists := seenRows[row.ID]; exists {
 				return true
 			}
@@ -414,6 +416,7 @@ func (s *Service) scanICloudMailboxRows(
 	untilAt time.Time,
 	limit int,
 	knownRowIDs []uint,
+	subject string,
 	visit func(iCloudForwardedMailRow) bool,
 ) error {
 	mailboxKey := mailbox.Normalize(forwardToEmail)
@@ -424,6 +427,9 @@ func (s *Service) scanICloudMailboxRows(
 		Select("id, envelope_from, header_from, source_object_key, created_at").
 		Where("resource_type = ? AND mailbox_key = ? AND status = ?", "domain", mailboxKey, "stored").
 		Order("created_at DESC, id DESC").Limit(limit)
+	if subject != "" {
+		query = query.Where("subject = ?", subject)
+	}
 	if !sinceAt.IsZero() {
 		query = query.Where("created_at >= ?", sinceAt.UTC())
 	}

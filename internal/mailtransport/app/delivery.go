@@ -23,6 +23,12 @@ type SenderPort interface {
 	Send(ctx context.Context, message domain.OutboundMessage) error
 }
 
+// OutboundNotAcceptedError permits relay failover without changing retry classification.
+type OutboundNotAcceptedError struct{ Cause error }
+
+func (e *OutboundNotAcceptedError) Error() string { return e.Cause.Error() }
+func (e *OutboundNotAcceptedError) Unwrap() error { return e.Cause }
+
 type OutboundAttachmentReader interface {
 	ReadOutboundAttachment(ctx context.Context, objectKey string) (contentType string, content []byte, err error)
 }
@@ -30,10 +36,11 @@ type OutboundAttachmentReader interface {
 // OutboundSendFailure is an explicit remote business result. Unknown sender
 // errors are infrastructure failures and must not consume the business budget.
 type OutboundSendFailure struct {
-	SafeMessage       string
-	Retryable         bool
-	RecipientRejected bool
-	Cause             error
+	SafeMessage        string
+	Retryable          bool
+	RecipientRejected  bool
+	RecipientTemporary bool
+	Cause              error
 }
 
 func (e *OutboundSendFailure) Error() string {

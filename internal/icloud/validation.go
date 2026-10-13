@@ -333,7 +333,7 @@ func (s *Service) iCloudValidationCandidates(ctx context.Context, limit int) ([]
 		Select("ir.id, er.owner_user_id, ir.credential_revision, ir.validation_generation, ir.status").
 		Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").
 		Where("ir.status IN ? AND ir.next_validation_at IS NOT NULL AND ir.next_validation_at <= ?", []string{iCloudResourcePending, iCloudResourceNormal}, now).
-		Where("NOT EXISTS (SELECT 1 FROM icloud_maintenance_runs AS probe WHERE probe.resource_id = ir.id AND probe.kind = ? AND probe.status IN ?)", iCloudMaintenanceLiveness, []string{iCloudMaintenanceQueued, iCloudMaintenanceRunning}).
+		Where("NOT EXISTS (SELECT 1 FROM icloud_maintenance_runs AS probe WHERE probe.resource_id = ir.id AND probe.kind IN ? AND probe.status IN ?)", iCloudLivenessKinds, []string{iCloudMaintenanceQueued, iCloudMaintenanceRunning}).
 		Where("NOT (ir.task_kind = ? AND ir.onboarding_status = ? AND ir.stage = ?)", "onboarding", iCloudOnboardingWaiting, iCloudOnboardingStageFamilySharing).
 		Where("NOT (ir.task_kind IN ? AND ir.onboarding_status IN ? AND ir.expected_credential_revision = ir.credential_revision)", []string{"refresh", iCloudCookieRecoveryTaskKind}, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}).
 		Where("NOT (ir.task_kind IN ? AND ir.onboarding_status = ? AND ir.last_error_category = ? AND ir.expected_credential_revision = ir.credential_revision)", []string{"refresh", iCloudCookieRecoveryTaskKind}, iCloudOnboardingFailed, "phone_blacklisted").
@@ -378,7 +378,7 @@ func (s *Service) markICloudValidationDispatched(ctx context.Context, task iClou
 			return nil
 		}
 		var probes int64
-		if err := tx.Model(&iCloudMaintenanceRunModel{}).Where("resource_id = ? AND kind = ? AND status IN ?", resource.ID, iCloudMaintenanceLiveness, []string{iCloudMaintenanceQueued, iCloudMaintenanceRunning}).Count(&probes).Error; err != nil {
+		if err := tx.Model(&iCloudMaintenanceRunModel{}).Where("resource_id = ? AND kind IN ? AND status IN ?", resource.ID, iCloudLivenessKinds, []string{iCloudMaintenanceQueued, iCloudMaintenanceRunning}).Count(&probes).Error; err != nil {
 			return err
 		}
 		if probes > 0 {

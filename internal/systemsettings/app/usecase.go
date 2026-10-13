@@ -110,11 +110,16 @@ func (uc *SystemSettingsUseCase) Upsert(ctx context.Context, key, value string, 
 		if err != nil {
 			return err
 		}
+		updates := []domain.Setting{update}
+		if err := runtimeconfig.MergeICloudLivenessSMTPSecrets(persisted, updates); err != nil {
+			return err
+		}
+		update = updates[0]
 		if err := runtimeconfig.ValidatePersistedUpdates(persisted, []domain.Setting{update}); err != nil {
 			return err
 		}
 		published = newlyPublishedAnnouncements(persisted, []domain.Setting{update}, time.Now())
-		setting, err = uc.repo.Upsert(txCtx, key, value)
+		setting, err = uc.repo.Upsert(txCtx, key, update.Value)
 		return err
 	})
 	if err != nil {
@@ -164,6 +169,9 @@ func (uc *SystemSettingsUseCase) BulkUpsert(ctx context.Context, settings []doma
 	}, func(txCtx context.Context) error {
 		persisted, err := uc.repo.List(txCtx)
 		if err != nil {
+			return err
+		}
+		if err := runtimeconfig.MergeICloudLivenessSMTPSecrets(persisted, normalized); err != nil {
 			return err
 		}
 		if err := runtimeconfig.ValidatePersistedUpdates(persisted, normalized); err != nil {
@@ -218,6 +226,9 @@ func (uc *SystemSettingsUseCase) MutateWithSettings(ctx context.Context, setting
 	err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
 		persisted, err := uc.repo.List(txCtx)
 		if err != nil {
+			return err
+		}
+		if err := runtimeconfig.MergeICloudLivenessSMTPSecrets(persisted, normalized); err != nil {
 			return err
 		}
 		if err := runtimeconfig.ValidatePersistedUpdates(persisted, normalized); err != nil {

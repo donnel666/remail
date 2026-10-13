@@ -10,14 +10,22 @@ import (
 )
 
 func IsRecipientRejectionStatus(status string) bool {
+	return isRecipientFailureStatus(status, "5")
+}
+
+func IsTemporaryRecipientStatus(status string) bool {
+	return isRecipientFailureStatus(status, "4")
+}
+
+func isRecipientFailureStatus(status, class string) bool {
 	fields := strings.Fields(status)
 	if len(fields) == 0 {
 		return false
 	}
 	status = fields[0]
-	// 5.1.7 and 5.1.8 describe the sender, even when reported during recipient or DATA checks.
-	return strings.HasPrefix(status, "5.2.") ||
-		(strings.HasPrefix(status, "5.1.") && status != "5.1.7" && status != "5.1.8")
+	// X.1.7 and X.1.8 describe the sender, even during recipient or DATA checks.
+	return strings.HasPrefix(status, class+".2.") ||
+		(strings.HasPrefix(status, class+".1.") && status != class+".1.7" && status != class+".1.8")
 }
 
 type OutboundPurpose string

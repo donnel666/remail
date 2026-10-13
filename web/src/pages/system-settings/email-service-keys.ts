@@ -122,6 +122,12 @@ export const MAIL_DELIVERY_KEYS = [
   "legacy_alias_retry_delay_seconds",
 ] as const;
 
+export const ICLOUD_LIVENESS_SMTP_KEYS = [
+  "icloud_liveness_smtp_enabled",
+  "icloud_liveness_smtp_servers",
+  "icloud_liveness_smtp_interval_seconds",
+] as const;
+
 export const EMAIL_SERVICE_KEYS = [
   ...EMAIL_RESOURCE_KEYS,
   ...ALLOCATION_KEYS,
@@ -129,4 +135,5 @@ export const EMAIL_SERVICE_KEYS = [
   ...MICROSOFT_OPS_KEYS,
   ...PROXY_NETWORK_KEYS,
   ...MAIL_DELIVERY_KEYS,
+  ...ICLOUD_LIVENESS_SMTP_KEYS,
 ] as const;

@@ -8,6 +8,7 @@ import (
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
+	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
@@ -98,6 +99,7 @@ type Service struct {
 	validateImportOwner func(context.Context, uint) (bool, error)
 	backgroundExecution BackgroundExecutionGate
 	livenessSender      mailapp.SenderPort
+	newLivenessSMTP     func(mailinfra.SMTPConfig) mailapp.SenderPort
 	livenessInbox       *mailapp.InboundService
 	livenessFrom        string
 	livenessLookupTXT   func(context.Context, string) ([]string, error)

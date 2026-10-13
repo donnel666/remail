@@ -286,6 +286,30 @@ func TestSettingDTOCanonicalizesLegacyKeyCase(t *testing.T) {
 	require.Equal(t, "smtp_task_retry_count", dto.Key)
 }
 
+func TestLivenessSMTPPasswordIsWriteOnly(t *testing.T) {
+	repo := &fakeRepository{items: map[string]settingsdomain.Setting{
+		"icloud_liveness_smtp_password": {Key: "icloud_liveness_smtp_password", Value: "qq-auth-secret"},
+	}}
+	r := testRouter(repo)
+	for _, path := range []string{"/v1/admin/settings", "/v1/admin/settings/icloud_liveness_smtp_password"} {
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, requestWithSession(http.MethodGet, path, ""))
+		require.NotContains(t, response.Body.String(), "qq-auth-secret")
+	}
+	response := httptest.NewRecorder()
+	r.ServeHTTP(response, requestWithSession(http.MethodPut, "/v1/admin/settings/icloud_liveness_smtp_password", `{"value":"new-qq-auth-secret"}`))
+	require.Equal(t, http.StatusNoContent, response.Code)
+	require.Equal(t, "new-qq-auth-secret", repo.items["icloud_liveness_smtp_password"].Value)
+	require.Empty(t, response.Body.String())
+	deniedRouter := testRouter(repo, permissionCheckerFunc(func(_ context.Context, _ uint, _ iamdomain.Role, _ string, action string) (bool, error) {
+		return action != "sensitive", nil
+	}))
+	denied := httptest.NewRecorder()
+	deniedRouter.ServeHTTP(denied, requestWithSession(http.MethodPut, "/v1/admin/settings/icloud_liveness_smtp_password", `{"value":"unauthorized"}`))
+	require.Equal(t, http.StatusForbidden, denied.Code)
+	require.Equal(t, "new-qq-auth-secret", repo.items["icloud_liveness_smtp_password"].Value)
+}
+
 func TestAdminSettingsRejectInvalidKnownValue(t *testing.T) {
 	repo := &fakeRepository{items: map[string]settingsdomain.Setting{}}
 	r := testRouter(repo)
@@ -480,4 +504,49 @@ func TestLinuxDOOAuthAppSettingsRequireSensitivePermission(t *testing.T) {
 	require.Equal(t, "old", repo.items["site_title"].Value)
 	require.Equal(t, "original-client", repo.items["linuxdo_client_id"].Value)
 	require.Equal(t, callbackURL, repo.items["linuxdo_callback_url"].Value)
+}
+
+func TestLivenessSMTPListRedactsAndPreservesSecretsAcrossEveryAPI(t *testing.T) {
+	const key = "icloud_liveness_smtp_servers"
+	const stored = `[{"id":"qq-a","name":"QQ A","enabled":true,"addr":"smtp.qq.com:465","username":"a@qq.com","password":"stored-qq-authorization","from":"a@qq.com"}]`
+	repo := &fakeRepository{items: map[string]settingsdomain.Setting{key: {Key: key, Value: stored}}}
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
+	r := testRouter(repo)
+	for _, path := range []string{"/v1/admin/settings", "/v1/admin/settings/" + key} {
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, requestWithSession(http.MethodGet, path, ""))
+		require.Equal(t, http.StatusOK, response.Code)
+		require.NotContains(t, response.Body.String(), "stored-qq-authorization")
+		require.Contains(t, response.Body.String(), "hasPassword")
+	}
+	editable := runtimeconfig.RedactICloudLivenessSMTPServers(stored)
+	editable = strings.ReplaceAll(editable, "QQ A", "Renamed QQ")
+	for _, bulk := range []bool{false, true} {
+		body := map[string]any{"value": editable}
+		path := "/v1/admin/settings/" + key
+		if bulk {
+			body = map[string]any{"settings": []map[string]string{{"key": key, "value": editable}}}
+			path = "/v1/admin/settings"
+		}
+		raw, err := json.Marshal(body)
+		require.NoError(t, err)
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, requestWithSession(http.MethodPut, path, string(raw)))
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		require.NotContains(t, response.Body.String(), "stored-qq-authorization")
+		require.Contains(t, repo.items[key].Value, "stored-qq-authorization")
+		require.Contains(t, repo.items[key].Value, "Renamed QQ")
+	}
+	denied := testRouter(repo, permissionCheckerFunc(func(_ context.Context, _ uint, _ iamdomain.Role, _ string, action string) (bool, error) {
+		return action != "sensitive", nil
+	}))
+	response := httptest.NewRecorder()
+	denied.ServeHTTP(response, requestWithSession(http.MethodGet, "/v1/admin/settings", ""))
+	require.NotContains(t, response.Body.String(), "qq-a")
+	raw, err := json.Marshal(map[string]any{"value": "[]"})
+	require.NoError(t, err)
+	response = httptest.NewRecorder()
+	denied.ServeHTTP(response, requestWithSession(http.MethodPut, "/v1/admin/settings/"+key, string(raw)))
+	require.Equal(t, http.StatusForbidden, response.Code)
+	require.Contains(t, repo.items[key].Value, "stored-qq-authorization")
 }
