@@ -44,6 +44,7 @@ import {
   setAdminICloudResourcesExpirationByFilter,
   setAdminICloudResourcesExpirationByIds,
   submitAdminICloudOnboardingSmsCode,
+  testAdminICloudSMTP,
   updateAdminICloudResource,
   validateAdminICloudResource,
   waitForAdminICloudResourceImport,
@@ -53,6 +54,14 @@ import {
   type AdminICloudOnboardingImportResponse,
   type AdminICloudResourceList,
 } from "./admin-icloud-api";
+
+it("tests a saved SMTP service with CSRF and no credentials in the request", async () => {
+  apiMocks.POST.mockResolvedValueOnce({ data: { accepted: true, recipient: "sender@qq.com" } });
+  await expect(testAdminICloudSMTP("qq-1")).resolves.toEqual({ accepted: true, recipient: "sender@qq.com" });
+  expect(apiMocks.POST).toHaveBeenCalledWith("/v1/admin/icloud/liveness-smtp/{serverId}/test", {
+    params: { path: { serverId: "qq-1" }, header: { "X-CSRF-Token": "admin-csrf" } },
+  });
+});
 
 const EMPTY_LIST = {
   items: [],

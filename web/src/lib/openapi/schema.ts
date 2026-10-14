@@ -4504,6 +4504,26 @@ export interface paths {
         patch: operations["patchAdminICloudResource"];
         trace?: never;
     };
+    "/v1/admin/icloud/liveness-smtp/{serverId}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send one test email through a saved liveness SMTP service
+         * @description Requires system:settings/write and system:settings/sensitive. Uses the saved credentials of the selected service and sends to its configured sender mailbox, including when the service or dedicated SMTP mode is disabled. Does not change settings or account health. Shares the global SMTP sending interval with liveness tasks, including failed attempts. No automatic retries or service failover. A successful response confirms SMTP acceptance only; check the destination inbox to confirm delivery. Upstream replies and credentials are never returned. Ambiguous delivery returns an explicit warning to check the inbox before retrying.
+         */
+        post: operations["testAdminICloudLivenessSMTP"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/icloud/device-platform/balance": {
         parameters: {
             query?: never;
@@ -9798,6 +9818,15 @@ export interface components {
             /** @enum {string} */
             role: "user" | "supplier" | "admin" | "super_admin";
             enabled: boolean;
+        };
+        AdminICloudSMTPTestResponse: {
+            /**
+             * @description SMTP acceptance, not inbox delivery confirmation.
+             * @enum {boolean}
+             */
+            accepted: true;
+            /** Format: email */
+            recipient: string;
         };
         AdminICloudDeviceBalance: {
             configured: boolean;
@@ -25373,6 +25402,55 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    testAdminICloudLivenessSMTP: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The selected SMTP service accepted the test email */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminICloudSMTPTestResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            /** @description The shared SMTP sending slot is busy or cooling down */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description SMTP rejected the test or delivery is unconfirmed; see the safe message */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
         };
     };

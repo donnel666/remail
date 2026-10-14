@@ -24,6 +24,12 @@ export async function rechargeAdminICloudDevice(cardKey: string): Promise<AdminI
   return unwrap(await client.POST("/v1/admin/icloud/device-platform/recharges", { body: { cardKey }, params: { header: csrfHeader() } }));
 }
 
+export async function testAdminICloudSMTP(serverId: string): Promise<components["schemas"]["AdminICloudSMTPTestResponse"]> {
+  return unwrap(await client.POST("/v1/admin/icloud/liveness-smtp/{serverId}/test", {
+    params: { path: { serverId }, header: csrfHeader() },
+  }));
+}
+
 export async function getAdminICloudDeviceBinding(resourceId: number, signal?: AbortSignal): Promise<AdminICloudDeviceBinding> {
   return unwrap(await client.GET("/v1/admin/icloud/resources/{resourceId}/device", { params: { path: { resourceId } }, signal }));
 }

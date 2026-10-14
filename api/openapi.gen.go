@@ -975,6 +975,21 @@ func (e AdminICloudResourceStatus) Valid() bool {
 	}
 }
 
+// Defines values for AdminICloudSMTPTestResponseAccepted.
+const (
+	AdminICloudSMTPTestResponseAcceptedTrue AdminICloudSMTPTestResponseAccepted = true
+)
+
+// Valid indicates whether the value is a known member of the AdminICloudSMTPTestResponseAccepted enum.
+func (e AdminICloudSMTPTestResponseAccepted) Valid() bool {
+	switch e {
+	case AdminICloudSMTPTestResponseAcceptedTrue:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminICloudSessionStatus.
 const (
 	AdminICloudSessionStatusInvalid   AdminICloudSessionStatus = "invalid"
@@ -2588,13 +2603,13 @@ func (e DeleteProxiesRequest1All) Valid() bool {
 
 // Defines values for DisableProxiesRequestAll.
 const (
-	DisableProxiesRequestAllTrue DisableProxiesRequestAll = true
+	True DisableProxiesRequestAll = true
 )
 
 // Valid indicates whether the value is a known member of the DisableProxiesRequestAll enum.
 func (e DisableProxiesRequestAll) Valid() bool {
 	switch e {
-	case DisableProxiesRequestAllTrue:
+	case True:
 		return true
 	default:
 		return false
@@ -8229,6 +8244,16 @@ type AdminICloudResourceListResponseAliasLimit int
 // AdminICloudResourceStatus defines model for AdminICloudResourceStatus.
 type AdminICloudResourceStatus string
 
+// AdminICloudSMTPTestResponse defines model for AdminICloudSMTPTestResponse.
+type AdminICloudSMTPTestResponse struct {
+	// Accepted SMTP acceptance, not inbox delivery confirmation.
+	Accepted  AdminICloudSMTPTestResponseAccepted `json:"accepted"`
+	Recipient openapi_types.Email                 `json:"recipient"`
+}
+
+// AdminICloudSMTPTestResponseAccepted SMTP acceptance, not inbox delivery confirmation.
+type AdminICloudSMTPTestResponseAccepted bool
+
 // AdminICloudSessionStatus defines model for AdminICloudSessionStatus.
 type AdminICloudSessionStatus string
 
@@ -13712,6 +13737,12 @@ type PostAdminICloudDeviceRechargeParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// TestAdminICloudLivenessSMTPParams defines parameters for TestAdminICloudLivenessSMTP.
+type TestAdminICloudLivenessSMTPParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // GetAdminICloudResourcesParams defines parameters for GetAdminICloudResources.
 type GetAdminICloudResourcesParams struct {
 	Search      *string                    `form:"search,omitempty" json:"search,omitempty"`
@@ -18152,6 +18183,9 @@ type ServerInterface interface {
 	// Redeem a card for device platform tai points
 	// (POST /v1/admin/icloud/device-platform/recharges)
 	PostAdminICloudDeviceRecharge(c *gin.Context, params PostAdminICloudDeviceRechargeParams)
+	// Send one test email through a saved liveness SMTP service
+	// (POST /v1/admin/icloud/liveness-smtp/{serverId}/test)
+	TestAdminICloudLivenessSMTP(c *gin.Context, serverId string, params TestAdminICloudLivenessSMTPParams)
 	// List administrator-safe iCloud resources
 	// (GET /v1/admin/icloud/resources)
 	GetAdminICloudResources(c *gin.Context, params GetAdminICloudResourcesParams)
@@ -23079,6 +23113,60 @@ func (siw *ServerInterfaceWrapper) PostAdminICloudDeviceRecharge(c *gin.Context)
 	}
 
 	siw.Handler.PostAdminICloudDeviceRecharge(c, params)
+}
+
+// TestAdminICloudLivenessSMTP operation middleware
+func (siw *ServerInterfaceWrapper) TestAdminICloudLivenessSMTP(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "serverId" -------------
+	var serverId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serverId", c.Param("serverId"), &serverId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter serverId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params TestAdminICloudLivenessSMTPParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.TestAdminICloudLivenessSMTP(c, serverId, params)
 }
 
 // GetAdminICloudResources operation middleware
@@ -41530,6 +41618,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/gmail/resources/:resourceId/validate", wrapper.PostAdminGmailResourceValidate)
 	router.GET(options.BaseURL+"/v1/admin/icloud/device-platform/balance", wrapper.GetAdminICloudDeviceBalance)
 	router.POST(options.BaseURL+"/v1/admin/icloud/device-platform/recharges", wrapper.PostAdminICloudDeviceRecharge)
+	router.POST(options.BaseURL+"/v1/admin/icloud/liveness-smtp/:serverId/test", wrapper.TestAdminICloudLivenessSMTP)
 	router.GET(options.BaseURL+"/v1/admin/icloud/resources", wrapper.GetAdminICloudResources)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/batch/alias", wrapper.PostAdminICloudResourcesCreateAliases)
 	router.POST(options.BaseURL+"/v1/admin/icloud/resources/batch/delete", wrapper.PostAdminICloudResourcesDelete)

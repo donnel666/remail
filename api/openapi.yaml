@@ -12456,6 +12456,55 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /v1/admin/icloud/liveness-smtp/{serverId}/test:
+    post:
+      operationId: testAdminICloudLivenessSMTP
+      summary: Send one test email through a saved liveness SMTP service
+      description: Requires system:settings/write and system:settings/sensitive. Uses the saved credentials of the selected service and sends to its configured sender mailbox, including when the service or dedicated SMTP mode is disabled. Does not change settings or account health. Shares the global SMTP sending interval with liveness tasks, including failed attempts. No automatic retries or service failover. A successful response confirms SMTP acceptance only; check the destination inbox to confirm delivery. Upstream replies and credentials are never returned. Ambiguous delivery returns an explicit warning to check the inbox before retrying.
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: serverId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-zA-Z0-9_-]{1,64}$'
+      responses:
+        "200":
+          description: The selected SMTP service accepted the test email
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminICloudSMTPTestResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          description: The shared SMTP sending slot is busy or cooling down
+          headers:
+            Retry-After:
+              schema: { type: integer, minimum: 1 }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: SMTP rejected the test or delivery is unconfirmed; see the safe message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /v1/admin/icloud/device-platform/balance:
     get:
       operationId: getAdminICloudDeviceBalance
@@ -24612,6 +24661,19 @@ components:
         enabled:
           type: boolean
       additionalProperties: false
+    AdminICloudSMTPTestResponse:
+      type: object
+      required: [accepted, recipient]
+      properties:
+        accepted:
+          type: boolean
+          enum: [true]
+          description: SMTP acceptance, not inbox delivery confirmation.
+        recipient:
+          type: string
+          format: email
+      additionalProperties: false
+
     AdminICloudDeviceBalance:
       type: object
       required: [configured, balance, checkedAt]

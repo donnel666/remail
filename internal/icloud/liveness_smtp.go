@@ -92,6 +92,13 @@ func (s *Service) reserveICloudLivenessSMTPSend(ctx context.Context, interval ti
 	return "", max(wait, time.Second), err
 }
 
+func (s *Service) finishICloudLivenessSMTPSend(ctx context.Context, token string, interval time.Duration) {
+	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), iCloudMaintenanceFinishTimeout)
+	defer cancel()
+	// Failed renewal retains the longer lease, never a shorter sending interval.
+	_ = finishICloudLivenessSMTPSendScript.Run(finishCtx, s.deviceRedis, []string{iCloudLivenessSMTPIntervalRedisKey}, token, interval.Milliseconds()).Err()
+}
+
 func (s *Service) deferICloudLivenessSMTPSend(ctx context.Context, run iCloudMaintenanceRunModel, delay time.Duration) error {
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), iCloudMaintenanceFinishTimeout)
 	defer cancel()
@@ -153,12 +160,7 @@ func (s *Service) sendICloudLivenessProbe(ctx context.Context, run *iCloudMainte
 	if err != nil || wait > 0 {
 		return wait, err
 	}
-	defer func() {
-		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), iCloudMaintenanceFinishTimeout)
-		defer cancel()
-		// Failed renewal retains the longer lease, never a shorter sending interval.
-		_ = finishICloudLivenessSMTPSendScript.Run(finishCtx, s.deviceRedis, []string{iCloudLivenessSMTPIntervalRedisKey}, lease, interval.Milliseconds()).Err()
-	}()
+	defer s.finishICloudLivenessSMTPSend(ctx, lease, interval)
 	planKey := fmt.Sprintf("icloud:liveness:smtp:remaining:%d:%d:%d", run.ID, run.ValidationGeneration, run.Attempts)
 	var remaining []string
 	plan, err := s.deviceRedis.Get(ctx, planKey).Result()

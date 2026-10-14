@@ -27,6 +27,9 @@ func RegisterRoutes(rg *gin.RouterGroup, module *Module, fetcher middleware.Sess
 		return
 	}
 	h := &handler{service: module.Service, checker: checker}
+	smtp := rg.Group("/admin/icloud/liveness-smtp", middleware.LoadSession(fetcher), middleware.AuthRequired(), middleware.CSRFRequired(),
+		middleware.PermissionRequired(checker, "system:settings", "write"), middleware.PermissionRequired(checker, "system:settings", "sensitive"))
+	smtp.POST("/:serverId/test", h.testLivenessSMTP)
 	devicePlatform := rg.Group("/admin/icloud/device-platform", middleware.LoadSession(fetcher), middleware.AuthRequired(), middleware.CSRFRequired())
 	devicePlatform.GET("/balance", middleware.PermissionRequired(checker, "system:settings", "read"), h.devicePlatformBalance)
 	devicePlatform.POST("/recharges", middleware.PermissionRequired(checker, "system:settings", "write"), middleware.PermissionRequired(checker, "system:settings", "sensitive"), middleware.RateLimitPerUser(module.Service.deviceRedis, "icloud_device_recharge", 10, 60), h.devicePlatformBalance)

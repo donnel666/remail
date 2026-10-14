@@ -10,7 +10,9 @@ import (
 	"net"
 	stdmail "net/mail"
 	"net/textproto"
+	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +20,7 @@ import (
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/mailtransport/domain"
 	gomail "github.com/wneessen/go-mail"
+	mailsmtp "github.com/wneessen/go-mail/smtp"
 )
 
 var diagnosticEmailPattern = regexp.MustCompile(`(?i)\b([a-z0-9._%+\-])[a-z0-9._%+\-]*@([a-z0-9.\-]+\.[a-z]{2,})\b`)
@@ -31,11 +34,13 @@ type SMTPConfig struct {
 }
 
 type SMTPDelivery struct {
-	cfg SMTPConfig
+	cfg         SMTPConfig
+	dialContext func(context.Context, string, string) (net.Conn, error)
+	tlsConfig   func(string) *tls.Config
 }
 
 func NewSMTPDelivery(cfg SMTPConfig) *SMTPDelivery {
-	return &SMTPDelivery{cfg: cfg}
+	return &SMTPDelivery{cfg: cfg, dialContext: (&net.Dialer{}).DialContext, tlsConfig: directSMTPTLSConfig}
 }
 
 func (s *SMTPDelivery) Send(ctx context.Context, message domain.OutboundMessage) error {
@@ -54,7 +59,7 @@ func (s *SMTPDelivery) Send(ctx context.Context, message domain.OutboundMessage)
 		return permanentOutboundFailure("Outbound mail configuration is invalid.", deliveryError("invalid smtp addr", err))
 	}
 	portNum, err := strconv.Atoi(port)
-	if err != nil {
+	if err != nil || host == "" || portNum < 1 || portNum > 65535 {
 		return permanentOutboundFailure("Outbound mail configuration is invalid.", deliveryError("invalid smtp port", err))
 	}
 	rawMessage, err := newSignedSMTPMessage(from, to, message, s.cfg.DKIM)
@@ -62,31 +67,9 @@ func (s *SMTPDelivery) Send(ctx context.Context, message domain.OutboundMessage)
 		return permanentOutboundFailure("Outbound mail message is invalid.", deliveryError("smtp message failed", err))
 	}
 
-	options := []gomail.Option{
-		gomail.WithPort(portNum),
-		gomail.WithTimeout(30 * time.Second),
-		gomail.WithTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, ServerName: host}),
-	}
-	if port == "465" {
-		options = append(options, gomail.WithSSL(), gomail.WithTLSPolicy(gomail.TLSMandatory))
-	} else if requiresSTARTTLS(port, s.cfg) {
-		options = append(options, gomail.WithTLSPolicy(gomail.TLSMandatory))
-	} else {
-		options = append(options, gomail.WithTLSPolicy(gomail.TLSOpportunistic))
-	}
-	if s.cfg.Username != "" || s.cfg.Password != "" {
-		options = append(options,
-			gomail.WithSMTPAuth(gomail.SMTPAuthAutoDiscover),
-			gomail.WithUsername(s.cfg.Username),
-			gomail.WithPassword(s.cfg.Password),
-		)
-	}
-
-	client, err := gomail.NewClient(host, options...)
-	if err != nil {
-		return permanentOutboundFailure("Outbound mail configuration is invalid.", deliveryError("smtp client failed", err))
-	}
-	if notAccepted, err := sendRawMailWithAcceptedClose(ctx, client, from, to, rawMessage); err != nil {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if notAccepted, err := s.sendRawMailWithAcceptedClose(ctx, host, port, from, to, rawMessage); err != nil {
 		failure := classifySMTPFailure("smtp send failed", err)
 		if notAccepted {
 			return &mailapp.OutboundNotAcceptedError{Cause: failure}
@@ -96,36 +79,105 @@ func (s *SMTPDelivery) Send(ctx context.Context, message domain.OutboundMessage)
 	return nil
 }
 
-func sendRawMailWithAcceptedClose(ctx context.Context, client *gomail.Client, from string, to string, rawMessage []byte) (notAccepted bool, err error) {
-	smtpClient, err := client.DialToSMTPClientWithContext(ctx)
+func (s *SMTPDelivery) sendRawMailWithAcceptedClose(ctx context.Context, host, port, from, to string, rawMessage []byte) (notAccepted bool, err error) {
+	rawConn, err := s.dialContext(ctx, "tcp", net.JoinHostPort(host, port))
 	if err != nil {
 		return true, fmt.Errorf("dial failed: %w", err)
 	}
+	// Own the socket: go-mail's high-level dialer replaces the context deadline after connecting.
+	stopClose := context.AfterFunc(ctx, func() { _ = rawConn.Close() })
+	defer func() { stopClose(); _ = rawConn.Close() }()
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := rawConn.SetDeadline(deadline); err != nil {
+			return true, fmt.Errorf("dial failed: %w", err)
+		}
+	}
+	tlsConfig := s.tlsConfig(host)
+	conn := rawConn
+	if port == "465" {
+		secure := tls.Client(rawConn, tlsConfig)
+		if err := secure.HandshakeContext(ctx); err != nil {
+			return true, fmt.Errorf("TLS handshake failed: %w", err)
+		}
+		conn = secure
+	}
+	smtpClient, err := mailsmtp.NewClient(conn, host)
+	if err != nil {
+		return true, fmt.Errorf("dial failed: %w", err)
+	}
+	defer smtpClient.Close()
+	helo, err := os.Hostname()
+	if err != nil {
+		return true, fmt.Errorf("dial failed: %w", err)
+	}
+	if err := smtpClient.Hello(helo); err != nil {
+		return true, fmt.Errorf("dial failed: %w", err)
+	}
+	if port != "465" {
+		supported, _ := smtpClient.Extension("STARTTLS")
+		if !supported && requiresSTARTTLS(port, s.cfg) {
+			return true, errors.New("STARTTLS is required but the SMTP server does not support it")
+		}
+		if supported {
+			if err := smtpClient.StartTLS(tlsConfig); err != nil {
+				return true, fmt.Errorf("STARTTLS failed: %w", err)
+			}
+		}
+	}
+	if s.cfg.Username != "" || s.cfg.Password != "" {
+		if err := authenticateSMTP(smtpClient, host, s.cfg.Username, s.cfg.Password); err != nil {
+			return true, fmt.Errorf("SMTP AUTH failed: %w", err)
+		}
+	}
 	if err := smtpClient.Mail(from); err != nil {
-		_ = client.CloseWithSMTPClient(smtpClient)
 		return true, fmt.Errorf("mail from failed: %w", err)
 	}
 	if err := smtpClient.Rcpt(to); err != nil {
-		_ = client.CloseWithSMTPClient(smtpClient)
 		return true, fmt.Errorf("rcpt to failed: %w", err)
 	}
 	writer, err := smtpClient.Data()
 	if err != nil {
-		_ = client.CloseWithSMTPClient(smtpClient)
 		return true, fmt.Errorf("data failed: %w", err)
 	}
 	if _, err := io.Copy(writer, bytes.NewReader(rawMessage)); err != nil {
 		_ = writer.Close()
-		_ = client.CloseWithSMTPClient(smtpClient)
 		return false, fmt.Errorf("write failed: %w", err)
 	}
 	if err := writer.Close(); err != nil {
-		_ = client.CloseWithSMTPClient(smtpClient)
 		var rejection *textproto.Error
 		return errors.As(err, &rejection) && rejection.Code >= 400 && rejection.Code < 600, fmt.Errorf("data close failed: %w", err)
 	}
-	_ = client.CloseWithSMTPClient(smtpClient)
+	_ = smtpClient.Quit()
 	return false, nil
+}
+
+func authenticateSMTP(client *mailsmtp.Client, host, username, password string) error {
+	supported, mechanisms := client.Extension("AUTH")
+	if !supported {
+		return errors.New("server does not support SMTP AUTH")
+	}
+	state, err := client.GetTLSConnectionState()
+	if err != nil {
+		return err
+	}
+	// Preserve go-mail's authentication preference order and mechanisms.
+	for _, candidate := range []struct {
+		name gomail.SMTPAuthType
+		auth mailsmtp.Auth
+	}{
+		{gomail.SMTPAuthSCRAMSHA256PLUS, mailsmtp.ScramSHA256PlusAuth(username, password, state)},
+		{gomail.SMTPAuthSCRAMSHA256, mailsmtp.ScramSHA256Auth(username, password)},
+		{gomail.SMTPAuthSCRAMSHA1PLUS, mailsmtp.ScramSHA1PlusAuth(username, password, state)},
+		{gomail.SMTPAuthSCRAMSHA1, mailsmtp.ScramSHA1Auth(username, password)},
+		{gomail.SMTPAuthCramMD5, mailsmtp.CRAMMD5Auth(username, password)},
+		{gomail.SMTPAuthPlain, mailsmtp.PlainAuth("", username, password, host, false)},
+		{gomail.SMTPAuthLogin, mailsmtp.LoginAuth(username, password, host, false)},
+	} {
+		if slices.Contains(strings.Fields(mechanisms), string(candidate.name)) {
+			return client.Auth(candidate.auth)
+		}
+	}
+	return gomail.ErrNoSupportedAuthDiscovered
 }
 
 func normalizeSMTPAddr(addr string) string {
