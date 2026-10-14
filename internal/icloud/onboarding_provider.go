@@ -58,6 +58,11 @@ const (
 	AppleOnboardingAddForward              = appleOnboardingAddForward
 	AppleOnboardingVerifyForward           = appleOnboardingVerifyForward
 	AppleOnboardingExport                  = appleOnboardingExport
+	AppleOnboardingListPrivateEmails       = "list_private_emails"
+	AppleOnboardingStopPrivateEmail        = "stop_private_email"
+	AppleOnboardingRemovePrivateEmail      = "remove_private_email"
+	AppleOnboardingGeneratePrivateEmail    = "generate_private_email"
+	AppleOnboardingCompletePrivateEmail    = "complete_private_email"
 	AppleSMSICloudLogin                    = appleSMSICloudLogin
 	AppleSMSICloudCookieLogin              = appleSMSICloudCookieLogin
 	AppleSMSPhoneEnrollment                = appleSMSPhoneEnrollment
@@ -89,6 +94,8 @@ type AppleOnboardingRequest struct {
 	RequireFamilyMembership bool
 	RequireFamilyChild      bool
 	UseDeviceCode           bool
+	PrivateEmailID          string
+	PrivateEmailAddress     string
 }
 
 // AppleSecurityAnswer and AppleOnboardingSecret expose only the input shape
@@ -114,7 +121,12 @@ type AppleOnboardingResponse struct {
 	NewChannel          *AppleOnboardingChannel
 	FamilyChannel       *AppleOnboardingChannel
 	TrustedPhoneLastTwo string
+	PrivateEmails       []ApplePrivateEmail
+	PrivateEmailAddress string
 }
+
+// ApplePrivateEmail is the remote alias identity returned to the CMD.
+type ApplePrivateEmail = appleAccountPrivateEmail
 
 type AppleOnboardingChannel struct {
 	Kind                  string     `json:"kind"`
@@ -246,6 +258,9 @@ func (c *appleOnboardingClient) Execute(ctx context.Context, request AppleOnboar
 		response, err = flow.exportChannels(request)
 	case appleOnboardingExportSession:
 		response, err = flow.exportAccountChannel()
+	case AppleOnboardingListPrivateEmails, AppleOnboardingStopPrivateEmail, AppleOnboardingRemovePrivateEmail,
+		AppleOnboardingGeneratePrivateEmail, AppleOnboardingCompletePrivateEmail:
+		response, err = flow.privateEmailOperation(request)
 	default:
 		return AppleOnboardingResponse{}, &AppleOnboardingError{Category: "invalid_operation", SafeMessage: "Apple onboarding operation is invalid."}
 	}
@@ -332,7 +347,9 @@ func appleOnboardingOperationRestartStage(request AppleOnboardingRequest) string
 	case appleOnboardingPrepareFamilyMembership, appleOnboardingVerifyFamilyMembership:
 		return "family_membership_prepare"
 	case appleOnboardingPrepareManage, appleOnboardingFetchManage, appleOnboardingAddForward,
-		appleOnboardingVerifyForward, appleOnboardingExport:
+		appleOnboardingVerifyForward, appleOnboardingExport,
+		AppleOnboardingListPrivateEmails, AppleOnboardingStopPrivateEmail, AppleOnboardingRemovePrivateEmail,
+		AppleOnboardingGeneratePrivateEmail, AppleOnboardingCompletePrivateEmail:
 		return "manage_prepare"
 	case appleOnboardingSendSMS, appleOnboardingVerifySMS:
 		return appleOnboardingRestartStage(request.SMSPurpose)

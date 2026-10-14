@@ -58,6 +58,7 @@ type options struct {
 	ownerUserID            uint
 	expireDays             int
 	timeout                time.Duration
+	replacePrivateEmail    string
 }
 
 type accountInput struct {
@@ -123,6 +124,8 @@ type accountCheckpoint struct {
 	ExpireAt               time.Time                      `json:"expireAt,omitempty"`
 	ResourceID             uint                           `json:"resourceId,omitempty"`
 	UpdatedAt              time.Time                      `json:"updatedAt"`
+
+	PrivateEmailReplacement *privateEmailReplacementCheckpoint `json:"privateEmailReplacement,omitempty"`
 }
 
 type checkpointFile struct {
@@ -169,6 +172,23 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if err != nil {
 		return err
 	}
+	ctx, cancel := context.WithTimeout(ctx, config.timeout)
+	defer cancel()
+	runtimeStarted := time.Now()
+	fmt.Fprintf(stdout, "runtime=open proxy_mode=sticky_pool timeout=%s\n", config.timeout)
+	rt, err := openRuntime(ctx, input.Email)
+	if err != nil {
+		return err
+	}
+	defer rt.close()
+	fmt.Fprintf(stdout, "runtime=ready proxy_mode=sticky_pool duration=%s\n", elapsed(runtimeStarted))
+	if config.replacePrivateEmail != "" {
+		release, err := rt.icloud.AcquireStandalonePrivateEmailReplacement(ctx, input.Email)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
 	state, err := loadCheckpoint(config.statePath)
 	if err != nil {
 		return err
@@ -179,6 +199,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return fmt.Errorf("fingerprint input: %w", err)
 	}
 	checkpoint, found := state.Accounts[stateKey]
+	if checkpoint.PrivateEmailReplacement != nil {
+		if config.replacePrivateEmail != checkpoint.PrivateEmailReplacement.Target || config.resetState {
+			return errors.New("resume this replacement with the same -replace-private-email and -state, without -reset-state")
+		}
+	}
 	if found && checkpoint.Fingerprint != fingerprint {
 		if !config.resetState {
 			return errors.New("checkpoint input does not match; use -reset-state to restart this Apple ID")
@@ -210,19 +235,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return fmt.Errorf("save provided device checkpoint: %w", err)
 		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, config.timeout)
-	defer cancel()
-	runtimeStarted := time.Now()
-	fmt.Fprintf(stdout, "runtime=open proxy_mode=sticky_pool timeout=%s\n", config.timeout)
-	rt, err := openRuntime(ctx, input.Email)
-	if err != nil {
-		return err
-	}
-	defer rt.close()
-	fmt.Fprintf(stdout, "runtime=ready proxy_mode=sticky_pool duration=%s\n", elapsed(runtimeStarted))
-
 	preparedBeforeBinding := false
-	if checkpoint.DeviceCodeAPI == "" && checkpoint.Binding == nil && input.PhoneNumber != "" && !checkpoint.ICloudAuthenticated && !checkpoint.ICloudReady && strings.TrimSpace(checkpoint.CountryCode) == "" {
+	if config.replacePrivateEmail == "" && checkpoint.DeviceCodeAPI == "" && checkpoint.Binding == nil && input.PhoneNumber != "" && !checkpoint.ICloudAuthenticated && !checkpoint.ICloudReady && strings.TrimSpace(checkpoint.CountryCode) == "" {
 		preflight := &debugger{ctx: ctx, input: input, runtime: rt, reader: reader, stdout: stdout,
 			statePath: config.statePath, state: &state, stateKey: stateKey, checkpoint: &checkpoint,
 			session: append(json.RawMessage(nil), checkpoint.Session...)}
@@ -341,6 +355,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	flags.UintVar(&config.ownerUserID, "owner-user-id", 1, "database owner user ID for the committed iCloud resource")
 	flags.IntVar(&config.expireDays, "expire-days", 30, "resource expiry in days")
 	flags.DurationVar(&config.timeout, "timeout", 15*time.Minute, "overall validation timeout")
+	flags.StringVar(&config.replacePrivateEmail, "replace-private-email", "", "stop and permanently delete this exact private email, then create one replacement")
 	if err := flags.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -364,6 +379,16 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	}
 	if strings.ContainsAny(config.forwardCode, "\r\n") {
 		return options{}, errors.New("forward-code contains an unsupported value")
+	}
+	config.replacePrivateEmail = strings.ToLower(strings.TrimSpace(config.replacePrivateEmail))
+	if config.replacePrivateEmail != "" {
+		address, err := mail.ParseAddress(config.replacePrivateEmail)
+		if err != nil || address.Address != config.replacePrivateEmail || !strings.HasSuffix(address.Address, "@icloud.com") {
+			return options{}, errors.New("replace-private-email must be one plain @icloud.com address")
+		}
+		if config.forwardTo != "" || config.forwardCode != "" || config.legacyCommit || config.familySharingConfirmed || config.resetState {
+			return options{}, errors.New("private email replacement cannot be combined with forwarding, family sharing, import, or reset-state options")
+		}
 	}
 	return config, nil
 }
@@ -568,6 +593,9 @@ func openRuntime(ctx context.Context, email string) (*runtime, error) {
 }
 
 func (d *debugger) run(binding *kitesim.SMSPhoneBinding, config options) error {
+	if config.replacePrivateEmail != "" {
+		return d.replacePrivateEmail(binding, config)
+	}
 	d.logf("validation=start email=%s region=%q country=%s icloud_opened=%t phone_supplied=%t family_invite_supplied=%t forwarding_override=%t\n", d.input.Email, d.input.Region, d.input.CountryCode, d.input.ICloudOpened, d.input.PhoneNumber != "", d.input.FamilyInviteURL != "", config.forwardTo != "")
 	if checkpointCommitted(d.checkpoint) {
 		d.logf("validation=already_committed resource_id=%d\n", d.checkpoint.ResourceID)
@@ -1250,6 +1278,9 @@ func (d *debugger) execute(request icloud.AppleOnboardingRequest) (icloud.AppleO
 		}
 		var appleErr *icloud.AppleOnboardingError
 		if !errors.As(err, &appleErr) || !appleErr.ProxyRetryPending || appleErr.RetryAt == nil {
+			break
+		}
+		if request.Operation == icloud.AppleOnboardingStopPrivateEmail || request.Operation == icloud.AppleOnboardingRemovePrivateEmail || request.Operation == icloud.AppleOnboardingCompletePrivateEmail {
 			break
 		}
 		d.logf("apple_proxy=waiting retry_at=%s\n", appleErr.RetryAt.UTC().Format(time.RFC3339))

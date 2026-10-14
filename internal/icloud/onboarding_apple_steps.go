@@ -903,36 +903,12 @@ func (f *appleOnboardingFlow) ensurePrivateAlias() error {
 	if appleOnboardingBool(data["maxLimitReached"]) {
 		return appleOnboardingPermanent("alias_limit_reached", "Apple Account cannot create a private email alias because its alias limit is reached.", data)
 	}
-	generated, err := f.postObject(strings.TrimRight(f.endpoints.AppleID, "/")+appleAccountPrivateEmailAddPath, map[string]any{}, "email/private/add", false, true, true)
+	email, err := f.generatePrivateEmail()
 	if err != nil {
 		return err
 	}
-	if f.state.Status != http.StatusOK && f.state.Status != http.StatusCreated {
-		return appleOnboardingPermanent("alias_create_failed", "Apple rejected private email alias creation.", generated)
-	}
-	email := strings.ToLower(strings.TrimSpace(firstNonEmpty(
-		appleOnboardingString(generated["emailAddress"]),
-		appleOnboardingString(generated["address"]),
-	)))
-	if !validICloudHMEEmail(email) {
-		return &AppleOnboardingError{Category: "alias_create_invalid", SafeMessage: "Apple returned an invalid private email alias candidate.", Retryable: true}
-	}
-	completed, err := f.putObject(strings.TrimRight(f.endpoints.AppleID, "/")+appleAccountPrivateEmailAddCompletePath, map[string]any{
-		"emailAddress": email, "label": "ReMail", "note": "",
-	}, "email/private/add/complete", true, false, true)
-	if err != nil {
+	if err := f.completePrivateEmail(email); err != nil {
 		return err
-	}
-	if f.state.Status != http.StatusOK && f.state.Status != http.StatusCreated && f.state.Status != http.StatusNoContent {
-		return appleOnboardingPermanent("alias_create_failed", "Apple rejected private email alias completion.", completed)
-	}
-	completedEmail := strings.ToLower(strings.TrimSpace(firstNonEmpty(
-		appleOnboardingString(completed["emailAddress"]),
-		appleOnboardingString(completed["address"]),
-		email,
-	)))
-	if !validICloudHMEEmail(completedEmail) {
-		return &AppleOnboardingError{Category: "alias_create_invalid", SafeMessage: "Apple did not confirm the created private email alias.", Retryable: true}
 	}
 	confirmed, err := f.privateEmailList()
 	if err != nil {
@@ -943,6 +919,54 @@ func (f *appleOnboardingFlow) ensurePrivateAlias() error {
 		return &AppleOnboardingError{Category: "alias_create_unconfirmed", SafeMessage: "Apple did not make the private email alias available yet.", Retryable: true, RetryAt: &retryAt}
 	}
 	f.state.PrivateAliasReady = true
+	return nil
+}
+
+func (f *appleOnboardingFlow) generatePrivateEmail() (string, error) {
+	generated, err := f.postObject(strings.TrimRight(f.endpoints.AppleID, "/")+appleAccountPrivateEmailAddPath, map[string]any{}, "email/private/add", false, true, true)
+	if err != nil {
+		return "", err
+	}
+	if f.state.Status == http.StatusUnauthorized || f.state.Status == http.StatusForbidden {
+		return "", appleOnboardingRestart("manage_prepare")
+	}
+	if f.state.Status != http.StatusOK && f.state.Status != http.StatusCreated {
+		return "", appleOnboardingPermanent("alias_create_failed", "Apple rejected private email alias creation.", generated)
+	}
+	email := strings.ToLower(strings.TrimSpace(firstNonEmpty(
+		appleOnboardingString(generated["emailAddress"]),
+		appleOnboardingString(generated["address"]),
+	)))
+	if !validICloudHMEEmail(email) {
+		return "", &AppleOnboardingError{Category: "alias_create_invalid", SafeMessage: "Apple returned an invalid private email alias candidate.", Retryable: true}
+	}
+	return email, nil
+}
+
+func (f *appleOnboardingFlow) completePrivateEmail(email string) error {
+	if !validICloudHMEEmail(email) {
+		return &AppleOnboardingError{Category: "invalid_alias", SafeMessage: "Invalid private email address."}
+	}
+	completed, err := f.putObject(strings.TrimRight(f.endpoints.AppleID, "/")+appleAccountPrivateEmailAddCompletePath, map[string]any{
+		"emailAddress": email, "label": "ReMail", "note": "",
+	}, "email/private/add/complete", true, false, true)
+	if err != nil {
+		return err
+	}
+	if f.state.Status == http.StatusUnauthorized || f.state.Status == http.StatusForbidden {
+		return appleOnboardingRestart("manage_prepare")
+	}
+	if f.state.Status != http.StatusOK && f.state.Status != http.StatusCreated && f.state.Status != http.StatusNoContent {
+		return appleOnboardingPermanent("alias_create_failed", "Apple rejected private email alias completion.", completed)
+	}
+	completedEmail := strings.ToLower(strings.TrimSpace(firstNonEmpty(
+		appleOnboardingString(completed["emailAddress"]),
+		appleOnboardingString(completed["address"]),
+		email,
+	)))
+	if completedEmail != email {
+		return &AppleOnboardingError{Category: "alias_create_invalid", SafeMessage: "Apple did not confirm the created private email alias.", Retryable: true}
+	}
 	return nil
 }
 
