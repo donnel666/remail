@@ -398,7 +398,7 @@ SELECT
     run.resource_id AS resource_scope_id,
     'icloud_resource' AS biz_type,
     run.resource_id AS biz_id,
-    run.kind AS kind,
+    CASE WHEN run.kind = 'liveness_smtp' THEN 'liveness' ELSE run.kind END AS kind,
     run.status AS status,
     run.attempts AS attempts,
     run.max_attempts AS max_attempts,

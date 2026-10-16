@@ -4515,7 +4515,7 @@ export interface paths {
         put?: never;
         /**
          * Send one test email through a saved liveness SMTP service
-         * @description Requires system:settings/write and system:settings/sensitive. Uses the saved credentials of the selected service and sends to its configured sender mailbox, including when the service or dedicated SMTP mode is disabled. Does not change settings or account health. Shares the global SMTP sending interval with liveness tasks, including failed attempts. No automatic retries or service failover. A successful response confirms SMTP acceptance only; check the destination inbox to confirm delivery. Upstream replies and credentials are never returned. Ambiguous delivery returns an explicit warning to check the inbox before retrying.
+         * @description Requires system:settings/write and system:settings/sensitive. Uses the saved credentials of the selected service and sends to its configured sender mailbox, including when the service or dedicated SMTP mode is disabled. Does not change settings or account health. Shares the global SMTP sending interval with liveness tasks, including failed attempts. No automatic retries or service failover. A successful response confirms SMTP acceptance only; check the destination inbox to confirm delivery. Upstream replies and credentials are never returned. An unsuccessful SMTP test returns 422 with a safe diagnostic, distinct from API infrastructure unavailability. Ambiguous delivery returns an explicit warning to check the inbox before retrying.
          */
         post: operations["testAdminICloudLivenessSMTP"];
         delete?: never;
@@ -4888,6 +4888,7 @@ export interface paths {
         /**
          * List normalized administrator tasks for a resource or iCloud import
          * @description Requires `governance:task/read`. Governance normalizes durable facts from their owning contexts without becoming their source of truth. Results use source-qualified task IDs, the stable `queued/running/succeeded/failed/uncertain/canceled` status union, and safe progress only. Internal table paths, claim/dispatch/lease/fencing tokens, upstream payloads, and raw errors are never returned. If any required task source is unavailable, the request returns 503 instead of a stale or partial success.
+         *     Both system-transport and dedicated SMTP liveness tasks use the public kind `liveness`; `kind=liveness` includes both transports.
          */
         get: operations["getAdminTasks"];
         put?: never;
@@ -25431,20 +25432,19 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            422: components["responses"]["UnprocessableEntity"];
-            /** @description The shared SMTP sending slot is busy or cooling down */
-            429: {
+            /** @description Invalid configuration, failed SMTP test, or unconfirmed delivery; see the safe diagnostic message */
+            422: {
                 headers: {
-                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description SMTP rejected the test or delivery is unconfirmed; see the safe message */
-            502: {
+            /** @description The shared SMTP sending slot is busy or cooling down */
+            429: {
                 headers: {
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {

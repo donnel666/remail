@@ -182,13 +182,14 @@ export function ownerRoleLabel(role: AdminMicrosoftOwnerRole) {
   }
 }
 
-export function taskKindLabel(kind: AdminMicrosoftAsyncTaskKind) {
+export function taskKindLabel(kind: AdminMicrosoftAsyncTaskKind | "liveness_smtp") {
   switch (kind) {
     case "import":
       return "Import";
     case "validation":
       return "Validation";
     case "liveness":
+    case "liveness_smtp":
       return "Liveness check";
     case "alias":
       return "Alias replenishment";
@@ -216,6 +217,8 @@ export function taskKindLabel(kind: AdminMicrosoftAsyncTaskKind) {
       return "Delete";
     case "bulk_disable":
       return "Disable";
+    default:
+      return kind;
   }
 }
 

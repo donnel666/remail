@@ -129,10 +129,11 @@ func (s *SMTPDelivery) sendRawMailWithAcceptedClose(ctx context.Context, host, p
 			return true, fmt.Errorf("SMTP AUTH failed: %w", err)
 		}
 	}
-	if err := smtpClient.Mail(from); err != nil {
+	// go-mail's low-level client expects the RFC 5321 path brackets from its caller.
+	if err := smtpClient.Mail("<" + from + ">"); err != nil {
 		return true, fmt.Errorf("mail from failed: %w", err)
 	}
-	if err := smtpClient.Rcpt(to); err != nil {
+	if err := smtpClient.Rcpt("<" + to + ">"); err != nil {
 		return true, fmt.Errorf("rcpt to failed: %w", err)
 	}
 	writer, err := smtpClient.Data()

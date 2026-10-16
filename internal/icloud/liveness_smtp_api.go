@@ -74,7 +74,7 @@ func (h *handler) testLivenessSMTP(c *gin.Context) {
 		TextBody: "这是一封 ReMail SMTP 配置测试邮件。收到此邮件说明该 SMTP 可以完成发信，无需回复。此测试不代表 iCloud 别名测活成功。",
 	})
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"message": smtpTestFailureMessage(err)})
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": smtpTestFailureMessage(err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"accepted": true, "recipient": server.From})

@@ -117,11 +117,19 @@ func smtpContextFixture(t *testing.T, blockAt string, implicitTLS bool, auth str
 				}
 				_, _ = io.WriteString(conn, "235 authenticated\r\n")
 			case strings.HasPrefix(command, "MAIL FROM:"):
+				if strings.TrimSpace(line) != "MAIL FROM:<sender@example.com>" {
+					_, _ = io.WriteString(conn, "502 Invalid input\r\n")
+					continue
+				}
 				if pause("mail") {
 					return
 				}
 				_, _ = io.WriteString(conn, "250 OK\r\n")
 			case strings.HasPrefix(command, "RCPT TO:"):
+				if strings.TrimSpace(line) != "RCPT TO:<recipient@example.com>" {
+					_, _ = io.WriteString(conn, "502 Invalid input\r\n")
+					continue
+				}
 				_, _ = io.WriteString(conn, "250 OK\r\n")
 			case command == "DATA":
 				if pause("data") {

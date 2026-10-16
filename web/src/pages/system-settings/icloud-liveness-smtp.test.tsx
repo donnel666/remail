@@ -132,8 +132,8 @@ it("prevents concurrent tests and displays the shared cooldown", async () => {
   await waitFor(() => expect(screen.getByLabelText("Test SMTP service 2")).toBeEnabled());
 });
 
-it("displays SMTP authentication failure and does not retry", async () => {
-  mocks.testSMTP.mockRejectedValue(new IamApiError(502, { message: "SMTP authentication failed. Check the username and password or authorization code." }));
+it.each([422, 502])("displays SMTP authentication failure for HTTP %s and does not retry", async (status) => {
+  mocks.testSMTP.mockRejectedValue(new IamApiError(status, { message: "SMTP authentication failed. Check the username and password or authorization code." }));
   render(<ICloudLivenessSMTPSection {...props} options={[{ key: "icloud_liveness_smtp_servers", value: JSON.stringify([server("a")]) }]} onBulkSave={vi.fn()} />);
   fireEvent.click(screen.getByLabelText("Test SMTP service 1"));
   await waitFor(() => expect(mocks.error).toHaveBeenCalledWith("SMTP authentication failed. Check the username and password or authorization code."));

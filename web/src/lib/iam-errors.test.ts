@@ -1,8 +1,9 @@
-import type { TFunction } from "i18next";
+import { createInstance, type TFunction } from "i18next";
 import { describe, expect, it } from "vitest";
 
 import { IamApiError } from "./iam-api";
 import { getApiErrorBodyMessage, getIamErrorMessage } from "./iam-errors";
+import zh from "../i18n/locales/zh.json";
 
 const translations: Record<string, string> = {
   "Authentication is required.": "请先登录。",
@@ -24,6 +25,14 @@ const t = ((key: string, options?: Record<string, unknown>) => {
 }) as TFunction;
 
 describe("API error messages", () => {
+  it("shows the actual localized SMTP diagnosis instead of a generic service error", async () => {
+    const i18n = createInstance();
+    await i18n.init({ lng: "zh", nsSeparator: false, resources: { zh: { translation: zh } } });
+    const message = "SMTP rejected the sender address. Check that the sender matches the authenticated mailbox.";
+    for (const status of [422, 502]) {
+      expect(getIamErrorMessage(i18n.t, new IamApiError(status, { message }), "SMTP test failed.")).toBe(zh[message]);
+    }
+  });
   it("translates a known backend message", () => {
     const error = new IamApiError(422, {
       message: "Insufficient inventory.",

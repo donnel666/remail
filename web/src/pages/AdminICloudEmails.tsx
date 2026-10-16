@@ -2021,7 +2021,7 @@ export function ICloudMaintenanceModal({
     },
   ];
   actions.push({
-    description: "Send a test email to an existing alias. A matching forwarded email confirms health and ends the check immediately. System mail can also pass after confirmed SMTP acceptance and 2 minutes without bounces, then observes late bounces for 24 hours until a receipt confirms delivery. Unconfirmed sends only wait for receipt for up to 10 minutes without resending. Dedicated SMTP shares the configured sending interval (default 60 seconds), requires receipt within 10 minutes and otherwise preserves health. Temporary recipient rejections retry another alias; permanent mailbox failures mark the account abnormal, while sender-policy failures preserve health.",
+    description: "Send a test email to an existing alias to check mail delivery.",
     disabled: rowDisabled || (target.mode === "row" && (target.item.aliasCount === 0 || target.item.status === "validating")),
     icon: MailCheck,
     key: "liveness",

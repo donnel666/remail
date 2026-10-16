@@ -226,7 +226,12 @@ func (s *Service) ProcessICloudLivenessCheck(ctx context.Context, runID uint64) 
 					}
 				}
 			}
-			return s.finishICloudLivenessCheck(ctx, run, "", iCloudMaintenanceFailed, "Liveness email could not be sent; account health is unchanged.", false)
+			message := "Liveness email could not be sent; account health is unchanged."
+			var unaccepted *mailapp.OutboundNotAcceptedError
+			if run.Kind == iCloudMaintenanceLivenessSMTP && errors.As(err, &unaccepted) {
+				message = smtpTestFailureMessage(err) + " Account health is unchanged."
+			}
+			return s.finishICloudLivenessCheck(ctx, run, "", iCloudMaintenanceFailed, message, false)
 		}
 		now = s.now().UTC()
 		return s.db.WithContext(ctx).Model(&run).Where("status = ?", iCloudMaintenanceRunning).

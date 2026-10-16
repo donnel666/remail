@@ -86,7 +86,7 @@ func TestICloudSMTPTestEndpointPermissionsAndSharedSendingInterval(t *testing.T)
 	*now = now.Add(90 * time.Second)
 	sender.err = &mailapp.OutboundNotAcceptedError{Cause: errors.New("dial failed: 535 AUTH rejected authorization-code")}
 	w = request("qq-1", true, true)
-	require.Equal(t, 502, w.Code)
+	require.Equal(t, 422, w.Code)
 	require.Contains(t, w.Body.String(), "authentication failed")
 	require.NotContains(t, w.Body.String(), "authorization-code")
 	require.Equal(t, 429, request("qq-1", true, true).Code, "failed tests must also consume the interval")
@@ -115,6 +115,34 @@ func TestICloudSMTPTestRequiresStoredCredentials(t *testing.T) {
 		(&handler{service: s}).testLivenessSMTP(c)
 		require.Equal(t, 422, w.Code)
 		require.Empty(t, sender.messages)
+	}
+}
+
+func TestICloudSMTPTestReturnsDiagnosticInsteadOfGatewayError(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		failure error
+		want    string
+	}{
+		{"sender", &mailapp.OutboundNotAcceptedError{Cause: errors.New("mail from failed: 502 Invalid input secret")}, "rejected the sender"},
+		{"connection", &mailapp.OutboundNotAcceptedError{Cause: errors.New("dial failed: connection refused secret")}, "connection failed"},
+		{"unconfirmed", errors.New("data close failed: EOF secret"), "unconfirmed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, sender, _ := newICloudLivenessTestService(t)
+			enableLivenessSMTPTest(t, s, sender)
+			sender.err = tc.failure
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/test", nil)
+			c.Params = gin.Params{{Key: "serverId", Value: "qq-1"}}
+			middleware.SetCurrentUser(c, 7, iamdomain.RoleAdmin, "admin@example.com", "sid")
+			(&handler{service: s}).testLivenessSMTP(c)
+			require.Equal(t, http.StatusUnprocessableEntity, w.Code)
+			require.Contains(t, w.Body.String(), tc.want)
+			require.NotContains(t, w.Body.String(), "secret")
+			require.Len(t, sender.messages, 1)
+		})
 	}
 }
 

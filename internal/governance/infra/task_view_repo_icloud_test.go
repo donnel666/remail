@@ -67,7 +67,8 @@ INSERT INTO icloud_maintenance_runs(
 ) VALUES
     (101, 7, 4, 'validation', 'succeeded', 1, 3, 2, '2026-08-08 00:00:00', '2026-08-08 00:00:01', '2026-08-08 00:00:02', '2026-08-08 00:00:02'),
     (102, 7, 5, 'alias', 'running', 1, 3, 2, '2026-08-08 00:01:00', '2026-08-08 00:01:01', NULL, '2026-08-08 00:01:01'),
-    (103, 7, 6, 'liveness', 'running', 1, 1, 2, '2026-08-08 00:02:00', '2026-08-08 00:02:01', NULL, '2026-08-08 00:02:01');
+    (103, 7, 6, 'liveness', 'running', 1, 1, 2, '2026-08-08 00:02:00', '2026-08-08 00:02:01', NULL, '2026-08-08 00:02:01'),
+    (104, 7, 7, 'liveness_smtp', 'failed', 1, 125, 2, '2026-08-08 00:03:00', '2026-08-08 00:03:01', '2026-08-08 00:03:02', '2026-08-08 00:03:02');
 `).Error)
 
 	repo := NewAdminTaskViewRepo(db)
@@ -75,15 +76,28 @@ INSERT INTO icloud_maintenance_runs(
 		BizID: 7, Limit: 20,
 	}, iCloudValidationTaskSelect)
 	require.NoError(t, err)
-	require.Equal(t, int64(3), total)
+	require.Equal(t, int64(4), total)
 	require.Equal(t, int64(1), succeeded)
-	require.Len(t, items, 3)
-	require.Equal(t, "icloud_validation:103", items[0].TaskID())
+	require.Len(t, items, 4)
+	require.Equal(t, "icloud_validation:104", items[0].TaskID())
 	require.Equal(t, governanceapp.AdminTaskKindLiveness, items[0].Kind)
-	require.Equal(t, "icloud_validation:102", items[1].TaskID())
-	require.Equal(t, governanceapp.AdminTaskKindAlias, items[1].Kind)
-	require.Equal(t, "icloud_validation:101", items[2].TaskID())
-	require.WithinDuration(t, time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC), items[2].QueuedAt.UTC(), time.Second)
+	require.Equal(t, "icloud_validation:103", items[1].TaskID())
+	require.Equal(t, governanceapp.AdminTaskKindLiveness, items[1].Kind)
+	require.Equal(t, "icloud_validation:102", items[2].TaskID())
+	require.Equal(t, governanceapp.AdminTaskKindAlias, items[2].Kind)
+	require.Equal(t, "icloud_validation:101", items[3].TaskID())
+	require.WithinDuration(t, time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC), items[3].QueuedAt.UTC(), time.Second)
+
+	filtered, total, _, err := repo.listForResource(context.Background(), governanceapp.AdminTaskListFilter{
+		BizID: 7, Kind: governanceapp.AdminTaskKindLiveness, Offset: 1, Limit: 1,
+	}, iCloudValidationTaskSelect)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total, "both transports must appear under the public liveness kind")
+	require.Len(t, filtered, 1)
+	require.Equal(t, "icloud_validation:103", filtered[0].TaskID())
+	detail, err := repo.FindByRef(context.Background(), items[0].Ref)
+	require.NoError(t, err)
+	require.Equal(t, governanceapp.AdminTaskKindLiveness, detail.Kind)
 }
 
 func TestAdminTaskViewRepoListsICloudRefreshTasks(t *testing.T) {

@@ -154,6 +154,27 @@ func TestICloudLivenessSMTPQueuedCheckNeverFallsBackToDirect(t *testing.T) {
 	require.Equal(t, iCloudMaintenanceFailed, run.Status)
 }
 
+func TestICloudLivenessSMTPRecordsSafeSendFailureWithoutChangingHealth(t *testing.T) {
+	s, sender, _ := newICloudLivenessTestService(t)
+	enableLivenessSMTPTest(t, s, sender)
+	seedICloudLivenessResource(t, s, 1, iCloudResourceNormal, true)
+	sender.err = &mailapp.OutboundNotAcceptedError{Cause: errors.New("SMTP AUTH failed: 535 authorization-code rejected")}
+	run := queueSMTPTestRun(t, s)
+	require.NoError(t, s.ProcessICloudLivenessCheck(context.Background(), run.ID))
+	var finished iCloudMaintenanceRunModel
+	require.NoError(t, s.db.Take(&finished, run.ID).Error)
+	require.Equal(t, iCloudMaintenanceFailed, finished.Status)
+	require.Contains(t, finished.LastSafeError, "SMTP authentication failed")
+	require.Contains(t, finished.LastSafeError, "Account health is unchanged.")
+	require.NotContains(t, finished.LastSafeError, "authorization-code")
+	require.Nil(t, finished.ProbeSentAt)
+	require.Nil(t, finished.NextCheckAt)
+	require.Len(t, sender.messages, 1)
+	var resource iCloudResourceModel
+	require.NoError(t, s.db.Take(&resource, 1).Error)
+	require.Equal(t, iCloudResourceNormal, resource.Status)
+}
+
 func TestICloudLivenessSMTPRotationAndSafeFailover(t *testing.T) {
 	s, _, now := newICloudLivenessTestService(t)
 	redisServer := enableLivenessSMTPTest(t, s, &iCloudLivenessMailStub{})

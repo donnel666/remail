@@ -275,6 +275,16 @@ func TestSMTPDeliveryTreatsQuitFailureAfterDataAsAccepted(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestSMTPDeliveryUsesBracketedEnvelope(t *testing.T) {
+	addr, data, commands, stop := startDirectCapturingSMTPServer(t, false, tls.Certificate{})
+	defer stop()
+	sender := NewSMTPDelivery(SMTPConfig{Addr: addr, From: "ReMail <sender@example.com>"})
+	require.NoError(t, sender.Send(context.Background(), mailapp.VerificationCodeMessage("recipient@example.com", "123456")))
+	<-data
+	require.Contains(t, commands(), "MAIL FROM:<sender@example.com>")
+	require.Contains(t, commands(), "RCPT TO:<recipient@example.com>")
+}
+
 func TestSMTPDeliverySignsMessagesWhenDKIMEnabled(t *testing.T) {
 	signer, _ := newTestDKIMSigner(t)
 	addr, dataCh, stop := startCapturingSMTPServer(t)
