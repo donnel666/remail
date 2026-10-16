@@ -141,6 +141,9 @@ func (s *Service) withStandalonePrivateEmail(ctx context.Context, ownerID uint, 
 		if !strings.EqualFold(resource.PrimaryEmail, account) {
 			return ErrICloudResourceIdentity
 		}
+		if isICloudAccountLocked(resource) {
+			return ErrICloudResourceStatus
+		}
 		if resource.Status != iCloudResourceDisabled || resource.OnboardingStatus == iCloudOnboardingProcessing || resource.OnboardingStatus == iCloudOnboardingWaiting {
 			return errors.New("disable the imported resource and stop its active workflow before replacing a private email")
 		}

@@ -24632,8 +24632,8 @@ components:
       enum: [pending, validating, normal, abnormal, disabled, deleted]
     AdminICloudSessionStatus:
       type: string
-      enum: [unchecked, valid, invalid]
-      x-enum-varnames: [AdminICloudSessionStatusUnchecked, AdminICloudSessionStatusValid, AdminICloudSessionStatusInvalid]
+      enum: [unchecked, valid, invalid, locked]
+      x-enum-varnames: [AdminICloudSessionStatusUnchecked, AdminICloudSessionStatusValid, AdminICloudSessionStatusInvalid, AdminICloudSessionStatusLocked]
     AdminICloudAccountRole:
       type: string
       enum: [unknown, primary, child]

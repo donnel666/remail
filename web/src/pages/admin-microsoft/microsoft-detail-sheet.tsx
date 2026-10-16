@@ -1108,6 +1108,57 @@ export function ResourceMailsPanel({
     return () => controller.abort();
   }, [auxiliary, cursor, debouncedSearch, listScope, pageSize, resourceId, resourceType, retryKey, t]);
 
+  useEffect(() => {
+    if (resourceType !== "icloud" || auxiliary || fetchDisabled || fetchLoading || listLoading) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
+    let inFlight = false;
+    let delay = 10_000;
+    const schedule = () => {
+      if (timer !== undefined) globalThis.clearTimeout(timer);
+      if (!controller.signal.aborted && !document.hidden && !inFlight) {
+        timer = globalThis.setTimeout(() => void poll(), delay);
+      }
+    };
+    const poll = async () => {
+      if (controller.signal.aborted || document.hidden) return;
+      inFlight = true;
+      try {
+        const response = await listAdminMicrosoftMessages(
+          resourceId, debouncedSearch, pageSize, undefined, controller.signal, "icloud",
+        );
+        if (controller.signal.aborted) return;
+        delay = 10_000;
+        if (response.total !== undefined) setTotal(response.total);
+        setMessages((current) => {
+          const received = new Set(response.items.map((message) => message.id));
+          return [...response.items, ...current.filter((message) => !received.has(message.id))];
+        });
+        // Refresh the newest page without losing the cursor for loaded history.
+        if (!cursor) {
+          const next = response.hasMore && response.nextBeforeReceivedAt && response.nextBeforeId
+            ? { beforeReceivedAt: response.nextBeforeReceivedAt, beforeId: response.nextBeforeId }
+            : null;
+          setNextCursor(next);
+          setHasMore(next !== null);
+          setListError(null);
+        }
+      } catch {
+        if (!controller.signal.aborted) delay = Math.min(delay * 2, 60_000);
+      } finally {
+        inFlight = false;
+        schedule();
+      }
+    };
+    document.addEventListener("visibilitychange", schedule);
+    schedule();
+    return () => {
+      controller.abort();
+      if (timer !== undefined) globalThis.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", schedule);
+    };
+  }, [auxiliary, cursor, debouncedSearch, fetchDisabled, fetchLoading, listLoading, pageSize, resourceId, resourceType]);
+
   const addresses = useMemo(() => {
     const map = new Map<string, AdminMicrosoftMailboxKind>();
     for (const message of messages) {

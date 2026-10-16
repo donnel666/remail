@@ -222,20 +222,20 @@ func (s *Service) sendICloudLivenessProbe(ctx context.Context, run *iCloudMainte
 	return interval, nil
 }
 
-func (s *Service) iCloudLivenessReceived(ctx context.Context, run iCloudMaintenanceRunModel) bool {
+func (s *Service) iCloudLivenessReceived(ctx context.Context, run iCloudMaintenanceRunModel) (bool, error) {
 	if run.StartedAt == nil || run.ProbeSender == "" {
-		return false
+		return false, nil
 	}
 	token := run.ProbeSender
 	until := run.StartedAt.Add(iCloudLivenessLateBounceWindow)
 	if run.Kind == iCloudMaintenanceLivenessSMTP {
 		if s.deviceRedis == nil {
-			return false
+			return false, nil
 		}
 		var err error
 		token, err = s.deviceRedis.Get(ctx, livenessProbeKey(run)).Result()
 		if err != nil || token == "" {
-			return false
+			return false, nil
 		}
 	}
 	if run.ProbeSentAt == nil || run.Kind == iCloudMaintenanceLivenessSMTP {
@@ -247,7 +247,7 @@ func (s *Service) iCloudLivenessReceived(ctx context.Context, run iCloudMaintena
 		UntilAt: until, MaxMessages: 100, Subject: subject,
 	})
 	if err != nil || result == nil {
-		return false
+		return false, nil
 	}
 	for _, message := range result.Messages {
 		if !strings.EqualFold(message.Recipient, run.ProbeRecipient) || message.ReceivedAt.Before(*run.StartedAt) {
@@ -259,20 +259,20 @@ func (s *Service) iCloudLivenessReceived(ctx context.Context, run iCloudMaintena
 		}
 		decoded, err := new(mime.WordDecoder).DecodeHeader(parsed.Header.Get("Subject"))
 		if err == nil && decoded == subject {
-			return true
+			return true, s.storeICloudLivenessReceipt(ctx, run, message)
 		}
 	}
-	return false
+	return false, nil
 }
 
 func (s *Service) waitForICloudLivenessReceipt(ctx context.Context, run iCloudMaintenanceRunModel) error {
 	if run.StartedAt == nil || run.ProbeSender == "" {
-		return s.finishICloudLivenessCheck(ctx, run, "", iCloudMaintenanceFailed, "SMTP liveness sending worker expired; account health is unchanged.", false)
+		return s.finishICloudLivenessCheck(ctx, run, "", iCloudMaintenanceFailed, "SMTP liveness sending worker expired; account health is unchanged.", nil)
 	}
 	now := s.now().UTC()
 	deadline := run.StartedAt.Add(iCloudLivenessReceiptWait)
 	if !now.Before(deadline) {
-		return s.finishICloudLivenessCheck(ctx, run, "", iCloudMaintenanceFailed, "SMTP liveness email delivery was not confirmed within 10 minutes; account health is unchanged.", false)
+		return s.finishICloudLivenessCheck(ctx, run, "", iCloudMaintenanceFailed, "SMTP liveness email delivery was not confirmed within 10 minutes; account health is unchanged.", nil)
 	}
 	next := now.Add(iCloudLivenessReceiptPoll)
 	if next.After(deadline) {

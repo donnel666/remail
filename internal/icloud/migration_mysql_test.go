@@ -18,6 +18,39 @@ import (
 
 var iCloudOnboardingMigrationMySQL = testmysql.New("remail_icloud_onboarding_migration")
 
+func TestICloudLockedSessionMigrationMySQL(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	fixture := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(fixture, "00001_fixture.sql"), []byte(`-- +goose Up
+CREATE TABLE icloud_resource_channels (
+    id BIGINT UNSIGNED PRIMARY KEY,
+    session_status VARCHAR(24) NOT NULL,
+    CONSTRAINT chk_icloud_channels_session CHECK (session_status IN ('unchecked', 'valid', 'invalid'))
+);
+-- +goose Down
+DROP TABLE icloud_resource_channels;
+`), 0600))
+	server := testmysql.New("remail_icloud_locked_migration")
+	t.Cleanup(func() { require.NoError(t, server.Close(context.Background())) })
+	db := server.Database(t, fixture)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("INSERT INTO icloud_resource_channels VALUES (1, 'invalid')").Error)
+	migration, err := os.ReadFile(filepath.Join(filepath.Dir(file), "../../migrations/00149_icloud_locked_session.sql"))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(fixture, "00149_icloud_locked_session.sql"), migration, 0600))
+	require.NoError(t, platform.RunMigrations(sqlDB, fixture))
+	require.NoError(t, db.Exec("UPDATE icloud_resource_channels SET session_status = 'locked' WHERE id = 1").Error)
+	require.Error(t, db.Exec("INSERT INTO icloud_resource_channels VALUES (2, 'unknown')").Error)
+	require.Error(t, goose.DownTo(sqlDB, fixture, 1), "rollback must not turn a locked account into a retryable invalid Cookie")
+	var status string
+	require.NoError(t, db.Raw("SELECT session_status FROM icloud_resource_channels WHERE id = 1").Scan(&status).Error)
+	require.Equal(t, iCloudSessionLocked, status)
+	require.NoError(t, db.Exec("DELETE FROM icloud_resource_channels WHERE id = 1").Error)
+	require.NoError(t, goose.DownTo(sqlDB, fixture, 1))
+}
+
 func TestICloudLivenessSMTPKindMigrationMySQL(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	require.True(t, ok)

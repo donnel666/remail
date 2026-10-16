@@ -168,6 +168,7 @@ type adminICloudResourceRow struct {
 	LastAliasSyncAt         *time.Time `gorm:"column:last_alias_sync_at"`
 	LastAllocatedAt         *time.Time `gorm:"column:last_allocated_at"`
 	LastSafeError           string     `gorm:"column:last_safe_error"`
+	LastErrorCategory       string     `gorm:"column:last_error_category"`
 	CreatedAt               time.Time  `gorm:"column:created_at"`
 	UpdatedAt               time.Time  `gorm:"column:updated_at"`
 }
@@ -199,7 +200,7 @@ const adminICloudResourceSelect = `
 	ir.alias_provision_candidate, ir.alias_provision_reconcile, ir.expire_at,
 	ir.next_validation_at, ir.next_provision_at, ir.last_checked_at,
 	ir.last_valid_at,
-	ir.last_alias_sync_at, ir.last_allocated_at, ir.last_safe_error,
+	ir.last_alias_sync_at, ir.last_allocated_at, ir.last_safe_error, ir.last_error_category,
 	ir.created_at, ir.updated_at`
 
 type AdminICloudStatusFacets struct {
@@ -320,7 +321,7 @@ func (s *Service) GetAdminICloudResource(ctx context.Context, resourceID uint) (
 	detail := &AdminICloudResourceDetail{
 		AdminICloudResourceView: adminICloudResourceView(row), AliasLimit: iCloudMaxAliases,
 		AliasRemaining:     remaining,
-		AliasProvisioning:  row.NextProvisionAt != nil || strings.TrimSpace(row.AliasProvisionCandidate) != "" || row.AliasProvisionReconcile,
+		AliasProvisioning:  row.LastErrorCategory != iCloudAccountLockedCategory && (row.NextProvisionAt != nil || strings.TrimSpace(row.AliasProvisionCandidate) != "" || row.AliasProvisionReconcile),
 		CredentialRevision: row.CredentialRevision, CredentialUpdatedAt: row.CredentialUpdatedAt,
 		ValidationGeneration: row.ValidationGeneration, ValidationFailures: row.ValidationFailures,
 	}
@@ -342,6 +343,12 @@ func (s *Service) GetAdminICloudResource(ctx context.Context, resourceID uint) (
 }
 
 func adminICloudResourceView(row adminICloudResourceRow) AdminICloudResourceView {
+	if row.LastErrorCategory == iCloudAccountLockedCategory {
+		row.NewSessionStatus, row.OldSessionStatus = iCloudSessionLocked, iCloudSessionLocked
+		row.NewNextKeepaliveAt, row.OldNextKeepaliveAt = nil, nil
+		row.NewCooldownUntil, row.OldCooldownUntil = nil, nil
+		row.NextValidationAt, row.NextProvisionAt = nil, nil
+	}
 	var safeError *string
 	if value := strings.TrimSpace(row.LastSafeError); value != "" {
 		safeError = &value
@@ -380,15 +387,17 @@ func adminICloudBoundPhoneNumber(row adminICloudResourceRow) string {
 }
 
 func adminICloudSessionView(id *uint, status string, failures uint8, cooldown, keepalive, checked, valid *time.Time) *AdminICloudSessionView {
-	if id == nil || *id == 0 {
+	status = normalizeICloudChannelStatus(status)
+	// A rejected first sign-in can establish a lock before any Cookie exists.
+	if (id == nil || *id == 0) && status != iCloudSessionLocked {
 		return nil
 	}
-	return &AdminICloudSessionView{Status: normalizeICloudChannelStatus(status), Failures: failures, CooldownUntil: cooldown, NextKeepaliveAt: keepalive, LastCheckedAt: checked, LastValidAt: valid}
+	return &AdminICloudSessionView{Status: status, Failures: failures, CooldownUntil: cooldown, NextKeepaliveAt: keepalive, LastCheckedAt: checked, LastValidAt: valid}
 }
 
 func normalizeICloudChannelStatus(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
-	if value != iCloudSessionValid && value != iCloudSessionInvalid {
+	if value != iCloudSessionValid && value != iCloudSessionInvalid && value != iCloudSessionLocked {
 		return iCloudSessionUnchecked
 	}
 	return value

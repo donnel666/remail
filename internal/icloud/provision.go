@@ -64,6 +64,7 @@ func (s *Service) DispatchICloudProvisions(ctx context.Context, limit int) error
 	}
 	var resourceIDs []uint
 	err := s.db.WithContext(ctx).Table("icloud_resources AS ir").Distinct("ir.id").
+		Where("COALESCE(ir.last_error_category, '') <> ?", iCloudAccountLockedCategory).
 		Joins("JOIN icloud_resource_channels AS ch ON ch.resource_id = ir.id").
 		Where("ir.status = ?", iCloudResourceNormal).
 		Where(`((ir.alias_count < ? AND ir.next_provision_at IS NOT NULL AND ir.next_provision_at <= ?) OR
@@ -91,6 +92,7 @@ func (s *Service) repairICloudProvisionSchedule(ctx context.Context, now time.Ti
 		return nil
 	}
 	return s.db.WithContext(ctx).Model(&iCloudResourceModel{}).
+		Where("COALESCE(last_error_category, '') <> ?", iCloudAccountLockedCategory).
 		Where("status = ? AND alias_count < ? AND expire_at > ? AND next_provision_at IS NULL AND next_validation_at IS NULL",
 			iCloudResourceNormal, iCloudMaxAliases, now).
 		Where(`NOT EXISTS (SELECT 1 FROM icloud_maintenance_runs AS run
@@ -895,7 +897,7 @@ func lockICloudProvisionResourceTx(ctx context.Context, tx *gorm.DB, expected iC
 	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, expected.ID).Error; err != nil {
 		return nil, errICloudValidationStale
 	}
-	if resource.CredentialRevision != expected.CredentialRevision || resource.Status != expected.Status ||
+	if isICloudAccountLocked(resource) || resource.CredentialRevision != expected.CredentialRevision || resource.Status != expected.Status ||
 		resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled {
 		return nil, errICloudValidationStale
 	}

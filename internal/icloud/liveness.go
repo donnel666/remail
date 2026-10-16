@@ -59,6 +59,9 @@ func (s *Service) livenessProbeSender() string {
 }
 
 func (s *Service) checkICloudLivenessMail(ctx context.Context) error {
+	if s.livenessReceipts == nil {
+		return ErrICloudLivenessUnavailable
+	}
 	return s.checkICloudLivenessTransport(ctx, configuredICloudLivenessKind())
 }
 
@@ -178,7 +181,7 @@ func (s *Service) ProcessICloudLivenessCheck(ctx context.Context, runID uint64) 
 		return err
 	}
 	if !currentICloudLivenessRun(resource, run) {
-		return s.finishICloudLivenessCheck(ctx, run, "", iCloudMaintenanceCanceled, "Liveness check canceled because the resource changed.", false)
+		return s.finishICloudLivenessCheck(ctx, run, "", iCloudMaintenanceCanceled, "Liveness check canceled because the resource changed.", nil)
 	}
 	now := s.now().UTC()
 	if run.NextCheckAt != nil && run.NextCheckAt.After(now) {
@@ -187,7 +190,7 @@ func (s *Service) ProcessICloudLivenessCheck(ctx context.Context, runID uint64) 
 	if run.Status == iCloudMaintenanceQueued {
 		now = now.Truncate(time.Millisecond)
 		if err := s.checkICloudLivenessTransport(ctx, run.Kind); err != nil {
-			return s.finishICloudLivenessCheck(ctx, run, "", iCloudMaintenanceFailed, "SMTP liveness mail transport is unavailable.", false)
+			return s.finishICloudLivenessCheck(ctx, run, "", iCloudMaintenanceFailed, "SMTP liveness mail transport is unavailable.", nil)
 		}
 		lease := now.Add(iCloudLivenessWorkerTimeout)
 		attempt := run.Attempts + 1
@@ -216,7 +219,7 @@ func (s *Service) ProcessICloudLivenessCheck(ctx context.Context, runID uint64) 
 			var failure *mailapp.OutboundSendFailure
 			if errors.As(err, &failure) {
 				if failure.RecipientRejected {
-					return s.finishICloudLivenessCheck(ctx, run, iCloudResourceAbnormal, iCloudMaintenanceFailed, "iCloud alias rejected the liveness email.", false)
+					return s.finishICloudLivenessCheck(ctx, run, iCloudResourceAbnormal, iCloudMaintenanceFailed, "iCloud alias rejected the liveness email.", nil)
 				}
 				var unaccepted *mailapp.OutboundNotAcceptedError
 				canRetryAlias := run.Kind != iCloudMaintenanceLivenessSMTP || (failure.RecipientTemporary && errors.As(err, &unaccepted))
@@ -231,7 +234,7 @@ func (s *Service) ProcessICloudLivenessCheck(ctx context.Context, runID uint64) 
 			if run.Kind == iCloudMaintenanceLivenessSMTP && errors.As(err, &unaccepted) {
 				message = smtpTestFailureMessage(err) + " Account health is unchanged."
 			}
-			return s.finishICloudLivenessCheck(ctx, run, "", iCloudMaintenanceFailed, message, false)
+			return s.finishICloudLivenessCheck(ctx, run, "", iCloudMaintenanceFailed, message, nil)
 		}
 		now = s.now().UTC()
 		return s.db.WithContext(ctx).Model(&run).Where("status = ?", iCloudMaintenanceRunning).
@@ -240,8 +243,16 @@ func (s *Service) ProcessICloudLivenessCheck(ctx context.Context, runID uint64) 
 	if run.NextCheckAt == nil || run.NextCheckAt.After(now) {
 		return nil
 	}
-	if s.iCloudLivenessReceived(ctx, run) {
-		return s.finishICloudLivenessCheck(ctx, run, iCloudResourceNormal, iCloudMaintenanceSucceeded, "", false)
+	received, receiptErr := s.iCloudLivenessReceived(ctx, run)
+	if received {
+		if receiptErr != nil {
+			return s.retryICloudLivenessReceiptStorage(ctx, run, receiptErr)
+		}
+		return s.finishICloudLivenessCheck(ctx, run, iCloudResourceNormal, iCloudMaintenanceSucceeded, "", nil)
+	}
+	if run.Status == iCloudMaintenanceSucceeded && run.LastSafeError == iCloudLivenessReceiptStoragePending {
+		// A confirmed receipt stays successful even if its source cannot be re-read.
+		return s.retryICloudLivenessReceiptStorage(ctx, run, nil)
 	}
 	if run.ProbeSentAt == nil || run.Kind == iCloudMaintenanceLivenessSMTP {
 		return s.waitForICloudLivenessReceipt(ctx, run)
@@ -259,12 +270,12 @@ func (s *Service) ProcessICloudLivenessCheck(ctx context.Context, runID uint64) 
 	if err != nil {
 		var failure *mailapp.OutboundSendFailure
 		if errors.As(err, &failure) {
-			return s.finishICloudLivenessCheck(ctx, run, "", iCloudMaintenanceFailed, failure.SafeMessage, false)
+			return s.finishICloudLivenessCheck(ctx, run, "", iCloudMaintenanceFailed, failure.SafeMessage, nil)
 		}
 		now = s.now().UTC()
 		deadline := run.ProbeSentAt.Add(iCloudLivenessLateBounceWindow)
 		if !now.Before(deadline) {
-			return s.finishICloudLivenessCheck(ctx, run, "", iCloudMaintenanceFailed, "Liveness bounce inspection expired; account health is unchanged.", false)
+			return s.finishICloudLivenessCheck(ctx, run, "", iCloudMaintenanceFailed, "Liveness bounce inspection expired; account health is unchanged.", nil)
 		}
 		next := now.Add(iCloudLivenessCheckInterval)
 		if next.After(deadline) {
@@ -280,11 +291,11 @@ func (s *Service) ProcessICloudLivenessCheck(ctx context.Context, runID uint64) 
 		return err
 	}
 	if bounced {
-		return s.finishICloudLivenessCheck(ctx, run, iCloudResourceAbnormal, iCloudMaintenanceFailed, "iCloud alias bounced the liveness email.", false)
+		return s.finishICloudLivenessCheck(ctx, run, iCloudResourceAbnormal, iCloudMaintenanceFailed, "iCloud alias bounced the liveness email.", nil)
 	}
 	if run.Status == iCloudMaintenanceRunning {
 		// shortcut: absent a received probe, direct SMTP acceptance without a bounce still counts as healthy.
-		return s.finishICloudLivenessCheck(ctx, run, iCloudResourceNormal, iCloudMaintenanceSucceeded, "", true)
+		return s.finishICloudLivenessCheck(ctx, run, iCloudResourceNormal, iCloudMaintenanceSucceeded, "", iCloudTimePointer(now.Add(iCloudLivenessCheckInterval)))
 	}
 	var nextCheck *time.Time
 	if now.Before(run.ProbeSentAt.Add(iCloudLivenessLateBounceWindow)) {
@@ -333,7 +344,7 @@ func currentICloudLivenessRun(resource iCloudResourceModel, run iCloudMaintenanc
 		resource.Status != iCloudResourceDisabled && resource.Status != iCloudResourceDeleted
 }
 
-func (s *Service) finishICloudLivenessCheck(ctx context.Context, snapshot iCloudMaintenanceRunModel, health, status, safeError string, watchBounces bool) error {
+func (s *Service) finishICloudLivenessCheck(ctx context.Context, snapshot iCloudMaintenanceRunModel, health, status, safeError string, nextCheck *time.Time) error {
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), iCloudMaintenanceFinishTimeout)
 	defer cancel()
 	return s.db.WithContext(finishCtx).Transaction(func(tx *gorm.DB) error {
@@ -349,6 +360,13 @@ func (s *Service) finishICloudLivenessCheck(ctx context.Context, snapshot iCloud
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Take(&run, snapshot.ID).Error; err != nil {
 			return err
 		}
+		if run.Status != snapshot.Status || run.Attempts != snapshot.Attempts ||
+			(run.StartedAt == nil) != (snapshot.StartedAt == nil) ||
+			(run.StartedAt != nil && !run.StartedAt.Equal(*snapshot.StartedAt)) ||
+			(run.NextCheckAt == nil) != (snapshot.NextCheckAt == nil) ||
+			(run.NextCheckAt != nil && !run.NextCheckAt.Equal(*snapshot.NextCheckAt)) {
+			return nil
+		}
 		if run.Status != iCloudMaintenanceQueued && run.Status != iCloudMaintenanceRunning && run.Status != iCloudMaintenanceSucceeded {
 			return nil
 		}
@@ -357,14 +375,9 @@ func (s *Service) finishICloudLivenessCheck(ctx context.Context, snapshot iCloud
 		}
 		if !currentICloudLivenessRun(resource, run) {
 			health, status, safeError = "", iCloudMaintenanceCanceled, "Liveness check canceled because the resource changed."
+			nextCheck = nil
 		}
 		now := s.now().UTC()
-		var nextCheck *time.Time
-		if status == iCloudMaintenanceSucceeded && watchBounces {
-			// shortcut: observe late bounces for 24 hours, extend this window if the provider delays delivery reports longer.
-			next := now.Add(iCloudLivenessCheckInterval)
-			nextCheck = &next
-		}
 		if err := tx.Model(&run).Updates(map[string]any{"status": status, "last_safe_error": safeError, "finished_at": now, "next_check_at": nextCheck, "updated_at": now}).Error; err != nil {
 			return err
 		}
@@ -375,6 +388,7 @@ func (s *Service) finishICloudLivenessCheck(ctx context.Context, snapshot iCloud
 		if health != "" {
 			updates["status"], updates["last_checked_at"] = health, now
 			if health == iCloudResourceNormal {
+				updates["last_safe_error"] = ""
 				updates["last_valid_at"] = now
 				updates["validation_failures"] = 0
 			} else {

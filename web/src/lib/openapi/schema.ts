@@ -9805,7 +9805,7 @@ export interface components {
         /** @enum {string} */
         AdminICloudResourceStatus: "pending" | "validating" | "normal" | "abnormal" | "disabled" | "deleted";
         /** @enum {string} */
-        AdminICloudSessionStatus: "unchecked" | "valid" | "invalid";
+        AdminICloudSessionStatus: "unchecked" | "valid" | "invalid" | "locked";
         /** @enum {string} */
         AdminICloudAccountRole: "unknown" | "primary" | "child";
         /** @enum {string} */

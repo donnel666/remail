@@ -49,7 +49,7 @@ func (s *Service) ensureICloudCookieRefreshTx(ctx context.Context, tx *gorm.DB, 
 		}
 		return false, err
 	}
-	if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || resource.AliasCount >= iCloudMaxAliases || (resource.DeviceCodeAPI == "" && (strings.TrimSpace(resource.BoundPhoneNumber) == "" || resource.KitesimPhoneID == nil)) {
+	if isICloudAccountLocked(resource) || resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || resource.AliasCount >= iCloudMaxAliases || (resource.DeviceCodeAPI == "" && (strings.TrimSpace(resource.BoundPhoneNumber) == "" || resource.KitesimPhoneID == nil)) {
 		return false, nil
 	}
 	if active, err := s.familyLoginActive(ctx, resourceID); active || err != nil {
@@ -152,7 +152,7 @@ func omitICloudOldCookieSafeError(task *iCloudOnboardingTaskModel, updates map[s
 }
 
 func iCloudRefreshSnapshotMatches(resource iCloudResourceModel, task *iCloudOnboardingTaskModel) bool {
-	if task == nil || task.ResourceID == nil || resource.ID != *task.ResourceID ||
+	if task == nil || task.ResourceID == nil || resource.ID != *task.ResourceID || isICloudAccountLocked(resource) ||
 		resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled ||
 		resource.CredentialRevision != task.ExpectedCredentialRevision {
 		return false
@@ -207,6 +207,9 @@ func iCloudCookieMaintenanceWorkflowActive(resource iCloudResourceModel) bool {
 // the phone or credentials; otherwise validation can erase the diagnostic and
 // immediately start alias traffic against the same invalid channel.
 func iCloudCookieMaintenanceBlocksValidation(resource *iCloudResourceModel) bool {
+	if resource != nil && isICloudAccountLocked(*resource) {
+		return true
+	}
 	if resource == nil || (resource.WorkflowTaskKind != "refresh" && resource.WorkflowTaskKind != iCloudCookieRecoveryTaskKind) {
 		return false
 	}

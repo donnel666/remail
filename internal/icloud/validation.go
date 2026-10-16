@@ -330,6 +330,7 @@ func (s *Service) iCloudValidationCandidates(ctx context.Context, limit int) ([]
 		Status               string `gorm:"column:status"`
 	}
 	query := s.db.WithContext(ctx).Table("icloud_resources AS ir").
+		Where("COALESCE(ir.last_error_category, '') <> ?", iCloudAccountLockedCategory).
 		Select("ir.id, er.owner_user_id, ir.credential_revision, ir.validation_generation, ir.status").
 		Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").
 		Where("ir.status IN ? AND ir.next_validation_at IS NOT NULL AND ir.next_validation_at <= ?", []string{iCloudResourcePending, iCloudResourceNormal}, now).

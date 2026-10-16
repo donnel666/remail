@@ -171,7 +171,7 @@ func (s *Service) CommitStandaloneValidatedAccount(
 			}
 			result = StandaloneCommitResult{ResourceID: resource.ID, ValidationGeneration: 1, CredentialRevision: 1, Created: true}
 		} else {
-			if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled {
+			if isICloudAccountLocked(resource) || resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled {
 				return ErrICloudResourceStatus
 			}
 			if rootErr := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND type = ?", resource.ID, "icloud").Take(&root).Error; rootErr != nil {

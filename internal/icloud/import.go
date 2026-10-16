@@ -749,28 +749,31 @@ func (s *Service) removeExistingICloudImportLines(ctx context.Context, ownerUser
 		emails = append(emails, line.PrimaryEmail)
 	}
 	var existing []struct {
-		ID           uint   `gorm:"column:id"`
-		OwnerUserID  uint   `gorm:"column:owner_user_id"`
-		PrimaryEmail string `gorm:"column:primary_email"`
-		Status       string `gorm:"column:status"`
+		ID                uint   `gorm:"column:id"`
+		OwnerUserID       uint   `gorm:"column:owner_user_id"`
+		PrimaryEmail      string `gorm:"column:primary_email"`
+		Status            string `gorm:"column:status"`
+		LastErrorCategory string `gorm:"column:last_error_category"`
 	}
 	if err := s.db.WithContext(ctx).Table("icloud_resources AS ir").
-		Select("ir.id, er.owner_user_id, ir.primary_email, ir.status").
+		Select("ir.id, er.owner_user_id, ir.primary_email, ir.status, ir.last_error_category").
 		Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").
 		Where("LOWER(ir.primary_email) IN ?", emails).Find(&existing).Error; err != nil {
 		return nil, nil, nil, ErrICloudImportTemporary
 	}
 	byEmail := make(map[string]struct {
-		ID          uint
-		OwnerUserID uint
-		Status      string
+		ID                uint
+		OwnerUserID       uint
+		Status            string
+		LastErrorCategory string
 	}, len(existing))
 	for _, item := range existing {
 		value := struct {
-			ID          uint
-			OwnerUserID uint
-			Status      string
-		}{item.ID, item.OwnerUserID, item.Status}
+			ID                uint
+			OwnerUserID       uint
+			Status            string
+			LastErrorCategory string
+		}{item.ID, item.OwnerUserID, item.Status, item.LastErrorCategory}
 		byEmail[iCloudImportEmailKey(item.PrimaryEmail)] = value
 	}
 	result := make([]iCloudImportLine, 0, len(lines))
@@ -784,7 +787,7 @@ func (s *Service) removeExistingICloudImportLines(ctx context.Context, ownerUser
 		match := emailMatch
 		// Credentials are deliberately replaceable. Cookie health is a channel
 		// concern and must never make the account itself abnormal.
-		if match.ID != 0 && match.OwnerUserID == ownerUserID {
+		if match.ID != 0 && match.OwnerUserID == ownerUserID && match.LastErrorCategory != iCloudAccountLockedCategory {
 			line.ExistingResourceID = match.ID
 			result = append(result, line)
 			continue
@@ -793,6 +796,9 @@ func (s *Service) removeExistingICloudImportLines(ctx context.Context, ownerUser
 		failure := iCloudImportFailure{
 			Line: line.LineNumber, Email: line.PrimaryEmail, Category: category,
 			SafeMessage: "iCloud resource already exists.",
+		}
+		if match.OwnerUserID == ownerUserID && match.LastErrorCategory == iCloudAccountLockedCategory {
+			failure.Category, failure.SafeMessage = iCloudAccountLockedCategory, iCloudAccountLockedMessage
 		}
 		if strategy == coreDomain.ImportErrorStrategyAbort {
 			return nil, nil, &failure, nil
@@ -872,6 +878,9 @@ func (s *Service) createICloudResourcesAndMarkImportSucceeded(
 					var existing iCloudResourceModel
 					if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&existing, root.ID).Error; err != nil {
 						return err
+					}
+					if isICloudAccountLocked(existing) {
+						return ErrICloudResourceStatus
 					}
 					credentialRevision := existing.CredentialRevision + 1
 					if credentialRevision == 1 {

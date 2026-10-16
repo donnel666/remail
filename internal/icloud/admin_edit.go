@@ -141,6 +141,9 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 			return ErrICloudResourceNotFound
 		}
 		emailChanged := imported != nil && !strings.EqualFold(strings.TrimSpace(imported.PrimaryEmail), strings.TrimSpace(resource.PrimaryEmail))
+		if isICloudAccountLocked(resource) && imported != nil {
+			return ErrICloudResourceStatus
+		}
 		credentialsSubmitted := imported != nil
 		accountIdentityChanged := emailChanged
 		if accountIdentityChanged && (firstNonEmpty(strings.TrimSpace(resource.AccountRole), "unknown") != "unknown" || resource.KitesimPhoneID != nil) {
@@ -316,7 +319,7 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 				queuedValidation = true
 			}
 		}
-		if phoneBinding != nil && !credentialsSubmitted {
+		if phoneBinding != nil && !credentialsSubmitted && !isICloudAccountLocked(resource) {
 			switch resource.Status {
 			case iCloudResourceDisabled:
 				updates["next_validation_at"] = nil
@@ -333,7 +336,7 @@ func (s *Service) EditAdminICloudResource(ctx context.Context, command AdminIClo
 			provisionExpireAt = *command.ExpireAt
 		}
 		if expireAtChanged && !credentialsSubmitted {
-			if resource.Status == iCloudResourceNormal && provisionExpireAt.After(now) && resource.AliasCount < iCloudMaxAliases {
+			if !isICloudAccountLocked(resource) && resource.Status == iCloudResourceNormal && provisionExpireAt.After(now) && resource.AliasCount < iCloudMaxAliases {
 				updates["next_provision_at"] = now
 				queuedProvision = true
 			} else if !provisionExpireAt.After(now) || resource.AliasCount >= iCloudMaxAliases {

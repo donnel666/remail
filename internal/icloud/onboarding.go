@@ -229,6 +229,7 @@ type iCloudOnboardingExistingResource struct {
 	Status                  string `gorm:"column:status"`
 	TaskKind                string `gorm:"column:task_kind"`
 	OnboardingStatus        string `gorm:"column:onboarding_status"`
+	LastErrorCategory       string `gorm:"column:last_error_category"`
 	ImportID                *uint  `gorm:"column:import_id"`
 	ForSale                 bool   `gorm:"column:for_sale"`
 	Generation              uint64 `gorm:"column:generation"`
@@ -699,13 +700,16 @@ func (s *Service) acceptICloudOnboardingImport(
 		}
 		var existing []iCloudOnboardingExistingResource
 		if err := tx.Table("icloud_resources AS ir").Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("ir.id, er.owner_user_id, ir.primary_email, ir.account_role, ir.status, ir.task_kind, ir.onboarding_status, ir.import_id, ir.for_sale, ir.generation, ir.credential_revision, ir.validation_generation, ir.region, ir.country_code, ir.icloud_opened, ir.bound_phone_number, ir.bound_phone_country_code, ir.bound_phone_source, ir.kitesim_phone_id").
+			Select("ir.id, er.owner_user_id, ir.primary_email, ir.account_role, ir.status, ir.task_kind, ir.onboarding_status, ir.last_error_category, ir.import_id, ir.for_sale, ir.generation, ir.credential_revision, ir.validation_generation, ir.region, ir.country_code, ir.icloud_opened, ir.bound_phone_number, ir.bound_phone_country_code, ir.bound_phone_source, ir.kitesim_phone_id").
 			Joins("JOIN email_resources AS er ON er.id = ir.id AND er.type = ?", "icloud").
 			Where("LOWER(ir.primary_email) IN ?", emails).Find(&existing).Error; err != nil {
 			return ErrICloudOnboardingTemporary
 		}
 		existingByEmail := make(map[string]iCloudOnboardingExistingResource, len(existing))
 		for _, resource := range existing {
+			if resource.LastErrorCategory == iCloudAccountLockedCategory {
+				return ErrICloudResourceIdentity
+			}
 			if userImport && resource.Status == iCloudResourceDisabled {
 				return ErrICloudResourceIdentity
 			}
@@ -1157,6 +1161,9 @@ func (s *Service) GetAdminICloudOnboardingTask(ctx context.Context, taskID uint)
 }
 
 func iCloudOnboardingTaskView(task iCloudOnboardingTaskModel) OnboardingTaskView {
+	if task.LastErrorCategory == iCloudAccountLockedCategory {
+		task.LastSafeError = iCloudAccountLockedMessage
+	}
 	needsPostFamilyRecovery := isICloudPostFamilyRecoveryAvailable(task)
 	status := iCloudOnboardingStatus(task)
 	taskKind := firstNonEmpty(task.TaskKind, "onboarding")

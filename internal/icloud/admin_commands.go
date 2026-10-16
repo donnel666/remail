@@ -502,6 +502,9 @@ func mutateAdminICloudResourceTx(
 
 	updates := make(map[string]any)
 	queuedGeneration := uint64(0)
+	if isICloudAccountLocked(resource) && (command == AdminICloudValidate || command == AdminICloudAlias || command == AdminICloudRecover) {
+		return nil, false, ErrICloudResourceStatus
+	}
 	switch command {
 	case AdminICloudLiveness:
 		return queueAdminICloudLivenessTx(ctx, tx, root, resource, now)
@@ -549,7 +552,11 @@ func mutateAdminICloudResourceTx(
 		if resource.Status != iCloudResourceDisabled {
 			return nil, false, ErrICloudResourceStatus
 		}
-		queuedGeneration = queueAdminICloudValidation(updates, resource, now)
+		if isICloudAccountLocked(resource) {
+			updates["status"] = iCloudResourceNormal
+		} else {
+			queuedGeneration = queueAdminICloudValidation(updates, resource, now)
+		}
 	case AdminICloudDisable:
 		if resource.Status == iCloudResourceDeleted {
 			return nil, false, ErrICloudResourceNotFound
@@ -616,7 +623,7 @@ func mutateAdminICloudResourceTx(
 			return adminICloudMutationResult(root, resource), false, nil
 		}
 		updates["expire_at"] = *expireAt
-		if resource.Status == iCloudResourceNormal && expireAt.After(now) && resource.AliasCount < iCloudMaxAliases {
+		if !isICloudAccountLocked(resource) && resource.Status == iCloudResourceNormal && expireAt.After(now) && resource.AliasCount < iCloudMaxAliases {
 			updates["next_provision_at"] = now
 		} else {
 			updates["next_provision_at"] = nil

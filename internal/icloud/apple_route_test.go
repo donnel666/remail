@@ -3,6 +3,7 @@ package icloud
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"testing"
@@ -78,6 +79,46 @@ func TestAppleRouteFailsClosedAndUsesNormalizedStickyKey(t *testing.T) {
 	routes.proxies = nil
 	_, err = routes.session(withAppleRouteEmail(context.Background(), "user@example.com"))
 	require.ErrorIs(t, err, errAppleProxyUnavailable)
+}
+
+func TestAppleRoutePreservesAccountLockWhenRedisFails(t *testing.T) {
+	for _, rotated := range []bool{false, true} {
+		for _, locked := range []bool{false, true} {
+			t.Run(fmt.Sprintf("rotated=%t/locked=%t", rotated, locked), func(t *testing.T) {
+				cache := miniredis.RunT(t)
+				state := redis.NewClient(&redis.Options{Addr: cache.Addr(), MaxRetries: -1,
+					DialTimeout: time.Second, ReadTimeout: time.Second, WriteTimeout: time.Second})
+				t.Cleanup(func() { require.NoError(t, state.Close()) })
+				routes := newAppleRouteManager(state)
+				body := `{"serviceErrors":[{"message":"Incorrect Apple Account or password."}]}`
+				if locked {
+					body = `{"serviceErrors":[{"code":"-20755","message":"This Apple Account is not active."}]}`
+				}
+				inner := &appleOnboardingScriptedSession{responses: []appleOnboardingScriptedResponse{{status: http.StatusForbidden, body: body}}}
+				session := &appleProxySession{ctx: context.Background(), inner: inner, routes: routes, email: "locked@example.com",
+					rotationToken: "rotation", rotated: rotated, rotationAttempted: rotated, deferRotationCommit: true}
+				client := appleOnboardingTestClient(time.Now(), inner)
+				client.newSession = func(context.Context) (appleOnboardingHTTPSession, error) { return session, nil }
+				cache.Close()
+				_, err := client.Execute(context.Background(), AppleOnboardingRequest{
+					Operation: appleOnboardingVerifySMS, SMSPurpose: appleSMSManageLogin, UseDeviceCode: true, Code: "123456",
+					Email: "locked@example.com", Session: appleOnboardingTestState(t, nil),
+				})
+				require.Len(t, inner.requests, 1)
+				var appleErr *AppleOnboardingError
+				require.ErrorAs(t, err, &appleErr)
+				if locked {
+					require.Equal(t, iCloudAccountLockedCategory, appleErr.Category)
+					require.Equal(t, http.StatusForbidden, appleErr.HTTPStatus)
+					require.False(t, appleErr.Retryable)
+					require.False(t, session.rotationAttempted, "cleanup must not replace the permanent result with another Redis error")
+				} else {
+					require.Equal(t, "apple_unavailable", appleErr.Category)
+					require.True(t, appleErr.Retryable)
+				}
+			})
+		}
+	}
 }
 
 func TestAppleRouteOnlyReportsTransportFailures(t *testing.T) {

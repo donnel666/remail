@@ -3170,5 +3170,7 @@
   "SMTP rejected the test recipient. Check that the configured sender mailbox can receive mail.": "SMTP 拒绝了测试收件地址，请确认配置的发件邮箱可以正常收信。",
   "SMTP rejected the test message. Check the provider's sending restrictions or rate limits.": "SMTP 拒绝了测试邮件，请检查邮箱服务商的发信限制或频率限制。",
   "SMTP connection failed. Check the server address, port and network access.": "SMTP 连接失败，请检查服务器地址、端口和网络连通性。",
-  "SMTP did not accept the test email. Check the SMTP settings before retrying.": "SMTP 未接受测试邮件，请检查配置后再试。"
+  "SMTP did not accept the test email. Check the SMTP settings before retrying.": "SMTP 未接受测试邮件，请检查配置后再试。",
+  "Account locked": "锁号",
+  "Login, Cookie keepalive and alias creation are stopped. Mail delivery is checked separately.": "已停止登录、Cookie 保活和新建别名，收件状态由测活判断。"
 }

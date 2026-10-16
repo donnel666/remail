@@ -377,6 +377,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		mailmatchMod.SetGmailMailFetchPort(gmailMod.Service)
 		mailmatchMod.SetGmailResourceFetchPort(gmailResourceFetchAdapter{service: gmailMod.Service})
 		mailmatchMod.SetICloudMailFetchPort(iCloudMailFetchAdapter{service: icloudMod.Service})
+		icloudMod.Service.SetLivenessReceiptStore(mailmatchMod.UseCase)
 		mailmatchMod.SetProtoMailFetchPort(protoMailFetchAdapter{resources: protoMod.Service})
 		mailmatchMod.SetPermanentProtoFetchFailurePort(protoFetchFailureAdapter{orders: tradeMod.UseCase})
 		allocMod.UseCase.SetProtoProtocolReady(protoClient.RuntimeAvailable())

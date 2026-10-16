@@ -665,14 +665,16 @@ func (s *appleProxySession) Request(method, rawURL string, headers map[string]st
 		}
 		s.routes.reportFailure(s.ctx, s.proxyID)
 	} else {
+		// A confirmed account lock must survive a failed proxy-state write.
+		accountLocked := appleOnboardingLockedResponse(response) != nil
 		if s.rotationAttempted {
 			if !s.deferRotationCommit || response.StatusCode >= http.StatusBadRequest {
-				if stateErr := s.routes.recordProxySuccess(s.ctx, s.email, s.rotationToken, true); stateErr != nil {
+				if stateErr := s.routes.recordProxySuccess(s.ctx, s.email, s.rotationToken, true); stateErr != nil && !accountLocked {
 					return nil, appleProxyRotationErrorFor(stateErr, 0, false)
 				}
 				s.rotationAttempted = false
 			}
-		} else if stateErr := s.routes.recordProxySuccess(s.ctx, s.email, s.rotationToken, false); stateErr != nil {
+		} else if stateErr := s.routes.recordProxySuccess(s.ctx, s.email, s.rotationToken, false); stateErr != nil && !accountLocked {
 			return nil, appleProxyRotationErrorFor(stateErr, 0, false)
 		}
 		s.routes.reportSuccess(s.ctx, s.proxyID)

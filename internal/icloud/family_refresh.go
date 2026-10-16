@@ -127,6 +127,9 @@ func familyRefreshError(err error) string {
 	}
 	var appleErr *AppleOnboardingError
 	if errors.As(err, &appleErr) {
+		if appleErr.Category == iCloudAccountLockedCategory {
+			return iCloudAccountLockedMessage
+		}
 		return "Device login failed. Check the account credentials and device status."
 	}
 	if errors.Is(err, errDeviceNoCode) || errors.Is(err, errDeviceUnauthorized) || errors.Is(err, errDeviceUnavailable) {
@@ -136,7 +139,7 @@ func familyRefreshError(err error) string {
 }
 
 func (s *Service) refreshFamilySnapshot(ctx context.Context, task iCloudFamilyRefreshTask, resource iCloudResourceModel, progress func(string) error) (iCloudFamilySnapshot, error) {
-	if resource.Status == iCloudResourceDisabled {
+	if isICloudAccountLocked(resource) || resource.Status == iCloudResourceDisabled {
 		return iCloudFamilySnapshot{}, ErrICloudResourceStatus
 	}
 	if err := progress("querying"); err != nil {
@@ -214,7 +217,7 @@ func (s *Service) refreshFamilySnapshot(ctx context.Context, task iCloudFamilyRe
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, task.ResourceID).Error; err != nil {
 				return err
 			}
-			if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled {
+			if isICloudAccountLocked(resource) || resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled {
 				return ErrICloudResourceStatus
 			}
 			if resource.PrimaryEmail != expectedEmail {
@@ -328,6 +331,11 @@ func (s *Service) loginFamilyDevice(ctx context.Context, resource iCloudResource
 		response, err := s.onboardingApple.Execute(ctx, AppleOnboardingRequest{Operation: operation, Email: resource.PrimaryEmail, Secret: secret, Session: session,
 			PhoneNumber: resource.BoundPhoneNumber, PhoneCountryCode: resource.BoundPhoneCountryCode, Code: code, SMSPurpose: appleSMSManageLogin,
 			UseDeviceCode: true, SkipPhoneEnrollment: true, SkipPrivateAlias: true})
+		if isAppleAccountLockedError(err) {
+			if stopErr := s.stopLockedICloudAccount(ctx, resource); stopErr != nil {
+				return AppleOnboardingResponse{}, stopErr
+			}
+		}
 		if err == nil {
 			session = response.Session
 		}
@@ -426,7 +434,7 @@ func (s *Service) saveFamilyCookie(ctx context.Context, expected iCloudResourceM
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, expected.ID).Error; err != nil {
 			return err
 		}
-		if current.Status == iCloudResourceDeleted || current.Status == iCloudResourceDisabled || current.CredentialRevision != expected.CredentialRevision ||
+		if isICloudAccountLocked(current) || current.Status == iCloudResourceDeleted || current.Status == iCloudResourceDisabled || current.CredentialRevision != expected.CredentialRevision ||
 			current.WorkflowGeneration != expected.WorkflowGeneration || current.PrimaryEmail != expected.PrimaryEmail || current.DeviceCodeAPI != expected.DeviceCodeAPI || iCloudCookieMaintenanceWorkflowActive(current) {
 			return errICloudRefreshStale
 		}

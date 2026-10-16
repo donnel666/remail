@@ -16,6 +16,8 @@ import (
 
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
 	"github.com/donnel666/remail/internal/icloud"
+	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
+	mailmatchinfra "github.com/donnel666/remail/internal/mailmatch/infra"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
@@ -224,6 +226,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		from = cfg.SMTP.Username
 	}
 	service.SetLivenessMail(diagnosticSender{SenderPort: sender, stderr: stderr}, inbox, from)
+	service.SetLivenessReceiptStore(mailmatchapp.NewUseCase(mailmatchinfra.NewRepo(p.DB, files), nil, nil, nil))
 	var runs []checkRun
 	var startupErr error
 	for _, row := range rows {

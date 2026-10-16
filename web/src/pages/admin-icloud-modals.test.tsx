@@ -533,6 +533,26 @@ describe("admin iCloud modal workflows", () => {
     expect(screen.getByRole("button", { name: /Liveness check/ })).toBeDisabled();
   });
 
+  it.each(["normal", "abnormal"] as const)("keeps liveness available for %s resources with locked Cookies", async (status) => {
+    const item = resource();
+    render(
+      <ICloudMaintenanceModal
+        aliasLimit={750}
+        onCancel={vi.fn()}
+        onCompleted={vi.fn()}
+        target={{ mode: "row", item: { ...item, status, newSession: { ...item.newSession!, status: "locked" } } }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /Validate resource/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Create alias/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Confirm family sharing/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Liveness check/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Submit maintenance task" }));
+    await waitFor(() => expect(mocks.liveness).toHaveBeenCalledWith(41, 3));
+    expect(mocks.validate).not.toHaveBeenCalled();
+    expect(mocks.alias).not.toHaveBeenCalled();
+  });
+
   it("confirms manual family sharing from the maintenance menu for automatic onboarding", async () => {
     mocks.getResourceDetail.mockResolvedValueOnce({
       ...resourceDetail(),
@@ -926,6 +946,23 @@ describe("admin iCloud modal workflows", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "Refresh Cookie" })).toBeDisabled();
+  });
+
+  it("blocks credential maintenance for a locked account while keeping it normal", () => {
+    const detail = resourceDetail();
+    render(
+      <ICloudTasksPanel
+        canOperate
+        item={{ ...detail, status: "normal", newSession: { ...detail.newSession!, status: "locked" } }}
+        onRefresh={vi.fn()}
+        refreshGeneration={0}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Validate" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create alias" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh Cookie" })).toBeDisabled();
+    expect(mocks.alias).not.toHaveBeenCalled();
+    expect(mocks.refreshCookies).not.toHaveBeenCalled();
   });
 
   it("offers recovery when an eligible Cookie channel is missing", () => {

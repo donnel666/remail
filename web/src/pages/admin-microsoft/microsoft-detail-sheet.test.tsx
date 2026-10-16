@@ -209,6 +209,14 @@ const EMPTY_PAGE = {
 };
 const EMPTY_TASKS = { ...EMPTY_PAGE, succeeded: 0 };
 
+function inboxMessage(id: number) {
+  return {
+    id, mailbox: "main", orderNo: null, preview: `Probe ${id}`,
+    receivedAt: `2026-10-16T03:00:0${id}Z`, recipient: "alias@icloud.com",
+    sender: "probe@qq.com", status: "ignored", subject: `Probe ${id}`, verificationCode: null,
+  };
+}
+
 function detail(id: number): AdminMicrosoftResourceDetail {
   const now = "2026-07-12T00:00:00Z";
   return {
@@ -667,6 +675,128 @@ describe("admin Microsoft detail sheet runtime", () => {
 
     await waitFor(() => expect(mocks.fetchMail).toHaveBeenCalledWith(77, "icloud"));
   });
+
+  it("automatically shows received iCloud mail without fetching or losing selection", async () => {
+    vi.useFakeTimers();
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    try {
+      mocks.messages
+        .mockResolvedValueOnce({ ...EMPTY_PAGE, items: [inboxMessage(1)], total: 1 })
+        .mockResolvedValue({ ...EMPTY_PAGE, items: [inboxMessage(2), inboxMessage(1)], total: 2 });
+      const view = render(
+        <ResourceMailsPanel resourceId={77} resourceType="icloud" t={((key: string) => key) as TFunction} />,
+      );
+      await act(async () => { await Promise.resolve(); });
+      expect(mocks.messages).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: /Probe 1/ })).toHaveAttribute("aria-pressed", "true");
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(mocks.messages).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole("button", { name: /Probe 2/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Probe 1/ })).toHaveAttribute("aria-pressed", "true");
+      expect(mocks.fetchMail).not.toHaveBeenCalled();
+      view.unmount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(mocks.messages).toHaveBeenCalledTimes(2);
+    } finally {
+      cleanup();
+      hidden.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("pauses hidden iCloud inbox polling, avoids overlapping requests, and backs off on errors", async () => {
+    vi.useFakeTimers();
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    let resolvePoll!: (value: typeof EMPTY_PAGE) => void;
+    try {
+      mocks.messages
+        .mockResolvedValueOnce(EMPTY_PAGE)
+        .mockImplementationOnce(() => new Promise((resolve) => { resolvePoll = resolve; }))
+        .mockRejectedValueOnce(new Error("temporary list failure"))
+        .mockResolvedValue(EMPTY_PAGE);
+      render(<ResourceMailsPanel resourceId={77} resourceType="icloud" t={((key: string) => key) as TFunction} />);
+      await act(async () => { await Promise.resolve(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(mocks.messages).toHaveBeenCalledTimes(2);
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(mocks.messages).toHaveBeenCalledTimes(2);
+      hidden.mockReturnValue(true);
+      act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+      await act(async () => { resolvePoll(EMPTY_PAGE); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(mocks.messages).toHaveBeenCalledTimes(2);
+      hidden.mockReturnValue(false);
+      act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(mocks.messages).toHaveBeenCalledTimes(3);
+      await act(async () => { await vi.advanceTimersByTimeAsync(19_999); });
+      expect(mocks.messages).toHaveBeenCalledTimes(3);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(mocks.messages).toHaveBeenCalledTimes(4);
+      expect(mocks.toastError).not.toHaveBeenCalled();
+      expect(mocks.fetchMail).not.toHaveBeenCalled();
+    } finally {
+      cleanup();
+      hidden.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps loaded history and its continuation cursor when new iCloud mail arrives", async () => {
+    vi.useFakeTimers();
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    const cursor = (id: number) => ({ beforeReceivedAt: inboxMessage(id).receivedAt, beforeId: id });
+    const page = (ids: number[], nextId?: number) => ({
+      ...EMPTY_PAGE, items: ids.map(inboxMessage), total: 4, hasMore: nextId !== undefined,
+      nextBeforeReceivedAt: nextId === undefined ? undefined : inboxMessage(nextId).receivedAt, nextBeforeId: nextId,
+    });
+    try {
+      mocks.messages
+        .mockResolvedValueOnce(page([3], 3))
+        .mockResolvedValueOnce(page([2], 2))
+        .mockResolvedValueOnce(page([4, 3], 3))
+        .mockResolvedValueOnce(page([1]));
+      render(<ResourceMailsPanel resourceId={77} resourceType="icloud" t={((key: string) => key) as TFunction} />);
+      await act(async () => { await Promise.resolve(); });
+      const scroller = screen.getByTestId("admin-microsoft-message-list");
+      Object.defineProperties(scroller, {
+        clientHeight: { configurable: true, value: 200 },
+        scrollHeight: { configurable: true, value: 400 },
+        scrollTop: { configurable: true, value: 180 },
+      });
+      await act(async () => { fireEvent.scroll(scroller); });
+      expect(mocks.messages.mock.calls[1]?.[3]).toEqual(cursor(3));
+      fireEvent.click(screen.getByRole("button", { name: /Probe 2/ }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(mocks.messages.mock.calls[2]?.[3]).toBeUndefined();
+      expect(screen.getByRole("button", { name: /Probe 4/ })).toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: /Probe 3/ })).toHaveLength(1);
+      expect(screen.getByRole("button", { name: /Probe 2/ })).toHaveAttribute("aria-pressed", "true");
+      await act(async () => { fireEvent.scroll(scroller); });
+      expect(mocks.messages.mock.calls[3]?.[3]).toEqual(cursor(2));
+      expect(screen.getByRole("button", { name: /Probe 1/ })).toBeInTheDocument();
+    } finally {
+      cleanup();
+      hidden.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([["microsoft", false], ["gmail", false], ["icloud", true]] as const)(
+    "does not automatically poll %s mail with auxiliary=%s",
+    async (resourceType, auxiliary) => {
+      vi.useFakeTimers();
+      try {
+        render(<ResourceMailsPanel resourceId={77} resourceType={resourceType} auxiliary={auxiliary} t={((key: string) => key) as TFunction} />);
+        await act(async () => { await Promise.resolve(); });
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+        expect((auxiliary ? mocks.bindingMessages : mocks.messages)).toHaveBeenCalledTimes(1);
+      } finally {
+        cleanup();
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("passes the Gmail resource type to the shared mailbox fetch", async () => {
     render(

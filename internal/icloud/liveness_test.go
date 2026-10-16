@@ -53,6 +53,7 @@ func newICloudLivenessTestService(t *testing.T) (*Service, *iCloudLivenessMailSt
 	service.now = func() time.Time { return now }
 	sender := &iCloudLivenessMailStub{}
 	service.SetLivenessMail(sender, mailapp.NewInboundService(nil, sender, files, nil, nil), "ReMail <no-reply@relay.example>")
+	service.SetLivenessReceiptStore(&livenessReceiptTestStore{db: db})
 	return service, sender, &now
 }
 
@@ -255,7 +256,7 @@ func TestICloudLivenessDirectReceiptShortCircuitsBounceCheck(t *testing.T) {
 			require.NoError(t, s.db.Take(&finished, run.ID).Error)
 			require.Equal(t, iCloudMaintenanceSucceeded, finished.Status)
 			require.Nil(t, finished.NextCheckAt)
-			require.NoError(t, s.finishICloudLivenessCheck(context.Background(), run, iCloudResourceAbnormal, iCloudMaintenanceFailed, "stale bounce result", false))
+			require.NoError(t, s.finishICloudLivenessCheck(context.Background(), run, iCloudResourceAbnormal, iCloudMaintenanceFailed, "stale bounce result", nil))
 			*now = now.Add(time.Hour)
 			require.NoError(t, s.ProcessICloudLivenessCheck(context.Background(), run.ID))
 			var resource iCloudResourceModel
@@ -819,6 +820,7 @@ func TestICloudLivenessUnconfirmedSendWaitsForReceipt(t *testing.T) {
 					worker := NewService(s.db, nil, s.files, s.deviceRedis)
 					worker.now, worker.newLivenessSMTP = s.now, s.newLivenessSMTP
 					worker.SetLivenessMail(sender, s.livenessInbox, s.livenessFrom)
+					worker.SetLivenessReceiptStore(s.livenessReceipts)
 					*now = started.Add(iCloudLivenessWorkerTimeout)
 					require.NoError(t, worker.ProcessICloudLivenessCheck(context.Background(), run.ID))
 					require.NoError(t, s.db.Take(&run, run.ID).Error)

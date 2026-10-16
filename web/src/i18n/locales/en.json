@@ -3170,5 +3170,7 @@
   "SMTP rejected the test recipient. Check that the configured sender mailbox can receive mail.": "SMTP rejected the test recipient. Check that the configured sender mailbox can receive mail.",
   "SMTP rejected the test message. Check the provider's sending restrictions or rate limits.": "SMTP rejected the test message. Check the provider's sending restrictions or rate limits.",
   "SMTP connection failed. Check the server address, port and network access.": "SMTP connection failed. Check the server address, port and network access.",
-  "SMTP did not accept the test email. Check the SMTP settings before retrying.": "SMTP did not accept the test email. Check the SMTP settings before retrying."
+  "SMTP did not accept the test email. Check the SMTP settings before retrying.": "SMTP did not accept the test email. Check the SMTP settings before retrying.",
+  "Account locked": "Account locked",
+  "Login, Cookie keepalive and alias creation are stopped. Mail delivery is checked separately.": "Login, Cookie keepalive and alias creation are stopped. Mail delivery is checked separately."
 }

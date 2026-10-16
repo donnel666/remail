@@ -208,6 +208,7 @@ func TestICloudLivenessSMTPRotationAndSafeFailover(t *testing.T) {
 		if id == 2 {
 			worker = NewService(s.db, nil, s.files, s.deviceRedis)
 			worker.now, worker.livenessInbox, worker.newLivenessSMTP = s.now, s.livenessInbox, s.newLivenessSMTP
+			worker.SetLivenessReceiptStore(s.livenessReceipts)
 		}
 		require.NoError(t, worker.ProcessICloudLivenessCheck(context.Background(), run.ID))
 		var stored iCloudMaintenanceRunModel
@@ -220,6 +221,7 @@ func TestICloudLivenessSMTPRotationAndSafeFailover(t *testing.T) {
 			*now = *stored.NextCheckAt
 			worker = NewService(s.db, nil, s.files, s.deviceRedis)
 			worker.now, worker.livenessInbox, worker.newLivenessSMTP = s.now, s.livenessInbox, s.newLivenessSMTP
+			worker.SetLivenessReceiptStore(s.livenessReceipts)
 			require.NoError(t, worker.ProcessICloudLivenessCheck(context.Background(), run.ID))
 			require.NoError(t, s.db.Take(&stored, run.ID).Error)
 		}
@@ -410,6 +412,7 @@ func TestICloudLivenessSMTPThrottlesThousandConcurrentChecks(t *testing.T) {
 			defer workers.Done()
 			worker := NewService(s.db, nil, s.files, s.deviceRedis)
 			worker.now, worker.livenessInbox, worker.newLivenessSMTP = s.now, s.livenessInbox, s.newLivenessSMTP
+			worker.SetLivenessReceiptStore(s.livenessReceipts)
 			for index := offset; index < len(runs); index += 20 {
 				results <- worker.ProcessICloudLivenessCheck(context.Background(), runs[index].ID)
 			}
@@ -450,6 +453,7 @@ func TestICloudLivenessSMTPSendIntervalIsSharedAcrossWorkers(t *testing.T) {
 	require.NoError(t, s.db.Where("resource_id=2").Take(&second).Error)
 	worker := NewService(s.db, nil, s.files, s.deviceRedis)
 	worker.now, worker.livenessInbox, worker.newLivenessSMTP = s.now, s.livenessInbox, s.newLivenessSMTP
+	worker.SetLivenessReceiptStore(s.livenessReceipts)
 	require.NoError(t, s.ProcessICloudLivenessCheck(context.Background(), first.ID))
 	require.NoError(t, worker.ProcessICloudLivenessCheck(context.Background(), second.ID))
 	require.NoError(t, s.db.Take(&second, second.ID).Error)

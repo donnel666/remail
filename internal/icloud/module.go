@@ -26,6 +26,7 @@ const (
 	iCloudSessionUnchecked = "unchecked"
 	iCloudSessionValid     = "valid"
 	iCloudSessionInvalid   = "invalid"
+	iCloudSessionLocked    = "locked"
 
 	iCloudChannelWeb           = "icloud_web"
 	iCloudChannelAppleAccount  = "apple_account"
@@ -99,6 +100,7 @@ type Service struct {
 	validateImportOwner func(context.Context, uint) (bool, error)
 	backgroundExecution BackgroundExecutionGate
 	livenessSender      mailapp.SenderPort
+	livenessReceipts    LivenessReceiptStore
 	newLivenessSMTP     func(mailinfra.SMTPConfig) mailapp.SenderPort
 	livenessInbox       *mailapp.InboundService
 	livenessFrom        string

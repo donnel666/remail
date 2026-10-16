@@ -28,7 +28,7 @@ func (s *Service) ensureICloudCookieMaintenanceTx(ctx context.Context, tx *gorm.
 		}
 		return false, err
 	}
-	if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || resource.AliasCount >= iCloudMaxAliases {
+	if isICloudAccountLocked(resource) || resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || resource.AliasCount >= iCloudMaxAliases {
 		return false, nil
 	}
 	if active, err := s.familyLoginActive(ctx, resourceID); active || err != nil {
@@ -112,7 +112,7 @@ func (s *Service) ensureICloudCookieRecoveryTx(ctx context.Context, tx *gorm.DB,
 		}
 		return false, err
 	}
-	if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || resource.AliasCount >= iCloudMaxAliases ||
+	if isICloudAccountLocked(resource) || resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || resource.AliasCount >= iCloudMaxAliases ||
 		(resource.DeviceCodeAPI == "" && (strings.TrimSpace(resource.BoundPhoneNumber) == "" || resource.KitesimPhoneID == nil)) {
 		return false, nil
 	}

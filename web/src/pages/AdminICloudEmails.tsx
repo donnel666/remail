@@ -242,6 +242,7 @@ const sessionMeta: Record<
   unchecked: { color: "grey", label: "Unchecked" },
   valid: { color: "green", label: "Valid" },
   invalid: { color: "red", label: "Invalid" },
+  locked: { color: "red", label: "Account locked" },
 };
 
 const aliasStatusMeta = {
@@ -352,6 +353,7 @@ function SessionStatusTag({ session }: { session: AdminICloudSessionView | null 
     </Tag>
   );
   const diagnostic = [
+    session.status === "locked" ? t("Login, Cookie keepalive and alias creation are stopped. Mail delivery is checked separately.") : "",
     session.failures ? `${t("Failures")}: ${session.failures}` : "",
     session.cooldownUntil ? `${t("Cooldown until")}: ${formatTime(session.cooldownUntil)}` : "",
     session.lastValidAt ? `${t("Last valid")}: ${formatTime(session.lastValidAt)}` : "",
@@ -359,6 +361,10 @@ function SessionStatusTag({ session }: { session: AdminICloudSessionView | null 
     .filter(Boolean)
     .join(" · ");
   return diagnostic ? <Tooltip content={diagnostic}>{tag}</Tooltip> : tag;
+}
+
+function iCloudCookiesLocked(item: AdminICloudResourceItem) {
+  return item.newSession?.status === "locked" || item.oldSession?.status === "locked";
 }
 
 function AliasCountTag({ count, limit }: { count: number; limit: number }) {
@@ -1991,13 +1997,14 @@ export function ICloudMaintenanceModal({
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (target) setSelected("validate");
+    if (target) setSelected(target.mode === "row" && iCloudCookiesLocked(target.item) ? "liveness" : "validate");
   }, [target]);
 
   if (!target) return null;
 
   const rowDisabled = target.mode === "row" &&
     (target.item.status === "disabled" || target.item.status === "deleted");
+  const cookiesLocked = target.mode === "row" && iCloudCookiesLocked(target.item);
   const actions: Array<{
     description: string;
     disabled: boolean;
@@ -2007,14 +2014,14 @@ export function ICloudMaintenanceModal({
   }> = [
     {
       description: "Check whether each configured Cookie can create an alias.",
-      disabled: rowDisabled,
+      disabled: rowDisabled || cookiesLocked,
       icon: ShieldCheck,
       key: "validate" as const,
       label: "Validate resource",
     },
     {
       description: "Queue dual-channel alias provisioning. Cookie state controls creation only.",
-      disabled: rowDisabled || (target.mode === "row" && target.item.aliasCount >= aliasLimit),
+      disabled: rowDisabled || cookiesLocked || (target.mode === "row" && target.item.aliasCount >= aliasLimit),
       icon: AtSign,
       key: "alias" as const,
       label: "Create alias",
@@ -2030,7 +2037,7 @@ export function ICloudMaintenanceModal({
   if (target.mode === "row") {
     actions.push({
       description: "Confirm that family sharing has been enabled manually for an automatic onboarding resource before Apple account configuration continues.",
-      disabled: rowDisabled,
+      disabled: rowDisabled || cookiesLocked,
       icon: Workflow,
       key: "familySharing",
       label: "Confirm family sharing",
@@ -2359,6 +2366,8 @@ export function ICloudTasksPanel({
     ? Math.round((response.succeeded / response.total) * 100)
     : 0;
   const awaitingVersionRefresh = submittedVersion !== null && item.version < submittedVersion;
+  const accountLocked = iCloudCookiesLocked(item) ||
+    item.refreshTask?.lastErrorCategory === "account_locked" || item.onboardingTask?.lastErrorCategory === "account_locked";
   const cookieRefreshEligible = !item.newSession || item.newSession.status === "invalid" ||
     (item.icloudOpened && (!item.oldSession || item.oldSession.status === "invalid"));
   const automationTaskActive = [item.onboardingTask, item.refreshTask].some(
@@ -2376,7 +2385,7 @@ export function ICloudTasksPanel({
       {canOperate ? (
         <div className="mb-4 flex flex-wrap gap-2">
           <Button
-            disabled={item.status === "deleted" || item.status === "disabled" || busy !== null || awaitingVersionRefresh}
+            disabled={accountLocked || item.status === "deleted" || item.status === "disabled" || busy !== null || awaitingVersionRefresh}
             loading={busy === "validate"}
             onClick={() => void runAction("validate")}
             size="small"
@@ -2385,7 +2394,7 @@ export function ICloudTasksPanel({
             {t("Validate")}
           </Button>
           <Button
-            disabled={item.status === "deleted" || item.status === "disabled" || item.aliasCount >= item.aliasLimit || busy !== null || awaitingVersionRefresh}
+            disabled={accountLocked || item.status === "deleted" || item.status === "disabled" || item.aliasCount >= item.aliasLimit || busy !== null || awaitingVersionRefresh}
             loading={busy === "alias"}
             onClick={() => void runAction("alias")}
             size="small"
@@ -2394,7 +2403,7 @@ export function ICloudTasksPanel({
             {t("Create alias")}
           </Button>
           <Button
-            disabled={item.status === "deleted" || item.status === "disabled" || item.aliasCount >= item.aliasLimit || (!item.deviceCodeApiAvailable && (!item.boundPhoneNumber || !item.kitesimPhoneId)) || !cookieRefreshEligible || cookieRefreshPhoneBlacklisted || automationTaskActive || busy !== null || awaitingVersionRefresh}
+            disabled={accountLocked || item.status === "deleted" || item.status === "disabled" || item.aliasCount >= item.aliasLimit || (!item.deviceCodeApiAvailable && (!item.boundPhoneNumber || !item.kitesimPhoneId)) || !cookieRefreshEligible || cookieRefreshPhoneBlacklisted || automationTaskActive || busy !== null || awaitingVersionRefresh}
             icon={<RefreshCw size={14} />}
             loading={busy === "cookieRefresh"}
             onClick={() => void runAction("cookieRefresh")}

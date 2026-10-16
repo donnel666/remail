@@ -28,8 +28,9 @@ const (
 )
 
 var (
-	appleOnboardingBootArgsPattern = regexp.MustCompile(`(?s)<script type="application/json"(?: class="boot_args"| id="boot_args")>\s*(.*?)</script>`)
-	appleOnboardingHTMLAttrPattern = regexp.MustCompile(`(?i)%s="([^"]*)"`)
+	appleOnboardingBootArgsPattern      = regexp.MustCompile(`(?s)<script type="application/json"(?: class="boot_args"| id="boot_args")>\s*(.*?)</script>`)
+	appleOnboardingHTMLAttrPattern      = regexp.MustCompile(`(?i)%s="([^"]*)"`)
+	appleOnboardingLockedAccountPattern = regexp.MustCompile(`(?i)\bapple\s+(?:account|id)\s+(?:is|has\s+been)\s+(?:not\s+active|inactive|locked|disabled)\b`)
 )
 
 type appleOnboardingEndpoints struct {
@@ -302,6 +303,9 @@ func (f *appleOnboardingFlow) request(method, rawURL string, body any, html, pro
 	f.state.Status = response.StatusCode
 	f.lastHTTPStatus = response.StatusCode
 	f.absorb(response.Header, appleOnboardingHost(rawURL))
+	if locked := appleOnboardingLockedResponse(response); locked != nil {
+		return nil, locked
+	}
 	if response.StatusCode == http.StatusTooManyRequests || response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= http.StatusInternalServerError {
 		if response.ProxyRetryExhausted {
 			return nil, &AppleOnboardingError{Category: "apple_unavailable", SafeMessage: "Apple service remained unavailable after the proxy was rotated.", HTTPStatus: response.StatusCode, ProxyRetryExhausted: true}
@@ -998,8 +1002,28 @@ func appleOnboardingFamilyJoinApplied(status int) bool {
 }
 
 func appleOnboardingLooksLocked(data map[string]any) bool {
-	message := strings.ToLower(appleOnboardingServiceError(data))
-	return strings.Contains(message, "locked") || strings.Contains(message, "disabled") || strings.Contains(message, "inactive")
+	for _, key := range []string{"serviceErrors", "service_errors"} {
+		for _, value := range appleOnboardingSlice(data[key]) {
+			item := appleOnboardingMap(value)
+			if appleOnboardingString(item["code"]) == "-20755" ||
+				appleOnboardingLockedAccountPattern.MatchString(appleOnboardingString(item["message"])) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func appleOnboardingLockedResponse(response *appleOnboardingHTTPResponse) *AppleOnboardingError {
+	if response == nil || response.StatusCode < http.StatusBadRequest || response.StatusCode >= http.StatusInternalServerError {
+		return nil
+	}
+	var data map[string]any
+	if json.Unmarshal([]byte(response.Body), &data) != nil || !appleOnboardingLooksLocked(data) {
+		return nil
+	}
+	return &AppleOnboardingError{Category: iCloudAccountLockedCategory, SafeMessage: iCloudAccountLockedMessage,
+		ProviderMessage: safeICloudImportMessage(appleOnboardingServiceError(data)), HTTPStatus: response.StatusCode}
 }
 
 func appleOnboardingPermanent(category, message string, data map[string]any) error {

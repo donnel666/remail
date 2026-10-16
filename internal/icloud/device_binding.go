@@ -83,10 +83,10 @@ func (s *Service) ensureDeviceBinding(ctx context.Context, email, password strin
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if resourceID != nil {
 			var resource iCloudResourceModel
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "primary_email", "status", "kitesim_phone_id").First(&resource, *resourceID).Error; err != nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "primary_email", "status", "kitesim_phone_id", "last_error_category").First(&resource, *resourceID).Error; err != nil {
 				return err
 			}
-			if resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || !strings.EqualFold(resource.PrimaryEmail, email) || resource.KitesimPhoneID == nil || *resource.KitesimPhoneID != phoneID {
+			if isICloudAccountLocked(resource) || resource.Status == iCloudResourceDeleted || resource.Status == iCloudResourceDisabled || !strings.EqualFold(resource.PrimaryEmail, email) || resource.KitesimPhoneID == nil || *resource.KitesimPhoneID != phoneID {
 				return ErrICloudResourceStatus
 			}
 		}

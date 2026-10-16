@@ -54,6 +54,7 @@ func (s *Service) DispatchICloudOnboardingTasks(ctx context.Context, limit int) 
 	}
 	var tasks []iCloudOnboardingTaskModel
 	if err := s.db.WithContext(ctx).
+		Where("COALESCE(last_error_category, '') <> ?", iCloudAccountLockedCategory).
 		Where("task_kind IN ? AND onboarding_status IN ? AND dispatch_status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)", []string{"", "onboarding", iCloudUserImportTaskKind, "refresh", iCloudCookieRecoveryTaskKind}, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, "pending", now).
 		Order("id ASC").Limit(limit).Find(&tasks).Error; err != nil {
 		return ErrICloudOnboardingTemporary
@@ -184,6 +185,7 @@ func (s *Service) ProcessICloudOnboardingTask(ctx context.Context, payload iClou
 	claim := newICloudOnboardingClaimToken()
 	now := s.now().UTC().Truncate(time.Millisecond)
 	result := s.db.WithContext(ctx).Model(&iCloudOnboardingTaskModel{}).
+		Where("COALESCE(last_error_category, '') <> ?", iCloudAccountLockedCategory).
 		Where("id = ? AND generation = ? AND task_kind IN ? AND onboarding_status IN ? AND dispatch_status IN ?", payload.TaskID, payload.Generation, []string{"", "onboarding", iCloudUserImportTaskKind, "refresh", iCloudCookieRecoveryTaskKind}, []string{iCloudOnboardingProcessing, iCloudOnboardingWaiting}, []string{"pending", "queued"}).
 		Updates(map[string]any{
 			"onboarding_status": iCloudOnboardingProcessing, "dispatch_status": "running", "claim_token": claim,
@@ -1566,6 +1568,9 @@ func (s *Service) handleICloudOnboardingAppleError(ctx context.Context, task *iC
 	if !errors.As(err, &appleErr) {
 		return ErrICloudOnboardingTemporary
 	}
+	if appleErr.Category == iCloudAccountLockedCategory {
+		return s.failICloudOnboardingTask(ctx, task, iCloudAccountLockedCategory, iCloudAccountLockedMessage)
+	}
 	if appleErr.ProxyRetryExhausted {
 		return s.failICloudOnboardingTask(ctx, task, firstNonEmpty(appleErr.Category, "apple_unavailable"), appleErr.SafeMessage)
 	}
@@ -1787,6 +1792,9 @@ func isICloudPostFamilyRecoveryTask(task *iCloudOnboardingTaskModel) bool {
 }
 
 func isICloudPostFamilyRecoveryAvailable(task iCloudOnboardingTaskModel) bool {
+	if task.LastErrorCategory == iCloudAccountLockedCategory {
+		return false
+	}
 	stopped := task.Status == iCloudOnboardingFailed && task.DispatchStatus == "failed" ||
 		task.Status == iCloudOnboardingWaiting && task.DispatchStatus == "waiting"
 	return isICloudPostFamilyRecoveryTask(&task) && stopped && len(task.SecretPayload) > 0 &&
@@ -1827,6 +1835,9 @@ func iCloudPostFamilyRecoveryStage(task iCloudOnboardingTaskModel) string {
 }
 
 func failICloudOnboardingTaskTx(tx *gorm.DB, task *iCloudOnboardingTaskModel, category, message string, attempts int, now time.Time, extra map[string]any) (bool, error) {
+	if category == iCloudAccountLockedCategory {
+		return failLockedICloudOnboardingTaskTx(tx, task, attempts, now)
+	}
 	updates := map[string]any{
 		"onboarding_status": iCloudOnboardingFailed, "dispatch_status": "failed", "claim_token": "", "next_attempt_at": nil,
 		"attempts": min(attempts, task.MaxAttempts), "last_error_category": safeICloudImportMessage(category),
@@ -1865,6 +1876,11 @@ func (s *Service) failICloudOnboardingTask(ctx context.Context, task *iCloudOnbo
 	if task == nil {
 		return ErrICloudOnboardingTemporary
 	}
+	if category == iCloudAccountLockedCategory {
+		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), iCloudMaintenanceFinishTimeout)
+		defer cancel()
+		return s.failICloudOnboardingTaskWithUpdates(finishCtx, task, category, iCloudAccountLockedMessage, task.Attempts+1, nil)
+	}
 	if task.TaskKind == "refresh" && task.ResourceID != nil {
 		s.cancelICloudOnboardingSMSChallenge(context.WithoutCancel(ctx), task)
 		return s.failICloudRefreshTask(ctx, task, category, message)
@@ -1891,7 +1907,7 @@ func (s *Service) failICloudOnboardingTaskWithUpdates(ctx context.Context, task 
 	}
 	s.cancelICloudOnboardingSMSChallenge(context.WithoutCancel(ctx), task)
 	_ = s.refreshICloudOnboardingImport(context.WithoutCancel(ctx), iCloudOnboardingImportID(task))
-	if isICloudCookieRecoveryTask(task) && category != "cookie_recovery_stale" && task.ResourceID != nil && task.ID == *task.ResourceID {
+	if isICloudCookieRecoveryTask(task) && category != "cookie_recovery_stale" && category != iCloudAccountLockedCategory && task.ResourceID != nil && task.ID == *task.ResourceID {
 		s.scheduleICloudCookieMaintenanceAfter(context.WithoutCancel(ctx), task.ResourceID, iCloudCookieRecoveryTaskKind)
 	}
 	return nil

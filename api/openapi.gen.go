@@ -993,6 +993,7 @@ func (e AdminICloudSMTPTestResponseAccepted) Valid() bool {
 // Defines values for AdminICloudSessionStatus.
 const (
 	AdminICloudSessionStatusInvalid   AdminICloudSessionStatus = "invalid"
+	AdminICloudSessionStatusLocked    AdminICloudSessionStatus = "locked"
 	AdminICloudSessionStatusUnchecked AdminICloudSessionStatus = "unchecked"
 	AdminICloudSessionStatusValid     AdminICloudSessionStatus = "valid"
 )
@@ -1001,6 +1002,8 @@ const (
 func (e AdminICloudSessionStatus) Valid() bool {
 	switch e {
 	case AdminICloudSessionStatusInvalid:
+		return true
+	case AdminICloudSessionStatusLocked:
 		return true
 	case AdminICloudSessionStatusUnchecked:
 		return true
