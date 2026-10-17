@@ -194,7 +194,7 @@ func TestBillingWalletReferralsRoute(t *testing.T) {
 }
 
 func TestBillingSupplierTransferIsAuthorizedAtomicAndIdempotent(t *testing.T) {
-	db, migrationsDir := newBillingAPILegacyMigrationTestDB(t)
+	db := newBillingAPITestDB(t)
 	supplierID := createBillingAPIUser(t, db, "supplier-transfer@example.com", iamdomain.RoleSupplier)
 	userID := createBillingAPIUser(t, db, "user-transfer@example.com", iamdomain.RoleUser)
 	adminID := createBillingAPIUser(t, db, "admin-transfer@example.com", iamdomain.RoleAdmin)
@@ -291,11 +291,39 @@ func TestBillingSupplierTransferIsAuthorizedAtomicAndIdempotent(t *testing.T) {
 	require.NoError(t, db.Model(&billinginfra.WalletTransactionModel{}).
 		Where("user_id = ? AND biz_type = ?", supplierID, "supplier_transfer").Count(&transactionCount).Error)
 	require.EqualValues(t, 4, transactionCount)
+}
+
+func TestBillingSupplierTransferMigrationPreservesLedgerMySQL(t *testing.T) {
+	db, migrationsDir := newBillingAPILegacyMigrationTestDB(t)
+	supplierID := createBillingAPIUser(t, db, "supplier-transfer-migration@example.com", iamdomain.RoleSupplier)
+	// Legacy rollback coverage must not invoke application queries requiring later migrations.
+	entries := []billinginfra.WalletTransactionModel{
+		{
+			TransactionNo: "TX-LEGACY-TRANSFER-OUT", UserID: supplierID,
+			TransactionType: string(billingdomain.TransactionTypeTransfer), BalanceBucket: "supplier_available", Direction: "out",
+			Amount: "-4.000000", BalanceBefore: "12.000000", BalanceAfter: "8.000000", BizType: "supplier_transfer", BizID: "legacy-transfer",
+		},
+		{
+			TransactionNo: "TX-LEGACY-TRANSFER-IN", UserID: supplierID,
+			TransactionType: string(billingdomain.TransactionTypeTransfer), BalanceBucket: "consumer", Direction: "in",
+			Amount: "4.000000", BalanceBefore: "3.000000", BalanceAfter: "7.000000", BizType: "supplier_transfer", BizID: "legacy-transfer",
+		},
+	}
+	require.NoError(t, db.Create(&entries).Error)
+	var before []billinginfra.WalletTransactionModel
+	require.NoError(t, db.Order("id").Find(&before).Error)
+	require.Len(t, before, 2)
 
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	require.NoError(t, goose.DownTo(sqlDB, migrationsDir, 62), "immutable outbound transfer rows must not block rollback")
+	var afterRollback []billinginfra.WalletTransactionModel
+	require.NoError(t, db.Order("id").Find(&afterRollback).Error)
+	require.Equal(t, before, afterRollback, "rollback must preserve both ledger entries")
 	require.NoError(t, goose.UpTo(sqlDB, migrationsDir, 63))
+	var afterUpgrade []billinginfra.WalletTransactionModel
+	require.NoError(t, db.Order("id").Find(&afterUpgrade).Error)
+	require.Equal(t, before, afterUpgrade, "reapplying the migration must preserve ledger facts")
 }
 
 func TestBillingAdminWalletCreditWritesOperationLog(t *testing.T) {
