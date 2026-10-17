@@ -276,3 +276,12 @@ def test_duplicate_facts_and_dependency_cycles_fail_closed() -> None:
     cycle["facts"][0]["dependsOn"] = ["recharge"]
     cycle["facts"][1]["dependsOn"] = ["price"]
     assert _parse(cycle).failed
+
+
+def test_daum_product_plan_keeps_mailbox_type_out_of_project_search() -> None:
+    value = _plan(entities={"projectQuery": "ChatGPT", "productTypes": ["daum"], "projectId": 2})
+    value["facts"][0]["params"]["productTypes"] = ["daum"]
+    plan = _parse(value)
+    assert not plan.failed
+    assert plan.product_types == ("daum",)
+    assert plan.project_query == "ChatGPT"

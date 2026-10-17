@@ -29,7 +29,7 @@ export default function MicrosoftOpsSection({ options, onBulkSave }: SectionProp
     finally { setSaving(false); }
   };
 
-  return <SettingsSection title={<SettingsCardHeader icon={<Wrench size={16} />} title={t("微软邮箱运维")} description={t("配置别名补充、Token 刷新、密码恢复和协议客户端参数")} />}>
+  return <SettingsSection title={<SettingsCardHeader icon={<Wrench size={16} />} title={t("Mailbox protocol and Microsoft operations")} description={t("IMAP settings are shared by Microsoft and Daum. Alias, token and recovery settings apply to Microsoft.")} />}>
     <SettingsFormGrid className="mt-4">
       {field("每周别名创建上限", "microsoft_alias_weekly_limit")}
       {field("每年别名创建上限", "microsoft_alias_yearly_limit")}

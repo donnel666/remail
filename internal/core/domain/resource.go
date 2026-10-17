@@ -25,12 +25,17 @@ const (
 // with migrations before changing them; they are intentionally not runtime settings.
 const (
 	MicrosoftAllocationBucketCount uint16 = 2048
+	DaumAllocationBucketCount      uint16 = 256
 	DomainAllocationBucketCount    uint16 = 512
 	GeneratedMailboxBucketCount    uint16 = 2048
 )
 
 func MicrosoftAllocationBucket(resourceID uint) uint16 {
 	return uint16(resourceID % uint(MicrosoftAllocationBucketCount))
+}
+
+func DaumAllocationBucket(resourceID uint) uint16 {
+	return uint16(resourceID % uint(DaumAllocationBucketCount))
 }
 
 func MailDomainAllocationBucket(resourceID uint) uint16 {

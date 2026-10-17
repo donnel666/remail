@@ -12,11 +12,21 @@ const json = (schema) => ({
     },
   },
 });
-const jsonBody = (schema) => ({ required: true, ...json(schema) });
+const jsonBody = (schema, examples) => ({
+  required: true,
+  content: { "application/json": { schema, ...(examples ? { examples } : {}) } },
+});
 
 const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
-const emailSuffixDescription = "商品选择后缀。gmail.com 选择本地 Gmail 原始主邮箱；gmail_variant 选择谷歌变种商品，分配等价的 @googlemail.com 地址，或 @gmail.com / @googlemail.com 上的点号、加号变种。icloud.com 选择苹果邮箱；proto 在有货的 Proto 后缀中按库存量加权随机，proton.me、protonmail.com 精确选择对应的 Proto 库存；outlook.com 等具体后缀精确选择对应库存，特殊值 outlook 会在有货的微软白名单后缀中按库存量加权随机，特殊值 domain 会在有货的域名后缀中按库存量加权随机。private_first 随机时先在自有库存内按数量加权；只有自有后缀无货时才使用公共库存。指定具体后缀缺货时不会切换其他后缀。private_first 下也可指定当前用户自有的完整域名，例如 mydomain.com。不接受完整邮箱地址。";
+const emailSuffixDescription = "商品选择后缀。daum 在有货的 Daum 后缀中按库存量加权随机；daum.net、hanmail.net、hanmail2.net 精确选择对应地址库存。三个后缀共用同一 Daum 商品的价格与服务配置。gmail.com 选择本地 Gmail 原始主邮箱；gmail_variant 选择谷歌变种商品，分配等价的 @googlemail.com 地址，或 @gmail.com / @googlemail.com 上的点号、加号变种。icloud.com 选择苹果邮箱；proto 在有货的 Proto 后缀中按库存量加权随机，proton.me、protonmail.com 精确选择对应的 Proto 库存；outlook.com 等具体后缀精确选择对应库存，特殊值 outlook 会在有货的微软白名单后缀中按库存量加权随机，特殊值 domain 会在有货的域名后缀中按库存量加权随机。private_first 随机时先在自有库存内按数量加权；只有自有后缀无货时才使用公共库存。指定具体后缀缺货时不会切换其他后缀。private_first 下也可指定当前用户自有的完整域名，例如 mydomain.com。不接受完整邮箱地址。";
 const batchEmailSuffixDescription = `${emailSuffixDescription} 批量下单只随机一次，所有子订单固定使用该后缀；该后缀库存耗尽后不再随机其他后缀。`;
+const daumOrderExamples = {
+  daumRandom: { summary: "Daum 随机后缀", value: { projectId: 1001, emailSuffix: "daum" } },
+  daumMain: { summary: "Daum 主地址", value: { projectId: 1001, emailSuffix: "daum.net" } },
+  daumHanmail: { summary: "Daum 显式别名 hanmail.net", value: { projectId: 1001, emailSuffix: "hanmail.net" } },
+  daumHanmail2: { summary: "Daum 显式别名 hanmail2.net", value: { projectId: 1001, emailSuffix: "hanmail2.net" } },
+};
+const pickupEmailDescription = "订单交付的完整邮箱地址。Daum 的 @daum.net、@hanmail.net、@hanmail2.net 分别匹配对应订单；即使共用收件箱，也不能将别名替换为主地址或另一个后缀。";
 const listOf = (name) => ({ type: "array", items: ref(name) });
 const nullable = (type, schema = {}) => ({ type, nullable: true, ...schema });
 const id = (schema = {}) => ({ type: "integer", format: "int64", ...schema });
@@ -76,6 +86,7 @@ const stableEnumVarNames = Object.freeze({
   matched: "Matched",
   microsoft: "Microsoft",
   proto: "Proto",
+  daum: "Daum",
   proto_resource_bulk: "ProtoResourceBulk",
   mine: "Mine",
   none: "None",
@@ -348,7 +359,7 @@ const schemas = {
   ProjectProductSummary: {
     type: "object",
     properties: {
-      type: stringEnum(["microsoft", "domain", "gmail", "gmail_variant", "icloud", "proto"]),
+      type: stringEnum(["microsoft", "domain", "gmail", "gmail_variant", "icloud", "proto", "daum"]),
       status: stringEnum(["enabled", "disabled"]),
       codeEnabled: { type: "boolean", example: true },
       purchaseEnabled: { type: "boolean", example: true },
@@ -387,7 +398,7 @@ const schemas = {
       suffix: {
         type: "string",
         example: "com.cn",
-        description: "Selectable inventory value. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned.",
+        description: "Selectable inventory value. Daum products expose daum.net, hanmail.net and hanmail2.net separately; each count reflects eligible, unused and unallocated delivery addresses rather than three times the account count. The random selector daum is not a separate suffix inventory row. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned.",
       },
       totalAvailable: { type: "integer", format: "int64", example: 120 },
       publicAvailable: { type: "integer", format: "int64", example: 80 },
@@ -427,7 +438,12 @@ const schemas = {
       status: { type: "object", additionalProperties: { type: "integer", format: "int64" } },
       access: { type: "object", additionalProperties: { type: "integer", format: "int64" } },
       match: { type: "object", additionalProperties: { type: "integer", format: "int64" } },
-      productType: { type: "object", additionalProperties: { type: "integer", format: "int64" } },
+      productType: {
+        type: "object",
+        properties: Object.fromEntries(["all", "microsoft", "domain", "gmail", "gmailVariant", "icloud", "proto", "daum"].map((name) => [name, id({ minimum: 0 })])),
+        required: ["all", "microsoft", "domain", "gmail", "gmailVariant", "icloud", "proto", "daum"],
+        additionalProperties: { type: "integer", format: "int64" },
+      },
     },
     required: ["status", "access", "match", "productType"],
     additionalProperties: false,
@@ -511,7 +527,7 @@ const schemas = {
       projectId: id({ example: 1001 }),
       projectName: { type: "string", example: "Microsoft 账号验证码" },
       projectLogoUrl: { type: "string" },
-      productType: stringEnum(["microsoft", "domain", "random", "gmail", "gmail_variant", "icloud", "proto"]),
+      productType: stringEnum(["microsoft", "domain", "random", "gmail", "gmail_variant", "icloud", "proto", "daum"]),
       serviceMode: stringEnum(["code", "purchase"]),
       supplyPolicy: stringEnum(["private_first", "public_only"]),
       status: stringEnum(["pending_payment", "paid", "active", "completed", "refunded", "failed", "closed"]),
@@ -525,7 +541,7 @@ const schemas = {
       ]),
       payAmount: { type: "string", example: "0.80" },
       refundAmount: { type: "string", example: "0.00" },
-      allocationType: stringEnum(["microsoft", "domain", "gmail", "icloud", "proto"]),
+      allocationType: stringEnum(["microsoft", "domain", "gmail", "icloud", "proto", "daum"]),
       allocationId: id({ example: 991 }),
       deliveryEmail: { type: "string", example: "mateo.richards@outlook.com" },
       receiveStartedAt: nullable("string", { format: "date-time" }),
@@ -537,7 +553,7 @@ const schemas = {
       serviceCleanupStatus: stringEnum(["none", "succeeded", "partial_failure"]),
       serviceToken: {
         type: "string",
-        description: "仅授予订单所选项目的系统收件权限。购买与接码均不交付账号；资源密码、2FA、应用密码和上游令牌对外只写不读。",
+        description: "仅授予订单所选项目的系统收件权限。购买与接码均不交付账号；资源密码、2FA、应用密码和上游令牌对外只写不读。Daum 同样只交付当前完整邮箱地址的服务凭证，不交付导入的 remail 取件 URL 或 Kakao 账号邮箱资料。",
         example: "st_550e8400-e29b-41d4-a716-446655440000",
       },
       hasDelivery: { type: "boolean", example: true },
@@ -577,8 +593,8 @@ const schemas = {
   PickupCredentialRequest: {
     type: "object",
     properties: {
-      email: { type: "string", format: "email", minLength: 1, maxLength: 254 },
-      token: { type: "string", minLength: 1, maxLength: 255 },
+      email: { type: "string", format: "email", minLength: 1, maxLength: 254, description: pickupEmailDescription, example: "account@hanmail2.net" },
+      token: { type: "string", minLength: 1, maxLength: 255, description: "订单返回的 serviceToken；不是 Daum 导入资料中的 remail 取件链接凭证。" },
     },
     required: ["email", "token"],
     additionalProperties: false,
@@ -1311,7 +1327,7 @@ const spec = {
           { name: "scope", in: "query", schema: stringEnum(["visible", "mine"]) },
           { name: "status", in: "query", schema: stringEnum(["reviewing", "listed", "delisted"]) },
           { name: "accessType", in: "query", schema: stringEnum(["public", "private"]) },
-          { name: "productType", in: "query", schema: stringEnum(["microsoft", "domain", "gmail", "gmail_variant", "icloud", "proto"]) },
+          { name: "productType", in: "query", schema: stringEnum(["microsoft", "domain", "gmail", "gmail_variant", "icloud", "proto", "daum"]) },
           { name: "search", in: "query", schema: { type: "string" } },
         ],
         responses: {
@@ -1345,7 +1361,7 @@ const spec = {
           { name: "serviceMode", in: "query", schema: stringEnum(["purchase", "code"]), description: "purchase 为长效购买，code 为短效接码。" },
           { name: "supply", in: "query", schema: stringEnum(["private_first", "public_only"]), description: "默认 private_first。" },
         ],
-        requestBody: jsonBody(ref("CreateOrderRequest")),
+        requestBody: jsonBody(ref("CreateOrderRequest"), daumOrderExamples),
         responses: {
           "200": ok(ref("Order")),
           "201": created(ref("Order")),
@@ -1382,7 +1398,7 @@ const spec = {
           { name: "serviceMode", in: "query", schema: stringEnum(["purchase", "code"]), description: "purchase 为长效购买，code 为短效接码。" },
           { name: "supply", in: "query", schema: stringEnum(["private_first", "public_only"]), description: "默认 private_first。" },
         ],
-        requestBody: jsonBody(ref("CreateOrderBatchRequest")),
+        requestBody: jsonBody(ref("CreateOrderBatchRequest"), Object.fromEntries(Object.entries(daumOrderExamples).map(([name, example]) => [name, { ...example, value: { ...example.value, quantity: 2 } }]))),
         responses: {
           "200": ok(ref("CreateOrderBatchResponse")),
           "201": created(ref("CreateOrderBatchResponse")),
@@ -1413,8 +1429,8 @@ const spec = {
         description: "取件接口不使用 API Key。持有交付邮箱和服务凭证即可访问对应订单的邮件结果。",
         security: [],
         parameters: [
-          { name: "email", in: "query", required: true, schema: { type: "string", format: "email" } },
-          { name: "token", in: "query", required: true, schema: { type: "string" } },
+          { name: "email", in: "query", required: true, description: pickupEmailDescription, schema: { type: "string", format: "email", example: "account@hanmail2.net" } },
+          { name: "token", in: "query", required: true, description: "订单返回的 serviceToken。", schema: { type: "string" } },
         ],
         responses: {
           "200": ok(ref("PickupMailResponse")),
@@ -1449,8 +1465,8 @@ const spec = {
         security: [],
         parameters: [
           { name: "messageId", in: "path", required: true, schema: id({ minimum: 1 }) },
-          { name: "email", in: "query", required: true, schema: { type: "string", format: "email" } },
-          { name: "token", in: "query", required: true, schema: { type: "string" } },
+          { name: "email", in: "query", required: true, description: pickupEmailDescription, schema: { type: "string", format: "email", example: "account@hanmail2.net" } },
+          { name: "token", in: "query", required: true, description: "订单返回的 serviceToken。", schema: { type: "string" } },
         ],
         responses: {
           "200": ok(ref("MailMessageDetail")),

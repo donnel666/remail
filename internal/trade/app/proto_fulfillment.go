@@ -28,6 +28,22 @@ func (uc *UseCase) protoProtocolReady() bool {
 }
 
 func (uc *UseCase) protoFulfillmentReady(ctx context.Context, order domain.Order, allocation *AllocationResult) (bool, error) {
+	if order.ProductType == domain.ProductTypeMicrosoft || (allocation != nil && allocation.Type == domain.AllocationTypeMicrosoft) {
+		ready, ok := uc.allocation.(interface {
+			MicrosoftAllocationReady(context.Context, string, uint) (bool, error)
+		})
+		if !ok {
+			return false, errors.New("microsoft allocation readiness is unavailable")
+		}
+		var id uint
+		if allocation != nil {
+			id = allocation.ID
+		}
+		return ready.MicrosoftAllocationReady(ctx, order.OrderNo, id)
+	}
+	if order.ProductType == domain.ProductTypeDaum || (allocation != nil && allocation.Type == domain.AllocationTypeDaum) {
+		return uc.daumFulfillmentReady(ctx, order, allocation)
+	}
 	if order.ProductType != domain.ProductTypeProto && (allocation == nil || allocation.Type != domain.AllocationTypeProto) {
 		return true, nil
 	}
@@ -48,6 +64,23 @@ func (uc *UseCase) protoFulfillmentReady(ctx context.Context, order domain.Order
 }
 
 func (uc *UseCase) compensateUnreadyProtoPaid(ctx context.Context, order domain.Order) (*CheckoutResult, error) {
+	if order.ProductType == domain.ProductTypeMicrosoft {
+		failed, err := uc.compensatePaidCheckout(ctx, order, domain.OrderFailureInsufficientInventory, "Microsoft mailbox is unavailable.")
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", domain.ErrOrderCompensationError, err)
+		}
+		if failed == nil {
+			return nil, errors.New("refund unavailable Microsoft order returned no order")
+		}
+		result := &CheckoutResult{Order: *failed}
+		if failed.Status == domain.OrderStatusFailed {
+			return result, checkoutInventoryError(*failed, domain.ErrInsufficientInventory)
+		}
+		return result, nil
+	}
+	if order.ProductType == domain.ProductTypeDaum {
+		return uc.compensateUnreadyDaumPaid(ctx, order)
+	}
 	if !uc.protoProtocolReady() {
 		return &CheckoutResult{Order: order}, domain.ErrProjectUnavailable
 	}

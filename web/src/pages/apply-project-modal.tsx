@@ -51,6 +51,7 @@ export function productTypeLabel(type: string, t: (key: string) => string) {
   if (type === "gmail_variant") return t("Gmail variant");
   if (type === "icloud") return t("iCloud email");
   if (type === "proto") return t("Proto email");
+  if (type === "daum") return t("Daum email");
   return type;
 }
 
@@ -280,6 +281,7 @@ export function ApplyProjectModal({
             <Select.Option value="gmail_variant">{t("Gmail variant")}</Select.Option>
             <Select.Option value="icloud">{t("iCloud email")}</Select.Option>
             <Select.Option value="proto">{t("Proto email")}</Select.Option>
+            <Select.Option value="daum">{t("Daum email")}</Select.Option>
           </Select>
         </label>
 

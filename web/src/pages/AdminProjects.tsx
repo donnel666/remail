@@ -82,6 +82,7 @@ import {
   normalizeDateRangeValue,
   type DateRangeValue,
 } from "./resources/date-range-filter";
+import { DAUM_EMAIL_SUFFIXES } from "./resources/daum-model";
 import { useSelectionNotification } from "./resources/use-selection-notification";
 
 const { Text } = Typography;
@@ -89,7 +90,7 @@ const projectLogoGalleryStorageKey = "remail.project.logo.gallery.v1";
 
 type ProjectStatusFilter = "all" | "reviewing" | "listed" | "delisted";
 type BooleanFilter = "all" | "yes" | "no";
-const projectProductTypes = ["microsoft", "domain", "gmail", "gmail_variant", "icloud", "proto"] as const;
+const projectProductTypes = ["microsoft", "domain", "gmail", "gmail_variant", "icloud", "proto", "daum"] as const;
 type ProjectProductType = (typeof projectProductTypes)[number];
 type ProjectProductStatus = "enabled" | "disabled";
 type ProjectProductTypeFilter = "all" | ProjectProductType;
@@ -181,6 +182,7 @@ const fallbackProjectPriceDefaults: ProjectPriceDefaults = {
   gmail: gmailProjectPriceDefaults,
   gmail_variant: gmailProjectPriceDefaults,
   proto: protoProjectPriceDefaults,
+  daum: microsoftProjectPriceDefaults,
 };
 
 function projectPriceDefaultsFromValues(
@@ -216,6 +218,7 @@ function projectPriceDefaultsFromValues(
     gmail_variant: readProduct("gmail_variant"),
     icloud: readProduct("icloud"),
     proto: readProduct("proto"),
+    daum: readProduct("daum"),
   };
 }
 
@@ -226,6 +229,7 @@ interface ProjectDraft {
   looseMatch: boolean;
   mailRules: MailRuleDraft[];
   microsoftSuffixBlacklist: string[];
+  daumSuffixBlacklist: string[];
   name: string;
   products: ProductDraft[];
   targetPlatform: string;
@@ -263,7 +267,7 @@ function createDefaultProduct(
     codeSupplierPrice: priceDefaults[type].codeSupplierPrice,
     codeWindowMinutes: "10",
     dotWeight: "0",
-    mainWeight: hasMailboxWeights || type === "gmail" || type === "proto" ? "1" : "0",
+    mainWeight: hasMailboxWeights || type === "gmail" || type === "proto" || type === "daum" ? "1" : "0",
     plusWeight: type === "gmail_variant" ? "1" : "0",
     purchaseEnabled: priceDefaults[type].purchaseEnabled,
     purchasePrice: priceDefaults[type].purchasePrice,
@@ -286,6 +290,7 @@ function initialDraft(priceDefaults: ProjectPriceDefaults = fallbackProjectPrice
     looseMatch: true,
     mailRules: createDefaultMailRules(),
     microsoftSuffixBlacklist: [],
+    daumSuffixBlacklist: [],
     name: "",
     products: [createDefaultProduct("microsoft", priceDefaults)],
     targetPlatform: "",
@@ -321,6 +326,7 @@ function productTypeLabel(type: string, t: (key: string) => string) {
   if (type === "gmail_variant") return t("Gmail variant");
   if (type === "icloud") return t("iCloud email");
   if (type === "proto") return t("Proto email");
+  if (type === "daum") return t("Daum email");
   return type;
 }
 
@@ -424,6 +430,7 @@ function detailToDraft(
           )
         : createDefaultMailRules(),
     microsoftSuffixBlacklist: detail.microsoftSuffixBlacklist ?? [],
+    daumSuffixBlacklist: detail.daumSuffixBlacklist ?? [],
     name: detail.project.name,
     products,
     targetPlatform: detail.project.targetPlatform,
@@ -526,7 +533,7 @@ function productDraftToRequest(
         ? 1
         : hasMailboxWeights
           ? toNonNegativeInt(product.mainWeight)
-          : product.type === "proto" ? 1 : 0,
+          : product.type === "proto" || product.type === "daum" ? 1 : 0,
     plusWeight:
       product.type === "gmail_variant"
         ? 1
@@ -626,6 +633,7 @@ function buildProjectPayload(
     looseMatch: draft.looseMatch,
     mailRules,
     microsoftSuffixBlacklist: draft.microsoftSuffixBlacklist,
+    daumSuffixBlacklist: draft.daumSuffixBlacklist,
     name: draft.name.trim(),
     products,
     targetPlatform: draft.targetPlatform.trim(),
@@ -738,6 +746,7 @@ function ProductDraftCard({
           ))}
         </div>
       ) : null}
+      {draft.type === "daum" ? <div className="mt-2 text-xs text-[var(--semi-color-text-2)]">{t("Daum uses three fixed suffixes. Exact and random suffixes share this product pricing.")}</div> : null}
       {draft.type === "proto" ? (
         <div className="mt-2 text-xs text-[var(--semi-color-text-2)]">
           {t("Proto uses the main mailbox only")}
@@ -1362,6 +1371,35 @@ function ProjectEditorSheet({
             </section>
           ) : null}
 
+          {draft.products.some((product) => product.type === "daum") ? (
+            <section>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-[var(--semi-color-text-1)]">
+                  {t("Daum suffix blacklist")}
+                </span>
+                <Select
+                  filter
+                  multiple
+                  onChange={(value) =>
+                    setField(
+                      "daumSuffixBlacklist",
+                      Array.isArray(value) ? value.map(String) : []
+                    )
+                  }
+                  showClear
+                  style={{ width: "100%" }}
+                  value={draft.daumSuffixBlacklist}
+                >
+                  {DAUM_EMAIL_SUFFIXES.map((suffix) => (
+                    <Select.Option key={suffix} value={suffix}>
+                      {suffix}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </label>
+            </section>
+          ) : null}
+
           {draft.accessType === "private" ? (
             <section>
               <div className="mb-3 text-sm font-semibold text-[var(--semi-color-text-0)]">
@@ -1814,6 +1852,7 @@ export default function AdminProjects() {
         icloud: 0,
         microsoft: 0,
         proto: 0,
+        daum: 0,
       },
       status: {
         all: total,
@@ -1844,6 +1883,7 @@ export default function AdminProjects() {
         icloud: facets.productType.icloud,
         microsoft: facets.productType.microsoft,
         proto: facets.productType.proto,
+        daum: facets.productType.daum,
       },
       status: {
         all: facets.status.all,

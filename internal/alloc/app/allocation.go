@@ -55,11 +55,15 @@ func newBucketProbeWindow(orderNo string, projectID uint, kind string, bucketCou
 	for _, bucket := range initial {
 		window.batches = append(window.batches, []uint16{bucket})
 	}
-	expanded := make([]uint16, min(expansionBuckets, int(bucketCount)-len(initial)))
-	for i := range expanded {
-		expanded[i] = (initial[0] + uint16(len(initial)+i)) % bucketCount
+	remaining := min(expansionBuckets, int(bucketCount)-len(initial))
+	for offset := 0; offset < remaining; {
+		expanded := make([]uint16, min(MicrosoftExpansionBuckets, remaining-offset))
+		for i := range expanded {
+			expanded[i] = (initial[0] + uint16(len(initial)+offset+i)) % bucketCount
+		}
+		window.batches = append(window.batches, expanded)
+		offset += len(expanded)
 	}
-	window.batches = append(window.batches, expanded)
 	return window
 }
 
@@ -105,6 +109,7 @@ type UseCase struct {
 	inventoryCache             InventoryCache
 	privateInventoryCache      *platform.HourlySnapshotCache[PrivateInventoryTotals]
 	protoProtocolReady         atomic.Bool
+	daumProtocolReady          atomic.Bool
 }
 
 func (uc *UseCase) SetInventoryCache(cache InventoryCache) {
@@ -208,6 +213,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 	// including retries inside the repository's transaction wrapper.
 	microsoftProbes := make(map[[2]string]*bucketProbeWindow)
 	icloudProbes := make(map[domain.SupplyScope]*bucketProbeWindow)
+	daumProbes := make(map[domain.SupplyScope]*bucketProbeWindow)
 	attempts := candidateRetryCountValue()
 	if uc.repo.HasParentTx(ctx) {
 		// A nested retry would keep the parent wallet/resource locks and sleep in
@@ -307,6 +313,8 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 						result, err = uc.allocateICloud(txCtx, attemptCmd, *config, icloudProbes)
 					case coredomain.ProductTypeProto:
 						result, err = uc.allocateProto(txCtx, attemptCmd, *config)
+					case coredomain.ProductTypeDaum:
+						result, err = uc.allocateDaum(txCtx, attemptCmd, *config, daumProbes)
 					default:
 						return domain.ErrProjectNotAllocatable
 					}
@@ -323,10 +331,10 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 			}
 			return domain.ErrInsufficientInventory
 		})
-		// Repeating a bounded Microsoft/iCloud miss cannot prove exhaustion.
+		// Repeating a bounded Microsoft/iCloud/Daum miss cannot prove exhaustion.
 		if err == nil || errors.Is(err, domain.ErrDefinitiveInventoryExhausted) ||
 			errors.Is(err, errBucketProbeBudgetExhausted) ||
-			((metricType == string(coredomain.ProductTypeMicrosoft) || metricType == string(coredomain.ProductTypeICloud)) && errors.Is(err, domain.ErrInsufficientInventory)) ||
+			((metricType == string(coredomain.ProductTypeMicrosoft) || metricType == string(coredomain.ProductTypeICloud) || metricType == string(coredomain.ProductTypeDaum)) && errors.Is(err, domain.ErrInsufficientInventory)) ||
 			(!errors.Is(err, domain.ErrInsufficientInventory) && !errors.Is(err, domain.ErrAllocationConflict) && !errors.Is(err, errResourceTypeBusy)) {
 			break
 		}
@@ -398,7 +406,7 @@ func containsSupplyScope(scopes []domain.SupplyScope, want domain.SupplyScope) b
 }
 
 func isRandomSuffixSelector(value string) bool {
-	return value == coredomain.RandomMicrosoftSuffixSelector || value == coredomain.RandomDomainSuffixSelector || value == coredomain.RandomProtoSuffixSelector
+	return value == coredomain.RandomMicrosoftSuffixSelector || value == coredomain.RandomDomainSuffixSelector || value == coredomain.RandomProtoSuffixSelector || value == coredomain.RandomDaumSuffixSelector
 }
 
 func randomSuffixMatchesProduct(selector string, productType coredomain.ProductType, suffix string) bool {
@@ -409,6 +417,8 @@ func randomSuffixMatchesProduct(selector string, productType coredomain.ProductT
 		return productType == coredomain.ProductTypeDomain && suffix != ""
 	case coredomain.RandomProtoSuffixSelector:
 		return productType == coredomain.ProductTypeProto && coredomain.IsProtoEmailSuffix(suffix)
+	case coredomain.RandomDaumSuffixSelector:
+		return productType == coredomain.ProductTypeDaum && coredomain.IsDaumEmailSuffix(suffix)
 	default:
 		return false
 	}
@@ -474,13 +484,15 @@ func (uc *UseCase) selectRandomInventorySuffix(ctx context.Context, config Produ
 		wantType = coredomain.ProductTypeDomain
 	} else if selector == coredomain.RandomProtoSuffixSelector {
 		wantType = coredomain.ProductTypeProto
+	} else if selector == coredomain.RandomDaumSuffixSelector {
+		wantType = coredomain.ProductTypeDaum
 	} else if selector != coredomain.RandomMicrosoftSuffixSelector {
 		return "", domain.ErrInvalidAllocationRequest
 	}
 	if config.ProductType != wantType {
 		return "", domain.ErrInvalidAllocationRequest
 	}
-	if wantType == coredomain.ProductTypeProto && !uc.ProtoProtocolReady() {
+	if (wantType == coredomain.ProductTypeProto && !uc.ProtoProtocolReady()) || (wantType == coredomain.ProductTypeDaum && !uc.DaumProtocolReady()) {
 		return "", domain.ErrInsufficientInventory
 	}
 	for _, scope := range scopes {
@@ -609,13 +621,6 @@ func (uc *UseCase) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd 
 			plusAliasID = &alias.ID
 			mailboxID = alias.ID
 		}
-		matched, err := uc.repo.IsMicrosoftMailboxHistoricallyMatched(txCtx, cmd.ProjectID, cmd.Mailbox, mailboxID)
-		if err != nil {
-			return err
-		}
-		if matched {
-			return nil
-		}
 		if cmd.Mailbox == domain.MicrosoftMailboxAlias && cmd.AliasOwnerID == 0 {
 			return domain.ErrHistoricalAllocationOwnerRequired
 		}
@@ -629,6 +634,13 @@ func (uc *UseCase) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd 
 				return domain.ErrAllocationConflict
 			}
 			result = existing
+			return nil
+		}
+		matched, err := uc.repo.IsMicrosoftMailboxHistoricallyMatched(txCtx, cmd.ProjectID, cmd.Mailbox, mailboxID)
+		if err != nil {
+			return err
+		}
+		if matched {
 			return nil
 		}
 		if err := uc.repo.CreateOrderGuard(txCtx, orderNo, domain.AllocationTypeMicrosoft); err != nil {
@@ -649,7 +661,7 @@ func (uc *UseCase) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd 
 			Type: domain.AllocationTypeMicrosoft, ID: allocation.ID, OrderNo: allocation.OrderNo,
 			ProjectID: allocation.ProjectID, ProductID: allocation.ProductID, ResourceID: allocation.ResourceID,
 			SupplyScope: allocation.SupplyScope, Mailbox: string(allocation.Mailbox), Email: allocation.Email,
-			Status: allocation.Status, CreatedAt: allocation.CreatedAt, ReleasedAt: allocation.ReleasedAt,
+			Status: allocation.Status, CreatedAt: allocation.CreatedAt, ReleasedAt: allocation.ReleasedAt, Created: true,
 		}
 		result = &unified
 		return nil
@@ -952,7 +964,7 @@ func (uc *UseCase) AssertNoActiveAllocations(ctx context.Context, resourceIDs []
 }
 
 func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint) (result *InventoryStats, runErr error) {
-	defer func() { result = uc.protoInventoryStats(result) }()
+	defer func() { result = uc.daumInventoryStats(uc.protoInventoryStats(result)) }()
 	if projectID == 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
@@ -979,7 +991,7 @@ func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint) (resul
 		}
 		// Legacy placeholders predate Cold and have neither source enabled;
 		// authoritative stats always enable at least one configured product type.
-		if !stats.Microsoft.Enabled && !stats.Domain.Enabled && !stats.Gmail.Enabled && !stats.ICloud.Enabled && !stats.Proto.Enabled {
+		if !stats.Microsoft.Enabled && !stats.Domain.Enabled && !stats.Gmail.Enabled && !stats.ICloud.Enabled && !stats.Proto.Enabled && !stats.Daum.Enabled {
 			_ = uc.ScheduleInventoryRefresh(ctx)
 			return nil, domain.ErrInventoryRefreshInProgress
 		}
@@ -988,7 +1000,7 @@ func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint) (resul
 }
 
 func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint, viewerUserID uint) (totals *ProjectProductInventoryTotals, runErr error) {
-	defer func() { totals = uc.protoInventoryTotals(totals) }()
+	defer func() { totals = uc.daumInventoryTotals(uc.protoInventoryTotals(totals)) }()
 	if projectID == 0 || viewerUserID == 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
@@ -1003,7 +1015,7 @@ func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint
 	if err != nil {
 		return nil, err
 	}
-	if private == nil || (len(private.Microsoft) == 0 && len(private.Domains) == 0 && len(private.Gmail) == 0 && len(private.ICloud) == 0 && len(private.Proto) == 0) {
+	if private == nil || (len(private.Microsoft) == 0 && len(private.Domains) == 0 && len(private.Gmail) == 0 && len(private.ICloud) == 0 && len(private.Proto) == 0 && len(private.Daum) == 0) {
 		return snapshot, nil
 	}
 	result := cloneProductInventoryTotals(snapshot)
@@ -1012,6 +1024,7 @@ func (uc *UseCase) GetProductInventoryTotals(ctx context.Context, projectID uint
 	mergePrivateSingletonInventory(result, private.Gmail, coredomain.ProductTypeGmail)
 	mergePrivateSingletonInventory(result, private.ICloud, coredomain.ProductTypeICloud)
 	mergePrivateProductInventory(result, private.Proto, coredomain.ProductTypeProto)
+	mergePrivateProductInventory(result, private.Daum, coredomain.ProductTypeDaum)
 	for i := range result.Items {
 		sort.Slice(result.Items[i].Suffixes, func(left, right int) bool {
 			return result.Items[i].Suffixes[left].Suffix < result.Items[i].Suffixes[right].Suffix
@@ -1165,7 +1178,7 @@ func (uc *UseCase) GetProductInventorySnapshots(ctx context.Context, projectIDs 
 		var refresh []InventoryCacheEntry
 		refreshProto := uc.inventoryCache != nil && uc.ProtoProtocolReady()
 		for projectID, totals := range result {
-			result[projectID] = uc.protoInventoryTotals(totals)
+			result[projectID] = uc.daumInventoryTotals(uc.protoInventoryTotals(totals))
 			if !refreshProto || totals == nil {
 				continue
 			}
@@ -1260,6 +1273,9 @@ func (uc *UseCase) HasProductInventory(ctx context.Context, req ProductInventory
 		return false, domain.ErrInvalidAllocationRequest
 	}
 	req.EmailSuffix = normalizeEmailSuffix(req.EmailSuffix)
+	if (req.EmailSuffix == coredomain.RandomDaumSuffixSelector || coredomain.IsDaumEmailSuffix(req.EmailSuffix)) && !uc.DaumProtocolReady() {
+		return false, nil
+	}
 	if (req.EmailSuffix == coredomain.RandomProtoSuffixSelector || coredomain.IsProtoEmailSuffix(req.EmailSuffix)) && !uc.ProtoProtocolReady() {
 		return false, nil
 	}
@@ -1303,7 +1319,7 @@ func (uc *UseCase) HasProductInventory(ctx context.Context, req ProductInventory
 	if !req.PublicOnly {
 		return true, nil
 	}
-	totals = uc.protoInventoryTotals(totals)
+	totals = uc.daumInventoryTotals(uc.protoInventoryTotals(totals))
 	available, known := productInventoryAvailable(totals, req)
 	if !known {
 		// A newly enabled product can predate its next inventory refresh. Fail open
@@ -1359,7 +1375,7 @@ func productInventoryAvailable(totals *ProjectProductInventoryTotals, req Produc
 			}
 			return suffix.TotalAvailable > 0, true
 		}
-		if item.ProductType == coredomain.ProductTypeMicrosoft {
+		if item.ProductType == coredomain.ProductTypeMicrosoft || item.ProductType == coredomain.ProductTypeDaum {
 			return false, false
 		}
 		return false, true

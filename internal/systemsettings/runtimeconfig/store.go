@@ -82,6 +82,8 @@ func ProductPriceMultiplier(productType string) string {
 		key = DomainPriceMultiplierKey
 	case "proto":
 		key = ProtoPriceMultiplierKey
+	case "daum":
+		key = DaumPriceMultiplierKey
 	default:
 		return "1"
 	}

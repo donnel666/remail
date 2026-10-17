@@ -4847,6 +4847,8 @@ def test_configured_qq_management_and_telegram_bot_mentions() -> None:
     assert functions["_mentions_bot"](telegram_event)
     assert functions["_normalize_product_types"]("Gmail 变种") == ("gmail_variant",)
     assert functions["_normalize_product_types"]("iCloud多少钱") == ("icloud",)
+    assert functions["_normalize_product_types"]("Daum邮箱") == ("daum",)
+    assert functions["_normalize_product_types"]("hanmail2.net") == ("daum",)
 
 
 def test_adapter_identity_uses_real_qq_and_telegram_ids() -> None:

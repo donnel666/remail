@@ -443,7 +443,7 @@ func pushSettingKey(key string) bool {
 	switch key {
 	case "global_notice", "announcements", "announcement_enabled",
 		runtimeconfig.MicrosoftPriceMultiplierKey, runtimeconfig.GmailPriceMultiplierKey,
-		runtimeconfig.ICloudPriceMultiplierKey, runtimeconfig.DomainPriceMultiplierKey, runtimeconfig.ProtoPriceMultiplierKey:
+		runtimeconfig.ICloudPriceMultiplierKey, runtimeconfig.DomainPriceMultiplierKey, runtimeconfig.ProtoPriceMultiplierKey, runtimeconfig.DaumPriceMultiplierKey:
 		return true
 	default:
 		return false

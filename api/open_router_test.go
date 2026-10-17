@@ -88,7 +88,7 @@ func TestPublicOpenAPISchemaUsesBackendEnums(t *testing.T) {
 	assertSchemaEnum(t, spec, "Project", "status", []string{"reviewing", "listed", "delisted"})
 	assertSchemaEnum(t, spec, "ProjectOwner", "role", []string{"user", "supplier", "admin", "super_admin"})
 	assertSchemaEnum(t, spec, "ProjectMailRule", "ruleType", []string{"sender", "recipient", "subject", "body"})
-	assertSchemaEnum(t, spec, "Order", "allocationType", []string{"microsoft", "domain", "gmail", "icloud", "proto"})
+	assertSchemaEnum(t, spec, "Order", "allocationType", []string{"microsoft", "domain", "gmail", "icloud", "proto", "daum"})
 	assertSchemaEnum(t, spec, "Order", "clientChannel", []string{"console", "api_key"})
 	assertSchemaEnum(t, spec, "Order", "serviceCleanupStatus", []string{"none", "succeeded", "partial_failure"})
 	assertSchemaEnum(t, spec, "Order", "failureCode", []string{

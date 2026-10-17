@@ -96,6 +96,8 @@ func (r *AdminMessageRepo) AdminMessageResourceExists(ctx context.Context, resou
 		query = query.Joins("JOIN icloud_resources ir ON ir.id = er.id")
 	case domain.ResourceTypeProto:
 		query = query.Joins("JOIN proto_resources pr ON pr.id = er.id AND pr.resource_type = 'proto'")
+	case domain.ResourceTypeDaum:
+		query = query.Joins("JOIN daum_resources pr ON pr.id = er.id AND pr.resource_type = 'daum'")
 	default:
 		query = query.Joins("JOIN microsoft_resources mr ON mr.id = er.id")
 	}
@@ -232,6 +234,8 @@ func adminMessageBaseQueryDB(db *gorm.DB, resourceID uint, resourceType domain.R
 		db = db.Joins("JOIN icloud_resources ir ON ir.id = m.email_resource_id")
 	case domain.ResourceTypeProto:
 		db = db.Joins("JOIN proto_resources pr ON pr.id = m.email_resource_id AND pr.resource_type = 'proto'")
+	case domain.ResourceTypeDaum:
+		db = db.Joins("JOIN daum_resources pr ON pr.id = m.email_resource_id AND pr.resource_type = 'daum'")
 	default:
 		db = db.Joins("JOIN microsoft_resources mr ON mr.id = m.email_resource_id")
 	}
@@ -256,6 +260,8 @@ func escapeAdminMessageLike(value string) string {
 
 func adminMessageMailboxSelect(resourceType domain.ResourceType) string {
 	switch resourceType {
+	case domain.ResourceTypeDaum:
+		return "CASE WHEN LOWER(m.recipient) = LOWER(pr.email_address) THEN 'main' ELSE 'alias' END"
 	case domain.ResourceTypeDomain, domain.ResourceTypeProto:
 		return "'main'"
 	case domain.ResourceTypeGmail:

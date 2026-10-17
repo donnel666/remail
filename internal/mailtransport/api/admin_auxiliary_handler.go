@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/donnel666/remail/api/middleware"
+	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	"github.com/donnel666/remail/internal/mailtransport/domain"
 	"github.com/gin-gonic/gin"
@@ -28,6 +29,12 @@ func (h *MailTransportHandler) GetAdminBindings(c *gin.Context) {
 		return
 	}
 	resourceType, ok := parseAdminAuxiliaryResourceType(c)
+	if ok && resourceType == domain.InboundResourceDaum {
+		middleware.RoleRequired(iamdomain.RoleAdmin, iamdomain.RoleSuperAdmin)(c)
+		if c.IsAborted() {
+			return
+		}
+	}
 	if !ok {
 		writeAdminMailBadRequest(c)
 		return
@@ -114,6 +121,12 @@ func (h *MailTransportHandler) GetAdminBindingMessage(c *gin.Context) {
 		return
 	}
 	resourceType, ok := parseAdminAuxiliaryResourceType(c)
+	if ok && resourceType == domain.InboundResourceDaum {
+		middleware.RoleRequired(iamdomain.RoleAdmin, iamdomain.RoleSuperAdmin)(c)
+		if c.IsAborted() {
+			return
+		}
+	}
 	if !ok {
 		writeAdminMailBadRequest(c)
 		return
@@ -178,7 +191,7 @@ func parsePositiveAdminMailUint(value string) (uint, bool) {
 
 func parseAdminAuxiliaryResourceType(c *gin.Context) (domain.InboundResourceType, bool) {
 	value := domain.InboundResourceType(strings.ToLower(strings.TrimSpace(c.DefaultQuery("type", string(domain.InboundResourceMicrosoft)))))
-	return value, value == domain.InboundResourceMicrosoft || value == domain.InboundResourceDomain || value == domain.InboundResourceICloud
+	return value, value == domain.InboundResourceMicrosoft || value == domain.InboundResourceDomain || value == domain.InboundResourceICloud || value == domain.InboundResourceDaum
 }
 
 func parseOptionalAdminMailBool(raw string, fallback bool) (bool, bool) {

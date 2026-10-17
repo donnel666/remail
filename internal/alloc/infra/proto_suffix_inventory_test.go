@@ -30,6 +30,7 @@ func newProtoSuffixInventoryDB(t *testing.T) *gorm.DB {
 		`CREATE TABLE proto_allocations (resource_id INTEGER, project_id INTEGER, guard_type TEXT DEFAULT 'proto', status TEXT DEFAULT 'released')`,
 		`CREATE TABLE projects (id INTEGER PRIMARY KEY, status TEXT)`,
 		`CREATE TABLE project_products (id INTEGER PRIMARY KEY, project_id INTEGER, type TEXT, status TEXT, code_enabled BOOLEAN, purchase_enabled BOOLEAN, main_weight INTEGER, dot_weight INTEGER, plus_weight INTEGER)`,
+		`CREATE TABLE daum_allocations (project_id INTEGER, guard_type TEXT, status TEXT)`,
 		`CREATE TABLE microsoft_allocations (project_id INTEGER, status TEXT)`,
 		`CREATE TABLE domain_allocations (project_id INTEGER, status TEXT)`,
 		`CREATE TABLE gmail_allocations (project_id INTEGER, status TEXT, source TEXT)`,

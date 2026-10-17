@@ -48,7 +48,7 @@ type AuxiliaryMailFilter struct {
 type AuxiliaryBindingSummary struct {
 	ID           uint
 	EmailAddress string
-	Status       domain.MicrosoftBindingStatus
+	Status       string
 	UpdatedAt    time.Time
 }
 
@@ -105,6 +105,8 @@ type AuxiliaryMailQueryService struct {
 	files         governanceapp.FilePort
 	operationLogs governanceapp.OperationLogPort
 	systemLogs    SystemLogPort
+	pickupScopes  AuxiliaryPickupScopeReader
+	pickupMail    AuxiliaryPickupMailReader
 }
 
 func NewAuxiliaryMailQueryService(
@@ -130,7 +132,7 @@ func (s *AuxiliaryMailQueryService) List(ctx context.Context, filter AuxiliaryMa
 	if filter.ResourceType == "" {
 		filter.ResourceType = domain.InboundResourceMicrosoft
 	}
-	if filter.ResourceType != domain.InboundResourceMicrosoft && filter.ResourceType != domain.InboundResourceDomain && filter.ResourceType != domain.InboundResourceICloud {
+	if filter.ResourceType != domain.InboundResourceMicrosoft && filter.ResourceType != domain.InboundResourceDomain && filter.ResourceType != domain.InboundResourceICloud && filter.ResourceType != domain.InboundResourceDaum {
 		return nil, domain.ErrInvalidAuxiliaryMailQuery
 	}
 	filter.Search = strings.TrimSpace(filter.Search)
@@ -162,12 +164,34 @@ func (s *AuxiliaryMailQueryService) List(ctx context.Context, filter AuxiliaryMa
 			binding = &AuxiliaryBindingSummary{
 				ID:           current.ID,
 				EmailAddress: current.BindingAddress,
-				Status:       current.Status,
+				Status:       string(current.Status),
 				UpdatedAt:    current.UpdatedAt,
 			}
 		}
 	}
 
+	if filter.ResourceType == domain.InboundResourceDaum {
+		repo, ok := s.repo.(interface {
+			DaumBinding(context.Context, uint) (*AuxiliaryBindingSummary, error)
+		})
+		if !ok {
+			return nil, domain.ErrAuxiliaryMailUnavailable
+		}
+		binding, err = repo.DaumBinding(ctx, filter.ResourceID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: load Daum auxiliary binding", domain.ErrAuxiliaryMailUnavailable)
+		}
+	}
+	if filter.ResourceType == domain.InboundResourceDaum {
+		page, handled, err := s.listDaumPickup(ctx, filter)
+		if err != nil {
+			return nil, fmt.Errorf("%w: load source order auxiliary mail", domain.ErrAuxiliaryMailUnavailable)
+		}
+		if handled {
+			page.Binding = binding
+			return page, nil
+		}
+	}
 	rows, total, hasMore, err := s.repo.ListMessages(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("%w: list auxiliary mailbox messages: %w", domain.ErrAuxiliaryMailUnavailable, err)
@@ -195,15 +219,33 @@ func (s *AuxiliaryMailQueryService) List(ctx context.Context, filter AuxiliaryMa
 }
 
 func (s *AuxiliaryMailQueryService) Get(ctx context.Context, request AuxiliaryMailDetailRequest) (*AuxiliaryMessageDetail, error) {
-	if s == nil || s.repo == nil || s.files == nil || s.operationLogs == nil ||
+	if s == nil || s.repo == nil || s.operationLogs == nil ||
 		request.ResourceID == 0 || request.MessageID == 0 || request.OperatorUserID == 0 {
 		return nil, domain.ErrInvalidAuxiliaryMailQuery
 	}
 	if request.ResourceType == "" {
 		request.ResourceType = domain.InboundResourceMicrosoft
 	}
-	if request.ResourceType != domain.InboundResourceMicrosoft && request.ResourceType != domain.InboundResourceDomain && request.ResourceType != domain.InboundResourceICloud {
+	if request.ResourceType != domain.InboundResourceMicrosoft && request.ResourceType != domain.InboundResourceDomain && request.ResourceType != domain.InboundResourceICloud && request.ResourceType != domain.InboundResourceDaum {
 		return nil, domain.ErrInvalidAuxiliaryMailQuery
+	}
+	if request.ResourceType == domain.InboundResourceDaum {
+		detail, handled, err := s.getDaumPickup(ctx, request)
+		if err != nil {
+			return nil, fmt.Errorf("%w: read source order auxiliary message", domain.ErrAuxiliaryMailUnavailable)
+		}
+		if handled {
+			if detail == nil {
+				return nil, domain.ErrAuxiliaryMessageNotFound
+			}
+			if err := s.auditAuxiliaryRead(ctx, request); err != nil {
+				return nil, err
+			}
+			return detail, nil
+		}
+	}
+	if s.files == nil {
+		return nil, domain.ErrAuxiliaryMailUnavailable
 	}
 	row, err := s.repo.FindMessage(ctx, request.ResourceID, request.ResourceType, request.MessageID)
 	if err != nil {
@@ -234,10 +276,19 @@ func (s *AuxiliaryMailQueryService) Get(ctx context.Context, request AuxiliaryMa
 
 	parsed := parseInboundMessage(stored.ContentBytes, auxiliaryReceivedAt(*row))
 	merged := mergeParsedAuxiliaryMessage(*row, parsed)
+	if err := s.auditAuxiliaryRead(ctx, request); err != nil {
+		return nil, err
+	}
+	return &merged, nil
+}
+
+func (s *AuxiliaryMailQueryService) auditAuxiliaryRead(ctx context.Context, request AuxiliaryMailDetailRequest) error {
 	auditResourceID := fmt.Sprintf("%d:%d", request.ResourceID, request.MessageID)
 	switch request.ResourceType {
 	case domain.InboundResourceDomain:
 		auditResourceID = fmt.Sprintf("domain:%d:%d", request.ResourceID, request.MessageID)
+	case domain.InboundResourceDaum:
+		auditResourceID = fmt.Sprintf("daum:%d:%d", request.ResourceID, request.MessageID)
 	case domain.InboundResourceICloud:
 		auditResourceID = fmt.Sprintf("icloud:%d:%d", request.ResourceID, request.MessageID)
 	}
@@ -258,13 +309,13 @@ func (s *AuxiliaryMailQueryService) Get(ctx context.Context, request AuxiliaryMa
 			"mail.auxiliary_message_audit_failed",
 			strings.TrimSpace(request.RequestID),
 			"auxiliary_message",
-			fmt.Sprintf("%d", row.ID),
+			fmt.Sprintf("%d", request.MessageID),
 			"Auxiliary mailbox message read audit could not be recorded.",
 			"operation log unavailable",
 		)
-		return nil, domain.ErrAuxiliaryMailUnavailable
+		return domain.ErrAuxiliaryMailUnavailable
 	}
-	return &merged, nil
+	return nil
 }
 
 func auxiliaryMessageSummary(row domain.InboundMail) AuxiliaryMessageSummary {

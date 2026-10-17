@@ -65,6 +65,9 @@ func backgroundQueueConfig() map[string]int {
 		QueueBackgroundProtoImport:         runtimeconfig.Int("asynq_queue_background_proto_import_weight", 1, 1),
 		QueueBackgroundProtoValidation:     runtimeconfig.Int("asynq_queue_background_proto_validation_weight", 1, 1),
 		QueueBackgroundProtoHistory:        runtimeconfig.Int("asynq_queue_background_proto_history_weight", 1, 1),
+		QueueBackgroundDaumImport:          runtimeconfig.Int("asynq_queue_background_daum_import_weight", 1, 1),
+		QueueBackgroundDaumValidation:      runtimeconfig.Int("asynq_queue_background_daum_validation_weight", 1, 1),
+		QueueBackgroundDaumHistory:         runtimeconfig.Int("asynq_queue_background_daum_history_weight", 1, 1),
 		QueueBackgroundInventory:           runtimeconfig.Int("asynq_queue_background_inventory_weight", 1, 1),
 		// Admin resource bulk operations (validate/publish/unpublish/delete) are
 		// enqueued to the resource queue; without it here no server consumes them

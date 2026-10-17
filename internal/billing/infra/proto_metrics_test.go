@@ -16,6 +16,7 @@ func TestSupplierMetricsIncludeProtoPublicOrdersOnly(t *testing.T) {
 	require.NoError(t, db.Exec(`
 CREATE TABLE email_resources (id INTEGER PRIMARY KEY, type TEXT, owner_user_id INTEGER);
 CREATE TABLE microsoft_allocations (order_no TEXT, resource_id INTEGER, supply_scope TEXT);
+CREATE TABLE allocation_order_guards (order_no TEXT, type TEXT, owner_user_id INTEGER);
 CREATE TABLE domain_allocations (order_no TEXT, resource_id INTEGER, supply_scope TEXT);
 CREATE TABLE proto_allocations (order_no TEXT, resource_id INTEGER, supply_scope TEXT);
 CREATE TABLE orders (

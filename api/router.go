@@ -17,6 +17,8 @@ import (
 	billingapi "github.com/donnel666/remail/internal/billing/api"
 	coreapi "github.com/donnel666/remail/internal/core/api"
 	dashboardapi "github.com/donnel666/remail/internal/dashboard/api"
+	daumapi "github.com/donnel666/remail/internal/daum/api"
+	daumprotocol "github.com/donnel666/remail/internal/daum/infra/protocol"
 	gmailapi "github.com/donnel666/remail/internal/gmail"
 	governanceapi "github.com/donnel666/remail/internal/governance/api"
 	governanceapp "github.com/donnel666/remail/internal/governance/app"
@@ -26,6 +28,7 @@ import (
 	"github.com/donnel666/remail/internal/kitesim"
 	lotteryapi "github.com/donnel666/remail/internal/lottery/api"
 	mailmatchapi "github.com/donnel666/remail/internal/mailmatch/api"
+	mailmatchinfra "github.com/donnel666/remail/internal/mailmatch/infra"
 	mailapi "github.com/donnel666/remail/internal/mailtransport/api"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
@@ -235,6 +238,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		allocMod.SetBackgroundExecutionGate(p.BackgroundLoad)
 		cleanupFuncs = append(cleanupFuncs, allocapi.RegisterAllocationTaskHandlers(taskMux, allocMod))
 		coreMod.ProductInventory = allocMod.UseCase
+		mailMod.BindingQuery = daumBindingQuery{BindingQueryPort: mailMod.BindingQuery, db: p.DB}
 		coreMod.SetAdminResourcePorts(
 			iamMod.AdminResourceOwners,
 			mailMod.BindingQuery,
@@ -287,6 +291,51 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		coreMod.ProjectUseCase.SetProtoHistoryScan(protoMod.Service.ScheduleProjectHistory)
 		protoapi.RegisterRoutes(v1, protoMod, iamSessionFetcher, iamMod.PermissionChecker, turnstileGuard)
 		cleanupFuncs = append(cleanupFuncs, protoapi.RegisterTaskHandlers(taskMux, protoMod))
+
+		// Daum owns its resource workflows and joins the existing shared services.
+		daumMod := daumapi.NewModule(p.DB, p.Asynq, fileStore)
+		daumMod.SetAuditLogs(governanceinfra.NewOperationLogRepo(p.DB), governanceinfra.NewSystemLogRepo(p.DB))
+		daumMod.SetRedis(p.Redis)
+		daumMod.Service.ResolveBinding = daumBindingResolver{db: p.DB, pickup: mailmatchinfra.NewRepo(p.DB, fileStore)}.Resolve
+		daumMod.SetBackgroundExecutionGate(p.BackgroundLoad)
+		daumClient := daumprotocol.NewClient()
+		daumMod.Service.Protocol = daumClient
+		daumMod.Service.Proxies = proxyMod.ProxyUseCase
+		daumMod.ProxyBindings = proxyapi.NewAdminResourceProxyBindingQueryAdapter(proxyMod.AdminResourceBindings)
+		daumMod.Tasks = governanceMod.CoreTaskQuery
+		daumMod.ValidateOwner = func(ctx context.Context, ownerID uint) (bool, error) {
+			owner, err := iamMod.AdminResourceOwners.ValidateTargetOwner(ctx, ownerID)
+			return owner != nil && owner.ID != 0 && owner.Enabled, err
+		}
+		daumMod.ValidateSupplierOwner = func(ctx context.Context, ownerID uint) (bool, error) {
+			owner, err := iamMod.AdminResourceOwners.ValidateTargetOwner(ctx, ownerID)
+			return owner != nil && owner.Enabled && (owner.Role == "supplier" || owner.Role == "admin" || owner.Role == "super_admin"), err
+		}
+		daumMod.OwnerSummaries = func(ctx context.Context, ids []uint) (map[uint]daumapi.OwnerSummary, error) {
+			owners, err := iamMod.AdminResourceOwners.GetByIDs(ctx, ids)
+			if err != nil {
+				return nil, err
+			}
+			result := make(map[uint]daumapi.OwnerSummary, len(owners))
+			for id, owner := range owners {
+				result[id] = daumapi.OwnerSummary{ID: owner.ID, Email: owner.Email, Nickname: owner.Nickname, GroupName: owner.GroupName, Role: owner.Role, Enabled: owner.Enabled}
+			}
+			return result, nil
+		}
+		daumMod.SearchOwners = func(ctx context.Context, search string, limit int) ([]uint, error) {
+			owners, err := iamMod.AdminResourceOwners.SearchAdminOwners(ctx, search, limit)
+			if err != nil {
+				return nil, err
+			}
+			ids := make([]uint, 0, len(owners))
+			for _, owner := range owners {
+				ids = append(ids, owner.ID)
+			}
+			return ids, nil
+		}
+		coreMod.ProjectUseCase.SetDaumHistoryScan(daumMod.Service.ScheduleProjectHistory)
+		daumapi.RegisterRoutes(v1, daumMod, iamSessionFetcher, iamMod.PermissionChecker, turnstileGuard)
+		cleanupFuncs = append(cleanupFuncs, daumapi.RegisterTaskHandlers(taskMux, daumMod))
 
 		// Billing module (wallet, recharge ledger and card-key redemption)
 		billingMod := billingapi.NewBillingModule(p.DB, p.Asynq)
@@ -348,6 +397,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		// Trade module (unified console/API Key checkout and order query).
 		tradeMod := tradeapi.NewModule(p.DB, coreMod.ProjectUseCase, billingMod.WalletUseCase, allocMod.UseCase, openapiMod.UseCase, p.Redis)
 		protoMod.Service.HistoricalUsage = importProtoHistory(tradeMod.UseCase)
+		daumMod.Service.HistoricalUsage = importDaumHistory(tradeMod.UseCase)
 		gmailMod.Service.SetTrade(tradeMod.UseCase)
 		tradeMod.UseCase.SetOwnerLookupPort(orderOwnerDirectory{owners: iamMod.AdminResourceOwners})
 		tradeapi.RegisterRoutes(v1, tradeMod, iamSessionFetcher, iamMod.PermissionChecker)
@@ -381,6 +431,10 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		mailmatchMod.SetProtoMailFetchPort(protoMailFetchAdapter{resources: protoMod.Service})
 		mailmatchMod.SetPermanentProtoFetchFailurePort(protoFetchFailureAdapter{orders: tradeMod.UseCase})
 		allocMod.UseCase.SetProtoProtocolReady(protoClient.RuntimeAvailable())
+		mailmatchMod.SetDaumMailFetchPort(daumMailFetchAdapter{resources: daumMod.Service})
+		mailMod.SetDaumPickupSource(mailmatchinfra.NewRepo(p.DB, fileStore), mailmatchMod.UseCase)
+		mailmatchMod.SetPermanentDaumFetchFailurePort(daumFetchFailureAdapter{orders: tradeMod.UseCase})
+		allocMod.UseCase.SetDaumProtocolReady(true)
 		mailmatchMod.SetBotDiagnosisRefresh(mailmatchMod.UseCase)
 		gmailMod.Service.SetMailIngest(gmailMailIngestAdapter{mailmatch: mailmatchMod.UseCase})
 		mailmatchMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)

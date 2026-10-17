@@ -29,8 +29,11 @@ func TestProtoDashboardInventoryRequiresCurrentSessionWithoutChangingOtherProvid
 		`CREATE TABLE icloud_allocations (alias_id INTEGER, status TEXT)`,
 		`CREATE TABLE domain_resources (domain TEXT, purpose TEXT, status TEXT)`,
 		`CREATE TABLE proto_resources (id INTEGER PRIMARY KEY, owner_user_id INTEGER, status TEXT, for_sale BOOLEAN, credential_revision INTEGER)`,
+		`CREATE TABLE daum_resources (id INTEGER PRIMARY KEY, owner_user_id INTEGER, status TEXT, for_sale BOOLEAN, app_password TEXT)`,
 		`CREATE TABLE proto_sessions (resource_id INTEGER PRIMARY KEY, credential_revision INTEGER)`,
-		`INSERT INTO users VALUES (1, 'active', 'supplier')`,
+		`INSERT INTO users VALUES (1, 'active', 'supplier'), (2, 'disabled', 'supplier')`,
+		`INSERT INTO email_resources VALUES (31, 'daum', 1), (32, 'daum', 1), (33, 'daum', 1), (34, 'daum', 2), (35, 'daum', 1)`,
+		`INSERT INTO daum_resources VALUES (31,1,'normal',1,'app'), (32,1,'normal',1,''), (33,1,'abnormal',1,'app'), (34,2,'normal',1,'app'), (35,1,'normal',0,'app')`,
 		`INSERT INTO email_resources VALUES (1, 'proto', 1), (2, 'proto', 1), (3, 'proto', 1), (10, 'gmail', 1), (11, 'gmail', 1)`,
 		`INSERT INTO microsoft_resources VALUES ('normal', TRUE, TRUE), ('normal', FALSE, TRUE), ('deleted', FALSE, FALSE)`,
 		`INSERT INTO generated_mailboxes VALUES ('normal'), ('disabled'), ('retired')`,
@@ -59,6 +62,7 @@ func TestProtoDashboardInventoryRequiresCurrentSessionWithoutChangingOtherProvid
 		GmailTotal: 2, GmailAvailable: 1,
 		ICloudTotal: 2, ICloudAvailable: 1,
 		ProtoTotal: 3, ProtoAvailable: 1,
+		DaumTotal: 5, DaumAvailable: 1,
 	}
 	repo := NewAdminViewRepo(db)
 	snapshot, err := repo.InventorySnapshot(context.Background())

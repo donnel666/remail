@@ -80,6 +80,12 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
         requiredPermission: permissionKey("core:resource", "read"),
       },
       {
+        path: "/admin/daum",
+        labelKey: "Admin Daum Emails",
+        icon: Mail,
+        requiredPermission: permissionKey("core:resource", "read"),
+      },
+      {
         path: "/admin/kitesim",
         labelKey: "Admin Kitesim",
         icon: Smartphone,

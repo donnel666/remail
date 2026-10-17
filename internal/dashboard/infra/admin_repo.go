@@ -162,6 +162,7 @@ func (r *AdminViewRepo) InventorySnapshot(ctx context.Context) (dashboardapp.Inv
 		{&snap.GmailTotal, "gmail_resources", "status <> 'deleted'"},
 		{&snap.ICloudTotal, "icloud_resources", "status <> 'deleted'"},
 		{&snap.ProtoTotal, "proto_resources", "status <> 'deleted'"},
+		{&snap.DaumTotal, "daum_resources", "status <> 'deleted'"},
 	}
 	for _, c := range counts {
 		var n int64
@@ -193,6 +194,17 @@ func (r *AdminViewRepo) InventorySnapshot(ctx context.Context) (dashboardapp.Inv
 		return dashboardapp.InventorySnapshot{}, err
 	}
 	snap.ProtoAvailable = int(protoAvailable)
+	var daumAvailable int64
+	if err := r.db.WithContext(ctx).
+		Table("daum_resources AS pr").
+		Joins("JOIN email_resources AS er ON er.id = pr.id AND er.type = 'daum'").
+		Joins("JOIN users AS owner ON owner.id = er.owner_user_id").
+		Where("pr.status = 'normal' AND pr.for_sale = TRUE AND pr.app_password <> '' AND pr.owner_user_id = er.owner_user_id").
+		Where("owner.status = 'active' AND owner.role IN ('supplier', 'admin', 'super_admin')").
+		Count(&daumAvailable).Error; err != nil {
+		return dashboardapp.InventorySnapshot{}, err
+	}
+	snap.DaumAvailable = int(daumAvailable)
 	domains := runtimeconfig.ICloudForwardingSuffixes(runtimeconfig.String(runtimeconfig.ICloudForwardingSuffixesKey, ""))
 	if len(domains) == 0 {
 		return snap, nil

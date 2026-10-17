@@ -16,6 +16,7 @@ const (
 	ResourceTypeGmail     ResourceType = "gmail"
 	ResourceTypeICloud    ResourceType = "icloud"
 	ResourceTypeProto     ResourceType = "proto"
+	ResourceTypeDaum      ResourceType = "daum"
 )
 
 type MessageStatus string

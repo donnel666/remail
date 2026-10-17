@@ -493,7 +493,8 @@
               "gmail",
               "gmail_variant",
               "icloud",
-              "proto"
+              "proto",
+              "daum"
             ],
             "x-enum-varnames": [
               "Microsoft",
@@ -501,7 +502,8 @@
               "Gmail",
               "GmailVariant",
               "ICloud",
-              "Proto"
+              "Proto",
+              "Daum"
             ]
           },
           "status": {
@@ -602,7 +604,7 @@
           "suffix": {
             "type": "string",
             "example": "com.cn",
-            "description": "Selectable inventory value. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned."
+            "description": "Selectable inventory value. Daum products expose daum.net, hanmail.net and hanmail2.net separately; each count reflects eligible, unused and unallocated delivery addresses rather than three times the account count. The random selector daum is not a separate suffix inventory row. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned."
           },
           "totalAvailable": {
             "type": "integer",
@@ -729,6 +731,58 @@
           },
           "productType": {
             "type": "object",
+            "properties": {
+              "all": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "microsoft": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "domain": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "gmail": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "gmailVariant": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "icloud": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "proto": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "daum": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "all",
+              "microsoft",
+              "domain",
+              "gmail",
+              "gmailVariant",
+              "icloud",
+              "proto",
+              "daum"
+            ],
             "additionalProperties": {
               "type": "integer",
               "format": "int64"
@@ -754,7 +808,7 @@
           "emailSuffix": {
             "type": "string",
             "example": "outlook.com",
-            "description": "商品选择后缀。gmail.com 选择本地 Gmail 原始主邮箱；gmail_variant 选择谷歌变种商品，分配等价的 @googlemail.com 地址，或 @gmail.com / @googlemail.com 上的点号、加号变种。icloud.com 选择苹果邮箱；proto 在有货的 Proto 后缀中按库存量加权随机，proton.me、protonmail.com 精确选择对应的 Proto 库存；outlook.com 等具体后缀精确选择对应库存，特殊值 outlook 会在有货的微软白名单后缀中按库存量加权随机，特殊值 domain 会在有货的域名后缀中按库存量加权随机。private_first 随机时先在自有库存内按数量加权；只有自有后缀无货时才使用公共库存。指定具体后缀缺货时不会切换其他后缀。private_first 下也可指定当前用户自有的完整域名，例如 mydomain.com。不接受完整邮箱地址。"
+            "description": "商品选择后缀。daum 在有货的 Daum 后缀中按库存量加权随机；daum.net、hanmail.net、hanmail2.net 精确选择对应地址库存。三个后缀共用同一 Daum 商品的价格与服务配置。gmail.com 选择本地 Gmail 原始主邮箱；gmail_variant 选择谷歌变种商品，分配等价的 @googlemail.com 地址，或 @gmail.com / @googlemail.com 上的点号、加号变种。icloud.com 选择苹果邮箱；proto 在有货的 Proto 后缀中按库存量加权随机，proton.me、protonmail.com 精确选择对应的 Proto 库存；outlook.com 等具体后缀精确选择对应库存，特殊值 outlook 会在有货的微软白名单后缀中按库存量加权随机，特殊值 domain 会在有货的域名后缀中按库存量加权随机。private_first 随机时先在自有库存内按数量加权；只有自有后缀无货时才使用公共库存。指定具体后缀缺货时不会切换其他后缀。private_first 下也可指定当前用户自有的完整域名，例如 mydomain.com。不接受完整邮箱地址。"
           }
         },
         "required": [
@@ -774,7 +828,7 @@
           "emailSuffix": {
             "type": "string",
             "example": "outlook.com",
-            "description": "商品选择后缀。gmail.com 选择本地 Gmail 原始主邮箱；gmail_variant 选择谷歌变种商品，分配等价的 @googlemail.com 地址，或 @gmail.com / @googlemail.com 上的点号、加号变种。icloud.com 选择苹果邮箱；proto 在有货的 Proto 后缀中按库存量加权随机，proton.me、protonmail.com 精确选择对应的 Proto 库存；outlook.com 等具体后缀精确选择对应库存，特殊值 outlook 会在有货的微软白名单后缀中按库存量加权随机，特殊值 domain 会在有货的域名后缀中按库存量加权随机。private_first 随机时先在自有库存内按数量加权；只有自有后缀无货时才使用公共库存。指定具体后缀缺货时不会切换其他后缀。private_first 下也可指定当前用户自有的完整域名，例如 mydomain.com。不接受完整邮箱地址。 批量下单只随机一次，所有子订单固定使用该后缀；该后缀库存耗尽后不再随机其他后缀。"
+            "description": "商品选择后缀。daum 在有货的 Daum 后缀中按库存量加权随机；daum.net、hanmail.net、hanmail2.net 精确选择对应地址库存。三个后缀共用同一 Daum 商品的价格与服务配置。gmail.com 选择本地 Gmail 原始主邮箱；gmail_variant 选择谷歌变种商品，分配等价的 @googlemail.com 地址，或 @gmail.com / @googlemail.com 上的点号、加号变种。icloud.com 选择苹果邮箱；proto 在有货的 Proto 后缀中按库存量加权随机，proton.me、protonmail.com 精确选择对应的 Proto 库存；outlook.com 等具体后缀精确选择对应库存，特殊值 outlook 会在有货的微软白名单后缀中按库存量加权随机，特殊值 domain 会在有货的域名后缀中按库存量加权随机。private_first 随机时先在自有库存内按数量加权；只有自有后缀无货时才使用公共库存。指定具体后缀缺货时不会切换其他后缀。private_first 下也可指定当前用户自有的完整域名，例如 mydomain.com。不接受完整邮箱地址。 批量下单只随机一次，所有子订单固定使用该后缀；该后缀库存耗尽后不再随机其他后缀。"
           },
           "quantity": {
             "type": "integer",
@@ -935,7 +989,8 @@
               "gmail",
               "gmail_variant",
               "icloud",
-              "proto"
+              "proto",
+              "daum"
             ],
             "x-enum-varnames": [
               "Microsoft",
@@ -944,7 +999,8 @@
               "Gmail",
               "GmailVariant",
               "ICloud",
-              "Proto"
+              "Proto",
+              "Daum"
             ]
           },
           "serviceMode": {
@@ -1024,14 +1080,16 @@
               "domain",
               "gmail",
               "icloud",
-              "proto"
+              "proto",
+              "daum"
             ],
             "x-enum-varnames": [
               "Microsoft",
               "Domain",
               "Gmail",
               "ICloud",
-              "Proto"
+              "Proto",
+              "Daum"
             ]
           },
           "allocationId": {
@@ -1094,7 +1152,7 @@
           },
           "serviceToken": {
             "type": "string",
-            "description": "仅授予订单所选项目的系统收件权限。购买与接码均不交付账号；资源密码、2FA、应用密码和上游令牌对外只写不读。",
+            "description": "仅授予订单所选项目的系统收件权限。购买与接码均不交付账号；资源密码、2FA、应用密码和上游令牌对外只写不读。Daum 同样只交付当前完整邮箱地址的服务凭证，不交付导入的 remail 取件 URL 或 Kakao 账号邮箱资料。",
             "example": "st_550e8400-e29b-41d4-a716-446655440000"
           },
           "hasDelivery": {
@@ -1167,12 +1225,15 @@
             "type": "string",
             "format": "email",
             "minLength": 1,
-            "maxLength": 254
+            "maxLength": 254,
+            "description": "订单交付的完整邮箱地址。Daum 的 @daum.net、@hanmail.net、@hanmail2.net 分别匹配对应订单；即使共用收件箱，也不能将别名替换为主地址或另一个后缀。",
+            "example": "account@hanmail2.net"
           },
           "token": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 255
+            "maxLength": 255,
+            "description": "订单返回的 serviceToken；不是 Daum 导入资料中的 remail 取件链接凭证。"
           }
         },
         "required": [
@@ -3667,7 +3728,8 @@
                 "gmail",
                 "gmail_variant",
                 "icloud",
-                "proto"
+                "proto",
+                "daum"
               ],
               "x-enum-varnames": [
                 "Microsoft",
@@ -3675,7 +3737,8 @@
                 "Gmail",
                 "GmailVariant",
                 "ICloud",
-                "Proto"
+                "Proto",
+                "Daum"
               ]
             }
           },
@@ -3856,6 +3919,36 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/CreateOrderRequest"
+              },
+              "examples": {
+                "daumRandom": {
+                  "summary": "Daum 随机后缀",
+                  "value": {
+                    "projectId": 1001,
+                    "emailSuffix": "daum"
+                  }
+                },
+                "daumMain": {
+                  "summary": "Daum 主地址",
+                  "value": {
+                    "projectId": 1001,
+                    "emailSuffix": "daum.net"
+                  }
+                },
+                "daumHanmail": {
+                  "summary": "Daum 显式别名 hanmail.net",
+                  "value": {
+                    "projectId": 1001,
+                    "emailSuffix": "hanmail.net"
+                  }
+                },
+                "daumHanmail2": {
+                  "summary": "Daum 显式别名 hanmail2.net",
+                  "value": {
+                    "projectId": 1001,
+                    "emailSuffix": "hanmail2.net"
+                  }
+                }
               }
             }
           }
@@ -4099,6 +4192,40 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/CreateOrderBatchRequest"
+              },
+              "examples": {
+                "daumRandom": {
+                  "summary": "Daum 随机后缀",
+                  "value": {
+                    "projectId": 1001,
+                    "emailSuffix": "daum",
+                    "quantity": 2
+                  }
+                },
+                "daumMain": {
+                  "summary": "Daum 主地址",
+                  "value": {
+                    "projectId": 1001,
+                    "emailSuffix": "daum.net",
+                    "quantity": 2
+                  }
+                },
+                "daumHanmail": {
+                  "summary": "Daum 显式别名 hanmail.net",
+                  "value": {
+                    "projectId": 1001,
+                    "emailSuffix": "hanmail.net",
+                    "quantity": 2
+                  }
+                },
+                "daumHanmail2": {
+                  "summary": "Daum 显式别名 hanmail2.net",
+                  "value": {
+                    "projectId": 1001,
+                    "emailSuffix": "hanmail2.net",
+                    "quantity": 2
+                  }
+                }
               }
             }
           }
@@ -4244,15 +4371,18 @@
             "name": "email",
             "in": "query",
             "required": true,
+            "description": "订单交付的完整邮箱地址。Daum 的 @daum.net、@hanmail.net、@hanmail2.net 分别匹配对应订单；即使共用收件箱，也不能将别名替换为主地址或另一个后缀。",
             "schema": {
               "type": "string",
-              "format": "email"
+              "format": "email",
+              "example": "account@hanmail2.net"
             }
           },
           {
             "name": "token",
             "in": "query",
             "required": true,
+            "description": "订单返回的 serviceToken。",
             "schema": {
               "type": "string"
             }
@@ -4363,15 +4493,18 @@
             "name": "email",
             "in": "query",
             "required": true,
+            "description": "订单交付的完整邮箱地址。Daum 的 @daum.net、@hanmail.net、@hanmail2.net 分别匹配对应订单；即使共用收件箱，也不能将别名替换为主地址或另一个后缀。",
             "schema": {
               "type": "string",
-              "format": "email"
+              "format": "email",
+              "example": "account@hanmail2.net"
             }
           },
           {
             "name": "token",
             "in": "query",
             "required": true,
+            "description": "订单返回的 serviceToken。",
             "schema": {
               "type": "string"
             }

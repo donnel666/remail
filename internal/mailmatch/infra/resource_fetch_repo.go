@@ -67,7 +67,7 @@ func (r *ResourceFetchRepo) operationKinds() []string {
 	if r.kind == domain.ResourceFetchJobHistory {
 		return []string{"resource_history"}
 	}
-	return []string{"resource_fetch", "gmail_resource_fetch", "icloud_resource_fetch", "proto_resource_fetch"}
+	return []string{"resource_fetch", "gmail_resource_fetch", "icloud_resource_fetch", "proto_resource_fetch", "daum_resource_fetch"}
 }
 
 func (r *ResourceFetchRepo) withTx(ctx context.Context, fn func(context.Context, *gorm.DB) error) error {
@@ -97,7 +97,7 @@ func (r *ResourceFetchRepo) CreateOrReuseResourceFetch(ctx context.Context, job 
 	if job.ResourceType == "" {
 		job.ResourceType = domain.ResourceTypeMicrosoft
 	}
-	if (job.ResourceType != domain.ResourceTypeMicrosoft && job.ResourceType != domain.ResourceTypeGmail && job.ResourceType != domain.ResourceTypeICloud && job.ResourceType != domain.ResourceTypeProto) ||
+	if (job.ResourceType != domain.ResourceTypeMicrosoft && job.ResourceType != domain.ResourceTypeGmail && job.ResourceType != domain.ResourceTypeICloud && job.ResourceType != domain.ResourceTypeProto && job.ResourceType != domain.ResourceTypeDaum) ||
 		(job.ResourceType != domain.ResourceTypeMicrosoft && job.Kind != domain.ResourceFetchJobFetch) {
 		return false, domain.ErrInvalidRequest
 	}
@@ -494,6 +494,9 @@ func (r *ResourceFetchRepo) lockResourceFetchScope(ctx context.Context, resource
 	if resourceType == domain.ResourceTypeProto {
 		return loadProtoResourceFetchScope(r.dbFor(ctx), resourceID)
 	}
+	if resourceType == domain.ResourceTypeDaum {
+		return loadDaumResourceFetchScope(r.dbFor(ctx), resourceID)
+	}
 	if resourceType == domain.ResourceTypeGmail {
 		return r.lockGmailResourceFetchScope(ctx, resourceID)
 	}
@@ -591,7 +594,7 @@ func validateResourceFetchScope(row *domain.ResourceFetchScope, expectedCredenti
 		}
 		return nil
 	}
-	if row.ResourceType == domain.ResourceTypeGmail || row.ResourceType == domain.ResourceTypeProto {
+	if row.ResourceType == domain.ResourceTypeGmail || row.ResourceType == domain.ResourceTypeProto || row.ResourceType == domain.ResourceTypeDaum {
 		if strings.TrimSpace(row.EmailAddress) == "" || !row.CredentialsConfigured {
 			return domain.ErrResourceFetchCredentialsMissing
 		}
@@ -615,6 +618,8 @@ func resourceFetchStateToDomain(state FetchStateModel) domain.ResourceFetchJob {
 		resourceType = domain.ResourceTypeICloud
 	case "proto_resource_fetch":
 		resourceType = domain.ResourceTypeProto
+	case "daum_resource_fetch":
+		resourceType = domain.ResourceTypeDaum
 	}
 	operatorID := uint(0)
 	if state.OperatorUserID != nil {
@@ -641,6 +646,9 @@ func resourceFetchStateToDomain(state FetchStateModel) domain.ResourceFetchJob {
 func resourceFetchOperationKind(kind domain.ResourceFetchJobKind, resourceType domain.ResourceType) string {
 	if resourceType == domain.ResourceTypeProto {
 		return "proto_resource_fetch"
+	}
+	if resourceType == domain.ResourceTypeDaum {
+		return "daum_resource_fetch"
 	}
 	if kind == domain.ResourceFetchJobHistory {
 		return "resource_history"
@@ -671,6 +679,9 @@ func resourceFetchTaskSource(kind domain.ResourceFetchJobKind) string {
 func resourceFetchResourceLabel(resourceType domain.ResourceType) string {
 	if resourceType == domain.ResourceTypeProto {
 		return "Proto"
+	}
+	if resourceType == domain.ResourceTypeDaum {
+		return "Daum"
 	}
 	if resourceType == domain.ResourceTypeGmail {
 		return "Gmail"

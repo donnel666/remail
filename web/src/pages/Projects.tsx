@@ -211,6 +211,9 @@ function parseEmailTypes(value?: string) {
     if (normalized.includes("icloud") || normalized.includes("苹果")) {
       types.add("icloud");
     }
+    if (normalized.includes("daum") || normalized.includes("hanmail")) {
+      types.add("daum");
+    }
     if (normalized.includes("proto") || normalized.includes("质子")) {
       types.add("proto");
     }
@@ -805,6 +808,7 @@ function ProjectSquareSidebar({
           },
           { count: productTypeCounts.icloud, label: t("iCloud email"), value: "icloud" },
           { count: productTypeCounts.proto, label: t("Proto email"), value: "proto" },
+          { count: productTypeCounts.daum, label: t("Daum email"), value: "daum" },
         ]}
         onChange={onProductTypeChange}
         title={t("Product type")}
@@ -1143,6 +1147,7 @@ export default function Projects() {
     icloud: 0,
     microsoft: 0,
     proto: 0,
+    daum: 0,
   });
   const [statusCounts, setStatusCounts] = useState<Record<StatusFilter, number>>({
     all: 0,
@@ -1195,6 +1200,7 @@ export default function Projects() {
         icloud: facets?.productType.icloud ?? 0,
         microsoft: facets?.productType.microsoft ?? 0,
         proto: facets?.productType.proto ?? 0,
+        daum: facets?.productType.daum ?? 0,
       });
       return { items: listResponse.items, total: listResponse.total };
     },

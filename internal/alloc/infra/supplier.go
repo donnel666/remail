@@ -8,10 +8,14 @@ import (
 	"gorm.io/gorm"
 )
 
-// The resource root is already locked by allocation; keep its owner even if it is transferred later.
-func (r *Repo) snapshotAllocationSupplier(ctx context.Context, orderNo string, resourceID uint) error {
+// Explicit Microsoft/Daum aliases belong to platform user 1; snapshot new allocations only.
+func (r *Repo) snapshotAllocationSupplier(ctx context.Context, orderNo string, resourceID uint, explicitAlias bool) error {
+	owner := any(gorm.Expr("(SELECT owner_user_id FROM email_resources WHERE id = ?)", resourceID))
+	if explicitAlias {
+		owner = uint(1)
+	}
 	result := r.dbFor(ctx).Model(&OrderGuardModel{}).Where("order_no = ? AND owner_user_id IS NULL", orderNo).
-		Update("owner_user_id", gorm.Expr("(SELECT owner_user_id FROM email_resources WHERE id = ?)", resourceID))
+		Update("owner_user_id", owner)
 	if result.Error != nil {
 		return fmt.Errorf("snapshot allocation supplier: %w", result.Error)
 	}

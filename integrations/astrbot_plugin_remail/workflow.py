@@ -15,9 +15,9 @@ from .knowledge import INTERNAL_MODULE_KNOWLEDGE, PUBLIC_DISCLOSURE_RULES
 # Shared public semantics, not a snapshot of prices, windows or individual orders.
 PUBLIC_BUSINESS_RULES = """<remail_public_business_context>
 ReMail 提供按目标项目使用的邮箱接码和购买邮箱服务，红夜是负责产品咨询、使用引导、公开 API 对接和订单排查的官方 FAE。
-项目表示目标业务；iCloud、Microsoft/Outlook、域名邮箱、Gmail 和 Gmail 变种表示邮箱产品类型。邮箱后缀不能证明用户购买了哪个项目。
+项目表示目标业务；iCloud、Microsoft/Outlook、域名邮箱、Gmail、Gmail 变种和 Daum 表示邮箱产品类型。邮箱后缀不能证明用户购买了哪个项目。
 这些是系统识别的产品类别，可以解释其公开含义，但类型存在不代表某项目当前在售、开放或有库存；当前实际项目、可售商品与支持模式来自动态目录。相同邮箱类型可能出现在不同项目中，应按目标业务选项目，再选该项目可用的邮箱类型和服务模式。
-五类产品的公开区别：iCloud 是苹果邮箱类型，不能等同于交付 Apple ID 或整套 iCloud 账号；Microsoft/Outlook 是微软邮箱类型，具体可选后缀以当前页面或公开契约为准；域名邮箱提供相应域名下的收件地址，不等于出售域名所有权；普通 Gmail 使用原始主邮箱地址；Gmail 变种是独立商品，公开地址形式包括等价的 googlemail.com 地址，以及 gmail.com／googlemail.com 上的点号或加号变种。不要由类型或地址形式推断目标网站一定接受注册。
+各类产品的公开区别：iCloud 是苹果邮箱类型，不能等同于交付 Apple ID 或整套 iCloud 账号；Microsoft/Outlook 是微软邮箱类型，具体可选后缀以当前页面或公开契约为准；域名邮箱提供相应域名下的收件地址，不等于出售域名所有权；普通 Gmail 使用原始主邮箱地址；Gmail 变种是独立商品，公开地址形式包括等价的 googlemail.com 地址，以及 gmail.com／googlemail.com 上的点号或加号变种。Daum 支持 daum.net、hanmail.net、hanmail2.net 三个后缀和随机选择，实际供给以当前项目目录为准。不要由类型或地址形式推断目标网站一定接受注册。
 接码模式是短期单次服务，接收目标项目的一次有效邮件或验证码；接码窗口内未收到有效邮件按接码规则自动退款。
 购买邮箱模式是长效服务，在服务正常且未退款或终止时可持续收件和接码；不是仅因激活窗口或质保期结束就使邮箱失效，也不代表永久可用的承诺。
 接码窗口、购买激活窗口、质保期、实际可使用时长是不同概念。激活窗口是购买订单首次有效收件/激活的时限；质保是异常核对和售后保障窗口，不是邮箱使用期限。购买激活超时不等于接码超时，不应据此承诺自动退款。
@@ -34,7 +34,7 @@ ReMail 提供按目标项目使用的邮箱接码和购买邮箱服务，红夜�
 支付、积分到账、兑换、创建邮箱订单是不同环节。支付成功不等于兑换码已经兑换，也不等于已经创建邮箱订单。遇到“付款了买不了”，先确认卡在哪个环节及页面安全提示，再引导核对本人充值记录、兑换结果、积分余额或订单；不能重复推销链接或直接宣称到账、扣款、退款。
 “买了邮箱”可能是口语，也可能特指购买模式。一般咨询先条件化解释服务区别，不擅自认定该用户实际订单模式。邮箱不能用、没有验证码、取件为空、页面报错和 API 报错是不同现象；优先理解用户目标和当前步骤，只有订单收件问题才需要本人诊断。
 所有邮箱类型只提供订单所选项目的系统收件权限：购买是长效收件，接码是短效且只收一次验证码。用户只能通过 ReMail 收件功能取件，不交付邮箱账号或账号所有权，不支持任意目标平台。
-Gmail、Gmail 变种、iCloud、微软、域名邮箱和 Proto 均不得向买方返回资源密码、2FA、应用密码或上游令牌、会话。资源敏感数据对外只写不读；订单服务凭证只授权对应项目的系统取件。机器人不得引导用户查看资源凭据或登录邮箱官网。
+Gmail、Gmail 变种、iCloud、微软、域名邮箱、Proto 和 Daum 均不得向买方返回资源密码、2FA、应用密码或上游令牌、会话。资源敏感数据对外只写不读；订单服务凭证只授权对应项目的系统取件。机器人不得引导用户查看资源凭据或登录邮箱官网。
 邮箱可用不代表目标网站一定发送邮件或接受注册；未找到邮件不等于邮箱无效，也不能据此推断资源故障或买错项目。不得替目标网站承诺注册成功、绕过验证或保证账号不受限制。
 订单生命周期与服务生命周期不同，不能仅从“已完成”推断购买服务已经停止。激活、质保、退款和服务终止要按公开语义区分；个人订单状态必须查询，不能从等待时长或上一轮对话推断当前状态。
 售后保障不是无条件退款承诺。接码超时规则与购买售后规则不同；是否符合售后条件、是否已经退款或服务已经终止，以本人订单的明确结果为准。售后问题只询问必要现象，不索取账号密码或邮件正文。
@@ -105,7 +105,7 @@ params 可为空，合法键如下，未列出的键一律不要输出：
 - api_documentation：query。
 - code_diagnosis：hasOrderEmail。
 - orders：offset。其他 claim 的 params 必须为 {}。
-projectQuery/search 只写单个目标项目或平台，不写整句提问、多个项目拼接或邮箱类型。productTypes 是 microsoft、domain、gmail、gmail_variant、icloud 中的数组；projectId 是合法正整数；offset 为 0 至 10000 的整数；hasOrderEmail 为布尔值。充值 points 是最多 18 位的正整数字符串；paymentMethod 只允许当前已启用的 alipay 或 epusdt_usdt_tron，省略表示系统默认方式，不代表用户已经选择了该币种。
+projectQuery/search 只写单个目标项目或平台，不写整句提问、多个项目拼接或邮箱类型。productTypes 是 microsoft、domain、gmail、gmail_variant、icloud、daum 中的数组；projectId 是合法正整数；offset 为 0 至 10000 的整数；hasOrderEmail 为布尔值。充值 points 是最多 18 位的正整数字符串；paymentMethod 只允许当前已启用的 alipay 或 epusdt_usdt_tron，省略表示系统默认方式，不代表用户已经选择了该币种。
 
 用户提供的项目 id 仍未验证。project_inventory 必须依赖一个 projects 事实，由执行器先核实当前项目身份；不能只因为计划里出现了 id 就信任它。params 不得包含聊天身份、用户 id、群 id、密码、令牌、完整邮箱、邮件内容或内部标识。
 orders 仅处理当前绑定用户本人订单摘要，privacy 必须为 private；群内问题引导本人私聊。普通订单状态不能证明到件或错购；收件诊断的 intent 与 answer_mode 都必须为 diagnosis，并保留必要的 code_diagnosis，即使尚无订单邮箱也让后续节点索取必要信息，privacy 不得为 public。public_api 答复模式必须包含 api 意图。
@@ -224,7 +224,7 @@ EVIDENCE_CLAIMS = frozenset(
         "code_diagnosis",
     }
 )
-PRODUCT_TYPES = frozenset({"microsoft", "domain", "gmail", "gmail_variant", "icloud"})
+PRODUCT_TYPES = frozenset({"microsoft", "domain", "gmail", "gmail_variant", "icloud", "daum"})
 RECHARGE_PAYMENT_METHODS = frozenset({"alipay", "epusdt_usdt_tron"})
 
 MAX_FACTS = 12

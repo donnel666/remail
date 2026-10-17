@@ -2461,7 +2461,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [microsoft, domain, gmail, gmail_variant, icloud, proto]
+            enum: [microsoft, domain, gmail, gmail_variant, icloud, proto, daum]
         - name: search
           in: query
           schema:
@@ -3629,7 +3629,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [microsoft, domain, gmail, gmail_variant, icloud, proto]
+            enum: [microsoft, domain, gmail, gmail_variant, icloud, proto, daum]
         - name: search
           in: query
           schema:
@@ -5701,7 +5701,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [microsoft, domain, gmail, icloud, proto]
+            enum: [microsoft, domain, gmail, icloud, proto, daum]
         - name: orderNo
           in: query
           schema:
@@ -5788,7 +5788,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [microsoft, domain, gmail, icloud, proto]
+            enum: [microsoft, domain, gmail, icloud, proto, daum]
       responses:
         "200":
           description: Allocation detail
@@ -6337,7 +6337,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [microsoft, domain, random, gmail, gmail_variant, icloud, proto]
+            enum: [microsoft, domain, random, gmail, gmail_variant, icloud, proto, daum]
         - name: search
           in: query
           schema:
@@ -11109,7 +11109,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [microsoft, gmail, icloud, proto]
+            enum: [microsoft, gmail, icloud, proto, daum]
             default: microsoft
       responses:
         "202":
@@ -13321,7 +13321,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [microsoft_resource, gmail_resource, icloud_resource, domain_resource, icloud_resource_import, proto_resource, proto_resource_import]
+            enum: [microsoft_resource, gmail_resource, icloud_resource, domain_resource, icloud_resource_import, proto_resource, proto_resource_import, daum_resource, daum_resource_import]
         - name: bizId
           in: query
           description: Resource ID matching bizType. Omit only when listing iCloud imports globally.
@@ -13333,7 +13333,7 @@ paths:
           description: Optional normalized task source. Use `icloud_onboarding` to list recoverable Apple onboarding batches without unrelated iCloud imports consuming the page; `icloud_refresh` identifies resource-level Cookie refresh tasks.
           schema:
             type: string
-            enum: [import, alias, alias_schedule, token, fetch, resource_history, bulk, gmail_validation, gmail_history, icloud_import, icloud_onboarding, icloud_refresh, icloud_validation, proto_import, proto_validation, proto_history, proto_bulk]
+            enum: [import, alias, alias_schedule, token, fetch, resource_history, bulk, gmail_validation, gmail_history, icloud_import, icloud_onboarding, icloud_refresh, icloud_validation, proto_import, proto_validation, proto_history, proto_bulk, daum_import, daum_validation, daum_history, daum_bulk]
         - name: kind
           in: query
           schema:
@@ -13424,7 +13424,7 @@ paths:
           description: Resource type; defaults to microsoft for backward compatibility.
           schema:
             type: string
-            enum: [microsoft, gmail, icloud, domain, proto]
+            enum: [microsoft, gmail, icloud, domain, proto, daum]
             default: microsoft
         - name: resourceId
           in: query
@@ -13514,7 +13514,7 @@ paths:
           description: Resource type; defaults to microsoft for backward compatibility.
           schema:
             type: string
-            enum: [microsoft, gmail, icloud, domain, proto]
+            enum: [microsoft, gmail, icloud, domain, proto, daum]
             default: microsoft
       responses:
         "200":
@@ -13553,10 +13553,10 @@ paths:
             minimum: 1
         - name: type
           in: query
-          description: Query scope; defaults to one Microsoft resource. Use domain to query a purpose=binding domain resource, or icloud to query the exact current forwarding mailbox of one iCloud resource.
+          description: Query scope; defaults to one Microsoft resource. Use domain to query a purpose=binding domain resource, or icloud to query the exact current forwarding mailbox of one iCloud resource. Daum uses its linked system mailbox, with current owner, order and pickup-token authorization checked on each read.
           schema:
             type: string
-            enum: [microsoft, icloud, domain]
+            enum: [microsoft, icloud, domain, daum]
             default: microsoft
         - name: search
           in: query
@@ -13637,10 +13637,10 @@ paths:
             minimum: 1
         - name: type
           in: query
-          description: Association scope; defaults to one Microsoft resource. Use domain for a purpose=binding domain, or icloud for the exact current forwarding mailbox of one iCloud resource.
+          description: Association scope; defaults to one Microsoft resource. Use domain for a purpose=binding domain, or icloud for the exact current forwarding mailbox of one iCloud resource. Daum requires the exact linked mailbox and current order/token authority.
           schema:
             type: string
-            enum: [microsoft, icloud, domain]
+            enum: [microsoft, icloud, domain, daum]
             default: microsoft
       responses:
         "200":
@@ -16712,8 +16712,470 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+
+  /v1/admin/daum/resources:
+    get:
+      operationId: getAdminDaumResources
+      summary: List Daum resources for administrators
+      description: Deleted resources are excluded by default. Use status=deleted to inspect and recover them.
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: protocol
+          in: query
+          schema: {$ref: "#/components/schemas/DaumProtocol"}
+        - $ref: "#/components/parameters/OffsetQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+        - $ref: "#/components/parameters/AfterIdQuery"
+        - $ref: "#/components/parameters/CreatedFromQuery"
+        - $ref: "#/components/parameters/CreatedToQuery"
+        - $ref: "#/components/parameters/DaumSuffixQuery"
+        - $ref: "#/components/parameters/DaumLongLivedQuery"
+        - $ref: "#/components/parameters/DaumIncludeTotalQuery"
+        - $ref: "#/components/parameters/DaumIncludeFacetsQuery"
+        - name: ownerId
+          in: query
+          schema: {type: integer, format: int64, minimum: 1}
+        - name: search
+          in: query
+          description: Resource ID, full mailbox email, exact local part, @suffix, or owner email/nickname.
+          schema: {type: string, maxLength: 320}
+        - name: status
+          in: query
+          schema: {type: string, enum: [pending, validating, identifying, normal, abnormal, disabled, deleted], x-enum-varnames: [Pending, Validating, Identifying, Normal, Abnormal, Disabled, Deleted]}
+        - name: forSale
+          in: query
+          schema: {type: boolean}
+      responses:
+        "200": {description: Daum resources, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceListResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /v1/admin/daum/resources/imports:
+    post:
+      operationId: postAdminDaumResourceImport
+      description: Accepts mixed email----appPassword, email----password----appPassword and email----password----appPassword----pickupUrl----kakaoEmail rows. The pickup URL accepts /pickup and /v1/pickup; its email identifies the auxiliary mailbox, independently of the fifth-field Kakao account address. Three supported domains canonicalize to one Daum account. Passwords and the existing remail pickup URL are write-only. Duplicate active accounts are not overwritten.
+      summary: Import Daum resources for a selected owner
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, ownerId]
+              properties:
+                protocol: {$ref: "#/components/schemas/DaumProtocol"}
+                file: {type: string, format: binary}
+                ownerId: {type: integer, format: int64, minimum: 1}
+                errorStrategy: {type: string, enum: [skip, abort], x-enum-varnames: [Skip, Abort], default: skip}
+                longLived: {type: boolean, default: false}
+      responses:
+        "202": {description: Import accepted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumImportResponse"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  /v1/admin/daum/resources/imports/{importId}:
+    get:
+      operationId: getAdminDaumResourceImport
+      summary: Get an administrator Daum import
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: importId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+      responses:
+        "200": {description: Import progress, content: {application/json: {schema: {$ref: "#/components/schemas/DaumImportResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /v1/admin/daum/resources/imports/{importId}/items:
+    get:
+      operationId: getAdminDaumResourceImportItems
+      summary: List safe per-line Daum import outcomes for administrators
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: importId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+        - $ref: "#/components/parameters/OffsetQuery"
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+      responses:
+        "200": {description: Import line outcomes, content: {application/json: {schema: {$ref: "#/components/schemas/DaumImportItemsResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /v1/admin/daum/resources/validations:
+    post:
+      operationId: postAdminDaumResourceValidations
+      summary: Queue Daum validation for selected resources
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumValidationIDsRequest"}}}}
+      responses:
+        "202": {description: Validation tasks accepted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumValidationBatchResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /v1/admin/daum/resources/batch/validation:
+    post:
+      operationId: postAdminDaumResourceBatchValidation
+      summary: Queue Daum validation for selected resources
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumValidationIDsRequest"}}}}
+      responses:
+        "202": {description: Validation tasks accepted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumValidationBatchResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /v1/admin/daum/resources/batch/{action}:
+    post:
+      operationId: postAdminDaumResourceBatch
+      summary: Run a lifecycle command for selected Daum resources
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: action
+          in: path
+          required: true
+          schema: {type: string, enum: [history, publish, unpublish, delete], x-enum-varnames: [History, Publish, Unpublish, Delete]}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumBatchRequest"}}}}
+      responses:
+        "202": {description: Bulk task accepted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumBulkTask"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /v1/admin/daum/resources/{resourceId}:
+    get:
+      operationId: getAdminDaumResource
+      summary: Get one safe Daum resource
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+      responses:
+        "200": {description: Daum resource, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResource"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      operationId: patchAdminDaumResource
+      summary: Edit Daum resource identity or owner
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceEditRequest"}}}}
+      responses:
+        "200": {description: Identity edit committed and resource returned to pending validation, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+    delete:
+      operationId: deleteAdminDaumResource
+      summary: Delete one Daum resource as an administrator
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceCommandRequest"}}}}
+      responses:
+        "200": {description: Deleted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /v1/admin/daum/resources/{resourceId}/maintenance:
+    get:
+      operationId: getAdminDaumResourceMaintenance
+      summary: List Daum maintenance runs for one resource
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+        - $ref: "#/components/parameters/OffsetQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200": {description: Daum maintenance runs, content: {application/json: {schema: {$ref: "#/components/schemas/DaumMaintenanceListResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /v1/admin/daum/resources/{resourceId}/credentials:
+    put:
+      operationId: putAdminDaumResourceCredentials
+      summary: Replace Daum password as a write-only value
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumCredentialsReplaceRequest"}}}}
+      responses:
+        "200": {description: Credentials replaced, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /v1/admin/daum/resources/{resourceId}/validate:
+    post:
+      operationId: postAdminDaumResourceValidate
+      summary: Queue Daum validate using the current resource version
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200": {description: Existing command result, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
+        "202": {description: Task accepted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /v1/admin/daum/resources/{resourceId}/history:
+    post:
+      operationId: postAdminDaumResourceHistory
+      summary: Queue Daum history using the current resource version
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200": {description: Existing command result, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
+        "202": {description: Task accepted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /v1/admin/daum/resources/batch/disable:
+    post:
+      operationId: postAdminDaumResourceBatchDisable
+      summary: Disable selected Daum resources synchronously
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumBatchRequest"}}}}
+      responses:
+        "200": {description: Committed disable result, content: {application/json: {schema: {$ref: "#/components/schemas/AdminMicrosoftBulkResult"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  /v1/admin/daum/resources/bulk/disable:
+    post:
+      operationId: postAdminDaumResourceBulkDisable
+      summary: Disable selected Daum resources synchronously
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumDisableSelection"}}}}
+      responses:
+        "200": {description: Committed disable result, content: {application/json: {schema: {$ref: "#/components/schemas/AdminMicrosoftBulkResult"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  /v1/admin/daum/resources/{resourceId}/{command}:
+    post:
+      operationId: postAdminDaumResourceCommand
+      summary: Run a lifecycle command for one Daum resource
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+        - name: command
+          in: path
+          required: true
+          schema: {type: string, enum: [enable, disable, publish, unpublish, recover], x-enum-varnames: [Enable, Disable, Publish, Unpublish, Recover]}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceCommandRequest"}}}}
+      responses:
+        "200": {description: Command result, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
+        "202": {description: Command accepted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumValidationResponse"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /v1/admin/daum/resources/{resourceId}/recover:
+    post:
+      operationId: postAdminDaumResourceRecover
+      summary: Recover a deleted Daum resource
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceCommandRequest"}}}}
+      responses:
+        "200": {description: Recovered, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /v1/admin/daum/resources/bulk/{command}:
+    post:
+      operationId: postAdminDaumResourceBulk
+      summary: Queue a Daum administration command for selected resources or a filter
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: command
+          in: path
+          required: true
+          schema: {type: string, enum: [validate, history, publish, unpublish, delete]}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumBulkRequest"}}}}
+      responses:
+        "202": {description: Bulk task accepted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumBulkTask"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+
+  /v1/admin/daum/resources/bulk-tasks/{taskId}:
+    get:
+      operationId: getAdminDaumResourceBulkTask
+      summary: Get a Daum administration bulk task
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/DaumBulkTaskId"
+      responses:
+        "200": {description: Bulk progress, content: {application/json: {schema: {$ref: "#/components/schemas/DaumBulkTask"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+
+  /v1/admin/daum/resources/imports/{importId}/failures:
+    get:
+      operationId: getAdminDaumResourceImportFailures
+      summary: Download safe Daum import failure details
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: importId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+      responses:
+        "200": {description: Safe CSV without credentials, content: {text/csv: {schema: {type: string}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /v1/admin/daum/resources/{resourceId}/aliases:
+    get:
+      operationId: getAdminDaumResourceAliases
+      summary: List the two fixed aliases of a Daum account
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+      responses:
+        "200":
+          description: Fixed aliases
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/DaumAlias"}}
+                  total: {type: integer}
+                additionalProperties: false
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
 components:
   parameters:
+    DaumBulkTaskId:
+      name: taskId
+      in: path
+      required: true
+      schema: {type: string, pattern: '^daum_bulk:[1-9][0-9]*$'}
+    DaumSuffixQuery:
+      name: suffix
+      in: query
+      schema: {type: string, maxLength: 255}
+    DaumLongLivedQuery:
+      name: longLived
+      in: query
+      schema: {type: boolean}
+    DaumIncludeTotalQuery:
+      name: includeTotal
+      in: query
+      description: When false, the response omits total and returns only cursor pagination data.
+      schema: {type: boolean, default: true}
+    DaumIncludeFacetsQuery:
+      name: includeFacets
+      in: query
+      schema: {type: boolean, default: true}
     ProtoBulkTaskId:
       name: taskId
       in: path
@@ -17492,7 +17954,7 @@ components:
           type: integer
         emailSuffix:
           type: string
-          description: Product selector. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted.
+          description: Product selector. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted.
       additionalProperties: false
 
     CreateOrderBatchRequest:
@@ -17506,7 +17968,7 @@ components:
           type: integer
         emailSuffix:
           type: string
-          description: Product selector. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted.
+          description: Product selector. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted.
         quantity:
           type: integer
           minimum: 2
@@ -17710,7 +18172,7 @@ components:
           description: Current display logo URL of the ordered project; omitted when the project no longer exists or has no logo.
         productType:
           type: string
-          enum: [microsoft, domain, random, gmail, gmail_variant, icloud, proto]
+          enum: [microsoft, domain, random, gmail, gmail_variant, icloud, proto, daum]
           description: Product type snapshot. `random` is returned only for historical orders created before that product was retired.
         serviceMode:
           type: string
@@ -17736,7 +18198,7 @@ components:
           $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         allocationType:
           type: string
-          enum: [microsoft, domain, gmail, icloud, proto]
+          enum: [microsoft, domain, gmail, icloud, proto, daum]
         allocationId:
           type: integer
         deliveryEmail:
@@ -17877,7 +18339,7 @@ components:
 
     OrderProductTypeFacets:
       type: object
-      required: [all, microsoft, domain, random, gmail, gmailVariant, icloud, proto]
+      required: [all, microsoft, domain, random, gmail, gmailVariant, icloud, proto, daum]
       properties:
         all:
           type: integer
@@ -17901,6 +18363,9 @@ components:
           type: integer
           format: int64
         proto:
+          type: integer
+          format: int64
+        daum:
           type: integer
           format: int64
       additionalProperties: false
@@ -19103,13 +19568,21 @@ components:
         - icloudPurchaseActivationSuccessRate
         - icloudAveragePurchaseActivationSeconds
         - protoTotalEmails
+        - daumTotalEmails
         - protoAvailableEmails
+        - daumAvailableEmails
         - protoCodeReceipts
+        - daumCodeReceipts
         - protoCodeSuccessRate
+        - daumCodeSuccessRate
         - protoAverageCodeReceiptSeconds
+        - daumAverageCodeReceiptSeconds
         - protoPurchaseActivations
+        - daumPurchaseActivations
         - protoPurchaseActivationSuccessRate
+        - daumPurchaseActivationSuccessRate
         - protoAveragePurchaseActivationSeconds
+        - daumAveragePurchaseActivationSeconds
         - domainTotalMailboxes
         - domainAvailableMailboxes
         - domainCodeReceipts
@@ -19215,20 +19688,38 @@ components:
         protoTotalEmails:
           type: integer
           description: Non-deleted Proto source accounts.
+        daumTotalEmails:
+          type: integer
+          description: Non-deleted Daum source accounts.
         protoAvailableEmails:
           type: integer
           description: Healthy public Proto source accounts owned by active supplier or administrator accounts.
+        daumAvailableEmails:
+          type: integer
+          description: Healthy public Daum source accounts owned by active supplier or administrator accounts.
         protoCodeReceipts:
+          type: integer
+        daumCodeReceipts:
           type: integer
         protoCodeSuccessRate:
           type: number
+        daumCodeSuccessRate:
+          type: number
         protoAverageCodeReceiptSeconds:
+          type: integer
+        daumAverageCodeReceiptSeconds:
           type: integer
         protoPurchaseActivations:
           type: integer
+        daumPurchaseActivations:
+          type: integer
         protoPurchaseActivationSuccessRate:
           type: number
+        daumPurchaseActivationSuccessRate:
+          type: number
         protoAveragePurchaseActivationSeconds:
+          type: integer
+        daumAveragePurchaseActivationSeconds:
           type: integer
         domainTotalMailboxes:
           type: integer
@@ -19277,10 +19768,15 @@ components:
         - icloudCodeSuccessRate
         - icloudAverageCodeReceiptSeconds
         - protoTotalEmails
+        - daumTotalEmails
         - protoAvailableEmails
+        - daumAvailableEmails
         - protoReceivedCodes
+        - daumReceivedCodes
         - protoCodeSuccessRate
+        - daumCodeSuccessRate
         - protoAverageCodeReceiptSeconds
+        - daumAverageCodeReceiptSeconds
         - domainTotalMailboxes
         - domainAvailableMailboxes
         - domainReceivedCodes
@@ -19351,13 +19847,23 @@ components:
           type: integer
         protoTotalEmails:
           type: integer
+        daumTotalEmails:
+          type: integer
         protoAvailableEmails:
+          type: integer
+        daumAvailableEmails:
           type: integer
         protoReceivedCodes:
           type: integer
+        daumReceivedCodes:
+          type: integer
         protoCodeSuccessRate:
           type: number
+        daumCodeSuccessRate:
+          type: number
         protoAverageCodeReceiptSeconds:
+          type: integer
+        daumAverageCodeReceiptSeconds:
           type: integer
         domainTotalMailboxes:
           type: integer
@@ -21149,7 +21655,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto]
+          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto, daum]
         status:
           type: string
           enum: [enabled, disabled]
@@ -22203,6 +22709,10 @@ components:
           type: array
           items:
             type: string
+        daumSuffixBlacklist:
+          type: array
+          items:
+            type: string
       additionalProperties: false
 
     AdminRejectProjectRequest:
@@ -22229,7 +22739,7 @@ components:
           type: boolean
         productType:
           type: string
-          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto]
+          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto, daum]
         search:
           type: string
         targetPlatform:
@@ -22365,7 +22875,7 @@ components:
       properties:
         type:
           type: string
-          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto]
+          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto, daum]
         status:
           type: string
           enum: [enabled, disabled]
@@ -22500,7 +23010,7 @@ components:
 
     ProjectProductTypeFacets:
       type: object
-      required: [all, microsoft, domain, gmail, gmailVariant, icloud, proto]
+      required: [all, microsoft, domain, gmail, gmailVariant, icloud, proto, daum]
       properties:
         all:
           type: integer
@@ -22515,6 +23025,8 @@ components:
         icloud:
           type: integer
         proto:
+          type: integer
+        daum:
           type: integer
       additionalProperties: false
 
@@ -22599,7 +23111,7 @@ components:
       properties:
         type:
           type: string
-          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto]
+          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto, daum]
         status:
           type: string
           enum: [enabled, disabled]
@@ -22663,7 +23175,7 @@ components:
       properties:
         suffix:
           type: string
-          description: Selectable inventory value. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned.
+          description: Selectable inventory value. Microsoft and Proto products expose exact email domains. Daum exposes daum.net, hanmail.net and hanmail2.net as independently available addresses on a shared account. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned.
         totalAvailable:
           type: integer
           format: int64
@@ -22693,7 +23205,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto]
+          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto, daum]
         status:
           type: string
           enum: [enabled, disabled]
@@ -22851,6 +23363,10 @@ components:
           items:
             $ref: "#/components/schemas/ProjectAccess"
         microsoftSuffixBlacklist:
+          type: array
+          items:
+            type: string
+        daumSuffixBlacklist:
           type: array
           items:
             type: string
@@ -23309,7 +23825,7 @@ components:
       properties:
         type:
           type: string
-          enum: [microsoft, domain, gmail, icloud, proto]
+          enum: [microsoft, domain, gmail, icloud, proto, daum]
         id:
           type: integer
         orderNo:
@@ -23367,6 +23883,7 @@ components:
         - gmail
         - icloud
         - proto
+        - daum
         - totalAvailable
         - activeMicrosoftAllocations
         - activeDomainAllocations
@@ -23385,6 +23902,8 @@ components:
           $ref: "#/components/schemas/ICloudInventory"
         proto:
           $ref: "#/components/schemas/ProtoInventory"
+        daum:
+          $ref: "#/components/schemas/DaumInventory"
         totalAvailable:
           type: integer
         activeMicrosoftAllocations:
@@ -23396,6 +23915,8 @@ components:
         activeICloudAllocations:
           type: integer
         activeProtoAllocations:
+          type: integer
+        activeDaumAllocations:
           type: integer
       additionalProperties: false
 
@@ -23515,7 +24036,7 @@ components:
       properties:
         productType:
           type: string
-          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto]
+          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto, daum]
         totalAvailable:
           type: integer
         publicAvailable:
@@ -25753,7 +26274,7 @@ components:
       additionalProperties: false
     AdminMicrosoftProxyBinding:
       type: object
-      description: Safe proxy binding metadata for the Microsoft account. The raw proxy URL and any proxy credentials are never returned.
+      description: Safe proxy binding metadata for a mailbox account. The raw proxy URL and any proxy credentials are never returned.
       required: [proxyId, host, outboundIp, country, ipVersion, status, expireAt]
       properties:
         proxyId:
@@ -26234,7 +26755,7 @@ components:
       enum: [queued, running, succeeded, failed, uncertain, canceled]
     AdminTaskBizType:
       type: string
-      enum: [microsoft_resource, gmail_resource, icloud_resource, domain_resource, proto_resource, microsoft_resource_import, gmail_resource_import, microsoft_resource_bulk, icloud_resource_import, proto_resource_import, proto_resource_bulk]
+      enum: [microsoft_resource, gmail_resource, icloud_resource, domain_resource, proto_resource, microsoft_resource_import, gmail_resource_import, microsoft_resource_bulk, icloud_resource_import, proto_resource_import, proto_resource_bulk, daum_resource, daum_resource_import, daum_resource_bulk]
     AdminTaskProgress:
       type: object
       required:
@@ -26667,7 +27188,7 @@ components:
           format: email
         status:
           type: string
-          enum: [pending, code_sent, verified, timeout, failed, expired]
+          enum: [pending, code_sent, verified, timeout, failed, expired, unlinked, linked, conflict, unavailable]
         updatedAt:
           type: string
           format: date-time
@@ -26786,7 +27307,7 @@ components:
       properties:
         type:
           type: string
-          enum: [microsoft, domain, gmail, icloud, proto]
+          enum: [microsoft, domain, gmail, icloud, proto, daum]
         id:
           type: integer
           minimum: 1
@@ -28642,4 +29163,394 @@ components:
         updatedAt: {type: string, format: date-time}
         startedAt: {type: string, format: date-time, nullable: true}
         finishedAt: {type: string, format: date-time, nullable: true}
+      additionalProperties: false
+
+    DaumInventory:
+      type: object
+      required: [enabled, eligibleResources, mainAvailable, publicAvailable, totalAvailable]
+      properties:
+        explicitAliasAvailable: {type: integer}
+        enabled:
+          type: boolean
+        eligibleResources:
+          type: integer
+        mainAvailable:
+          type: integer
+        publicAvailable:
+          type: integer
+        totalAvailable:
+          type: integer
+      additionalProperties: false
+
+    DaumResourceStatus:
+      type: string
+      description: Validation matches Microsoft resources. Retryable failures return to pending while attempts remain; non-retryable or exhausted validations become abnormal.
+      enum: [pending, validating, identifying, normal, abnormal, disabled, deleted]
+      x-enum-varnames: [Pending, Validating, Identifying, Normal, Abnormal, Disabled, Deleted]
+
+    DaumResource:
+      type: object
+      required: [id, version, ownerUserId, email, suffix, longLived, qualityScore, status, forSale, passwordConfigured, loginPasswordConfigured, appPasswordConfigured, protocol, kakaoEmail, bindingStatus, pickupUrlConfigured, aliases, credentialRevision, credentialUpdatedAt, validationGeneration, validationFailures, createdAt, updatedAt]
+      properties:
+        proxyBindings: {type: array, items: {$ref: "#/components/schemas/AdminMicrosoftProxyBinding"}}
+        recentTasks: {type: array, items: {$ref: "#/components/schemas/AdminTaskSummary"}}
+        activeTask:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/AdminTaskSummary"
+        protocol: {$ref: "#/components/schemas/DaumProtocol"}
+        appPasswordConfigured: {type: boolean}
+        kakaoEmail: {type: string, description: Kakao account address supplied separately from the pickup mailbox.}
+        bindingAddress: {type: string, description: Actual auxiliary mailbox address resolved from the pickup URL or an owned domain.}
+        bindingStatus: {type: string, enum: [unlinked, linked, conflict, unavailable]}
+        bindingLastSafeError: {type: string}
+        pickupUrlConfigured: {type: boolean}
+        aliases: {type: array, items: {$ref: "#/components/schemas/DaumAlias"}}
+        id: {type: integer, format: int64}
+        version: {type: integer, format: int64}
+        ownerUserId: {type: integer, format: int64}
+        owner: {$ref: "#/components/schemas/DaumOwnerSummary"}
+        email: {type: string, format: email}
+        suffix: {type: string}
+        longLived: {type: boolean, description: Supplier-provided lifecycle classification; not a protocol lifetime guarantee.}
+        qualityScore: {type: integer, minimum: 0, maximum: 100}
+        status: {$ref: "#/components/schemas/DaumResourceStatus"}
+        forSale: {type: boolean}
+        passwordConfigured: {type: boolean}
+        loginPasswordConfigured: {type: boolean}
+        credentialRevision: {type: integer, format: int64}
+        credentialUpdatedAt: {type: string, format: date-time}
+        validationGeneration: {type: integer, format: int64}
+        validationFailures: {type: integer}
+        lastSafeError: {type: string}
+        lastCheckedAt: {type: string, format: date-time, nullable: true}
+        lastAllocatedAt: {type: string, format: date-time, nullable: true}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+      additionalProperties: false
+
+    DaumResourceFacets:
+      type: object
+      required: [all, pending, validating, identifying, normal, abnormal, disabled, deleted, status, forSale, longLived, suffixes]
+      properties:
+        all: {type: integer, format: int64}
+        pending: {type: integer, format: int64}
+        validating: {type: integer, format: int64}
+        identifying: {type: integer, format: int64}
+        normal: {type: integer, format: int64}
+        abnormal: {type: integer, format: int64}
+        disabled: {type: integer, format: int64}
+        deleted: {type: integer, format: int64}
+        status:
+          type: object
+          required: [all, pending, validating, identifying, normal, abnormal, disabled, deleted]
+          properties:
+            all: {type: integer, format: int64}
+            pending: {type: integer, format: int64}
+            validating: {type: integer, format: int64}
+            identifying: {type: integer, format: int64}
+            normal: {type: integer, format: int64}
+            abnormal: {type: integer, format: int64}
+            disabled: {type: integer, format: int64}
+            deleted: {type: integer, format: int64}
+          additionalProperties: false
+        forSale: {$ref: "#/components/schemas/DaumBooleanFacets"}
+        longLived: {$ref: "#/components/schemas/DaumBooleanFacets"}
+        suffixes:
+          type: array
+          items:
+            type: object
+            required: [key, count]
+            properties:
+              key: {type: string}
+              count: {type: integer, format: int64}
+            additionalProperties: false
+      additionalProperties: false
+
+    DaumOwnerSummary:
+      type: object
+      required: [id, email, nickname, groupName, role, enabled]
+      properties:
+        id: {type: integer, format: int64}
+        email: {type: string}
+        nickname: {type: string}
+        groupName: {type: string}
+        role: {type: string, enum: [user, supplier, admin, super_admin]}
+        enabled: {type: boolean}
+      additionalProperties: false
+
+    DaumBooleanFacets:
+      type: object
+      required: [all, yes, no]
+      properties:
+        all: {type: integer, format: int64}
+        yes: {type: integer, format: int64}
+        no: {type: integer, format: int64}
+      additionalProperties: false
+
+    DaumResourceListResponse:
+      type: object
+      required: [items, offset, limit, facets, hasMore]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/DaumResource"}}
+        total: {type: integer, format: int64, minimum: 0, description: Omitted when includeTotal is false.}
+        offset: {type: integer}
+        limit: {type: integer}
+        facets: {$ref: "#/components/schemas/DaumResourceFacets"}
+        nextAfterId: {type: integer, format: int64, nullable: true}
+        hasMore: {type: boolean}
+      additionalProperties: false
+
+    DaumImportResponse:
+      type: object
+      required: [importId, status, accepted, imported, skipped, failed, dispatchStatus, dispatchAttempts, failureAvailable, reused]
+      properties:
+        importId: {type: integer, format: int64}
+        status: {type: string, enum: [processing, imported, failed], x-enum-varnames: [Processing, Imported, Failed]}
+        accepted: {type: integer}
+        imported: {type: integer}
+        skipped: {type: integer}
+        failed: {type: integer}
+        dispatchStatus: {type: string, enum: [pending, queued, running, done, succeeded, failed]}
+        dispatchAttempts: {type: integer}
+        failureAvailable: {type: boolean}
+        lastSafeError: {type: string}
+        reused: {type: boolean}
+        createdAt: {type: string, format: date-time, nullable: true}
+        updatedAt: {type: string, format: date-time, nullable: true}
+      additionalProperties: false
+
+    DaumImportItem:
+      type: object
+      required: [line, outcome, category]
+      properties:
+        line: {type: integer, minimum: 1}
+        resourceId: {type: integer, format: int64, nullable: true}
+        outcome: {type: string, enum: [imported, restored, skipped, failed], x-enum-varnames: [Imported, Restored, Skipped, Failed]}
+        category: {type: string}
+        lastSafeError: {type: string}
+      additionalProperties: false
+
+    DaumImportItemsResponse:
+      type: object
+      required: [items, total, offset, limit]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/DaumImportItem"}}
+        total: {type: integer, format: int64}
+        offset: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 200}
+      additionalProperties: false
+
+    DaumValidationResponse:
+      $ref: "#/components/schemas/DaumResourceMutationResponse"
+
+    DaumMaintenanceRun:
+      type: object
+      required: [id, resourceId, validationGeneration, kind, status, attempts, maxAttempts, credentialRevision, queuedAt, createdAt, updatedAt]
+      properties:
+        id: {type: integer, format: int64}
+        resourceId: {type: integer, format: int64}
+        validationGeneration: {type: integer, format: int64}
+        kind: {type: string, enum: [validation, history], x-enum-varnames: [Validation, History]}
+        status: {type: string, enum: [queued, running, succeeded, failed, uncertain, canceled], x-enum-varnames: [Queued, Running, Succeeded, Failed, Uncertain, Canceled]}
+        attempts: {type: integer}
+        maxAttempts: {type: integer}
+        credentialRevision: {type: integer, format: int64}
+        requestId: {type: string}
+        lastSafeError: {type: string}
+        queuedAt: {type: string, format: date-time}
+        startedAt: {type: string, format: date-time, nullable: true}
+        finishedAt: {type: string, format: date-time, nullable: true}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+      additionalProperties: false
+
+    DaumMaintenanceListResponse:
+      type: object
+      required: [items, total, offset, limit]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/DaumMaintenanceRun"}}
+        total: {type: integer, format: int64}
+        offset: {type: integer}
+        limit: {type: integer}
+      additionalProperties: false
+
+    DaumDisableSelection:
+      type: object
+      required: [selection]
+      properties:
+        selection:
+          type: object
+          required: [mode, resourceIds]
+          properties:
+            mode: {type: string, enum: [ids]}
+            resourceIds:
+              type: array
+              minItems: 1
+              maxItems: 1000
+              items: {type: integer, format: int64, minimum: 1}
+          additionalProperties: false
+      additionalProperties: false
+
+    DaumValidationIDsRequest:
+      type: object
+      required: [resourceIds]
+      properties:
+        resourceIds:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          description: Also bounded by the configured resource_validation_max_ids.
+          items: {type: integer, format: int64, minimum: 1}
+      additionalProperties: false
+
+    DaumBatchRequest:
+      type: object
+      required: [resourceIds]
+      properties:
+        resourceIds:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items: {type: integer, format: int64, minimum: 1}
+      additionalProperties: false
+
+    DaumValidationBatchResponse:
+      $ref: "#/components/schemas/DaumBulkTask"
+
+    DaumBatchResponse:
+      $ref: "#/components/schemas/DaumBulkTask"
+
+    DaumResourceMutationResponse:
+      type: object
+      required: [resourceId, version, status, forSale, validationGeneration, queued, todo, reused, changed]
+      properties:
+        resourceId: {type: integer, format: int64}
+        version: {type: integer, format: int64}
+        status: {$ref: "#/components/schemas/DaumResourceStatus"}
+        forSale: {type: boolean}
+        validationGeneration: {type: integer, format: int64}
+        queued: {type: boolean}
+        todo: {type: boolean}
+        reused: {type: boolean}
+        changed: {type: boolean, description: Whether this command changed the resource; preserved on idempotent replay.}
+      additionalProperties: false
+
+    DaumResourceEditRequest:
+      type: object
+      description: Patch changed metadata only. Kakao account email is independent of the auxiliary mailbox; pickupUrl determines its actual mailbox. A real owner change is blocked while an active Daum allocation exists.
+      required: [version]
+      properties:
+        appPassword: {type: string, minLength: 1, maxLength: 512, writeOnly: true}
+        protocol: {$ref: "#/components/schemas/DaumProtocol"}
+        kakaoEmail: {type: string, description: Kakao account email; an empty string clears it.}
+        bindingAddress: {type: string, format: email, nullable: true, description: Omit to preserve; null removes the auxiliary association.}
+        pickupUrl: {type: string, maxLength: 4096, writeOnly: true, nullable: true, description: Omit to preserve; null removes the auxiliary association.}
+        version: {type: integer, format: int64, minimum: 1}
+        email: {type: string, format: email}
+        ownerId: {type: integer, format: int64, minimum: 1}
+        password: {type: string, minLength: 1, maxLength: 512, writeOnly: true}
+        qualityScore: {type: integer, minimum: 0, maximum: 100}
+        longLived: {type: boolean}
+        forSale: {type: boolean}
+      additionalProperties: false
+
+    DaumCredentialsReplaceRequest:
+      type: object
+      required: [version, appPassword]
+      properties:
+        appPassword: {type: string, minLength: 1, maxLength: 512, writeOnly: true}
+        protocol: {$ref: "#/components/schemas/DaumProtocol"}
+        version: {type: integer, format: int64, minimum: 1}
+        password: {type: string, minLength: 1, maxLength: 512, writeOnly: true}
+      additionalProperties: false
+
+    DaumResourceCommandRequest:
+      type: object
+      required: [version]
+      properties:
+        version: {type: integer, format: int64, minimum: 1}
+      additionalProperties: false
+
+    DaumResourceFilter:
+      type: object
+      properties:
+        protocol: {$ref: "#/components/schemas/DaumProtocol"}
+        search: {type: string, maxLength: 320}
+        status: {$ref: "#/components/schemas/DaumResourceStatus"}
+        suffix: {type: string, maxLength: 255}
+        forSale: {type: boolean}
+        longLived: {type: boolean}
+        ownerId: {type: integer, format: int64, minimum: 1}
+        createdFrom: {type: string, format: date-time}
+        createdTo: {type: string, format: date-time}
+      additionalProperties: false
+
+    DaumBulkRequest:
+      type: object
+      required: [selection]
+      properties:
+        selection:
+          type: object
+          required: [mode]
+          properties:
+            mode: {type: string, enum: [ids, filter]}
+            resourceIds:
+              type: array
+              minItems: 1
+              maxItems: 1000
+              items: {type: integer, format: int64, minimum: 1}
+            filter: {$ref: "#/components/schemas/DaumResourceFilter"}
+          additionalProperties: false
+      additionalProperties: false
+
+    DaumBulkTask:
+      type: object
+      required: [taskId, kind, resourceType, status, action, requested, processed, affected, skipped, reasonCounts, createdAt, updatedAt]
+      properties:
+        taskId: {type: string}
+        kind: {type: string, enum: [daum_resource_bulk]}
+        resourceType: {type: string, enum: [daum]}
+        status: {type: string, enum: [queued, running, succeeded, failed]}
+        action: {type: string, enum: [validate, history, disable, publish, unpublish, delete]}
+        operatorUserId: {type: integer, format: int64}
+        attempts: {type: integer, minimum: 0}
+        maxAttempts: {type: integer, minimum: 1}
+        requested: {type: integer, minimum: 0}
+        processed: {type: integer, minimum: 0}
+        affected: {type: integer, minimum: 0}
+        skipped: {type: integer, minimum: 0}
+        reasonCounts:
+          type: array
+          items:
+            type: object
+            required: [reason, count]
+            properties:
+              reason: {type: string}
+              count: {type: integer, minimum: 0}
+            additionalProperties: false
+        requestId: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        startedAt: {type: string, format: date-time, nullable: true}
+        finishedAt: {type: string, format: date-time, nullable: true}
+      additionalProperties: false
+
+    DaumProtocol:
+      type: string
+      enum: [imap, pop3]
+      default: imap
+    DaumAlias:
+      type: object
+      required: [id, email, suffix, status]
+      properties:
+        version: {type: integer, format: int64}
+        id: {type: integer, format: int64}
+        resourceId: {type: integer, format: int64}
+        ownerUserId: {type: integer, format: int64}
+        email: {type: string, format: email}
+        suffix: {type: string, enum: [hanmail.net, hanmail2.net]}
+        status: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
       additionalProperties: false

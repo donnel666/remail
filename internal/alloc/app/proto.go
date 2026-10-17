@@ -28,8 +28,26 @@ func (uc *UseCase) ProtoProtocolReady() bool {
 
 func (uc *UseCase) findAllocationForFulfillment(ctx context.Context, orderNo string) (*domain.UnifiedAllocation, error) {
 	allocation, err := uc.repo.FindExistingAllocation(ctx, orderNo)
+	if err == nil && allocation != nil && allocation.Type == domain.AllocationTypeMicrosoft {
+		ready, checkErr := uc.MicrosoftAllocationReady(ctx, orderNo, allocation.ID)
+		if checkErr != nil {
+			return nil, checkErr
+		}
+		if !ready {
+			return nil, domain.ErrInsufficientInventory
+		}
+	}
 	if err == nil && allocation != nil && allocation.Type == domain.AllocationTypeProto {
 		ready, readyErr := uc.ProtoAllocationReady(ctx, orderNo, allocation.ID)
+		if readyErr != nil {
+			return nil, readyErr
+		}
+		if !ready {
+			return nil, domain.ErrInsufficientInventory
+		}
+	}
+	if err == nil && allocation != nil && allocation.Type == domain.AllocationTypeDaum {
+		ready, readyErr := uc.DaumAllocationReady(ctx, orderNo, allocation.ID)
 		if readyErr != nil {
 			return nil, readyErr
 		}

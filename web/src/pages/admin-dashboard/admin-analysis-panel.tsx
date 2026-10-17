@@ -163,6 +163,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
       const gmailVariantLabel = t("Gmail variant code receipts");
       const iCloudLabel = t("iCloud code receipts");
       const protoLabel = t("Proto code receipts");
+      const daumLabel = t("Daum code receipts");
       const values = (data?.trend ?? []).flatMap((point) => [
         { Count: point.microsoftReceivedCodes, Metric: microsoftLabel, Time: point.label },
         { Count: point.domainReceivedCodes, Metric: domainLabel, Time: point.label },
@@ -174,6 +175,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
         },
         { Count: point.icloudReceivedCodes, Metric: iCloudLabel, Time: point.label },
         { Count: point.protoReceivedCodes, Metric: protoLabel, Time: point.label },
+        { Count: point.daumReceivedCodes, Metric: daumLabel, Time: point.label },
       ]);
 
       return asChartSpec({
@@ -185,6 +187,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
             [iCloudLabel]: "#06b6d4",
             [microsoftLabel]: "#3b82f6",
             [protoLabel]: "#14b8a6",
+            [daumLabel]: "#f59e0b",
           },
         },
         data: [{ id: "adminCodeTrendData", values }],
@@ -207,6 +210,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
       const gmailVariantLabel = t("Gmail variant code success rate");
       const iCloudLabel = t("iCloud code success rate");
       const protoLabel = t("Proto code success rate");
+      const daumLabel = t("Daum code success rate");
       const values = (data?.trend ?? []).flatMap((point) => [
         { Metric: microsoftLabel, Rate: point.microsoftCodeSuccessRate, Time: point.label },
         { Metric: domainLabel, Rate: point.domainCodeSuccessRate, Time: point.label },
@@ -218,6 +222,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
         },
         { Metric: iCloudLabel, Rate: point.icloudCodeSuccessRate, Time: point.label },
         { Metric: protoLabel, Rate: point.protoCodeSuccessRate, Time: point.label },
+        { Metric: daumLabel, Rate: point.daumCodeSuccessRate, Time: point.label },
       ]);
 
       return asChartSpec({
@@ -235,6 +240,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
             [iCloudLabel]: "#06b6d4",
             [microsoftLabel]: "#22a06b",
             [protoLabel]: "#14b8a6",
+            [daumLabel]: "#f59e0b",
           },
         },
         data: [{ id: "adminSuccessRateData", values }],
@@ -254,7 +260,9 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
       domainAvailable: t("Available domain emails"),
       domainTotal: t("Total domain emails"),
       protoAvailable: t("Available Proto emails"),
+      daumAvailable: t("Available Daum emails"),
       protoTotal: t("Total Proto emails"),
+      daumTotal: t("Total Daum emails"),
       microsoftAvailable: t("Available Microsoft emails"),
       microsoftTotal: t("Total Microsoft emails"),
     };
@@ -272,7 +280,9 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
         Time: point.label,
       },
       { Count: point.protoTotalEmails, Metric: labels.protoTotal, Time: point.label },
+      { Count: point.daumTotalEmails, Metric: labels.daumTotal, Time: point.label },
       { Count: point.protoAvailableEmails, Metric: labels.protoAvailable, Time: point.label },
+      { Count: point.daumAvailableEmails, Metric: labels.daumAvailable, Time: point.label },
     ]);
 
     return asChartSpec({
@@ -283,7 +293,9 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
           [labels.domainTotal]: "#8b5cf6",
           [labels.domainAvailable]: "#ec4899",
           [labels.protoTotal]: "#14b8a6",
+          [labels.daumTotal]: "#f59e0b",
           [labels.protoAvailable]: "#0f766e",
+          [labels.daumAvailable]: "#d97706",
         },
       },
       data: [{ id: "adminInventoryTrendData", values }],

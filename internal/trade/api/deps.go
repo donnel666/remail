@@ -311,7 +311,7 @@ func (a coreOrderingAdapter) projectProductIDFromDB(ctx context.Context, project
 
 func isCheckoutProductType(productType domain.ProductType) bool {
 	switch productType {
-	case domain.ProductTypeMicrosoft, domain.ProductTypeDomain, domain.ProductTypeGmail, domain.ProductTypeGmailVariant, domain.ProductTypeICloud, domain.ProductTypeProto:
+	case domain.ProductTypeMicrosoft, domain.ProductTypeDomain, domain.ProductTypeGmail, domain.ProductTypeGmailVariant, domain.ProductTypeICloud, domain.ProductTypeProto, domain.ProductTypeDaum:
 		return true
 	default:
 		return false
@@ -658,4 +658,11 @@ func mapAllocationError(err error) error {
 	default:
 		return err
 	}
+}
+
+func (a allocationAdapter) MicrosoftAllocationReady(ctx context.Context, orderNo string, allocationID uint) (bool, error) {
+	if a.alloc == nil {
+		return false, nil
+	}
+	return a.alloc.MicrosoftAllocationReady(ctx, orderNo, allocationID)
 }

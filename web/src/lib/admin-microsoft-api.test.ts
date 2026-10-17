@@ -791,4 +791,22 @@ describe("admin Microsoft API adapter", () => {
     expectCommandHeader(apiMocks.POST, 0);
     expectCommandHeader(apiMocks.POST, 1);
   });
+  it("keeps Daum main mail, auxiliary mail and fetch requests in the Daum scope", async () => {
+    apiMocks.GET.mockResolvedValue({ data: { items: [], total: 0, hasMore: false } });
+    apiMocks.POST.mockResolvedValue({ data: ACCEPTED_TASK_RESPONSE });
+    await listAdminMicrosoftMessages(41, "", 20, undefined, undefined, "daum");
+    await getAdminMicrosoftMessage(41, 9, undefined, "daum");
+    await listAdminMicrosoftBindingMessages(41, "", 20, undefined, undefined, "daum");
+    await getAdminMicrosoftBindingMessage(41, 10, undefined, "daum");
+    await fetchAdminMicrosoftMail(41, "daum");
+    expect(apiMocks.GET.mock.calls.map(([path]) => path)).toEqual([
+      "/v1/admin/messages", "/v1/admin/messages/{messageId}", "/v1/admin/bindings", "/v1/admin/bindings/messages/{messageId}",
+    ]);
+    for (let index = 0; index < 4; index += 1) {
+      expect(callOptions(apiMocks.GET, index).params?.query).toMatchObject({ resourceId: 41, type: "daum" });
+    }
+    expect(callOptions(apiMocks.POST).params?.query).toEqual({ type: "daum" });
+    expectCommandHeader(apiMocks.POST);
+  });
+
 });

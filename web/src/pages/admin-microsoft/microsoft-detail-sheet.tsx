@@ -99,6 +99,48 @@ type AliasListResponse = {
   schedule?: AdminMicrosoftAliasListResponse["schedule"];
 };
 
+export function ResourceProxyDiagnostics({ bindings, t }: {
+  bindings: AdminMicrosoftResourceDetail["proxyBindings"];
+  t: TFunction;
+}) {
+  return <>
+          <InfoItem
+            label={t("Resource proxy")}
+            value={
+              bindings.length > 0 ? (
+                <div className="space-y-1 text-xs">
+                  {bindings.map((binding) => (
+                    <div key={`${binding.proxyId}-${binding.ipVersion}`}>
+                      <span className="font-mono">#{binding.proxyId}</span>{" "}
+                      {binding.host || "-"} · {binding.ipVersion} · {binding.status}
+                      {binding.outboundIp ? ` · ${binding.outboundIp}` : ""}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <span className="text-[var(--semi-color-text-2)]">{t("Not configured")}</span>
+              )
+            }
+          />
+          <InfoItem
+            label={t("Expires at")}
+            value={
+              bindings.length > 0 ? (
+                <div className="space-y-1 text-xs">
+                  {bindings.map((binding) => (
+                    <div key={`${binding.proxyId}-${binding.ipVersion}`}>
+                      {binding.ipVersion}: {formatTime(binding.expireAt)}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <span className="text-[var(--semi-color-text-2)]">-</span>
+              )
+            }
+          />
+  </>;
+}
+
 function ResourceOverview({
   detail,
   t,
@@ -131,40 +173,7 @@ function ResourceOverview({
               )
             }
           />
-          <InfoItem
-            label={t("Resource proxy")}
-            value={
-              detail.proxyBindings.length > 0 ? (
-                <div className="space-y-1 text-xs">
-                  {detail.proxyBindings.map((binding) => (
-                    <div key={`${binding.proxyId}-${binding.ipVersion}`}>
-                      <span className="font-mono">#{binding.proxyId}</span>{" "}
-                      {binding.host || "-"} · {binding.ipVersion} · {binding.status}
-                      {binding.outboundIp ? ` · ${binding.outboundIp}` : ""}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <span className="text-[var(--semi-color-text-2)]">{t("Not configured")}</span>
-              )
-            }
-          />
-          <InfoItem
-            label={t("Expires at")}
-            value={
-              detail.proxyBindings.length > 0 ? (
-                <div className="space-y-1 text-xs">
-                  {detail.proxyBindings.map((binding) => (
-                    <div key={`${binding.proxyId}-${binding.ipVersion}`}>
-                      {binding.ipVersion}: {formatTime(binding.expireAt)}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <span className="text-[var(--semi-color-text-2)]">-</span>
-              )
-            }
-          />
+          <ResourceProxyDiagnostics bindings={detail.proxyBindings} t={t} />
           <InfoItem
             label={t("Owner")}
             value={<OwnerIdentity owner={detail.owner} t={t} />}
@@ -571,7 +580,7 @@ export function RelatedOrdersTable({
   t,
 }: {
   resourceId: number;
-  resourceType?: "microsoft" | "gmail" | "icloud";
+  resourceType?: "microsoft" | "gmail" | "icloud" | "daum";
   t: TFunction;
 }) {
   const pageState = useAdminMicrosoftAllocationPage(resourceId, resourceType);
@@ -992,7 +1001,7 @@ export function ResourceMailsPanel({
   hideMailboxMeta?: boolean;
   onRefresh?: () => void | Promise<void>;
   resourceId: number;
-  resourceType?: "microsoft" | "gmail" | "icloud";
+  resourceType?: "microsoft" | "gmail" | "icloud" | "daum";
   t: TFunction;
 }) {
   const [search, setSearch] = useState("");
@@ -1053,7 +1062,7 @@ export function ResourceMailsPanel({
           pageSize,
           cursor ?? undefined,
           controller.signal,
-          resourceType === "icloud" ? "icloud" : "microsoft"
+          resourceType === "icloud" || resourceType === "daum" ? resourceType : "microsoft"
         )
       : listAdminMicrosoftMessages(
           resourceId,
@@ -1096,7 +1105,9 @@ export function ResourceMailsPanel({
               ? "Gmail mail load failed."
               : resourceType === "icloud"
                 ? "iCloud mail load failed."
-              : "Microsoft mail load failed."
+              : resourceType === "daum"
+                  ? "Daum mail load failed."
+                  : "Microsoft mail load failed."
           );
           setListError(message);
           Toast.error(message);
@@ -1204,7 +1215,7 @@ export function ResourceMailsPanel({
           resourceId,
           selectedId,
           controller.signal,
-          resourceType === "icloud" ? "icloud" : "microsoft"
+          resourceType === "icloud" || resourceType === "daum" ? resourceType : "microsoft"
         )
       : getAdminMicrosoftMessage(
           resourceId,
@@ -1226,7 +1237,9 @@ export function ResourceMailsPanel({
                 ? "Gmail mail detail load failed."
                 : resourceType === "icloud"
                   ? "iCloud mail detail load failed."
-                : "Microsoft mail detail load failed."
+                : resourceType === "daum"
+                  ? "Daum mail detail load failed."
+                  : "Microsoft mail detail load failed."
             )
           );
         }
@@ -1288,7 +1301,7 @@ export function ResourceMailsPanel({
               ? "Gmail task load failed."
               : resourceType === "icloud"
                 ? "iCloud task load failed."
-                : "Microsoft task load failed."
+                : resourceType === "daum" ? "Daum task load failed." : "Microsoft task load failed."
           )
         );
       }
@@ -1309,7 +1322,7 @@ export function ResourceMailsPanel({
               ? "Gmail resources load failed."
               : resourceType === "icloud"
                 ? "iCloud resources load failed."
-                : "Admin Microsoft resources load failed."
+                : resourceType === "daum" ? "Admin Daum resources load failed." : "Admin Microsoft resources load failed."
           )
         );
       }

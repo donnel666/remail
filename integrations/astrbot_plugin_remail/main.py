@@ -199,9 +199,10 @@ _PRODUCT_TYPE_ALIASES = {
     "gmail_variant": ("gmail_variant", "gmail变种", "gmail 变种", "gmailvariant"),
     "gmail": ("gmail",),
     "icloud": ("icloud",),
+    "daum": ("daum", "daum.net", "hanmail.net", "hanmail2.net"),
 }
 _PROJECT_PRICE_SUBJECT = re.compile(
-    r"icloud|outlook|hotmail|microsoft|微软|域名邮箱|gmail|项目|接码|购买邮箱",
+    r"icloud|outlook|hotmail|microsoft|daum|hanmail|微软|域名邮箱|gmail|项目|接码|购买邮箱",
     re.IGNORECASE,
 )
 _MONEY_PAYMENT_QUERY = re.compile(r"充值|兑换码|人民币|支付|商城", re.IGNORECASE)
@@ -681,6 +682,7 @@ _PRODUCT_LABELS = {
     "gmail": "Gmail",
     "gmail_variant": "Gmail 变种",
     "icloud": "iCloud",
+    "daum": "Daum",
 }
 _PUSH_TOPICS = (
     "project.launched",
@@ -7743,7 +7745,7 @@ class Main(Star):
         常用场景：用户问价格、单价、多少钱、收费、贵不贵，或同时比较多种邮箱价格。
 
         Args:
-            product_types(string): 可选邮箱类型，多个值用英文逗号分隔。标准值为 microsoft、domain、gmail、gmail_variant、icloud。例如 iCloud、微软和域名邮箱一起询价时传 icloud,microsoft,domain；留空返回全部类型。
+            product_types(string): 可选邮箱类型，多个值用英文逗号分隔。标准值为 microsoft、domain、gmail、gmail_variant、icloud、daum。例如 iCloud、微软和域名邮箱一起询价时传 icloud,microsoft,domain；留空返回全部类型。
             search(string): 可选的单个项目名称或目标平台关键词，对应事实计划 projectQuery；不能传整句问题或多个项目。
             offset(number): 默认 0，实际使用非负整数 0 到 10000；每页最多 100 个项目，truncated=true 时可从 nextOffset 继续查询。
 
@@ -7821,7 +7823,7 @@ class Main(Star):
         Args:
             search(string): 可选的单个项目名称或目标平台关键词。服务端要求 search 中的全部词同时匹配；不得传多个项目、多个邮箱类型或整句问题。若按邮箱类型筛选，请使用 product_types，不要把 gmail_variant 等类型写入 search。
             offset(number): 默认 0，实际使用非负整数 0 到 10000；每页最多 100 个项目，需要补齐当前目标时可按 nextOffset 继续查询。
-            product_types(string): 可选邮箱类型；单个值可用于服务端 productType 筛选，标准值为 microsoft、domain、gmail、gmail_variant、icloud。多个值会保留为客户端筛选提示。
+            product_types(string): 可选邮箱类型；单个值可用于服务端 productType 筛选，标准值为 microsoft、domain、gmail、gmail_variant、icloud、daum。多个值会保留为客户端筛选提示。
 
         Returns:
             与普通工作台一致的当前可见项目列表，包含项目 ID、products 邮箱类型、接码/购买
@@ -8298,7 +8300,14 @@ class Main(Star):
                 if not isinstance(source, dict) or name not in source:
                     unresolved = True
                     continue
-                target[name] = source[name]
+                # SDK identifier hints must not crowd out the checkout/pickup HTTP contract.
+                target[name] = json.loads(
+                    json.dumps(source[name]),
+                    object_hook=lambda value: {
+                        key: item for key, item in value.items()
+                        if key != "x-enum-varnames"
+                    },
+                )
                 pending.extend(
                     re.findall(
                         ref_pattern,

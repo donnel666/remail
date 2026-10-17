@@ -112,7 +112,9 @@ type InventorySnapshot struct {
 	ICloudTotal        int
 	ICloudAvailable    int
 	ProtoTotal         int
+	DaumTotal          int
 	ProtoAvailable     int
+	DaumAvailable      int
 }
 
 // ---- assembled read model ------------------------------------------------
@@ -161,13 +163,21 @@ type AdminStats struct {
 	ICloudPurchaseActivationSuccessRate          float64
 	ICloudAveragePurchaseActivationSeconds       int
 	ProtoTotalEmails                             int
+	DaumTotalEmails                              int
 	ProtoAvailableEmails                         int
+	DaumAvailableEmails                          int
 	ProtoCodeReceipts                            int
+	DaumCodeReceipts                             int
 	ProtoCodeSuccessRate                         float64
+	DaumCodeSuccessRate                          float64
 	ProtoAverageCodeReceiptSeconds               int
+	DaumAverageCodeReceiptSeconds                int
 	ProtoPurchaseActivations                     int
+	DaumPurchaseActivations                      int
 	ProtoPurchaseActivationSuccessRate           float64
+	DaumPurchaseActivationSuccessRate            float64
 	ProtoAveragePurchaseActivationSeconds        int
+	DaumAveragePurchaseActivationSeconds         int
 	DomainTotalMailboxes                         int
 	DomainAvailableMailboxes                     int
 	DomainCodeReceipts                           int
@@ -208,10 +218,15 @@ type AdminTrendPoint struct {
 	ICloudCodeSuccessRate                 float64
 	ICloudAverageCodeReceiptSeconds       int
 	ProtoTotalEmails                      int
+	DaumTotalEmails                       int
 	ProtoAvailableEmails                  int
+	DaumAvailableEmails                   int
 	ProtoReceivedCodes                    int
+	DaumReceivedCodes                     int
 	ProtoCodeSuccessRate                  float64
+	DaumCodeSuccessRate                   float64
 	ProtoAverageCodeReceiptSeconds        int
+	DaumAverageCodeReceiptSeconds         int
 	DomainTotalMailboxes                  int
 	DomainAvailableMailboxes              int
 	DomainReceivedCodes                   int
@@ -329,12 +344,14 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 		gmailVariantR := receiptsByType[productBucket{key, "gmail_variant"}]
 		iCloudR := receiptsByType[productBucket{key, "icloud"}]
 		protoR := receiptsByType[productBucket{key, "proto"}]
+		daumR := receiptsByType[productBucket{key, "daum"}]
 		msCO := codeOrdersByType[productBucket{key, "microsoft"}]
 		dCO := codeOrdersByType[productBucket{key, "domain"}]
 		gmailCO := codeOrdersByType[productBucket{key, "gmail"}]
 		gmailVariantCO := codeOrdersByType[productBucket{key, "gmail_variant"}]
 		iCloudCO := codeOrdersByType[productBucket{key, "icloud"}]
 		protoCO := codeOrdersByType[productBucket{key, "proto"}]
+		daumCO := codeOrdersByType[productBucket{key, "daum"}]
 		newUsers := newUserByKey[key]
 		activeUsers := activeUserByKey[key]
 		trend = append(trend, AdminTrendPoint{
@@ -345,7 +362,7 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 			WithdrawAmount:                        f.Withdraw,
 			PlatformRevenue:                       f.PlatformRevenue,
 			Orders:                                orderByKey[key],
-			SuccessfulCodeReceipts:                msR.Received + dR.Received + gmailR.Received + gmailVariantR.Received + iCloudR.Received + protoR.Received,
+			SuccessfulCodeReceipts:                msR.Received + dR.Received + gmailR.Received + gmailVariantR.Received + iCloudR.Received + protoR.Received + daumR.Received,
 			TotalUsers:                            totalUsers,
 			ActiveUsers:                           activeUsers,
 			NewUsers:                              newUsers,
@@ -370,10 +387,15 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 			ICloudCodeSuccessRate:                 round1(minFloat(100, pct(iCloudR.Received, iCloudCO))),
 			ICloudAverageCodeReceiptSeconds:       iCloudR.AvgSeconds,
 			ProtoTotalEmails:                      snapshot.ProtoTotal,
+			DaumTotalEmails:                       snapshot.DaumTotal,
 			ProtoAvailableEmails:                  snapshot.ProtoAvailable,
+			DaumAvailableEmails:                   snapshot.DaumAvailable,
 			ProtoReceivedCodes:                    protoR.Received,
+			DaumReceivedCodes:                     daumR.Received,
 			ProtoCodeSuccessRate:                  round1(minFloat(100, pct(protoR.Received, protoCO))),
+			DaumCodeSuccessRate:                   round1(minFloat(100, pct(daumR.Received, daumCO))),
 			ProtoAverageCodeReceiptSeconds:        protoR.AvgSeconds,
+			DaumAverageCodeReceiptSeconds:         daumR.AvgSeconds,
 			DomainTotalMailboxes:                  snapshot.DomainTotal,
 			DomainAvailableMailboxes:              snapshot.DomainAvailable,
 			DomainReceivedCodes:                   dR.Received,
@@ -407,11 +429,13 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 	gmailVariant := fulfillmentTotals["gmail_variant"]
 	iCloud := fulfillmentTotals["icloud"]
 	proto := fulfillmentTotals["proto"]
+	daum := fulfillmentTotals["daum"]
 	msPurchase := purchasesByType["microsoft"]
 	gmailPurchase := purchasesByType["gmail"]
 	gmailVariantPurchase := purchasesByType["gmail_variant"]
 	iCloudPurchase := purchasesByType["icloud"]
 	protoPurchase := purchasesByType["proto"]
+	daumPurchase := purchasesByType["daum"]
 
 	return &AdminDashboard{
 		Stats: AdminStats{
@@ -458,13 +482,21 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 			ICloudPurchaseActivationSuccessRate:          round1(minFloat(100, pct(iCloudPurchase.Activated, iCloudPurchase.Orders))),
 			ICloudAveragePurchaseActivationSeconds:       averageSeconds(iCloudPurchase.TotalSeconds, iCloudPurchase.Timed),
 			ProtoTotalEmails:                             snapshot.ProtoTotal,
+			DaumTotalEmails:                              snapshot.DaumTotal,
 			ProtoAvailableEmails:                         snapshot.ProtoAvailable,
+			DaumAvailableEmails:                          snapshot.DaumAvailable,
 			ProtoCodeReceipts:                            proto.Received,
+			DaumCodeReceipts:                             daum.Received,
 			ProtoCodeSuccessRate:                         round1(minFloat(100, pct(proto.Received, proto.CodeOrders))),
+			DaumCodeSuccessRate:                          round1(minFloat(100, pct(daum.Received, daum.CodeOrders))),
 			ProtoAverageCodeReceiptSeconds:               averageSeconds(proto.TotalSeconds, proto.Timed),
+			DaumAverageCodeReceiptSeconds:                averageSeconds(daum.TotalSeconds, daum.Timed),
 			ProtoPurchaseActivations:                     protoPurchase.Activated,
+			DaumPurchaseActivations:                      daumPurchase.Activated,
 			ProtoPurchaseActivationSuccessRate:           round1(minFloat(100, pct(protoPurchase.Activated, protoPurchase.Orders))),
+			DaumPurchaseActivationSuccessRate:            round1(minFloat(100, pct(daumPurchase.Activated, daumPurchase.Orders))),
 			ProtoAveragePurchaseActivationSeconds:        averageSeconds(protoPurchase.TotalSeconds, protoPurchase.Timed),
+			DaumAveragePurchaseActivationSeconds:         averageSeconds(daumPurchase.TotalSeconds, daumPurchase.Timed),
 			DomainTotalMailboxes:                         snapshot.DomainTotal,
 			DomainAvailableMailboxes:                     snapshot.DomainAvailable,
 			DomainCodeReceipts:                           domain.Received,
@@ -501,7 +533,7 @@ func countByBucket(rows []CountBucket) map[string]int {
 	return m
 }
 
-var dashboardProductTypes = [...]string{"microsoft", "domain", "gmail", "gmail_variant", "icloud", "proto"}
+var dashboardProductTypes = [...]string{"microsoft", "domain", "gmail", "gmail_variant", "icloud", "proto", "daum"}
 
 type productBucket struct {
 	Bucket      string

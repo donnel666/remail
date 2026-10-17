@@ -124,6 +124,7 @@ type OrderProductTypeFacetsResponse struct {
 	GmailVariant int64 `json:"gmailVariant"`
 	ICloud       int64 `json:"icloud"`
 	Proto        int64 `json:"proto"`
+	Daum         int64 `json:"daum"`
 }
 
 type OrderProjectFacetResponse struct {

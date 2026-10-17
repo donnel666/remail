@@ -160,7 +160,7 @@ func (h *Handler) GetAdminMessage(c *gin.Context) {
 }
 
 func requireProtoManagementRole(c *gin.Context, resourceType domain.ResourceType) bool {
-	if resourceType != domain.ResourceTypeProto {
+	if resourceType != domain.ResourceTypeProto && resourceType != domain.ResourceTypeDaum {
 		return true
 	}
 	middleware.RoleRequired(iamdomain.RoleAdmin, iamdomain.RoleSuperAdmin)(c)
@@ -169,7 +169,7 @@ func requireProtoManagementRole(c *gin.Context, resourceType domain.ResourceType
 
 func adminMessageResourceType(c *gin.Context) (domain.ResourceType, bool) {
 	value := domain.ResourceType(strings.TrimSpace(c.DefaultQuery("type", string(domain.ResourceTypeMicrosoft))))
-	return value, value == domain.ResourceTypeMicrosoft || value == domain.ResourceTypeDomain || value == domain.ResourceTypeGmail || value == domain.ResourceTypeICloud || value == domain.ResourceTypeProto
+	return value, value == domain.ResourceTypeMicrosoft || value == domain.ResourceTypeDomain || value == domain.ResourceTypeGmail || value == domain.ResourceTypeICloud || value == domain.ResourceTypeProto || value == domain.ResourceTypeDaum
 }
 
 func adminMessageSummaryDTO(item mailmatchapp.AdminMessageSummary) adminMessageSummaryResponse {

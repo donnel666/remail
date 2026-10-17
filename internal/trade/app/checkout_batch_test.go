@@ -1741,3 +1741,7 @@ func TestAttachAllocationIDsKeepsTerminalLegacyGmailOrderReadable(t *testing.T) 
 	require.NoError(t, uc.attachAllocationIDs(context.Background(), result))
 	require.Zero(t, result.AllocationID)
 }
+
+func (*checkoutInventorySpy) MicrosoftAllocationReady(context.Context, string, uint) (bool, error) {
+	return true, nil
+}

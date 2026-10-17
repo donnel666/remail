@@ -423,7 +423,7 @@ func (r *Repo) MarkActive(ctx context.Context, cmd tradeapp.MarkActiveCommand) (
 			updates["activated_at"] = cmd.ActivatedAt.UTC()
 		}
 		switch cmd.AllocationType {
-		case domain.AllocationTypeMicrosoft, domain.AllocationTypeDomain, domain.AllocationTypeICloud, domain.AllocationTypeProto:
+		case domain.AllocationTypeMicrosoft, domain.AllocationTypeDomain, domain.AllocationTypeICloud, domain.AllocationTypeProto, domain.AllocationTypeDaum:
 			if cmd.AllocationID == 0 {
 				return domain.ErrInvalidOrderRequest
 			}
@@ -859,6 +859,7 @@ func (r *Repo) OrderFacets(ctx context.Context, filter tradeapp.OrderListFilter)
 		GmailVariant int64 `gorm:"column:gmail_variant_count"`
 		ICloud       int64 `gorm:"column:icloud_count"`
 		Proto        int64 `gorm:"column:proto_count"`
+		Daum         int64 `gorm:"column:daum_count"`
 	}
 	if err := applyOrderFilter(r.dbFor(ctx).Model(&OrderModel{}), productTypeBase).
 		Select(
@@ -869,7 +870,8 @@ func (r *Repo) OrderFacets(ctx context.Context, filter tradeapp.OrderListFilter)
 			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS gmail_count,
 			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS gmail_variant_count,
 			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS icloud_count,
-			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS proto_count`,
+			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS proto_count,
+			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS daum_count`,
 			string(domain.ProductTypeMicrosoft),
 			string(domain.ProductTypeDomain),
 			string(domain.ProductTypeLegacyRandom),
@@ -877,6 +879,7 @@ func (r *Repo) OrderFacets(ctx context.Context, filter tradeapp.OrderListFilter)
 			string(domain.ProductTypeGmailVariant),
 			string(domain.ProductTypeICloud),
 			string(domain.ProductTypeProto),
+			string(domain.ProductTypeDaum),
 		).
 		Scan(&productTypeRow).Error; err != nil {
 		return nil, fmt.Errorf("order product type facets: %w", err)
@@ -890,6 +893,7 @@ func (r *Repo) OrderFacets(ctx context.Context, filter tradeapp.OrderListFilter)
 		GmailVariant: productTypeRow.GmailVariant,
 		ICloud:       productTypeRow.ICloud,
 		Proto:        productTypeRow.Proto,
+		Daum:         productTypeRow.Daum,
 	}
 
 	projectBase := filter
@@ -1010,7 +1014,8 @@ func (r *Repo) listCheckoutAllocationRecoveries(ctx context.Context, staleBefore
 		Joins("LEFT JOIN gmail_allocations AS ga ON g.type = ? AND ga.order_no = g.order_no AND ga.source = ? AND ga.status = ?", domain.AllocationTypeGmail, "local", "allocated").
 		Joins("LEFT JOIN icloud_allocations AS ia ON g.type = ? AND ia.order_no = g.order_no AND ia.status = ?", domain.AllocationTypeICloud, "allocated").
 		Joins("LEFT JOIN proto_allocations AS pa ON g.type = ? AND pa.order_no = g.order_no AND pa.guard_type = ? AND pa.status = ?", domain.AllocationTypeProto, domain.AllocationTypeProto, "allocated").
-		Where("(ma.id IS NOT NULL OR da.id IS NOT NULL OR ga.id IS NOT NULL OR ia.id IS NOT NULL OR pa.id IS NOT NULL) AND (o.status = ? OR (o.status = ? AND COALESCE(ma.created_at, da.created_at, ga.created_at, ia.created_at, pa.created_at) < ?) OR (o.status = ? AND o.updated_at < ?))",
+		Joins("LEFT JOIN daum_allocations AS dma ON g.type = ? AND dma.order_no = g.order_no AND dma.guard_type = ? AND dma.status = ?", domain.AllocationTypeDaum, domain.AllocationTypeDaum, "allocated").
+		Where("(ma.id IS NOT NULL OR da.id IS NOT NULL OR ga.id IS NOT NULL OR ia.id IS NOT NULL OR pa.id IS NOT NULL OR dma.id IS NOT NULL) AND (o.status = ? OR (o.status = ? AND COALESCE(ma.created_at, da.created_at, ga.created_at, ia.created_at, pa.created_at, dma.created_at) < ?) OR (o.status = ? AND o.updated_at < ?))",
 			domain.OrderStatusFailed,
 			domain.OrderStatusPendingPayment, staleBefore.UTC(),
 			domain.OrderStatusPaid, staleBefore.UTC())
@@ -1027,23 +1032,15 @@ func (r *Repo) listCheckoutAllocationRecoveries(ctx context.Context, staleBefore
 }
 
 func (r *Repo) ListUnavailableMicrosoftOrderNos(ctx context.Context, resourceID uint, limit int) ([]string, error) {
-	var orderNos []string
-	query := r.dbFor(ctx).Table("orders AS o").
-		Select("o.order_no").
-		Joins("JOIN microsoft_allocations AS ma ON ma.order_no = o.order_no AND ma.status = ?", "allocated").
-		Joins("JOIN microsoft_resources AS mr ON mr.id = ma.resource_id AND mr.status = ?", "abnormal").
-		Where("o.allocation_type = ? AND o.status = ? AND o.debit_tx_id IS NOT NULL AND o.refund_tx_id IS NULL", string(domain.AllocationTypeMicrosoft), string(domain.OrderStatusActive)).
-		Order("o.id ASC")
-	if resourceID > 0 {
-		query = query.Where("ma.resource_id = ?", resourceID)
+	proofs, err := r.ListUnavailableMicrosoftOrders(ctx, resourceID, limit)
+	if err != nil {
+		return nil, err
 	}
-	if limit > 0 {
-		query = query.Limit(limit)
+	orders := make([]string, 0, len(proofs))
+	for _, proof := range proofs {
+		orders = append(orders, proof.OrderNo)
 	}
-	if err := query.Scan(&orderNos).Error; err != nil {
-		return nil, fmt.Errorf("list orders on unavailable microsoft resources: %w", err)
-	}
-	return orderNos, nil
+	return orders, nil
 }
 
 func (r *Repo) ListUnavailableGmailOrderNos(ctx context.Context, resourceID uint, limit int) ([]string, error) {

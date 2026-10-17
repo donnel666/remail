@@ -45,7 +45,7 @@ func TestBackgroundTierOnlyServesBackgroundQueues(t *testing.T) {
 			t.Fatalf("background tier must not serve realtime/foreground queue %s", foreground)
 		}
 	}
-	if bg[QueueBackgroundValidation] != 3 || bg[QueueBackgroundGmailValidation] != 1 || bg[QueueBackgroundICloudValidation] != 1 || bg[QueueBackgroundDomainValidation] != 1 || bg[QueueBackgroundAlias] != 1 || bg[QueueBackgroundTokenRefresh] != 1 || bg[QueueBackgroundProjectHistory] != 1 || bg[QueueBackgroundGmailIdentification] != 1 || bg[QueueBackgroundProtoImport] != 1 || bg[QueueBackgroundProtoValidation] != 1 || bg[QueueBackgroundProtoHistory] != 1 || bg[QueueBackgroundInventory] != 1 || bg[QueueResource] != 2 {
+	if bg[QueueBackgroundValidation] != 3 || bg[QueueBackgroundGmailValidation] != 1 || bg[QueueBackgroundICloudValidation] != 1 || bg[QueueBackgroundDomainValidation] != 1 || bg[QueueBackgroundAlias] != 1 || bg[QueueBackgroundTokenRefresh] != 1 || bg[QueueBackgroundProjectHistory] != 1 || bg[QueueBackgroundGmailIdentification] != 1 || bg[QueueBackgroundProtoImport] != 1 || bg[QueueBackgroundProtoValidation] != 1 || bg[QueueBackgroundProtoHistory] != 1 || bg[QueueBackgroundDaumImport] != 1 || bg[QueueBackgroundDaumValidation] != 1 || bg[QueueBackgroundDaumHistory] != 1 || bg[QueueBackgroundInventory] != 1 || bg[QueueResource] != 2 {
 		t.Fatalf("background queues must retain non-zero weighted fairness, got %#v", bg)
 	}
 }
@@ -73,6 +73,9 @@ func TestEveryQueueWeightUsesItsRuntimeSetting(t *testing.T) {
 		{"asynq_queue_background_proto_import_weight", QueueBackgroundProtoImport, backgroundQueueConfig},
 		{"asynq_queue_background_proto_validation_weight", QueueBackgroundProtoValidation, backgroundQueueConfig},
 		{"asynq_queue_background_proto_history_weight", QueueBackgroundProtoHistory, backgroundQueueConfig},
+		{"asynq_queue_background_daum_import_weight", QueueBackgroundDaumImport, backgroundQueueConfig},
+		{"asynq_queue_background_daum_validation_weight", QueueBackgroundDaumValidation, backgroundQueueConfig},
+		{"asynq_queue_background_daum_history_weight", QueueBackgroundDaumHistory, backgroundQueueConfig},
 		{"asynq_queue_background_inventory_weight", QueueBackgroundInventory, backgroundQueueConfig},
 	}
 	if len(settings) != len(AllQueueNames) {

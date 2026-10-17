@@ -49,9 +49,13 @@ var projectPriceFallbacks = map[string]string{
 	"default_project_icloud_purchase_price":                 "10",
 	"default_project_icloud_purchase_supplier_price":        "7",
 	"default_project_proto_code_price":                      "8",
+	"default_project_daum_code_price":                       "8",
 	"default_project_proto_code_supplier_price":             "5",
+	"default_project_daum_code_supplier_price":              "5",
 	"default_project_proto_purchase_price":                  "10",
+	"default_project_daum_purchase_price":                   "10",
 	"default_project_proto_purchase_supplier_price":         "7",
+	"default_project_daum_purchase_supplier_price":          "7",
 }
 
 var projectServiceFallbacks = map[string]bool{
@@ -66,7 +70,9 @@ var projectServiceFallbacks = map[string]bool{
 	"default_project_icloud_code_enabled":            true,
 	"default_project_icloud_purchase_enabled":        true,
 	"default_project_proto_code_enabled":             true,
+	"default_project_daum_code_enabled":              true,
 	"default_project_proto_purchase_enabled":         true,
+	"default_project_daum_purchase_enabled":          true,
 }
 
 func projectNameMaxValue() int {
@@ -168,6 +174,7 @@ type ProjectProductTypeFacets struct {
 	GmailVariant int64
 	ICloud       int64
 	Proto        int64
+	Daum         int64
 }
 
 type ProjectListFacets struct {
@@ -224,6 +231,7 @@ type CreateProjectRequest struct {
 	MailRules      []ProjectMailRuleRequest
 	// nil means omitted on update/approve; a non-nil empty slice explicitly clears it.
 	MicrosoftSuffixBlacklist []string
+	DaumSuffixBlacklist      []string
 }
 
 type ProjectProductRequest struct {
@@ -267,6 +275,7 @@ type ProjectUseCase struct {
 	historyScan         func(context.Context, uint, string) error
 	gmailHistoryScan    func(context.Context, uint, string) error
 	protoHistoryScan    func(context.Context, uint, string) error
+	daumHistoryScan     func(context.Context, uint, string) error
 	applicationNotifier func(context.Context, domain.Project, string) error
 }
 
@@ -284,6 +293,10 @@ func (uc *ProjectUseCase) SetGmailHistoryScan(scan func(context.Context, uint, s
 
 func (uc *ProjectUseCase) SetProtoHistoryScan(scan func(context.Context, uint, string) error) {
 	uc.protoHistoryScan = scan
+}
+
+func (uc *ProjectUseCase) SetDaumHistoryScan(scan func(context.Context, uint, string) error) {
+	uc.daumHistoryScan = scan
 }
 
 func (uc *ProjectUseCase) SetOwnerQueryPort(owners OwnerQueryPort) {
@@ -499,6 +512,10 @@ func (uc *ProjectUseCase) AdminCreateListed(ctx context.Context, operatorUserID 
 	if err != nil {
 		return nil, err
 	}
+	daumSuffixBlacklist, err := normalizeDaumSuffixBlacklist(req.DaumSuffixBlacklist, products, nil)
+	if err != nil {
+		return nil, err
+	}
 
 	detail := &domain.ProjectDetail{
 		Project:                  project,
@@ -506,6 +523,7 @@ func (uc *ProjectUseCase) AdminCreateListed(ctx context.Context, operatorUserID 
 		MailRules:                rules,
 		Accesses:                 accesses,
 		MicrosoftSuffixBlacklist: suffixBlacklist,
+		DaumSuffixBlacklist:      daumSuffixBlacklist,
 	}
 	log := projectOperationLog(operatorUserID, requestID, path, "core.project.create", "project", "new", "success", "Listed project created.")
 	if err := uc.projects.CreateWithLog(ctx, detail, log); err != nil {
@@ -514,6 +532,7 @@ func (uc *ProjectUseCase) AdminCreateListed(ctx context.Context, operatorUserID 
 	uc.scheduleHistoryScan(ctx, detail, requestID)
 	uc.scheduleGmailHistoryScan(ctx, detail, requestID)
 	uc.scheduleProtoHistoryScan(ctx, detail, requestID)
+	uc.scheduleDaumHistoryScan(ctx, detail, requestID)
 	return detail, nil
 }
 
@@ -542,6 +561,10 @@ func (uc *ProjectUseCase) AdminUpdate(ctx context.Context, operatorUserID, proje
 	if err != nil {
 		return nil, err
 	}
+	daumSuffixBlacklist, err := uc.normalizeDaumSuffixBlacklist(ctx, projectID, req.DaumSuffixBlacklist, products)
+	if err != nil {
+		return nil, err
+	}
 
 	detail := &domain.ProjectDetail{
 		Project:                  project,
@@ -549,6 +572,7 @@ func (uc *ProjectUseCase) AdminUpdate(ctx context.Context, operatorUserID, proje
 		MailRules:                rules,
 		Accesses:                 accesses,
 		MicrosoftSuffixBlacklist: suffixBlacklist,
+		DaumSuffixBlacklist:      daumSuffixBlacklist,
 	}
 	operationType, summary := "core.project.update", "Project updated."
 	previous, err := uc.projects.FindDetail(ctx, projectID, operatorUserID, true)
@@ -563,6 +587,7 @@ func (uc *ProjectUseCase) AdminUpdate(ctx context.Context, operatorUserID, proje
 		return nil, err
 	}
 	uc.scheduleProtoHistoryScan(ctx, detail, requestID)
+	uc.scheduleDaumHistoryScan(ctx, detail, requestID)
 	return detail, nil
 }
 
@@ -593,6 +618,7 @@ func (uc *ProjectUseCase) AdminApprove(ctx context.Context, operatorUserID, proj
 	uc.scheduleHistoryScan(ctx, detail, requestID)
 	uc.scheduleGmailHistoryScan(ctx, detail, requestID)
 	uc.scheduleProtoHistoryScan(ctx, detail, requestID)
+	uc.scheduleDaumHistoryScan(ctx, detail, requestID)
 	return detail, nil
 }
 
@@ -621,12 +647,17 @@ func (uc *ProjectUseCase) AdminApproveWithConfig(ctx context.Context, operatorUs
 	if err != nil {
 		return nil, err
 	}
+	daumSuffixBlacklist, err := uc.normalizeDaumSuffixBlacklist(ctx, projectID, req.DaumSuffixBlacklist, products)
+	if err != nil {
+		return nil, err
+	}
 	detail := &domain.ProjectDetail{
 		Project:                  project,
 		Products:                 products,
 		MailRules:                rules,
 		Accesses:                 accesses,
 		MicrosoftSuffixBlacklist: suffixBlacklist,
+		DaumSuffixBlacklist:      daumSuffixBlacklist,
 	}
 	log := projectOperationLog(operatorUserID, requestID, path, "core.project.approve", "project", strconv.FormatUint(uint64(projectID), 10), "success", "Project approved with configuration.")
 	if err := uc.projects.ApproveWithConfigAndLog(ctx, detail, log); err != nil {
@@ -635,6 +666,7 @@ func (uc *ProjectUseCase) AdminApproveWithConfig(ctx context.Context, operatorUs
 	uc.scheduleHistoryScan(ctx, detail, requestID)
 	uc.scheduleGmailHistoryScan(ctx, detail, requestID)
 	uc.scheduleProtoHistoryScan(ctx, detail, requestID)
+	uc.scheduleDaumHistoryScan(ctx, detail, requestID)
 	return detail, nil
 }
 
@@ -664,6 +696,20 @@ func (uc *ProjectUseCase) scheduleProtoHistoryScan(ctx context.Context, detail *
 		if product.Type == domain.ProductTypeProto {
 			if err := uc.protoHistoryScan(context.WithoutCancel(ctx), detail.Project.ID, requestID); err != nil {
 				slog.Warn("Proto project history scan enqueue failed", "project_id", detail.Project.ID, "request_id", requestID, "error", err)
+			}
+			return
+		}
+	}
+}
+
+func (uc *ProjectUseCase) scheduleDaumHistoryScan(ctx context.Context, detail *domain.ProjectDetail, requestID string) {
+	if uc.daumHistoryScan == nil || detail == nil || detail.Project.ID == 0 {
+		return
+	}
+	for _, product := range detail.Products {
+		if product.Type == domain.ProductTypeDaum {
+			if err := uc.daumHistoryScan(context.WithoutCancel(ctx), detail.Project.ID, requestID); err != nil {
+				slog.Warn("Daum project history scan enqueue failed", "project_id", detail.Project.ID, "request_id", requestID, "error", err)
 			}
 			return
 		}
@@ -816,6 +862,23 @@ func (uc *ProjectUseCase) AdminBulkUpdateProducts(ctx context.Context, operatorU
 			}
 			for _, project := range projects {
 				uc.scheduleProtoHistoryScan(ctx, &domain.ProjectDetail{Project: project.Project, Products: products}, requestID)
+			}
+			break
+		}
+	}
+	if affected > 0 && uc.daumHistoryScan != nil {
+		for _, product := range products {
+			if product.Type != domain.ProductTypeDaum {
+				continue
+			}
+			// Use the same project filter as the upsert; requested IDs can include
+			// missing/deleted projects. Disabled Daum products also retain history.
+			projects, err := uc.projects.List(ctx, filter, 0, len(filter.IDs))
+			if err != nil {
+				return nil, err
+			}
+			for _, project := range projects {
+				uc.scheduleDaumHistoryScan(ctx, &domain.ProjectDetail{Project: project.Project, Products: products}, requestID)
 			}
 			break
 		}
@@ -1044,6 +1107,11 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled, 
 			product.MainWeight = 0
 			product.DotWeight = 0
 			product.PlusWeight = 1
+		case domain.ProductTypeDaum:
+			if product.DotWeight != 0 || product.PlusWeight != 0 {
+				return nil, domain.ErrInvalidProduct
+			}
+			product.MainWeight = 1
 		case domain.ProductTypeProto:
 			product.MainWeight = 1
 			product.DotWeight = 0
@@ -1055,7 +1123,7 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled, 
 		if product.PurchaseEnabled && (product.ActivationWindowMinutes <= 0 || product.WarrantyMinutes <= 0) {
 			return nil, domain.ErrInvalidProduct
 		}
-		if (product.Type == domain.ProductTypeMicrosoft || product.Type == domain.ProductTypeGmail || product.Type == domain.ProductTypeGmailVariant || product.Type == domain.ProductTypeICloud || product.Type == domain.ProductTypeProto) && product.MainWeight+product.DotWeight+product.PlusWeight <= 0 {
+		if (product.Type == domain.ProductTypeMicrosoft || product.Type == domain.ProductTypeGmail || product.Type == domain.ProductTypeGmailVariant || product.Type == domain.ProductTypeICloud || product.Type == domain.ProductTypeProto || product.Type == domain.ProductTypeDaum) && product.MainWeight+product.DotWeight+product.PlusWeight <= 0 {
 			return nil, domain.ErrInvalidProduct
 		}
 		if product.Type == domain.ProductTypeDomain {
@@ -1260,4 +1328,76 @@ func uniqueProjectIDs(projectIDs []uint) []uint {
 		result = append(result, projectID)
 	}
 	return result
+}
+
+func (uc *ProjectUseCase) normalizeDaumSuffixBlacklist(ctx context.Context, projectID uint, values []string, products []domain.Product) ([]string, error) {
+	if values == nil && projectHasDaumProduct(products) {
+		historical, findErr := uc.projects.FindDetail(ctx, projectID, 0, true)
+		if findErr != nil {
+			return nil, findErr
+		}
+		if historical == nil || historical.Project.ID != projectID {
+			return nil, nil
+		}
+		return normalizeDaumSuffixBlacklist(historical.DaumSuffixBlacklist, products, historical.DaumSuffixBlacklist)
+	}
+	result, err := normalizeDaumSuffixBlacklist(values, products, nil)
+	if err == nil || !projectHasDaumProduct(products) {
+		return result, err
+	}
+	historical, findErr := uc.projects.FindDetail(ctx, projectID, 0, true)
+	if findErr != nil {
+		return nil, findErr
+	}
+	if historical == nil || historical.Project.ID != projectID {
+		return nil, err
+	}
+	return normalizeDaumSuffixBlacklist(values, products, historical.DaumSuffixBlacklist)
+}
+
+func normalizeDaumSuffixBlacklist(values []string, products []domain.Product, historicalValues ...[]string) ([]string, error) {
+	if !projectHasDaumProduct(products) || len(values) == 0 {
+		return nil, nil
+	}
+	var historical []string
+	if len(historicalValues) > 0 {
+		historical = historicalValues[0]
+	}
+	allowed := make(map[string]struct{}, len(domain.DaumEmailDomains()))
+	for _, suffix := range domain.DaumEmailDomains() {
+		allowed[suffix] = struct{}{}
+	}
+	for _, value := range historical {
+		suffix := strings.TrimPrefix(strings.TrimSuffix(strings.ToLower(strings.TrimSpace(value)), "."), "@")
+		if suffix != "" {
+			allowed[suffix] = struct{}{}
+		}
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		suffix := strings.TrimPrefix(strings.TrimSuffix(strings.ToLower(strings.TrimSpace(value)), "."), "@")
+		if suffix == "" {
+			return nil, domain.ErrInvalidProject
+		}
+		if _, ok := allowed[suffix]; !ok {
+			return nil, domain.ErrInvalidProject
+		}
+		if _, ok := seen[suffix]; ok {
+			return nil, domain.ErrInvalidProject
+		}
+		seen[suffix] = struct{}{}
+		result = append(result, suffix)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func projectHasDaumProduct(products []domain.Product) bool {
+	for _, product := range products {
+		if product.Type == domain.ProductTypeDaum {
+			return true
+		}
+	}
+	return false
 }

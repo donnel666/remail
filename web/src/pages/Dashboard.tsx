@@ -33,6 +33,7 @@ import {
 import { MailboxClientModal } from "./workbench/mailbox-client";
 import { ApplyProjectModal } from "./apply-project-modal";
 import { PROTO_EMAIL_SUFFIXES } from "./resources/proto-model";
+import { DAUM_EMAIL_SUFFIXES } from "./resources/daum-model";
 import {
   clearCheckoutAttempt,
   loadCheckoutAttempt,
@@ -119,8 +120,9 @@ function toWorkbenchSuffixProducts(
   baseProduct: WorkbenchProduct,
   suffixes: ProductInventoryTotal["suffixes"],
 ) {
-  const sourceSuffixes = baseProduct.productType === "proto"
-    ? PROTO_EMAIL_SUFFIXES.map((suffix) => {
+  const fixedSuffixes = baseProduct.productType === "daum" ? DAUM_EMAIL_SUFFIXES : baseProduct.productType === "proto" ? PROTO_EMAIL_SUFFIXES : undefined;
+  const sourceSuffixes = fixedSuffixes
+    ? fixedSuffixes.map((suffix) => {
         const inventory = suffixes?.find((item) => normalizeInventorySuffix(item.suffix) === suffix);
         return { suffix, totalAvailable: inventory?.totalAvailable ?? 0, publicAvailable: inventory?.publicAvailable ?? 0 };
       })
@@ -201,7 +203,7 @@ export function toWorkbenchProducts(
           ? "Gmail variant"
           : product.type === "icloud"
             ? "iCloud"
-            : "Proto";
+            : product.type === "daum" ? "Daum" : "Proto";
   const totalAvailable =
     inventory?.totalAvailable ?? product.totalAvailable ?? 0;
   const publicAvailable =
@@ -231,7 +233,7 @@ export function toWorkbenchProducts(
             ? "gmail_variant"
             : product.type === "icloud"
               ? "icloud.com"
-              : "proto";
+              : product.type === "daum" ? "daum" : "proto";
   const baseProduct: WorkbenchProduct = {
     activationWindowMinutes: product.activationWindowMinutes,
     codeEnabled: product.codeEnabled,
@@ -258,7 +260,7 @@ export function toWorkbenchProducts(
     warrantyHours: Math.max(1, Math.ceil(product.warrantyMinutes / 60)),
   };
   const suffixProducts =
-    product.type === "microsoft" || product.type === "domain" || product.type === "proto"
+    product.type === "microsoft" || product.type === "domain" || product.type === "proto" || product.type === "daum"
       ? toWorkbenchSuffixProducts(
           baseProduct,
           inventory?.suffixes ?? product.suffixes,
@@ -283,8 +285,8 @@ export function mergeProjectInventory(
     products: baseProducts.flatMap((product) => {
       const inventoryItem = inventoryByProductType.get(product.productType);
       if (!inventoryItem) {
-        if (product.productType === "proto") {
-          const children = project.products.filter((item) => item.productType === "proto" && item.id !== item.productType);
+        if (product.productType === "proto" || product.productType === "daum") {
+          const children = project.products.filter((item) => item.productType === product.productType && item.id !== item.productType);
           return [product, ...(children.length ? children : toWorkbenchSuffixProducts(product, undefined))];
         }
         return [product];
@@ -302,7 +304,7 @@ export function mergeProjectInventory(
           inventoryItem.purchasePublicAvailable ?? publicAvailable,
       };
       const suffixProducts =
-        product.productType === "microsoft" || product.productType === "domain" || product.productType === "proto"
+        product.productType === "microsoft" || product.productType === "domain" || product.productType === "proto" || product.productType === "daum"
           ? toWorkbenchSuffixProducts(baseProduct, inventoryItem.suffixes)
           : [];
       return [baseProduct, ...suffixProducts];

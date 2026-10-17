@@ -60,7 +60,7 @@ func TestAdminBindingsHandlerReturnsOnlySummaryContract(t *testing.T) {
 		Binding: &mailapp.AuxiliaryBindingSummary{
 			ID:           5,
 			EmailAddress: "proof@example.com",
-			Status:       domain.MicrosoftBindingVerified,
+			Status:       string(domain.MicrosoftBindingVerified),
 			UpdatedAt:    receivedAt,
 		},
 		Items: []mailapp.AuxiliaryMessageSummary{{

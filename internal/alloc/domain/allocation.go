@@ -10,6 +10,7 @@ const (
 	AllocationTypeGmail     AllocationType = "gmail"
 	AllocationTypeICloud    AllocationType = "icloud"
 	AllocationTypeProto     AllocationType = "proto"
+	AllocationTypeDaum      AllocationType = "daum"
 )
 
 type AllocationStatus string
@@ -170,7 +171,7 @@ type UnifiedAllocation struct {
 }
 
 func IsValidAllocationType(value AllocationType) bool {
-	return value == AllocationTypeMicrosoft || value == AllocationTypeDomain || value == AllocationTypeGmail || value == AllocationTypeICloud || value == AllocationTypeProto
+	return value == AllocationTypeMicrosoft || value == AllocationTypeDomain || value == AllocationTypeGmail || value == AllocationTypeICloud || value == AllocationTypeProto || value == AllocationTypeDaum
 }
 
 func IsValidGmailMailbox(value GmailMailbox) bool {
@@ -212,4 +213,22 @@ func NormalizeSupplyScope(value SupplyScope) SupplyScope {
 
 func IsValidSupplyScope(value SupplyScope) bool {
 	return value == SupplyScopePublic || value == SupplyScopeOwned
+}
+
+type DaumAllocation struct {
+	ID                 uint
+	OrderNo            string
+	ProjectID          uint
+	ProductID          uint
+	ResourceID         uint
+	OwnerUserID        uint
+	SupplyScope        SupplyScope
+	ExplicitAliasID    *uint
+	Mailbox            string
+	ServiceMode        string
+	Email              string
+	Status             AllocationStatus
+	CostPointsSnapshot string
+	CreatedAt          time.Time
+	ReleasedAt         *time.Time
 }

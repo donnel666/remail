@@ -33,6 +33,8 @@ const (
 	// InboundResourceICloud is an auxiliary-mail query scope. Messages sent to
 	// an iCloud forwarding address remain stored against their domain resource.
 	InboundResourceICloud InboundResourceType = "icloud"
+	// Daum is an auxiliary query scope; source mail keeps its domain ownership.
+	InboundResourceDaum InboundResourceType = "daum"
 )
 
 func IsValidInboundResourceType(value InboundResourceType) bool {

@@ -1217,6 +1217,7 @@ func (r *Repo) AssertNoActiveAllocations(ctx context.Context, resourceIDs []uint
 		{table: "gmail_allocations", label: "Gmail", condition: "resource_id IN ? AND source = 'local' AND status = 'allocated'"},
 		{table: "icloud_allocations", label: "iCloud", condition: "resource_id IN ? AND status = 'allocated'"},
 		{table: "proto_allocations", label: "Proto", condition: "resource_id IN ? AND guard_type = 'proto' AND status = 'allocated'"},
+		{table: "daum_allocations", label: "Daum", condition: "resource_id IN ? AND guard_type = 'daum' AND status = 'allocated'"},
 	}
 	for _, query := range queries {
 		var row struct {
@@ -1689,7 +1690,7 @@ func (r *Repo) CreateMicrosoftAllocation(ctx context.Context, allocation *domain
 		}
 		return fmt.Errorf("create microsoft allocation: %w", err)
 	}
-	if err := r.snapshotAllocationSupplier(ctx, allocation.OrderNo, allocation.ResourceID); err != nil {
+	if err := r.snapshotAllocationSupplier(ctx, allocation.OrderNo, allocation.ResourceID, allocation.Mailbox == domain.MicrosoftMailboxAlias); err != nil {
 		return err
 	}
 	*allocation = model.toDomain()
@@ -1714,7 +1715,7 @@ func (r *Repo) CreateGmailAllocation(ctx context.Context, allocation *domain.Gma
 		}
 		return fmt.Errorf("create Gmail allocation: %w", err)
 	}
-	if err := r.snapshotAllocationSupplier(ctx, allocation.OrderNo, allocation.ResourceID); err != nil {
+	if err := r.snapshotAllocationSupplier(ctx, allocation.OrderNo, allocation.ResourceID, false); err != nil {
 		return err
 	}
 	*allocation = model.toDomain()
@@ -1735,7 +1736,7 @@ func (r *Repo) CreateICloudAllocation(ctx context.Context, allocation *domain.IC
 		}
 		return fmt.Errorf("create iCloud allocation: %w", err)
 	}
-	if err := r.snapshotAllocationSupplier(ctx, allocation.OrderNo, allocation.ResourceID); err != nil {
+	if err := r.snapshotAllocationSupplier(ctx, allocation.OrderNo, allocation.ResourceID, false); err != nil {
 		return err
 	}
 	*allocation = model.toDomain()
@@ -1756,7 +1757,7 @@ func (r *Repo) CreateDomainAllocation(ctx context.Context, allocation *domain.Ge
 		}
 		return fmt.Errorf("create domain allocation: %w", err)
 	}
-	if err := r.snapshotAllocationSupplier(ctx, allocation.OrderNo, allocation.ResourceID); err != nil {
+	if err := r.snapshotAllocationSupplier(ctx, allocation.OrderNo, allocation.ResourceID, false); err != nil {
 		return err
 	}
 	*allocation = model.toDomain()
@@ -1901,6 +1902,22 @@ func (r *Repo) ReleaseByOrder(ctx context.Context, orderNo string, releasedAt ti
 		}
 		result := model.unified()
 		return &result, nil
+	case domain.AllocationTypeDaum:
+		var model DaumAllocationModel
+		if err := r.dbFor(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_no = ? AND guard_type = ?", orderNo, string(domain.AllocationTypeDaum)).First(&model).Error; err != nil {
+			return nil, findAllocationError(err, "find Daum allocation for release")
+		}
+		if model.Status == string(domain.AllocationStatusAllocated) {
+			if err := r.dbFor(ctx).Model(&DaumAllocationModel{}).
+				Where("id = ? AND status = ?", model.ID, string(domain.AllocationStatusAllocated)).
+				Updates(map[string]any{"status": string(domain.AllocationStatusReleased), "released_at": releasedAt}).Error; err != nil {
+				return nil, fmt.Errorf("release Daum allocation: %w", err)
+			}
+			model.Status = string(domain.AllocationStatusReleased)
+			model.ReleasedAt = &releasedAt
+		}
+		result := model.unified()
+		return &result, nil
 	default:
 		return nil, domain.ErrAllocationNotFound
 	}
@@ -1955,6 +1972,13 @@ func (r *Repo) FindAllocationDetail(ctx context.Context, allocationType domain.A
 		var model ProtoAllocationModel
 		if err := r.dbFor(ctx).Where("id = ? AND guard_type = ?", allocationID, string(domain.AllocationTypeProto)).First(&model).Error; err != nil {
 			return nil, findAllocationError(err, "find Proto allocation detail")
+		}
+		result := model.unified()
+		return &result, nil
+	case domain.AllocationTypeDaum:
+		var model DaumAllocationModel
+		if err := r.dbFor(ctx).Where("id = ? AND guard_type = ?", allocationID, string(domain.AllocationTypeDaum)).First(&model).Error; err != nil {
+			return nil, findAllocationError(err, "find Daum allocation detail")
 		}
 		result := model.unified()
 		return &result, nil
@@ -2021,7 +2045,13 @@ func (r *Repo) ListActiveByRecipient(ctx context.Context, recipient string) ([]d
 		Find(&ps).Error; err != nil {
 		return nil, fmt.Errorf("list Proto allocation by recipient: %w", err)
 	}
-	result := make([]domain.UnifiedAllocation, 0, len(ms)+len(ds)+len(gs)+len(is)+len(ps))
+	var dms []DaumAllocationModel
+	if err := r.dbFor(ctx).
+		Where("email = ? AND guard_type = ? AND status = ?", recipient, string(domain.AllocationTypeDaum), string(domain.AllocationStatusAllocated)).
+		Find(&dms).Error; err != nil {
+		return nil, fmt.Errorf("list Daum allocation by recipient: %w", err)
+	}
+	result := make([]domain.UnifiedAllocation, 0, len(ms)+len(ds)+len(gs)+len(is)+len(ps)+len(dms))
 	for _, item := range ms {
 		result = append(result, item.unified())
 	}
@@ -2035,6 +2065,9 @@ func (r *Repo) ListActiveByRecipient(ctx context.Context, recipient string) ([]d
 		result = append(result, item.unified())
 	}
 	for _, item := range ps {
+		result = append(result, item.unified())
+	}
+	for _, item := range dms {
 		result = append(result, item.unified())
 	}
 	return result, nil
@@ -2058,7 +2091,7 @@ func (r *Repo) ListInventoryProjects(ctx context.Context) ([]allocapp.InventoryP
 		Table("projects AS p").
 		Select("p.id, p.name").
 		Where("p.status = 'listed'").
-		Where("EXISTS (SELECT 1 FROM project_products pp WHERE pp.project_id = p.id AND pp.status = 'enabled' AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud', 'proto'))").
+		Where("EXISTS (SELECT 1 FROM project_products pp WHERE pp.project_id = p.id AND pp.status = 'enabled' AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud', 'proto', 'daum'))").
 		Order("p.id ASC").
 		Scan(&projects).Error; err != nil {
 		return nil, fmt.Errorf("list inventory projects: %w", err)
@@ -2088,7 +2121,7 @@ JOIN project_products pp ON pp.project_id = p.id
 	WHERE p.id = ?
 	  AND p.status = 'listed'
 	  AND pp.status = 'enabled'
-	  AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud', 'proto')`, projectID).Scan(&productRows).Error; err != nil {
+	  AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud', 'proto', 'daum')`, projectID).Scan(&productRows).Error; err != nil {
 		return nil, fmt.Errorf("load inventory project products: %w", err)
 	}
 	if len(productRows) == 0 {
@@ -2119,6 +2152,8 @@ JOIN project_products pp ON pp.project_id = p.id
 			stats.ICloud.Enabled = true
 		case coredomain.ProductTypeProto:
 			stats.Proto.Enabled = true
+		case coredomain.ProductTypeDaum:
+			stats.Daum.Enabled = true
 		}
 	}
 	scan := func(target any, query string, args ...any) error {
@@ -2496,7 +2531,23 @@ WHERE pr.resource_type = 'proto'
 	if err := scan(&stats.ActiveProtoAllocations, `SELECT COUNT(*) FROM proto_allocations WHERE project_id = ? AND guard_type = 'proto' AND status = 'allocated'`, projectID); err != nil {
 		return nil, err
 	}
-	stats.TotalAvailable = stats.Microsoft.TotalAvailable + stats.Domain.TotalAvailable + stats.Gmail.TotalAvailable + stats.ICloud.TotalAvailable + stats.Proto.TotalAvailable
+	if stats.Daum.Enabled {
+		suffixes, err := r.daumSuffixInventory(ctx, projectID, 0, domain.SupplyScopePublic)
+		if err != nil {
+			return nil, err
+		}
+		stats.Daum.MainAvailable = suffixes["daum.net"]
+		stats.Daum.ExplicitAliasAvailable = suffixes["hanmail.net"] + suffixes["hanmail2.net"]
+		stats.Daum.PublicAvailable = stats.Daum.MainAvailable + stats.Daum.ExplicitAliasAvailable
+		stats.Daum.TotalAvailable = stats.Daum.PublicAvailable
+		if err := r.dbFor(ctx).Table("daum_resources dr").Joins("JOIN email_resources er ON er.id = dr.id AND er.type = 'daum' AND er.owner_user_id = dr.owner_user_id").Joins("JOIN users owner ON owner.id = er.owner_user_id").Where("dr.resource_type = 'daum' AND dr.status = 'normal' AND dr.app_password <> '' AND dr.for_sale = TRUE AND owner.status = 'active' AND owner.role IN ('supplier','admin','super_admin')").Count(&stats.Daum.EligibleResources).Error; err != nil {
+			return nil, err
+		}
+	}
+	if err := scan(&stats.ActiveDaumAllocations, `SELECT COUNT(*) FROM daum_allocations WHERE project_id = ? AND guard_type = 'daum' AND status = 'allocated'`, projectID); err != nil {
+		return nil, err
+	}
+	stats.TotalAvailable = stats.Daum.TotalAvailable + stats.Microsoft.TotalAvailable + stats.Domain.TotalAvailable + stats.Gmail.TotalAvailable + stats.ICloud.TotalAvailable + stats.Proto.TotalAvailable
 	return stats, nil
 }
 
@@ -2560,6 +2611,8 @@ func (r *Repo) ListProductSuffixInventory(ctx context.Context, config allocapp.P
 		return r.domainInventoryByScope(ctx, scope, args, "dr.domain_tld")
 	case coredomain.ProductTypeProto:
 		return r.protoSuffixInventory(ctx, config.ProjectID, buyerUserID, supplyScope)
+	case coredomain.ProductTypeDaum:
+		return r.daumSuffixInventory(ctx, config.ProjectID, buyerUserID, supplyScope)
 	default:
 		return nil, domain.ErrInvalidAllocationRequest
 	}
@@ -2581,7 +2634,7 @@ JOIN project_products pp ON pp.project_id = p.id
 	WHERE p.id = ?
 	  AND p.status = 'listed'
 	  AND pp.status = 'enabled'
-	  AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud', 'proto')
+	  AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud', 'proto', 'daum')
 	ORDER BY pp.id ASC`, projectID).Scan(&productRows).Error; err != nil {
 		return nil, fmt.Errorf("load product inventory rows: %w", err)
 	}
@@ -2609,7 +2662,7 @@ JOIN project_products pp ON pp.project_id = p.id
 			item.Suffixes, err = r.microsoftProductInventorySuffixTotals(ctx, projectID, row)
 		case coredomain.ProductTypeDomain:
 			item.Suffixes, err = r.domainProductInventorySuffixTotals(ctx)
-		case coredomain.ProductTypeGmail, coredomain.ProductTypeGmailVariant, coredomain.ProductTypeICloud, coredomain.ProductTypeProto:
+		case coredomain.ProductTypeGmail, coredomain.ProductTypeGmailVariant, coredomain.ProductTypeICloud, coredomain.ProductTypeProto, coredomain.ProductTypeDaum:
 			if item.ProductType == coredomain.ProductTypeProto {
 				suffixes, suffixErr := r.protoSuffixInventory(ctx, projectID, 0, domain.SupplyScopePublic)
 				if suffixErr != nil {
@@ -2619,6 +2672,15 @@ JOIN project_products pp ON pp.project_id = p.id
 					item.Suffixes = append(item.Suffixes, allocapp.ProductInventorySuffixTotal{
 						Suffix: suffix, TotalAvailable: suffixes[suffix], PublicAvailable: suffixes[suffix],
 					})
+				}
+			}
+			if item.ProductType == coredomain.ProductTypeDaum {
+				suffixes, err := r.daumSuffixInventory(ctx, projectID, 0, domain.SupplyScopePublic)
+				if err != nil {
+					return nil, err
+				}
+				for _, suffix := range coredomain.DaumEmailDomains() {
+					item.Suffixes = append(item.Suffixes, allocapp.ProductInventorySuffixTotal{Suffix: suffix, TotalAvailable: suffixes[suffix], PublicAvailable: suffixes[suffix]})
 				}
 			}
 			codeAvailable, codePublicAvailable := item.TotalAvailable, item.PublicAvailable
@@ -2663,6 +2725,8 @@ func productInventoryTotalFromStats(row productInventoryRow, stats *allocapp.Inv
 		return stats.ICloud.TotalAvailable
 	case coredomain.ProductTypeProto:
 		return stats.Proto.TotalAvailable
+	case coredomain.ProductTypeDaum:
+		return stats.Daum.TotalAvailable
 	default:
 		return 0
 	}
@@ -2679,6 +2743,8 @@ func productInventoryPublicTotalFromStats(row productInventoryRow, stats *alloca
 		return stats.Gmail.DotPublicAvailable + stats.Gmail.PlusPublicAvailable
 	case coredomain.ProductTypeProto:
 		return stats.Proto.PublicAvailable
+	case coredomain.ProductTypeDaum:
+		return stats.Daum.PublicAvailable
 	default:
 		return productInventoryTotalFromStats(row, stats)
 	}
@@ -3214,6 +3280,16 @@ func (r *Repo) findByGuard(ctx context.Context, guard OrderGuardModel) (*domain.
 		}
 		result := model.unified()
 		return &result, nil
+	case domain.AllocationTypeDaum:
+		var model DaumAllocationModel
+		if err := r.dbFor(ctx).Where("order_no = ? AND guard_type = ?", guard.OrderNo, string(domain.AllocationTypeDaum)).First(&model).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("find Daum allocation by guard: %w", err)
+		}
+		result := model.unified()
+		return &result, nil
 	default:
 		return nil, domain.ErrAllocationNotFound
 	}
@@ -3277,6 +3353,17 @@ func (r *Repo) queryUnifiedAllocations(ctx context.Context, filter allocapp.Allo
 			conditions, condArgs := allocationConditions(filter)
 			conditions = append(conditions, "guard_type = 'proto'")
 			addSelect("proto_allocations", string(domain.AllocationTypeProto), "mailbox", conditions, condArgs)
+		}
+	}
+	if filter.Type == "" || filter.Type == domain.AllocationTypeDaum {
+		if filter.Mailbox == "" || filter.Mailbox == "main" || filter.Mailbox == "alias" {
+			conditions, condArgs := allocationConditions(filter)
+			conditions = append(conditions, "guard_type = 'daum'")
+			if filter.Mailbox != "" {
+				conditions = append(conditions, "mailbox = ?")
+				condArgs = append(condArgs, filter.Mailbox)
+			}
+			addSelect("daum_allocations", string(domain.AllocationTypeDaum), "mailbox", conditions, condArgs)
 		}
 	}
 	if len(selects) == 0 {

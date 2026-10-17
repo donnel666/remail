@@ -87,7 +87,10 @@ const (
 	// QueueBackgroundProtoValidation carries Proto validation tasks.
 	QueueBackgroundProtoValidation = "background_proto_validation"
 	// QueueBackgroundProtoHistory carries Proto project-history tasks.
-	QueueBackgroundProtoHistory = "background_proto_history"
+	QueueBackgroundProtoHistory   = "background_proto_history"
+	QueueBackgroundDaumImport     = "background_daum_import"
+	QueueBackgroundDaumValidation = "background_daum_validation"
+	QueueBackgroundDaumHistory    = "background_daum_history"
 	// QueueBackgroundInventory refreshes Redis read models such as inventory and dashboard rankings.
 	QueueBackgroundInventory = "background_inventory"
 )
@@ -111,5 +114,8 @@ var AllQueueNames = []string{
 	QueueBackgroundProtoImport,
 	QueueBackgroundProtoValidation,
 	QueueBackgroundProtoHistory,
+	QueueBackgroundDaumImport,
+	QueueBackgroundDaumValidation,
+	QueueBackgroundDaumHistory,
 	QueueBackgroundInventory,
 }

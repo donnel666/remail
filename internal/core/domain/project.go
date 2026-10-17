@@ -42,12 +42,14 @@ const (
 	ProductTypeGmailVariant ProductType = "gmail_variant"
 	ProductTypeICloud       ProductType = "icloud"
 	ProductTypeProto        ProductType = "proto"
+	ProductTypeDaum         ProductType = "daum"
 )
 
 const (
 	RandomMicrosoftSuffixSelector = "outlook"
 	RandomDomainSuffixSelector    = "domain"
 	RandomProtoSuffixSelector     = "proto"
+	RandomDaumSuffixSelector      = "daum"
 )
 
 // MailRuleType identifies which part of a message a rule matches.
@@ -125,6 +127,7 @@ type ProjectDetail struct {
 	MailRules                []MailRule
 	Accesses                 []ProjectAccess
 	MicrosoftSuffixBlacklist []string
+	DaumSuffixBlacklist      []string
 }
 
 func IsValidProjectStatus(status ProjectStatus) bool {
@@ -156,7 +159,7 @@ func IsValidProductStatus(status ProductStatus) bool {
 
 func IsValidProductType(productType ProductType) bool {
 	switch productType {
-	case ProductTypeMicrosoft, ProductTypeDomain, ProductTypeGmail, ProductTypeGmailVariant, ProductTypeICloud, ProductTypeProto:
+	case ProductTypeMicrosoft, ProductTypeDomain, ProductTypeGmail, ProductTypeGmailVariant, ProductTypeICloud, ProductTypeProto, ProductTypeDaum:
 		return true
 	default:
 		return false
@@ -226,6 +229,8 @@ func NormalizeProductType(productType string) (ProductType, bool) {
 		return ProductTypeICloud, true
 	case ProductTypeProto:
 		return ProductTypeProto, true
+	case ProductTypeDaum:
+		return ProductTypeDaum, true
 	default:
 		return "", false
 	}
@@ -257,3 +262,9 @@ func NormalizeMoney(value string) (string, bool) {
 	}
 	return amount.StringFixedBank(moneyfmt.Scale), true
 }
+
+func IsDaumEmailSuffix(suffix string) bool {
+	return suffix == "daum.net" || suffix == "hanmail.net" || suffix == "hanmail2.net"
+}
+
+func DaumEmailDomains() []string { return []string{"daum.net", "hanmail.net", "hanmail2.net"} }

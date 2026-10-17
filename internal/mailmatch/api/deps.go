@@ -178,3 +178,15 @@ func (a historicalMicrosoftUsageAdapter) ImportHistoricalMicrosoftUsage(ctx cont
 	}
 	return a.trade.ImportHistoricalMicrosoftUsage(ctx, items)
 }
+
+func (m *Module) SetDaumMailFetchPort(port mailmatchapp.DaumMailFetchPort) {
+	if m != nil && m.UseCase != nil {
+		m.UseCase.SetDaumMailFetchPort(port)
+	}
+}
+
+func (m *Module) SetPermanentDaumFetchFailurePort(port mailmatchapp.PermanentDaumFetchFailurePort) {
+	if m != nil && m.UseCase != nil {
+		m.UseCase.SetPermanentDaumFetchFailurePort(port)
+	}
+}

@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"errors"
+	"github.com/donnel666/remail/internal/mailtransport/netdial"
 	"io"
 	"net"
 	"net/url"
@@ -818,7 +819,7 @@ func TestDialHTTPConnectHonorsContextWhenProxyGoesSilent(t *testing.T) {
 	defer cancel()
 
 	started := time.Now()
-	conn, err := dialHTTPConnect(ctx, &net.Dialer{Timeout: time.Second}, parsed, outlookIMAPAddress)
+	conn, err := netdial.HTTPConnect(ctx, &net.Dialer{Timeout: time.Second}, parsed, outlookIMAPAddress)
 	if conn != nil {
 		_ = conn.Close()
 	}
@@ -833,7 +834,7 @@ func TestDialOutlookIMAPSOCKSHandshakeHonorsContext(t *testing.T) {
 	defer cancel()
 
 	started := time.Now()
-	conn, err := dialOutlookIMAPConn(ctx, "socks5://"+proxyAddress)
+	conn, err := netdial.DialProxy(ctx, "socks5://"+proxyAddress, outlookIMAPAddress)
 	if conn != nil {
 		_ = conn.Close()
 	}

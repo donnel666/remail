@@ -17,6 +17,7 @@ type PrivateInventoryTotals struct {
 	Gmail     []PrivateSingletonInventoryTotal
 	ICloud    []PrivateSingletonInventoryTotal
 	Proto     []PrivateProductInventoryTotal
+	Daum      []PrivateProductInventoryTotal
 }
 
 func (uc *UseCase) SetPrivateInventoryCache(cache *platform.HourlySnapshotCache[PrivateInventoryTotals]) {
@@ -79,6 +80,11 @@ func (uc *UseCase) loadPrivateInventoryTotals(ctx context.Context, projectID, vi
 	}
 	if protoRepo, ok := uc.repo.(ProtoInventoryRepository); ok {
 		totals.Proto, err = protoRepo.ListPrivateProtoInventoryTotals(ctx, projectID, viewerUserID)
+	}
+	if err == nil {
+		if repo, ok := uc.repo.(DaumInventoryRepository); ok {
+			totals.Daum, err = repo.ListPrivateDaumInventoryTotals(ctx, projectID, viewerUserID)
+		}
 	}
 	return totals, err
 }

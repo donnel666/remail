@@ -20,11 +20,14 @@ const (
 	AdminTaskBizGmailResource           = "gmail_resource"
 	AdminTaskBizICloudResource          = "icloud_resource"
 	AdminTaskBizProtoResource           = "proto_resource"
+	AdminTaskBizDaumResource            = "daum_resource"
 	AdminTaskBizMicrosoftResourceImport = "microsoft_resource_import"
 	AdminTaskBizICloudResourceImport    = "icloud_resource_import"
 	AdminTaskBizProtoResourceImport     = "proto_resource_import"
+	AdminTaskBizDaumResourceImport      = "daum_resource_import"
 	AdminTaskBizMicrosoftResourceBulk   = "microsoft_resource_bulk"
 	AdminTaskBizProtoResourceBulk       = "proto_resource_bulk"
+	AdminTaskBizDaumResourceBulk        = "daum_resource_bulk"
 
 	AdminTaskKindImport        = "import"
 	AdminTaskKindValidation    = "validation"
@@ -64,9 +67,13 @@ const (
 	AdminTaskSourceICloudRefresh    = "icloud_refresh"
 	AdminTaskSourceICloudValidate   = "icloud_validation"
 	AdminTaskSourceProtoImport      = "proto_import"
+	AdminTaskSourceDaumImport       = "daum_import"
 	AdminTaskSourceProtoValidate    = "proto_validation"
+	AdminTaskSourceDaumValidate     = "daum_validation"
 	AdminTaskSourceProtoHistory     = "proto_history"
+	AdminTaskSourceDaumHistory      = "daum_history"
 	AdminTaskSourceProtoBulk        = "proto_bulk"
+	AdminTaskSourceDaumBulk         = "daum_bulk"
 )
 
 func AdminTaskLimits() (int, int) {
@@ -131,7 +138,11 @@ func isAdminTaskSource(value string) bool {
 	case AdminTaskSourceProtoImport,
 		AdminTaskSourceProtoValidate,
 		AdminTaskSourceProtoHistory,
-		AdminTaskSourceProtoBulk:
+		AdminTaskSourceProtoBulk,
+		AdminTaskSourceDaumImport,
+		AdminTaskSourceDaumValidate,
+		AdminTaskSourceDaumHistory,
+		AdminTaskSourceDaumBulk:
 		return true
 	default:
 		return false
@@ -216,6 +227,12 @@ type ProtoAdminTaskViewRepository interface {
 	ListForProtoImports(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
 }
 
+type DaumAdminTaskViewRepository interface {
+	DaumResourceExists(ctx context.Context, resourceID uint) (bool, error)
+	ListForDaumResource(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
+	ListForDaumImports(ctx context.Context, filter AdminTaskListFilter) ([]AdminTaskView, int64, int64, error)
+}
+
 type AdminTaskQueryService struct {
 	repo AdminTaskViewRepository
 }
@@ -232,9 +249,13 @@ func (s *AdminTaskQueryService) List(ctx context.Context, filter AdminTaskListFi
 	if err != nil {
 		return nil, err
 	}
-	var exists = normalized.BizType == AdminTaskBizICloudResourceImport || normalized.BizType == AdminTaskBizProtoResourceImport
+	var exists = normalized.BizType == AdminTaskBizICloudResourceImport || normalized.BizType == AdminTaskBizProtoResourceImport || normalized.BizType == AdminTaskBizDaumResourceImport
 	protoRepo, hasProtoRepo := s.repo.(ProtoAdminTaskViewRepository)
 	if (normalized.BizType == AdminTaskBizProtoResource || normalized.BizType == AdminTaskBizProtoResourceImport) && !hasProtoRepo {
+		return nil, ErrAdminTaskUnavailable
+	}
+	daumRepo, hasDaumRepo := s.repo.(DaumAdminTaskViewRepository)
+	if (normalized.BizType == AdminTaskBizDaumResource || normalized.BizType == AdminTaskBizDaumResourceImport) && !hasDaumRepo {
 		return nil, ErrAdminTaskUnavailable
 	}
 	var items []AdminTaskView
@@ -250,6 +271,8 @@ func (s *AdminTaskQueryService) List(ctx context.Context, filter AdminTaskListFi
 		exists, err = s.repo.ICloudResourceExists(ctx, normalized.BizID)
 	case AdminTaskBizProtoResource:
 		exists, err = protoRepo.ProtoResourceExists(ctx, normalized.BizID)
+	case AdminTaskBizDaumResource:
+		exists, err = daumRepo.DaumResourceExists(ctx, normalized.BizID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: check task resource", ErrAdminTaskUnavailable)
@@ -270,8 +293,12 @@ func (s *AdminTaskQueryService) List(ctx context.Context, filter AdminTaskListFi
 		items, total, succeeded, err = s.repo.ListForICloudImports(ctx, normalized)
 	case AdminTaskBizProtoResource:
 		items, total, succeeded, err = protoRepo.ListForProtoResource(ctx, normalized)
+	case AdminTaskBizDaumResource:
+		items, total, succeeded, err = daumRepo.ListForDaumResource(ctx, normalized)
 	case AdminTaskBizProtoResourceImport:
 		items, total, succeeded, err = protoRepo.ListForProtoImports(ctx, normalized)
+	case AdminTaskBizDaumResourceImport:
+		items, total, succeeded, err = daumRepo.ListForDaumImports(ctx, normalized)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: list normalized tasks", ErrAdminTaskUnavailable)
@@ -314,7 +341,7 @@ func normalizeAdminTaskListFilter(filter AdminTaskListFilter) (AdminTaskListFilt
 	filter.Source = strings.TrimSpace(filter.Source)
 	filter.Kind = strings.TrimSpace(filter.Kind)
 	filter.Status = strings.TrimSpace(filter.Status)
-	if (filter.BizType != AdminTaskBizMicrosoftResource && filter.BizType != AdminTaskBizDomainResource && filter.BizType != AdminTaskBizGmailResource && filter.BizType != AdminTaskBizICloudResource && filter.BizType != AdminTaskBizICloudResourceImport && filter.BizType != AdminTaskBizProtoResource && filter.BizType != AdminTaskBizProtoResourceImport) || ((filter.BizType != AdminTaskBizICloudResourceImport && filter.BizType != AdminTaskBizProtoResourceImport) && filter.BizID == 0) || filter.Offset < 0 {
+	if (filter.BizType != AdminTaskBizMicrosoftResource && filter.BizType != AdminTaskBizDomainResource && filter.BizType != AdminTaskBizGmailResource && filter.BizType != AdminTaskBizICloudResource && filter.BizType != AdminTaskBizICloudResourceImport && filter.BizType != AdminTaskBizProtoResource && filter.BizType != AdminTaskBizDaumResource && filter.BizType != AdminTaskBizProtoResourceImport && filter.BizType != AdminTaskBizDaumResourceImport) || ((filter.BizType != AdminTaskBizICloudResourceImport && filter.BizType != AdminTaskBizProtoResourceImport && filter.BizType != AdminTaskBizDaumResourceImport) && filter.BizID == 0) || filter.Offset < 0 {
 		return AdminTaskListFilter{}, ErrInvalidAdminTaskQuery
 	}
 	defaultLimit, maxLimit := AdminTaskLimits()

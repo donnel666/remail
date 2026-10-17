@@ -83,6 +83,7 @@ type AdminCreateProjectRequest struct {
 	Products                 []ProjectProductRequest  `json:"products" binding:"required"`
 	MailRules                []ProjectMailRuleRequest `json:"mailRules" binding:"required"`
 	MicrosoftSuffixBlacklist []string                 `json:"microsoftSuffixBlacklist,omitempty"`
+	DaumSuffixBlacklist      []string                 `json:"daumSuffixBlacklist,omitempty"`
 }
 
 // AdminRejectProjectRequest rejects a reviewing project application.
@@ -396,6 +397,7 @@ type ProjectProductTypeFacetsResponse struct {
 	GmailVariant int64 `json:"gmailVariant"`
 	ICloud       int64 `json:"icloud"`
 	Proto        int64 `json:"proto"`
+	Daum         int64 `json:"daum"`
 }
 
 // ProjectProductResponse is a product view under a project.
@@ -491,6 +493,7 @@ type ProjectDetailResponse struct {
 	MailRules                []ProjectMailRuleResponse `json:"mailRules,omitempty"`
 	Accesses                 []ProjectAccessResponse   `json:"accesses,omitempty"`
 	MicrosoftSuffixBlacklist []string                  `json:"microsoftSuffixBlacklist,omitempty"`
+	DaumSuffixBlacklist      []string                  `json:"daumSuffixBlacklist,omitempty"`
 }
 
 // ProjectBulkCommandResponse returns the number of projects affected by a bulk command.

@@ -96,6 +96,7 @@ const PRODUCT_TYPE_VALUES: OrderProductType[] = [
   "gmail_variant",
   "icloud",
   "proto",
+  "daum",
   "random",
 ];
 
@@ -279,6 +280,7 @@ export default function AdminOrders() {
         microsoft: 0,
         random: 0,
         proto: 0,
+        daum: 0,
       },
       serviceMode: { all: total, code: 0, purchase: 0 },
       status: {

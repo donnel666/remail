@@ -199,6 +199,7 @@ type BillingRepo struct {
 	hasGmailAllocations  bool
 	hasICloudAllocations bool
 	hasProtoAllocations  bool
+	hasDaumAllocations   bool
 	fulfillmentStats     *platform.HourlySnapshotCache[supplierFulfillmentMetrics]
 }
 
@@ -215,6 +216,7 @@ func NewBillingRepo(db *gorm.DB) *BillingRepo {
 		repo.hasGmailAllocations = db.Migrator().HasTable("gmail_allocations")
 		repo.hasICloudAllocations = db.Migrator().HasTable("icloud_allocations")
 		repo.hasProtoAllocations = db.Migrator().HasTable("proto_allocations")
+		repo.hasDaumAllocations = db.Migrator().HasTable("daum_allocations")
 	}
 	return repo
 }
@@ -274,8 +276,9 @@ FROM (`
 
 const supplierMicrosoftAllocationsSQL = `SELECT ma.order_no
     FROM microsoft_allocations ma
-    JOIN email_resources er ON er.id = ma.resource_id AND er.type = 'microsoft'
-    WHERE er.owner_user_id = ? AND ma.supply_scope = 'public'`
+    JOIN allocation_order_guards guard ON guard.order_no = ma.order_no AND guard.type = 'microsoft'
+    LEFT JOIN email_resources er ON er.id = ma.resource_id AND er.type = 'microsoft'
+    WHERE COALESCE(guard.owner_user_id, er.owner_user_id) = ? AND ma.supply_scope = 'public'`
 
 const supplierDomainAllocationsSQL = `SELECT da.order_no
     FROM domain_allocations da
@@ -296,6 +299,12 @@ const supplierProtoAllocationsSQL = `SELECT pa.order_no
     FROM proto_allocations pa
     JOIN email_resources er ON er.id = pa.resource_id AND er.type = 'proto'
     WHERE er.owner_user_id = ? AND pa.supply_scope = 'public'`
+
+const supplierDaumAllocationsSQL = `SELECT pa.order_no
+    FROM daum_allocations pa
+    JOIN allocation_order_guards guard ON guard.order_no = pa.order_no AND guard.type = 'daum'
+    LEFT JOIN email_resources er ON er.id = pa.resource_id AND er.type = 'daum'
+    WHERE COALESCE(guard.owner_user_id, er.owner_user_id) = ? AND pa.supply_scope = 'public'`
 
 const supplierFulfillmentMetricsSuffix = `) allocations
 JOIN orders o ON o.order_no = allocations.order_no
@@ -343,6 +352,10 @@ func (r *BillingRepo) loadSupplierFulfillmentMetrics(ctx context.Context, db *go
 	}
 	if r.hasProtoAllocations {
 		allocationQueries = append(allocationQueries, supplierProtoAllocationsSQL)
+		args = append(args, userID)
+	}
+	if r.hasDaumAllocations {
+		allocationQueries = append(allocationQueries, supplierDaumAllocationsSQL)
 		args = append(args, userID)
 	}
 	query := supplierFulfillmentMetricsPrefix + strings.Join(allocationQueries, "\nUNION ALL\n") + supplierFulfillmentMetricsSuffix

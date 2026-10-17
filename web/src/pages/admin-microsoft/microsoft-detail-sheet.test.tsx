@@ -6,8 +6,10 @@ import type { TFunction } from "i18next";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AdminMicrosoftResourceDetail } from "./admin-microsoft-types";
+import type { AdminDaumResourceDetail } from "../admin-daum/admin-daum-types";
 
 const mocks = vi.hoisted(() => ({
+  translate: (key: string) => key,
   alias: vi.fn(),
   allocationPage: vi.fn(),
   bindingMessage: vi.fn(),
@@ -27,7 +29,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({ t: mocks.translate }),
 }));
 
 vi.mock("@douyinfe/semi-icons", () => ({
@@ -198,6 +200,8 @@ vi.mock("@/lib/admin-microsoft-api", () => ({
   validateAdminMicrosoftResource: mocks.validate,
 }));
 
+vi.mock("../admin-daum/daum-meta", async () => import("./microsoft-meta"));
+import { DaumDetailSheet } from "../admin-daum/daum-detail-sheet";
 import { MicrosoftDetailSheet, ResourceMailsPanel } from "./microsoft-detail-sheet";
 
 const EMPTY_PAGE = {
@@ -782,7 +786,7 @@ describe("admin Microsoft detail sheet runtime", () => {
     }
   });
 
-  it.each([["microsoft", false], ["gmail", false], ["icloud", true]] as const)(
+  it.each([["microsoft", false], ["gmail", false], ["icloud", true], ["daum", false], ["daum", true]] as const)(
     "does not automatically poll %s mail with auxiliary=%s",
     async (resourceType, auxiliary) => {
       vi.useFakeTimers();
@@ -791,6 +795,7 @@ describe("admin Microsoft detail sheet runtime", () => {
         await act(async () => { await Promise.resolve(); });
         await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
         expect((auxiliary ? mocks.bindingMessages : mocks.messages)).toHaveBeenCalledTimes(1);
+        if (resourceType === "daum") expect((auxiliary ? mocks.bindingMessages : mocks.messages).mock.calls[0]?.[5]).toBe("daum");
       } finally {
         cleanup();
         vi.useRealTimers();
@@ -937,4 +942,88 @@ describe("admin Microsoft detail sheet runtime", () => {
     );
     expect(screen.getByTestId("side-sheet")).toHaveAttribute("data-width", "100%");
   });
+  describe("Daum auxiliary binding changes", () => {
+    const now = "2026-10-17T01:00:00Z";
+    function resource(): AdminDaumResourceDetail {
+      return {
+        id: 41, version: 3, ownerUserId: 1,
+        owner: { id: 1, email: "admin@example.com", nickname: "Admin", role: "super_admin", groupName: "Admin", enabled: true },
+        email: "user@daum.net", emailAddress: "user@daum.net", suffix: "daum.net", status: "normal", forSale: false,
+        longLived: true, qualityScore: 100, protocol: "imap", kakaoEmail: "user@kakao.com", bindingAddress: "old@outlook.com",
+        bindingStatus: "linked", pickupUrlConfigured: true, aliases: [], passwordConfigured: true, loginPasswordConfigured: true,
+        appPasswordConfigured: true, credentialRevision: 1, credentialUpdatedAt: now, validationGeneration: 1, validationFailures: 0,
+        createdAt: now, updatedAt: now, proxyBindings: [], recentTasks: [], activeTask: null,
+        credentials: { passwordConfigured: true, appPasswordConfigured: true, revision: 1 },
+      };
+    }
+    function sheet(value: AdminDaumResourceDetail) {
+      return <DaumDetailSheet detail={value} loading={false} busy={false} onCancel={vi.fn()} onDelete={vi.fn()} onEdit={vi.fn()}
+        onRecover={vi.fn()} onRefresh={vi.fn()} onReplaceCredentials={vi.fn()} onTogglePublish={vi.fn()} onToggleDisabled={vi.fn()} onMaintain={vi.fn()} />;
+    }
+    const oldMail = { ...inboxMessage(1), recipient: "old@outlook.com", subject: "Old auxiliary inbox" };
+    const newMail = { ...inboxMessage(1), recipient: "new@outlook.com", subject: "Current auxiliary inbox" };
+    const mailPage = (mail: typeof oldMail) => ({ ...EMPTY_PAGE, items: [mail], total: 1 });
+    beforeEach(() => {
+      mocks.bindingMessages.mockReset().mockResolvedValue(mailPage(oldMail));
+      mocks.bindingMessage.mockReset().mockResolvedValue({ ...oldMail, body: "OLD AUXILIARY BODY" });
+    });
+
+    it.each(["address", "same-address authorization", "owner"])("clears old auxiliary messages when the %s changes on the same resource", async (change) => {
+      const original = resource();
+      const view = render(sheet(original));
+      fireEvent.click(screen.getByRole("tab", { name: "Auxiliary mailbox" }));
+      await screen.findByText("OLD AUXILIARY BODY");
+      const listSignal = mocks.bindingMessages.mock.calls[0][4] as AbortSignal;
+      const bodySignal = mocks.bindingMessage.mock.calls[0][2] as AbortSignal;
+      const next = { ...original, version: 4,
+        ...(change === "address" ? { bindingAddress: "new@outlook.com" } : {}),
+        ...(change === "owner" ? { ownerUserId: 2 } : {}),
+      };
+      mocks.bindingMessages.mockResolvedValue(mailPage(newMail));
+      mocks.bindingMessage.mockResolvedValue({ ...newMail, body: "CURRENT AUXILIARY BODY" });
+      view.rerender(sheet(next));
+      expect(screen.queryByText("OLD AUXILIARY BODY")).not.toBeInTheDocument();
+      await screen.findByText("CURRENT AUXILIARY BODY");
+      expect(listSignal.aborted).toBe(true);
+      expect(bodySignal.aborted).toBe(true);
+      expect(mocks.bindingMessages).toHaveBeenLastCalledWith(41, "", 20, undefined, expect.any(AbortSignal), "daum");
+      expect(mocks.bindingMessages).toHaveBeenCalledTimes(2);
+    });
+
+    it("removes cached messages when the auxiliary relationship is unlinked", async () => {
+      const original = resource();
+      const view = render(sheet(original));
+      fireEvent.click(screen.getByRole("tab", { name: "Auxiliary mailbox" }));
+      await screen.findByText("OLD AUXILIARY BODY");
+      const bodySignal = mocks.bindingMessage.mock.calls[0][2] as AbortSignal;
+      view.rerender(sheet({ ...original, version: 4, bindingAddress: "", bindingStatus: "unlinked", pickupUrlConfigured: false }));
+      expect(screen.getByText("No auxiliary mailbox configured")).toBeInTheDocument();
+      expect(screen.queryByText("OLD AUXILIARY BODY")).not.toBeInTheDocument();
+      expect(bodySignal.aborted).toBe(true);
+      expect(mocks.bindingMessages).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(["list", "body"])("ignores a late %s response from the previous binding", async (phase) => {
+      let finishOld!: (value: unknown) => void;
+      const pending = new Promise((resolve) => { finishOld = resolve; });
+      if (phase === "list") mocks.bindingMessages.mockReturnValueOnce(pending);
+      else mocks.bindingMessage.mockReturnValueOnce(pending);
+      const original = resource();
+      const view = render(sheet(original));
+      fireEvent.click(screen.getByRole("tab", { name: "Auxiliary mailbox" }));
+      const request = phase === "list" ? mocks.bindingMessages : mocks.bindingMessage;
+      await waitFor(() => expect(request).toHaveBeenCalledOnce());
+      const signal = request.mock.calls[0][phase === "list" ? 4 : 2] as AbortSignal;
+      mocks.bindingMessages.mockResolvedValue(mailPage(newMail));
+      mocks.bindingMessage.mockResolvedValue({ ...newMail, body: "CURRENT AUXILIARY BODY" });
+      view.rerender(sheet({ ...original, version: 4, bindingAddress: "new@outlook.com" }));
+      await screen.findByText("CURRENT AUXILIARY BODY");
+      expect(signal.aborted).toBe(true);
+      await act(async () => { finishOld(phase === "list" ? mailPage(oldMail) : { ...oldMail, body: "LATE OLD BODY" }); });
+      expect(screen.getByText("CURRENT AUXILIARY BODY")).toBeInTheDocument();
+      expect(screen.queryByText("Old auxiliary inbox")).not.toBeInTheDocument();
+      expect(screen.queryByText("LATE OLD BODY")).not.toBeInTheDocument();
+    });
+  });
+
 });

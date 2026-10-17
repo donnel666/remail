@@ -70,7 +70,7 @@ func TestHistoricalImportRecordsZeroDebitWithoutLockingWallet(t *testing.T) {
 	events := []string{}
 	repo := &historicalImportRepoSpy{events: &events}
 	allocation := &historicalImportAllocationSpy{events: &events, result: &AllocationResult{
-		OrderNo: "history-order", Type: domain.AllocationTypeMicrosoft, ID: 1,
+		OrderNo: "history-order", Type: domain.AllocationTypeMicrosoft, ID: 1, ProductID: 3, Created: true, Email: "main@example.com", SupplyScope: SupplyScopePublic,
 	}}
 	uc := NewUseCase(repo, nil, &historicalImportWalletSpy{events: &events}, allocation, nil)
 
@@ -80,7 +80,7 @@ func TestHistoricalImportRecordsZeroDebitWithoutLockingWallet(t *testing.T) {
 	}})
 
 	require.NoError(t, err)
-	require.Equal(t, []string{"allocation", "zero-debit", "order"}, events)
+	require.Equal(t, []string{"allocation", "find-order", "zero-debit", "order"}, events)
 }
 
 func TestHistoricalImportNoopDoesNotWriteWalletOrOrder(t *testing.T) {
@@ -183,4 +183,55 @@ func TestHistoricalGmailImportReplaysExistingAndLegacyPlusWithoutWrites(t *testi
 	repo.order = nil
 	require.NoError(t, uc.ImportHistoricalGmailUsage(context.Background(), []HistoricalGmailUsage{base}))
 	require.Equal(t, []string{"allocation", "find-order", "zero-debit", "gmail-order"}, events)
+}
+
+func TestMicrosoftHistoricalReplayPreservesFactsAndRejectsPartialOrder(t *testing.T) {
+	events := []string{}
+	allocationType := domain.AllocationTypeMicrosoft
+	debitID := uint(50)
+	createdAt := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	expiredAt := createdAt.Add(time.Hour)
+	orderNo := "HIST-MS-existing"
+	order := &domain.Order{
+		OrderNo: orderNo, UserID: historicalMicrosoftOwnerUserID, ProjectID: 10, ProjectProductID: 20,
+		ProductType: domain.ProductTypeMicrosoft, ServiceMode: domain.ServiceModePurchase,
+		SupplyPolicy: domain.SupplyPolicyPublicOnly, Status: domain.OrderStatusCompleted,
+		PayAmount: "0.00", RefundAmount: "0.00", DebitTxID: &debitID, AllocationType: &allocationType,
+		DeliveryEmail: "original@outlook.com", ClientChannel: domain.ClientChannelConsole,
+		ReceiveStartedAt: &createdAt, ReceiveUntil: &expiredAt, ActivatedAt: &createdAt, AfterSaleUntil: &expiredAt,
+		IdempotencyKey: "history:" + orderNo, RequestFingerprint: fmt.Sprintf("%x", sha256.Sum256([]byte(orderNo))),
+		ServiceCleanupStatus: "succeeded", CreatedAt: createdAt, Version: 1,
+	}
+	repo := &historicalImportRepoSpy{events: &events, order: order}
+	allocation := &historicalImportAllocationSpy{events: &events, result: &AllocationResult{OrderNo: orderNo, Type: allocationType, ID: 40, ProductID: 20, Email: order.DeliveryEmail, SupplyScope: SupplyScopePublic, CreatedAt: createdAt, ReleasedAt: &expiredAt}}
+	uc := NewUseCase(repo, nil, &historicalImportWalletSpy{events: &events}, allocation, nil)
+	match := HistoricalMicrosoftUsage{ResourceID: 30, ProjectID: 10, ProductID: 20, Mailbox: "main", Email: "corrected@outlook.com", FirstMatchedAt: createdAt.Add(-time.Hour), LastMatchedAt: expiredAt.Add(time.Minute), EvidenceCount: 1}
+	original := *order
+	for range 2 {
+		require.NoError(t, uc.ImportHistoricalMicrosoftUsage(context.Background(), []HistoricalMicrosoftUsage{match}))
+	}
+	require.Equal(t, original, *order, "rescan preserves original main-address delivery and financial snapshots")
+	require.Equal(t, []string{"allocation", "find-order", "allocation", "find-order"}, events)
+	for _, change := range []string{"orphan allocation", "new allocation with old order", "paid amount", "fingerprint", "delivery"} {
+		t.Run(change, func(t *testing.T) {
+			events = events[:0]
+			copyOrder := original
+			repo.order = &copyOrder
+			allocation.result.Created = false
+			switch change {
+			case "orphan allocation":
+				repo.order = nil
+			case "new allocation with old order":
+				allocation.result.Created = true
+			case "paid amount":
+				repo.order.PayAmount = "1.00"
+			case "fingerprint":
+				repo.order.RequestFingerprint = "different"
+			case "delivery":
+				repo.order.DeliveryEmail = "different@outlook.com"
+			}
+			require.ErrorIs(t, uc.ImportHistoricalMicrosoftUsage(context.Background(), []HistoricalMicrosoftUsage{match}), domain.ErrIdempotencyConflict)
+			require.Equal(t, []string{"allocation", "find-order"}, events)
+		})
+	}
 }

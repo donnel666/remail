@@ -1465,6 +1465,7 @@ type projectRequestFields interface {
 	projectProducts() []ProjectProductRequest
 	projectMailRules() []ProjectMailRuleRequest
 	projectMicrosoftSuffixBlacklist() []string
+	projectDaumSuffixBlacklist() []string
 }
 
 func (req CreateProjectApplicationRequest) projectName() string { return req.Name }
@@ -1485,6 +1486,7 @@ func (req CreateProjectApplicationRequest) projectMailRules() []ProjectMailRuleR
 	return req.MailRules
 }
 func (req CreateProjectApplicationRequest) projectMicrosoftSuffixBlacklist() []string { return nil }
+func (req CreateProjectApplicationRequest) projectDaumSuffixBlacklist() []string      { return nil }
 
 func (req AdminCreateProjectRequest) projectName() string { return req.Name }
 func (req AdminCreateProjectRequest) projectTargetPlatform() string {
@@ -1533,6 +1535,7 @@ func toAppProjectRequest(req projectRequestFields) coreapp.CreateProjectRequest 
 		Products:                 products,
 		MailRules:                rules,
 		MicrosoftSuffixBlacklist: req.projectMicrosoftSuffixBlacklist(),
+		DaumSuffixBlacklist:      req.projectDaumSuffixBlacklist(),
 	}
 }
 
@@ -1643,6 +1646,7 @@ func toProjectListFacetsResponse(facets *coreapp.ProjectListFacets) *ProjectList
 			GmailVariant: facets.ProductType.GmailVariant,
 			ICloud:       facets.ProductType.ICloud,
 			Proto:        facets.ProductType.Proto,
+			Daum:         facets.ProductType.Daum,
 		},
 	}
 }
@@ -1763,6 +1767,12 @@ func toProjectDetailResponseWithInventory(detail *coredomain.ProjectDetail, incl
 		MicrosoftSuffixBlacklist: func() []string {
 			if includeInternal {
 				return detail.MicrosoftSuffixBlacklist
+			}
+			return nil
+		}(),
+		DaumSuffixBlacklist: func() []string {
+			if includeInternal {
+				return detail.DaumSuffixBlacklist
 			}
 			return nil
 		}(),
@@ -2317,4 +2327,8 @@ func validationErrors(err error) map[string]string {
 		fields["body"] = err.Error()
 	}
 	return fields
+}
+
+func (req AdminCreateProjectRequest) projectDaumSuffixBlacklist() []string {
+	return req.DaumSuffixBlacklist
 }

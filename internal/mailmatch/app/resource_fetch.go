@@ -230,11 +230,14 @@ func (uc *resourceTaskUseCase) submit(ctx context.Context, cmd resourceTaskSubmi
 	if cmd.ResourceType == "" {
 		cmd.ResourceType = domain.ResourceTypeMicrosoft
 	}
-	if (cmd.ResourceType != domain.ResourceTypeMicrosoft && cmd.ResourceType != domain.ResourceTypeGmail && cmd.ResourceType != domain.ResourceTypeICloud && cmd.ResourceType != domain.ResourceTypeProto) ||
+	if (cmd.ResourceType != domain.ResourceTypeMicrosoft && cmd.ResourceType != domain.ResourceTypeGmail && cmd.ResourceType != domain.ResourceTypeICloud && cmd.ResourceType != domain.ResourceTypeProto && cmd.ResourceType != domain.ResourceTypeDaum) ||
 		(cmd.ResourceType != domain.ResourceTypeMicrosoft && cmd.Kind != domain.ResourceFetchJobFetch) {
 		return nil, domain.ErrInvalidRequest
 	}
 	if cmd.ResourceType == domain.ResourceTypeProto && (uc.messages == nil || uc.messages.protoFetch == nil) {
+		return nil, domain.ErrMailServiceUnavailable
+	}
+	if cmd.ResourceType == domain.ResourceTypeDaum && (uc.messages == nil || uc.messages.daumFetch == nil) {
 		return nil, domain.ErrMailServiceUnavailable
 	}
 	now := uc.now()
@@ -325,6 +328,9 @@ func (uc *resourceTaskUseCase) process(ctx context.Context, resourceID uint, gen
 	}
 	if job.ResourceType == domain.ResourceTypeProto {
 		return uc.processProtoResourceFetch(ctx, *job, *scope)
+	}
+	if job.ResourceType == domain.ResourceTypeDaum {
+		return uc.processDaumResourceFetch(ctx, *job, *scope)
 	}
 	if uc.transport == nil {
 		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, errors.New("microsoft mail transport is unavailable"))
@@ -825,6 +831,9 @@ func resourceFetchOperationType(resourceType domain.ResourceType, kind domain.Re
 	if resourceType == domain.ResourceTypeProto {
 		return "mailmatch.admin_proto_resource.fetch"
 	}
+	if resourceType == domain.ResourceTypeDaum {
+		return "mailmatch.admin_daum_resource.fetch"
+	}
 	if kind == domain.ResourceFetchJobHistory {
 		return "mailmatch.admin_resource.history_scan"
 	}
@@ -855,6 +864,9 @@ func resourceFetchBizType(resourceType domain.ResourceType) string {
 	if resourceType == domain.ResourceTypeProto {
 		return governanceapp.AdminTaskBizProtoResource
 	}
+	if resourceType == domain.ResourceTypeDaum {
+		return governanceapp.AdminTaskBizDaumResource
+	}
 	if resourceType == domain.ResourceTypeGmail {
 		return governanceapp.AdminTaskBizGmailResource
 	}
@@ -867,6 +879,9 @@ func resourceFetchBizType(resourceType domain.ResourceType) string {
 func resourceFetchResourceLabel(resourceType domain.ResourceType) string {
 	if resourceType == domain.ResourceTypeProto {
 		return "Proto"
+	}
+	if resourceType == domain.ResourceTypeDaum {
+		return "Daum"
 	}
 	if resourceType == domain.ResourceTypeGmail {
 		return "Gmail"

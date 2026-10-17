@@ -432,6 +432,7 @@ type OrderProductTypeFacets struct {
 	GmailVariant int64
 	ICloud       int64
 	Proto        int64
+	Daum         int64
 }
 
 type OrderProjectFacet struct {
@@ -627,10 +628,24 @@ func (uc *UseCase) ImportHistoricalMicrosoftUsage(ctx context.Context, matches [
 			if allocation == nil {
 				continue
 			}
-			if strings.TrimSpace(allocation.OrderNo) == "" || allocation.ID == 0 || allocation.Type != domain.AllocationTypeMicrosoft {
+			if strings.TrimSpace(allocation.OrderNo) == "" || allocation.ID == 0 || allocation.Type != domain.AllocationTypeMicrosoft || allocation.ProductID == 0 || allocation.SupplyScope != SupplyScopePublic || (match.Mailbox != "main" && !strings.EqualFold(allocation.Email, match.Email)) {
 				return domain.ErrInvalidOrderRequest
 			}
 			orderNo := strings.TrimSpace(allocation.OrderNo)
+			existing, findErr := uc.repo.FindOrder(txCtx, orderNo)
+			if findErr == nil {
+				if allocation.Created || !sameHistoricalMicrosoftOrder(existing, allocation, match) {
+					return domain.ErrIdempotencyConflict
+				}
+				continue
+			}
+			if !errors.Is(findErr, domain.ErrOrderNotFound) {
+				return findErr
+			}
+			if !allocation.Created || allocation.ProductID != match.ProductID {
+				return domain.ErrIdempotencyConflict
+			}
+
 			debit, err := uc.wallet.RecordHistoricalZeroDebit(txCtx, WalletCommand{
 				UserID: ownerID, Amount: "0", Reason: "order:" + orderNo,
 				IdempotencyKey: "history:" + orderNo + ":debit",
@@ -645,7 +660,7 @@ func (uc *UseCase) ImportHistoricalMicrosoftUsage(ctx context.Context, matches [
 				OrderNo: orderNo, UserID: ownerID, ProjectID: match.ProjectID, ProjectProductID: match.ProductID,
 				CodeWindowMinutes: match.CodeWindowMinutes, ActivationWindowMinutes: match.ActivationWindowMinutes,
 				WarrantyMinutes: match.WarrantyMinutes, DebitTxID: debit.ID,
-				MicrosoftAllocationID: allocation.ID, DeliveryEmail: match.Email,
+				MicrosoftAllocationID: allocation.ID, DeliveryEmail: allocation.Email,
 				CreatedAt: createdAt, ExpiredAt: expiredAt, Now: now,
 			}); err != nil {
 				return err
@@ -976,6 +991,11 @@ func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.P
 				return domain.ErrInvalidOrderRequest
 			}
 			prepared.emailSuffix = prepared.selectorSuffix
+		case domain.ProductTypeDaum:
+			if prepared.selectorSuffix != coredomain.RandomDaumSuffixSelector && !coredomain.IsDaumEmailSuffix(prepared.selectorSuffix) {
+				return domain.ErrInvalidOrderRequest
+			}
+			prepared.emailSuffix = prepared.selectorSuffix
 		default:
 			return domain.ErrInvalidOrderRequest
 		}
@@ -1012,6 +1032,10 @@ func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.P
 		}
 	case domain.ProductTypeProto:
 		if prepared.emailSuffix != "" && prepared.emailSuffix != coredomain.RandomProtoSuffixSelector && !coredomain.IsProtoEmailSuffix(prepared.emailSuffix) {
+			return domain.ErrInvalidOrderRequest
+		}
+	case domain.ProductTypeDaum:
+		if prepared.emailSuffix != "" && prepared.emailSuffix != coredomain.RandomDaumSuffixSelector && !coredomain.IsDaumEmailSuffix(prepared.emailSuffix) {
 			return domain.ErrInvalidOrderRequest
 		}
 	case domain.ProductTypeLegacyRandom, domain.ProductTypeGmail, domain.ProductTypeGmailVariant, domain.ProductTypeICloud:
@@ -1530,7 +1554,7 @@ func (uc *UseCase) resolveRandomCheckoutSuffixes(ctx context.Context, prepared [
 	for i := range prepared {
 		item := &prepared[i]
 		if item.prepareErr != nil || item.existing != nil || item.quote == nil ||
-			(item.emailSuffix != coredomain.RandomMicrosoftSuffixSelector && item.emailSuffix != coredomain.RandomDomainSuffixSelector && item.emailSuffix != coredomain.RandomProtoSuffixSelector) {
+			(item.emailSuffix != coredomain.RandomMicrosoftSuffixSelector && item.emailSuffix != coredomain.RandomDomainSuffixSelector && item.emailSuffix != coredomain.RandomProtoSuffixSelector && item.emailSuffix != coredomain.RandomDaumSuffixSelector) {
 			continue
 		}
 		key := selectionKey{
@@ -2238,19 +2262,8 @@ func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrder
 			result.DeliveryReconciled++
 		}
 	}
-	unavailable, err := uc.repo.ListUnavailableMicrosoftOrderNos(ctx, 0, limit)
-	if err != nil {
+	if err := uc.expireUnavailableMicrosoftOrders(ctx, limit, result); err != nil {
 		return nil, err
-	}
-	for _, orderNo := range unavailable {
-		refunded, err := uc.refundUnavailableMicrosoftOrder(ctx, orderNo, "")
-		if err != nil {
-			result.Failed++
-			continue
-		}
-		if refunded {
-			result.ResourceUnavailableRefunded++
-		}
 	}
 	unavailableGmail, err := uc.repo.ListUnavailableGmailOrderNos(ctx, 0, limit)
 	if err != nil {
@@ -2267,6 +2280,9 @@ func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrder
 		}
 	}
 	if err := uc.expireUnavailableProtoOrders(ctx, limit, result); err != nil {
+		return nil, err
+	}
+	if err := uc.expireUnavailableDaumOrders(ctx, limit, result); err != nil {
 		return nil, err
 	}
 	codeExpired, err := uc.repo.ListExpiredCodeOrderNos(ctx, now, limit)
@@ -2339,26 +2355,6 @@ func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrder
 		return result, err
 	}
 	return result, nil
-}
-
-func (uc *UseCase) RefundUnavailableMicrosoftOrders(ctx context.Context, resourceID uint, requestID string) (int, error) {
-	if uc == nil || uc.repo == nil || uc.wallet == nil || resourceID == 0 {
-		return 0, domain.ErrInvalidOrderRequest
-	}
-	orderNos, err := uc.repo.ListUnavailableMicrosoftOrderNos(ctx, resourceID, 200)
-	if err != nil {
-		return 0, err
-	}
-	refunded := 0
-	var resultErr error
-	for _, orderNo := range orderNos {
-		changed, err := uc.refundUnavailableMicrosoftOrder(ctx, orderNo, requestID)
-		if changed {
-			refunded++
-		}
-		resultErr = errors.Join(resultErr, err)
-	}
-	return refunded, resultErr
 }
 
 func (uc *UseCase) RefundUnavailableGmailOrders(ctx context.Context, resourceID uint, requestID string) (int, error) {
@@ -2453,6 +2449,7 @@ func (uc *UseCase) NotifyMatchedCode(ctx context.Context, req MatchCodeResultReq
 }
 
 type refundOrderRequest struct {
+	BeforeOrderLock   func(context.Context) error
 	OrderNo           string
 	Reason            string
 	IdempotencyKey    string
@@ -2460,25 +2457,6 @@ type refundOrderRequest struct {
 	Operator          domain.OperatorType
 	AllowedStatuses   []domain.OrderStatus
 	ReconcileDelivery bool
-}
-
-func (uc *UseCase) refundUnavailableMicrosoftOrder(ctx context.Context, orderNo string, requestID string) (bool, error) {
-	order, changed, err := uc.refundOrder(ctx, refundOrderRequest{
-		OrderNo:           orderNo,
-		Reason:            "Microsoft resource is permanently unavailable.",
-		IdempotencyKey:    "order:" + strings.TrimSpace(orderNo) + ":refund",
-		RequestID:         strings.TrimSpace(requestID),
-		Operator:          domain.OperatorTypeSystem,
-		AllowedStatuses:   []domain.OrderStatus{domain.OrderStatusActive},
-		ReconcileDelivery: true,
-	})
-	if errors.Is(err, domain.ErrOrderStateConflict) {
-		return false, nil
-	}
-	if err != nil || order == nil || !changed {
-		return false, err
-	}
-	return true, uc.cleanupOrderService(ctx, *order, true, "Order refunded because its Microsoft resource is permanently unavailable.", requestID)
 }
 
 func (uc *UseCase) expireCodeOrder(ctx context.Context, orderNo string, _ time.Time) error {
@@ -2530,6 +2508,11 @@ func (uc *UseCase) refundOrder(ctx context.Context, req refundOrderRequest) (*do
 	err = uc.repo.WithTx(ctx, func(txCtx context.Context) error {
 		if err := uc.lockOrderWallets(txCtx, *owner); err != nil {
 			return err
+		}
+		if req.BeforeOrderLock != nil {
+			if err := req.BeforeOrderLock(txCtx); err != nil {
+				return err
+			}
 		}
 		locked, err := uc.repo.LockOrderForUpdate(txCtx, orderNo)
 		if err != nil {
@@ -3264,10 +3247,15 @@ func checkoutProductTypeForSuffix(suffix string) (domain.ProductType, error) {
 		return domain.ProductTypeICloud, nil
 	case coredomain.RandomProtoSuffixSelector:
 		return domain.ProductTypeProto, nil
+	case coredomain.RandomDaumSuffixSelector:
+		return domain.ProductTypeDaum, nil
 	case coredomain.RandomMicrosoftSuffixSelector:
 		return domain.ProductTypeMicrosoft, nil
 	case coredomain.RandomDomainSuffixSelector:
 		return domain.ProductTypeDomain, nil
+	}
+	if coredomain.IsDaumEmailSuffix(suffix) {
+		return domain.ProductTypeDaum, nil
 	}
 	if coredomain.IsProtoEmailSuffix(suffix) {
 		return domain.ProductTypeProto, nil

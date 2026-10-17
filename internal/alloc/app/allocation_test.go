@@ -1288,3 +1288,7 @@ func TestDomainAllocationGeneratesAnotherAddressAfterProjectHistory(t *testing.T
 		t.Fatalf("generated attempts/history checks/result = %d/%d/%#v; want 3/2/new mailbox", repo.calls, repo.historyChecks, result)
 	}
 }
+
+func (*allocationLockRepo) MicrosoftAllocationReady(context.Context, string, uint) (bool, error) {
+	return true, nil
+}

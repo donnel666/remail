@@ -1,16 +1,12 @@
 package infra
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"crypto/tls"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"mime"
-	"net"
 	stdmail "net/mail"
 	"net/url"
 	"sort"
@@ -19,13 +15,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/donnel666/remail/internal/mailbox"
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
+	"github.com/donnel666/remail/internal/mailtransport/netdial"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/emersion/go-sasl"
-	"golang.org/x/net/proxy"
 )
 
 const (
@@ -858,205 +855,21 @@ func isMicrosoftIMAPProxyTransportError(err error, proxyURL string) bool {
 }
 
 func dialOutlookIMAPClient(ctx context.Context, proxyURL string) (*imapclient.Client, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: "outlook.office365.com", NextProtos: []string{"imap"}}
-	conn, err := dialOutlookIMAPConn(ctx, proxyURL)
-	if err != nil {
-		return nil, err
-	}
-	tlsConn := tls.Client(conn, tlsConfig)
-	if err := setConnectionDeadline(ctx, tlsConn, runtimeconfig.Duration("imap_operation_timeout_seconds", microsoftIMAPOperationTimeout, time.Second, 1)); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	if err := tlsConn.HandshakeContext(ctx); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	if err := tlsConn.SetDeadline(time.Time{}); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	return imapclient.New(tlsConn, &imapclient.Options{TLSConfig: tlsConfig}), nil
-}
-
-func dialOutlookIMAPConn(ctx context.Context, proxyURL string) (net.Conn, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	proxyURL = normalizeMailProxyURL(proxyURL)
-	dialer := &net.Dialer{
-		Timeout:   runtimeconfig.Duration("imap_dial_timeout_seconds", 20*time.Second, time.Second, 1),
-		KeepAlive: runtimeconfig.Duration("imap_keepalive_seconds", 30*time.Second, time.Second, 1),
-	}
-	if proxyURL == "" {
+	if strings.TrimSpace(proxyURL) == "" {
 		return nil, fmt.Errorf("proxy url is required for outlook imap fallback")
 	}
-	parsed, err := url.Parse(proxyURL)
-	if err != nil || parsed.Host == "" {
-		return nil, fmt.Errorf("invalid proxy url")
-	}
-	switch strings.ToLower(parsed.Scheme) {
-	case "socks5", "socks5h":
-		auth := (*proxy.Auth)(nil)
-		if parsed.User != nil {
-			password, _ := parsed.User.Password()
-			auth = &proxy.Auth{User: parsed.User.Username(), Password: password}
-		}
-		socksDialer, err := proxy.SOCKS5("tcp", parsed.Host, auth, dialer)
-		if err != nil {
-			return nil, err
-		}
-		contextDialer, ok := socksDialer.(proxy.ContextDialer)
-		if !ok {
-			return nil, fmt.Errorf("socks5 proxy does not support context cancellation")
-		}
-		handshakeCtx, cancel := context.WithTimeout(ctx, runtimeconfig.Duration("proxy_handshake_timeout_seconds", microsoftProxyHandshakeTimeout, time.Second, 1))
-		conn, err := contextDialer.DialContext(handshakeCtx, "tcp", outlookIMAPAddress)
-		cancel()
-		if err != nil {
-			return nil, err
-		}
-		if err := setConnectionDeadline(ctx, conn, runtimeconfig.Duration("imap_operation_timeout_seconds", microsoftIMAPOperationTimeout, time.Second, 1)); err != nil {
-			_ = conn.Close()
-			return nil, err
-		}
-		return conn, nil
-	case "http", "https":
-		return dialHTTPConnect(ctx, dialer, parsed, outlookIMAPAddress)
-	default:
-		return nil, fmt.Errorf("unsupported proxy scheme")
-	}
-}
-
-func normalizeMailProxyURL(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	if strings.Contains(value, "://") {
-		return value
-	}
-	return "http://" + value
-}
-
-func dialHTTPConnect(ctx context.Context, dialer *net.Dialer, parsed *url.URL, target string) (net.Conn, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	conn, err := dialer.DialContext(ctx, "tcp", parsed.Host)
+	conn, err := netdial.DialTLS(ctx, proxyURL, outlookIMAPAddress, "imap")
 	if err != nil {
 		return nil, err
 	}
-	if err := setConnectionDeadline(ctx, conn, runtimeconfig.Duration("proxy_handshake_timeout_seconds", microsoftProxyHandshakeTimeout, time.Second, 1)); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	if strings.EqualFold(parsed.Scheme, "https") {
-		tlsConn := tls.Client(conn, &tls.Config{MinVersion: tls.VersionTLS12, ServerName: parsed.Hostname()})
-		if err := tlsConn.HandshakeContext(ctx); err != nil {
-			_ = conn.Close()
-			return nil, err
-		}
-		conn = tlsConn
-	}
-	request := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n", target, target)
-	if parsed.User != nil {
-		password, _ := parsed.User.Password()
-		credential := base64.StdEncoding.EncodeToString([]byte(parsed.User.Username() + ":" + password))
-		request += "Proxy-Authorization: Basic " + credential + "\r\n"
-	}
-	request += "\r\n"
-	if _, err := conn.Write([]byte(request)); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	reader := bufio.NewReader(conn)
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	if !strings.Contains(line, " 200 ") {
-		_ = conn.Close()
-		return nil, fmt.Errorf("proxy connect failed")
-	}
-	for {
-		header, err := reader.ReadString('\n')
-		if err != nil {
-			_ = conn.Close()
-			return nil, err
-		}
-		if strings.TrimSpace(header) == "" {
-			break
-		}
-	}
-	return conn, nil
-}
-
-func setConnectionDeadline(ctx context.Context, conn net.Conn, fallback time.Duration) error {
-	if conn == nil {
-		return errors.New("network connection is nil")
-	}
-	if fallback <= 0 {
-		fallback = runtimeconfig.Duration("proxy_handshake_timeout_seconds", microsoftProxyHandshakeTimeout, time.Second, 1)
-	}
-	deadline := time.Now().Add(fallback)
-	if ctx != nil {
-		if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
-			deadline = contextDeadline
-		}
-	}
-	return conn.SetDeadline(deadline)
+	return imapclient.New(conn, nil), nil
 }
 
 func recentIMAPSeqSet(ctx context.Context, client *imapclient.Client, total uint32, sinceAt time.Time, maxMessages int) (imap.SeqSet, error) {
-	if total == 0 {
-		return nil, nil
-	}
-	criteria := &imap.SearchCriteria{}
-	if !sinceAt.IsZero() {
-		criteria.Since = sinceAt.UTC()
-	}
-	if maxMessages > 0 && client.Caps().Has(imap.CapSort) {
-		nums, err := client.Sort(&imapclient.SortOptions{
-			SearchCriteria: criteria,
-			SortCriteria:   []imapclient.SortCriterion{{Key: imapclient.SortKeyArrival, Reverse: true}},
-		}).Wait()
-		if err == nil {
-			return imap.SeqSetNum(nums[:min(len(nums), maxMessages)]...), ctx.Err()
-		}
-	}
-	if maxMessages > 0 {
-		return latestIMAPSeqSet(total, maxMessages), ctx.Err()
-	}
-
-	seqSet := imap.SeqSet{}
-	if sinceAt.IsZero() {
-		seqSet.AddRange(1, total)
-	} else {
-		data, err := client.Search(criteria, nil).Wait()
-		if err != nil {
-			return nil, err
-		}
-		seqSet = imap.SeqSetNum(data.AllSeqNums()...)
-	}
-	return seqSet, ctx.Err()
+	return mailbox.RecentIMAPSeqSet(ctx, client, total, sinceAt, maxMessages)
 }
-
 func latestIMAPSeqSet(total uint32, maxMessages int) imap.SeqSet {
-	if total == 0 || maxMessages <= 0 {
-		return nil
-	}
-	start := uint32(1)
-	if total > uint32(maxMessages) {
-		start = total - uint32(maxMessages) + 1
-	}
-	seqSet := imap.SeqSet{}
-	seqSet.AddRange(start, total)
-	return seqSet
+	return mailbox.LatestIMAPSeqSet(total, maxMessages)
 }
 
 func imapCandidateFolders(client *imapclient.Client) []MicrosoftMailFolder {

@@ -87,7 +87,7 @@ func (uc *AdminMessageUseCase) List(ctx context.Context, query AdminMessageListQ
 	if query.ResourceType == "" {
 		query.ResourceType = domain.ResourceTypeMicrosoft
 	}
-	if query.ResourceType != domain.ResourceTypeMicrosoft && query.ResourceType != domain.ResourceTypeDomain && query.ResourceType != domain.ResourceTypeGmail && query.ResourceType != domain.ResourceTypeICloud && query.ResourceType != domain.ResourceTypeProto {
+	if query.ResourceType != domain.ResourceTypeMicrosoft && query.ResourceType != domain.ResourceTypeDomain && query.ResourceType != domain.ResourceTypeGmail && query.ResourceType != domain.ResourceTypeICloud && query.ResourceType != domain.ResourceTypeProto && query.ResourceType != domain.ResourceTypeDaum {
 		return nil, domain.ErrInvalidRequest
 	}
 	defaultLimit, maxLimit, maxSearch := AdminMessageLimits()
@@ -141,7 +141,7 @@ func (uc *AdminMessageUseCase) Get(
 	path string,
 ) (*AdminMessageDetail, error) {
 	if uc == nil || uc.repo == nil || operatorUserID == 0 || resourceID == 0 || messageID == 0 ||
-		(resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeDomain && resourceType != domain.ResourceTypeGmail && resourceType != domain.ResourceTypeICloud && resourceType != domain.ResourceTypeProto) {
+		(resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeDomain && resourceType != domain.ResourceTypeGmail && resourceType != domain.ResourceTypeICloud && resourceType != domain.ResourceTypeProto && resourceType != domain.ResourceTypeDaum) {
 		return nil, domain.ErrInvalidRequest
 	}
 	resourceName := "microsoft_message"
@@ -154,6 +154,8 @@ func (uc *AdminMessageUseCase) Get(
 		resourceName = "icloud_message"
 	case domain.ResourceTypeProto:
 		resourceName = "proto_message"
+	case domain.ResourceTypeDaum:
+		resourceName = "daum_message"
 	}
 	return uc.repo.FindAdminMessageDetailWithLog(ctx, resourceID, resourceType, messageID, &governancedomain.OperationLog{
 		OperatorUserID: operatorUserID,

@@ -407,3 +407,9 @@ func (m *MailTransportModule) StartDispatchers(ctx context.Context) func() {
 		once.Do(cancel)
 	}
 }
+
+func (m *MailTransportModule) SetDaumPickupSource(scopes mailapp.AuxiliaryPickupScopeReader, messages mailapp.AuxiliaryPickupMailReader) {
+	if service, ok := m.AuxiliaryMail.(*mailapp.AuxiliaryMailQueryService); ok {
+		service.SetDaumPickupSource(scopes, messages)
+	}
+}

@@ -2,7 +2,7 @@ import { Tag } from "@douyinfe/semi-ui";
 
 interface StatisticFilterOptionProps<T extends string> {
   active: boolean;
-  count: number;
+  count?: number;
   label: string;
   onSelect: (value: T) => void;
   value: T;
@@ -26,9 +26,9 @@ export function StatisticFilterOption<T extends string>({
       type="button"
     >
       <span>{label}</span>
-      <Tag color={active ? "orange" : "grey"} shape="circle" size="small">
+      {count === undefined ? null : <Tag color={active ? "orange" : "grey"} shape="circle" size="small">
         {count}
-      </Tag>
+      </Tag>}
     </button>
   );
 }

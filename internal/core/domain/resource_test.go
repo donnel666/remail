@@ -610,6 +610,7 @@ func TestAllocationBucketCapacity(t *testing.T) {
 		capacity uint
 	}{
 		"microsoft": {bucket: MicrosoftAllocationBucket, last: 2047, capacity: 2048},
+		"daum":      {bucket: DaumAllocationBucket, last: 255, capacity: 256},
 		"domain":    {bucket: MailDomainAllocationBucket, last: 511, capacity: 512},
 	} {
 		t.Run(name, func(t *testing.T) {

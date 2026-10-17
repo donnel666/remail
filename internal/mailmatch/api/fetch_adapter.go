@@ -3,13 +3,13 @@ package api
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	stdmail "net/mail"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/donnel666/remail/internal/mailbox"
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	"github.com/donnel666/remail/internal/mailmatch/domain"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
@@ -19,10 +19,10 @@ import (
 )
 
 const (
-	microsoftFetchAttempts         = 3
+	microsoftFetchAttempts         = mailbox.FetchAttempts
 	permanentFetchFailureTimeout   = 30 * time.Second
-	microsoftFetchFailureThreshold = int64(3)
-	microsoftFetchFailureTTL       = time.Hour
+	microsoftFetchFailureThreshold = mailbox.FetchFailureThreshold
+	microsoftFetchFailureTTL       = mailbox.FetchFailureTTL
 )
 
 type microsoftMessageFetchClient interface {
@@ -260,32 +260,23 @@ func (a *MicrosoftFetchAdapter) finishFailure(ctx context.Context, req mailmatch
 }
 
 func (a *MicrosoftFetchAdapter) incrementFailureCount(ctx context.Context, resourceID uint) (int64, error) {
-	if a == nil || a.redis == nil || resourceID == 0 {
+	if a == nil || resourceID == 0 {
 		return 0, nil
 	}
-	var increment *redis.IntCmd
-	_, err := a.redis.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-		increment = pipe.Incr(ctx, microsoftFetchFailureKey(resourceID))
-		pipe.Expire(ctx, microsoftFetchFailureKey(resourceID), microsoftFetchFailureTTL)
-		return nil
-	})
-	if err != nil {
-		return 0, err
-	}
-	return increment.Val(), nil
+	return mailbox.IncrementFetchFailure(ctx, a.redis, microsoftFetchFailureKey(resourceID))
 }
 
 func (a *MicrosoftFetchAdapter) clearFailureCount(ctx context.Context, resourceID uint) {
-	if a == nil || a.redis == nil || resourceID == 0 {
+	if a == nil || resourceID == 0 {
 		return
 	}
-	if err := a.redis.Del(ctx, microsoftFetchFailureKey(resourceID)).Err(); err != nil {
+	if err := mailbox.ClearFetchFailures(ctx, a.redis, microsoftFetchFailureKey(resourceID)); err != nil {
 		slog.Warn("microsoft fetch failure counter clear failed", "resource_id", resourceID, "error", err)
 	}
 }
 
 func microsoftFetchFailureKey(resourceID uint) string {
-	return fmt.Sprintf("mailmatch:microsoft:fetch_failures:%d", resourceID)
+	return mailbox.FetchFailureKey("microsoft", resourceID)
 }
 
 func (a *MicrosoftFetchAdapter) acquireProxy(ctx context.Context, scope mailmatchapp.OrderScope, requestID string, fullHistory bool, attempt int, avoidServerIDs []uint) (*proxyapp.ProxyConfig, error) {

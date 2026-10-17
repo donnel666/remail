@@ -14,6 +14,7 @@ const GmailVariantInventory int64 = 1_000_000_000
 const (
 	MicrosoftBucketCount        = coredomain.MicrosoftAllocationBucketCount
 	MicrosoftExpansionBuckets   = 100
+	DaumBucketCount             = coredomain.DaumAllocationBucketCount
 	ICloudBucketCount           = 256
 	ICloudExpansionBuckets      = 100
 	DomainBucketCount           = coredomain.DomainAllocationBucketCount
@@ -173,12 +174,14 @@ type InventoryStats struct {
 	Gmail                      GmailInventoryStats
 	ICloud                     ICloudInventoryStats
 	Proto                      ProtoInventoryStats
+	Daum                       DaumInventoryStats
 	TotalAvailable             int64
 	ActiveMicrosoftAllocations int64
 	ActiveDomainAllocations    int64
 	ActiveGmailAllocations     int64
 	ActiveICloudAllocations    int64
 	ActiveProtoAllocations     int64
+	ActiveDaumAllocations      int64
 	// Cold distinguishes an unrefreshed placeholder from a real zero inventory.
 	Cold bool
 }
@@ -532,4 +535,33 @@ type ProtoRepository interface {
 
 type ProtoInventoryRepository interface {
 	ListPrivateProtoInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]PrivateProductInventoryTotal, error)
+}
+
+type DaumCandidate struct {
+	ResourceID      uint
+	OwnerUserID     uint
+	Mailbox         string
+	ExplicitAliasID *uint
+	Email           string
+	LastAllocatedAt *time.Time
+}
+
+type DaumRepository interface {
+	ListDaumSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, buckets []uint16, limit int, emailSuffix string) ([]DaumCandidate, error)
+	LockDaumCandidate(ctx context.Context, candidate DaumCandidate, projectID uint, buyerUserID uint, scope domain.SupplyScope, emailSuffix string) (*DaumCandidate, error)
+	CreateDaumAllocation(ctx context.Context, allocation *domain.DaumAllocation) error
+	TouchDaumAllocated(ctx context.Context, resourceID uint, allocatedAt time.Time) error
+}
+
+type DaumInventoryRepository interface {
+	ListPrivateDaumInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]PrivateProductInventoryTotal, error)
+}
+
+type DaumInventoryStats struct {
+	Enabled                bool
+	EligibleResources      int64
+	ExplicitAliasAvailable int64
+	MainAvailable          int64
+	PublicAvailable        int64
+	TotalAvailable         int64
 }

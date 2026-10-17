@@ -6690,6 +6690,354 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/daum/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Daum resources for administrators
+         * @description Deleted resources are excluded by default. Use status=deleted to inspect and recover them.
+         */
+        get: operations["getAdminDaumResources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Daum resources for a selected owner
+         * @description Accepts mixed email----appPassword, email----password----appPassword and email----password----appPassword----pickupUrl----kakaoEmail rows. The pickup URL accepts /pickup and /v1/pickup; its email identifies the auxiliary mailbox, independently of the fifth-field Kakao account address. Three supported domains canonicalize to one Daum account. Passwords and the existing remail pickup URL are write-only. Duplicate active accounts are not overwritten.
+         */
+        post: operations["postAdminDaumResourceImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/imports/{importId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get an administrator Daum import */
+        get: operations["getAdminDaumResourceImport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/imports/{importId}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List safe per-line Daum import outcomes for administrators */
+        get: operations["getAdminDaumResourceImportItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/validations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue Daum validation for selected resources */
+        post: operations["postAdminDaumResourceValidations"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/batch/validation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue Daum validation for selected resources */
+        post: operations["postAdminDaumResourceBatchValidation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/batch/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run a lifecycle command for selected Daum resources */
+        post: operations["postAdminDaumResourceBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/{resourceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one safe Daum resource */
+        get: operations["getAdminDaumResource"];
+        put?: never;
+        post?: never;
+        /** Delete one Daum resource as an administrator */
+        delete: operations["deleteAdminDaumResource"];
+        options?: never;
+        head?: never;
+        /** Edit Daum resource identity or owner */
+        patch: operations["patchAdminDaumResource"];
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/{resourceId}/maintenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Daum maintenance runs for one resource */
+        get: operations["getAdminDaumResourceMaintenance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/{resourceId}/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace Daum password as a write-only value */
+        put: operations["putAdminDaumResourceCredentials"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/{resourceId}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue Daum validate using the current resource version */
+        post: operations["postAdminDaumResourceValidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/{resourceId}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue Daum history using the current resource version */
+        post: operations["postAdminDaumResourceHistory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/batch/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable selected Daum resources synchronously */
+        post: operations["postAdminDaumResourceBatchDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/bulk/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable selected Daum resources synchronously */
+        post: operations["postAdminDaumResourceBulkDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/{resourceId}/{command}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run a lifecycle command for one Daum resource */
+        post: operations["postAdminDaumResourceCommand"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/{resourceId}/recover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recover a deleted Daum resource */
+        post: operations["postAdminDaumResourceRecover"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/bulk/{command}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue a Daum administration command for selected resources or a filter */
+        post: operations["postAdminDaumResourceBulk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/bulk-tasks/{taskId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a Daum administration bulk task */
+        get: operations["getAdminDaumResourceBulkTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/imports/{importId}/failures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download safe Daum import failure details */
+        get: operations["getAdminDaumResourceImportFailures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/daum/resources/{resourceId}/aliases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the two fixed aliases of a Daum account */
+        get: operations["getAdminDaumResourceAliases"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -6939,12 +7287,12 @@ export interface components {
         };
         CreateOrderRequest: {
             projectId: number;
-            /** @description Product selector. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted. */
+            /** @description Product selector. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted. */
             emailSuffix: string;
         };
         CreateOrderBatchRequest: {
             projectId: number;
-            /** @description Product selector. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted. */
+            /** @description Product selector. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted. */
             emailSuffix: string;
             /** @description Number of independent orders to create. */
             quantity: number;
@@ -7017,7 +7365,7 @@ export interface components {
              * @description Product type snapshot. `random` is returned only for historical orders created before that product was retired.
              * @enum {string}
              */
-            productType: "microsoft" | "domain" | "random" | "gmail" | "gmail_variant" | "icloud" | "proto";
+            productType: "microsoft" | "domain" | "random" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
             /** @enum {string} */
             serviceMode: "code" | "purchase";
             /** @enum {string} */
@@ -7029,7 +7377,7 @@ export interface components {
             payAmount: components["schemas"]["NonNegativeLedgerAmountResponse"];
             refundAmount: components["schemas"]["NonNegativeLedgerAmountResponse"];
             /** @enum {string} */
-            allocationType?: "microsoft" | "domain" | "gmail" | "icloud" | "proto";
+            allocationType?: "microsoft" | "domain" | "gmail" | "icloud" | "proto" | "daum";
             allocationId?: number;
             deliveryEmail: string;
             /** Format: date-time */
@@ -7115,6 +7463,8 @@ export interface components {
             icloud: number;
             /** Format: int64 */
             proto: number;
+            /** Format: int64 */
+            daum: number;
         };
         OrderProjectFacet: {
             projectId: number;
@@ -7595,14 +7945,24 @@ export interface components {
             icloudAveragePurchaseActivationSeconds: number;
             /** @description Non-deleted Proto source accounts. */
             protoTotalEmails: number;
+            /** @description Non-deleted Daum source accounts. */
+            daumTotalEmails: number;
             /** @description Healthy public Proto source accounts owned by active supplier or administrator accounts. */
             protoAvailableEmails: number;
+            /** @description Healthy public Daum source accounts owned by active supplier or administrator accounts. */
+            daumAvailableEmails: number;
             protoCodeReceipts: number;
+            daumCodeReceipts: number;
             protoCodeSuccessRate: number;
+            daumCodeSuccessRate: number;
             protoAverageCodeReceiptSeconds: number;
+            daumAverageCodeReceiptSeconds: number;
             protoPurchaseActivations: number;
+            daumPurchaseActivations: number;
             protoPurchaseActivationSuccessRate: number;
+            daumPurchaseActivationSuccessRate: number;
             protoAveragePurchaseActivationSeconds: number;
+            daumAveragePurchaseActivationSeconds: number;
             domainTotalMailboxes: number;
             domainAvailableMailboxes: number;
             domainCodeReceipts: number;
@@ -7642,10 +8002,15 @@ export interface components {
             icloudCodeSuccessRate: number;
             icloudAverageCodeReceiptSeconds: number;
             protoTotalEmails: number;
+            daumTotalEmails: number;
             protoAvailableEmails: number;
+            daumAvailableEmails: number;
             protoReceivedCodes: number;
+            daumReceivedCodes: number;
             protoCodeSuccessRate: number;
+            daumCodeSuccessRate: number;
             protoAverageCodeReceiptSeconds: number;
+            daumAverageCodeReceiptSeconds: number;
             domainTotalMailboxes: number;
             domainAvailableMailboxes: number;
             domainReceivedCodes: number;
@@ -8382,7 +8747,7 @@ export interface components {
         BotProjectProduct: {
             projectId: number;
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto";
+            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
@@ -8817,6 +9182,7 @@ export interface components {
             products: components["schemas"]["ProjectProductRequest"][];
             mailRules: components["schemas"]["ProjectMailRuleRequest"][];
             microsoftSuffixBlacklist?: string[];
+            daumSuffixBlacklist?: string[];
         };
         AdminRejectProjectRequest: {
             reviewReason: string;
@@ -8828,7 +9194,7 @@ export interface components {
             accessType?: "public" | "private";
             looseMatch?: boolean;
             /** @enum {string} */
-            productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto";
+            productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
             search?: string;
             targetPlatform?: string;
             /** Format: date-time */
@@ -8873,7 +9239,7 @@ export interface components {
         };
         ProjectProductRequest: {
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto";
+            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
             /**
              * @default enabled
              * @enum {string}
@@ -8937,6 +9303,7 @@ export interface components {
             gmailVariant: number;
             icloud: number;
             proto: number;
+            daum: number;
         };
         ProjectItem: {
             id: number;
@@ -8967,7 +9334,7 @@ export interface components {
         };
         ProjectProductSummary: {
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto";
+            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
@@ -9004,7 +9371,7 @@ export interface components {
             suffixes?: components["schemas"]["ProductSuffixInventory"][];
         };
         ProductSuffixInventory: {
-            /** @description Selectable inventory value. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned. */
+            /** @description Selectable inventory value. Microsoft and Proto products expose exact email domains. Daum exposes daum.net, hanmail.net and hanmail2.net as independently available addresses on a shared account. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned. */
             suffix: string;
             /** Format: int64 */
             totalAvailable: number;
@@ -9014,7 +9381,7 @@ export interface components {
         ProjectProduct: {
             projectId: number;
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto";
+            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
@@ -9087,6 +9454,7 @@ export interface components {
             mailRules?: components["schemas"]["ProjectMailRule"][];
             accesses?: components["schemas"]["ProjectAccess"][];
             microsoftSuffixBlacklist?: string[];
+            daumSuffixBlacklist?: string[];
         };
         ResourceValidationsResponse: {
             /** @description Number of explicit IDs accepted into Redis. Filter submissions return zero because matching is intentionally deferred. */
@@ -9270,7 +9638,7 @@ export interface components {
         };
         AllocationItem: {
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "icloud" | "proto";
+            type: "microsoft" | "domain" | "gmail" | "icloud" | "proto" | "daum";
             id: number;
             orderNo: string;
             projectId: number;
@@ -9300,12 +9668,14 @@ export interface components {
             gmail: components["schemas"]["GmailInventory"];
             icloud: components["schemas"]["ICloudInventory"];
             proto: components["schemas"]["ProtoInventory"];
+            daum: components["schemas"]["DaumInventory"];
             totalAvailable: number;
             activeMicrosoftAllocations: number;
             activeDomainAllocations: number;
             activeGmailAllocations: number;
             activeICloudAllocations: number;
             activeProtoAllocations?: number;
+            activeDaumAllocations?: number;
         };
         InventoryRefreshRequest: {
             projectId?: number;
@@ -9349,7 +9719,7 @@ export interface components {
         };
         ProjectProductInventoryTotal: {
             /** @enum {string} */
-            productType: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto";
+            productType: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
             totalAvailable: number;
             publicAvailable: number;
             /** Format: int64 */
@@ -10309,7 +10679,7 @@ export interface components {
             lastRefreshRequestId: string | null;
             lastSafeError: string | null;
         };
-        /** @description Safe proxy binding metadata for the Microsoft account. The raw proxy URL and any proxy credentials are never returned. */
+        /** @description Safe proxy binding metadata for a mailbox account. The raw proxy URL and any proxy credentials are never returned. */
         AdminMicrosoftProxyBinding: {
             proxyId: number;
             /** @description Parsed proxy host only; it contains no scheme, port, username, or password. */
@@ -10494,7 +10864,7 @@ export interface components {
         /** @enum {string} */
         AdminTaskStatus: "queued" | "running" | "succeeded" | "failed" | "uncertain" | "canceled";
         /** @enum {string} */
-        AdminTaskBizType: "microsoft_resource" | "gmail_resource" | "icloud_resource" | "domain_resource" | "proto_resource" | "microsoft_resource_import" | "gmail_resource_import" | "microsoft_resource_bulk" | "icloud_resource_import" | "proto_resource_import" | "proto_resource_bulk";
+        AdminTaskBizType: "microsoft_resource" | "gmail_resource" | "icloud_resource" | "domain_resource" | "proto_resource" | "microsoft_resource_import" | "gmail_resource_import" | "microsoft_resource_bulk" | "icloud_resource_import" | "proto_resource_import" | "proto_resource_bulk" | "daum_resource" | "daum_resource_import" | "daum_resource_bulk";
         AdminTaskProgress: {
             /** Format: int64 */
             total: number;
@@ -10659,7 +11029,7 @@ export interface components {
             /** Format: email */
             emailAddress: string;
             /** @enum {string} */
-            status: "pending" | "code_sent" | "verified" | "timeout" | "failed" | "expired";
+            status: "pending" | "code_sent" | "verified" | "timeout" | "failed" | "expired" | "unlinked" | "linked" | "conflict" | "unavailable";
             /** Format: date-time */
             updatedAt: string;
         };
@@ -10701,7 +11071,7 @@ export interface components {
         };
         AdminAllocationItem: {
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "icloud" | "proto";
+            type: "microsoft" | "domain" | "gmail" | "icloud" | "proto" | "daum";
             /** @description Allocation ID. */
             id: number;
             orderNo: string;
@@ -11644,6 +12014,359 @@ export interface components {
             /** Format: date-time */
             finishedAt?: string | null;
         };
+        DaumInventory: {
+            explicitAliasAvailable?: number;
+            enabled: boolean;
+            eligibleResources: number;
+            mainAvailable: number;
+            publicAvailable: number;
+            totalAvailable: number;
+        };
+        /**
+         * @description Validation matches Microsoft resources. Retryable failures return to pending while attempts remain; non-retryable or exhausted validations become abnormal.
+         * @enum {string}
+         */
+        DaumResourceStatus: "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
+        DaumResource: {
+            proxyBindings?: components["schemas"]["AdminMicrosoftProxyBinding"][];
+            recentTasks?: components["schemas"]["AdminTaskSummary"][];
+            activeTask?: components["schemas"]["AdminTaskSummary"] | null;
+            protocol: components["schemas"]["DaumProtocol"];
+            appPasswordConfigured: boolean;
+            /** @description Kakao account address supplied separately from the pickup mailbox. */
+            kakaoEmail: string;
+            /** @description Actual auxiliary mailbox address resolved from the pickup URL or an owned domain. */
+            bindingAddress?: string;
+            /** @enum {string} */
+            bindingStatus: "unlinked" | "linked" | "conflict" | "unavailable";
+            bindingLastSafeError?: string;
+            pickupUrlConfigured: boolean;
+            aliases: components["schemas"]["DaumAlias"][];
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            version: number;
+            /** Format: int64 */
+            ownerUserId: number;
+            owner?: components["schemas"]["DaumOwnerSummary"];
+            /** Format: email */
+            email: string;
+            suffix: string;
+            /** @description Supplier-provided lifecycle classification; not a protocol lifetime guarantee. */
+            longLived: boolean;
+            qualityScore: number;
+            status: components["schemas"]["DaumResourceStatus"];
+            forSale: boolean;
+            passwordConfigured: boolean;
+            loginPasswordConfigured: boolean;
+            /** Format: int64 */
+            credentialRevision: number;
+            /** Format: date-time */
+            credentialUpdatedAt: string;
+            /** Format: int64 */
+            validationGeneration: number;
+            validationFailures: number;
+            lastSafeError?: string;
+            /** Format: date-time */
+            lastCheckedAt?: string | null;
+            /** Format: date-time */
+            lastAllocatedAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        DaumResourceFacets: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            pending: number;
+            /** Format: int64 */
+            validating: number;
+            /** Format: int64 */
+            identifying: number;
+            /** Format: int64 */
+            normal: number;
+            /** Format: int64 */
+            abnormal: number;
+            /** Format: int64 */
+            disabled: number;
+            /** Format: int64 */
+            deleted: number;
+            status: {
+                /** Format: int64 */
+                all: number;
+                /** Format: int64 */
+                pending: number;
+                /** Format: int64 */
+                validating: number;
+                /** Format: int64 */
+                identifying: number;
+                /** Format: int64 */
+                normal: number;
+                /** Format: int64 */
+                abnormal: number;
+                /** Format: int64 */
+                disabled: number;
+                /** Format: int64 */
+                deleted: number;
+            };
+            forSale: components["schemas"]["DaumBooleanFacets"];
+            longLived: components["schemas"]["DaumBooleanFacets"];
+            suffixes: {
+                key: string;
+                /** Format: int64 */
+                count: number;
+            }[];
+        };
+        DaumOwnerSummary: {
+            /** Format: int64 */
+            id: number;
+            email: string;
+            nickname: string;
+            groupName: string;
+            /** @enum {string} */
+            role: "user" | "supplier" | "admin" | "super_admin";
+            enabled: boolean;
+        };
+        DaumBooleanFacets: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            yes: number;
+            /** Format: int64 */
+            no: number;
+        };
+        DaumResourceListResponse: {
+            items: components["schemas"]["DaumResource"][];
+            /**
+             * Format: int64
+             * @description Omitted when includeTotal is false.
+             */
+            total?: number;
+            offset: number;
+            limit: number;
+            facets: components["schemas"]["DaumResourceFacets"];
+            /** Format: int64 */
+            nextAfterId?: number | null;
+            hasMore: boolean;
+        };
+        DaumImportResponse: {
+            /** Format: int64 */
+            importId: number;
+            /** @enum {string} */
+            status: "processing" | "imported" | "failed";
+            accepted: number;
+            imported: number;
+            skipped: number;
+            failed: number;
+            /** @enum {string} */
+            dispatchStatus: "pending" | "queued" | "running" | "done" | "succeeded" | "failed";
+            dispatchAttempts: number;
+            failureAvailable: boolean;
+            lastSafeError?: string;
+            reused: boolean;
+            /** Format: date-time */
+            createdAt?: string | null;
+            /** Format: date-time */
+            updatedAt?: string | null;
+        };
+        DaumImportItem: {
+            line: number;
+            /** Format: int64 */
+            resourceId?: number | null;
+            /** @enum {string} */
+            outcome: "imported" | "restored" | "skipped" | "failed";
+            category: string;
+            lastSafeError?: string;
+        };
+        DaumImportItemsResponse: {
+            items: components["schemas"]["DaumImportItem"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        DaumValidationResponse: components["schemas"]["DaumResourceMutationResponse"];
+        DaumMaintenanceRun: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            resourceId: number;
+            /** Format: int64 */
+            validationGeneration: number;
+            /** @enum {string} */
+            kind: "validation" | "history";
+            /** @enum {string} */
+            status: "queued" | "running" | "succeeded" | "failed" | "uncertain" | "canceled";
+            attempts: number;
+            maxAttempts: number;
+            /** Format: int64 */
+            credentialRevision: number;
+            requestId?: string;
+            lastSafeError?: string;
+            /** Format: date-time */
+            queuedAt: string;
+            /** Format: date-time */
+            startedAt?: string | null;
+            /** Format: date-time */
+            finishedAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        DaumMaintenanceListResponse: {
+            items: components["schemas"]["DaumMaintenanceRun"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
+        };
+        DaumDisableSelection: {
+            selection: {
+                /** @enum {string} */
+                mode: "ids";
+                resourceIds: number[];
+            };
+        };
+        DaumValidationIDsRequest: {
+            /** @description Also bounded by the configured resource_validation_max_ids. */
+            resourceIds: number[];
+        };
+        DaumBatchRequest: {
+            resourceIds: number[];
+        };
+        DaumValidationBatchResponse: components["schemas"]["DaumBulkTask"];
+        DaumBatchResponse: components["schemas"]["DaumBulkTask"];
+        DaumResourceMutationResponse: {
+            /** Format: int64 */
+            resourceId: number;
+            /** Format: int64 */
+            version: number;
+            status: components["schemas"]["DaumResourceStatus"];
+            forSale: boolean;
+            /** Format: int64 */
+            validationGeneration: number;
+            queued: boolean;
+            todo: boolean;
+            reused: boolean;
+            /** @description Whether this command changed the resource; preserved on idempotent replay. */
+            changed: boolean;
+        };
+        /** @description Patch changed metadata only. Kakao account email is independent of the auxiliary mailbox; pickupUrl determines its actual mailbox. A real owner change is blocked while an active Daum allocation exists. */
+        DaumResourceEditRequest: {
+            appPassword?: string;
+            protocol?: components["schemas"]["DaumProtocol"];
+            /** @description Kakao account email; an empty string clears it. */
+            kakaoEmail?: string;
+            /**
+             * Format: email
+             * @description Omit to preserve; null removes the auxiliary association.
+             */
+            bindingAddress?: string | null;
+            /** @description Omit to preserve; null removes the auxiliary association. */
+            pickupUrl?: string | null;
+            /** Format: int64 */
+            version: number;
+            /** Format: email */
+            email?: string;
+            /** Format: int64 */
+            ownerId?: number;
+            password?: string;
+            qualityScore?: number;
+            longLived?: boolean;
+            forSale?: boolean;
+        };
+        DaumCredentialsReplaceRequest: {
+            appPassword: string;
+            protocol?: components["schemas"]["DaumProtocol"];
+            /** Format: int64 */
+            version: number;
+            password?: string;
+        };
+        DaumResourceCommandRequest: {
+            /** Format: int64 */
+            version: number;
+        };
+        DaumResourceFilter: {
+            protocol?: components["schemas"]["DaumProtocol"];
+            search?: string;
+            status?: components["schemas"]["DaumResourceStatus"];
+            suffix?: string;
+            forSale?: boolean;
+            longLived?: boolean;
+            /** Format: int64 */
+            ownerId?: number;
+            /** Format: date-time */
+            createdFrom?: string;
+            /** Format: date-time */
+            createdTo?: string;
+        };
+        DaumBulkRequest: {
+            selection: {
+                /** @enum {string} */
+                mode: "ids" | "filter";
+                resourceIds?: number[];
+                filter?: components["schemas"]["DaumResourceFilter"];
+            };
+        };
+        DaumBulkTask: {
+            taskId: string;
+            /** @enum {string} */
+            kind: "daum_resource_bulk";
+            /** @enum {string} */
+            resourceType: "daum";
+            /** @enum {string} */
+            status: "queued" | "running" | "succeeded" | "failed";
+            /** @enum {string} */
+            action: "validate" | "history" | "disable" | "publish" | "unpublish" | "delete";
+            /** Format: int64 */
+            operatorUserId?: number;
+            attempts?: number;
+            maxAttempts?: number;
+            requested: number;
+            processed: number;
+            affected: number;
+            skipped: number;
+            reasonCounts: {
+                reason: string;
+                count: number;
+            }[];
+            requestId?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** Format: date-time */
+            startedAt?: string | null;
+            /** Format: date-time */
+            finishedAt?: string | null;
+        };
+        /**
+         * @default imap
+         * @enum {string}
+         */
+        DaumProtocol: "imap" | "pop3";
+        DaumAlias: {
+            /** Format: int64 */
+            version?: number;
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            resourceId?: number;
+            /** Format: int64 */
+            ownerUserId?: number;
+            /** Format: email */
+            email: string;
+            /** @enum {string} */
+            suffix: "hanmail.net" | "hanmail2.net";
+            status: string;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
     };
     responses: {
         /** @description Malformed JSON, path, query, pagination, enum, or multipart input */
@@ -11731,6 +12454,12 @@ export interface components {
         };
     };
     parameters: {
+        DaumBulkTaskId: string;
+        DaumSuffixQuery: string;
+        DaumLongLivedQuery: boolean;
+        /** @description When false, the response omits total and returns only cursor pagination data. */
+        DaumIncludeTotalQuery: boolean;
+        DaumIncludeFacetsQuery: boolean;
         ProtoBulkTaskId: string;
         ProtoSuffixQuery: string;
         ProtoLongLivedQuery: boolean;
@@ -14730,7 +15459,7 @@ export interface operations {
                 status?: "reviewing" | "listed" | "delisted";
                 accessType?: "public" | "private";
                 looseMatch?: boolean;
-                productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto";
+                productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
                 search?: string;
                 targetPlatform?: string;
                 createdFrom?: components["parameters"]["CreatedFromQuery"];
@@ -16041,7 +16770,7 @@ export interface operations {
                 status?: "reviewing" | "listed" | "delisted";
                 accessType?: "public" | "private";
                 looseMatch?: boolean;
-                productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto";
+                productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
                 search?: string;
                 targetPlatform?: string;
                 createdFrom?: string;
@@ -18497,7 +19226,7 @@ export interface operations {
     getAdminAllocations: {
         parameters: {
             query?: {
-                type?: "microsoft" | "domain" | "gmail" | "icloud" | "proto";
+                type?: "microsoft" | "domain" | "gmail" | "icloud" | "proto" | "daum";
                 orderNo?: string;
                 projectId?: number;
                 resourceId?: number;
@@ -18555,7 +19284,7 @@ export interface operations {
     getAdminAllocation: {
         parameters: {
             query: {
-                type: "microsoft" | "domain" | "gmail" | "icloud" | "proto";
+                type: "microsoft" | "domain" | "gmail" | "icloud" | "proto" | "daum";
             };
             header?: never;
             path: {
@@ -19133,7 +19862,7 @@ export interface operations {
                 scope?: "mine" | "all";
                 status?: "pending_payment" | "paid" | "active" | "completed" | "refunded" | "failed" | "closed";
                 serviceMode?: "purchase" | "code";
-                productType?: "microsoft" | "domain" | "random" | "gmail" | "gmail_variant" | "icloud" | "proto";
+                productType?: "microsoft" | "domain" | "random" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
                 /** @description Prefix search by order number or delivery email; token-prefix search by user email/nickname or project name/platform; exact user/project ID search. */
                 search?: string;
                 /** @description Exact project filter used by the order project tabs. */
@@ -24300,7 +25029,7 @@ export interface operations {
     postAdminMicrosoftResourceMessagesFetch: {
         parameters: {
             query?: {
-                type?: "microsoft" | "gmail" | "icloud" | "proto";
+                type?: "microsoft" | "gmail" | "icloud" | "proto" | "daum";
             };
             header: {
                 /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
@@ -26220,11 +26949,11 @@ export interface operations {
     getAdminTasks: {
         parameters: {
             query: {
-                bizType: "microsoft_resource" | "gmail_resource" | "icloud_resource" | "domain_resource" | "icloud_resource_import" | "proto_resource" | "proto_resource_import";
+                bizType: "microsoft_resource" | "gmail_resource" | "icloud_resource" | "domain_resource" | "icloud_resource_import" | "proto_resource" | "proto_resource_import" | "daum_resource" | "daum_resource_import";
                 /** @description Resource ID matching bizType. Omit only when listing iCloud imports globally. */
                 bizId?: number;
                 /** @description Optional normalized task source. Use `icloud_onboarding` to list recoverable Apple onboarding batches without unrelated iCloud imports consuming the page; `icloud_refresh` identifies resource-level Cookie refresh tasks. */
-                source?: "import" | "alias" | "alias_schedule" | "token" | "fetch" | "resource_history" | "bulk" | "gmail_validation" | "gmail_history" | "icloud_import" | "icloud_onboarding" | "icloud_refresh" | "icloud_validation" | "proto_import" | "proto_validation" | "proto_history" | "proto_bulk";
+                source?: "import" | "alias" | "alias_schedule" | "token" | "fetch" | "resource_history" | "bulk" | "gmail_validation" | "gmail_history" | "icloud_import" | "icloud_onboarding" | "icloud_refresh" | "icloud_validation" | "proto_import" | "proto_validation" | "proto_history" | "proto_bulk" | "daum_import" | "daum_validation" | "daum_history" | "daum_bulk";
                 kind?: components["schemas"]["AdminTaskKind"];
                 status?: components["schemas"]["AdminTaskStatus"];
                 offset?: number;
@@ -26284,7 +27013,7 @@ export interface operations {
         parameters: {
             query: {
                 /** @description Resource type; defaults to microsoft for backward compatibility. */
-                type?: "microsoft" | "gmail" | "icloud" | "domain" | "proto";
+                type?: "microsoft" | "gmail" | "icloud" | "domain" | "proto" | "daum";
                 resourceId: number;
                 search?: string;
                 offset?: number;
@@ -26324,7 +27053,7 @@ export interface operations {
             query: {
                 resourceId: number;
                 /** @description Resource type; defaults to microsoft for backward compatibility. */
-                type?: "microsoft" | "gmail" | "icloud" | "domain" | "proto";
+                type?: "microsoft" | "gmail" | "icloud" | "domain" | "proto" | "daum";
             };
             header?: never;
             path: {
@@ -26355,8 +27084,8 @@ export interface operations {
         parameters: {
             query: {
                 resourceId: number;
-                /** @description Query scope; defaults to one Microsoft resource. Use domain to query a purpose=binding domain resource, or icloud to query the exact current forwarding mailbox of one iCloud resource. */
-                type?: "microsoft" | "icloud" | "domain";
+                /** @description Query scope; defaults to one Microsoft resource. Use domain to query a purpose=binding domain resource, or icloud to query the exact current forwarding mailbox of one iCloud resource. Daum uses its linked system mailbox, with current owner, order and pickup-token authorization checked on each read. */
+                type?: "microsoft" | "icloud" | "domain" | "daum";
                 search?: string;
                 offset?: number;
                 /** @description Timestamp component of a stable continuation cursor. Must be supplied together with beforeId; offset must remain zero. */
@@ -26394,8 +27123,8 @@ export interface operations {
         parameters: {
             query: {
                 resourceId: number;
-                /** @description Association scope; defaults to one Microsoft resource. Use domain for a purpose=binding domain, or icloud for the exact current forwarding mailbox of one iCloud resource. */
-                type?: "microsoft" | "icloud" | "domain";
+                /** @description Association scope; defaults to one Microsoft resource. Use domain for a purpose=binding domain, or icloud for the exact current forwarding mailbox of one iCloud resource. Daum requires the exact linked mailbox and current order/token authority. */
+                type?: "microsoft" | "icloud" | "domain" | "daum";
             };
             header?: never;
             path: {
@@ -29727,6 +30456,712 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getAdminDaumResources: {
+        parameters: {
+            query?: {
+                protocol?: components["schemas"]["DaumProtocol"];
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: components["parameters"]["LimitQuery"];
+                /** @description Last ticket id from the previous page. */
+                afterId?: components["parameters"]["AfterIdQuery"];
+                createdFrom?: components["parameters"]["CreatedFromQuery"];
+                createdTo?: components["parameters"]["CreatedToQuery"];
+                suffix?: components["parameters"]["DaumSuffixQuery"];
+                longLived?: components["parameters"]["DaumLongLivedQuery"];
+                /** @description When false, the response omits total and returns only cursor pagination data. */
+                includeTotal?: components["parameters"]["DaumIncludeTotalQuery"];
+                includeFacets?: components["parameters"]["DaumIncludeFacetsQuery"];
+                ownerId?: number;
+                /** @description Resource ID, full mailbox email, exact local part, @suffix, or owner email/nickname. */
+                search?: string;
+                status?: "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
+                forSale?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Daum resources */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumResourceListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    postAdminDaumResourceImport: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    protocol?: components["schemas"]["DaumProtocol"];
+                    /** Format: binary */
+                    file: string;
+                    /** Format: int64 */
+                    ownerId: number;
+                    /**
+                     * @default skip
+                     * @enum {string}
+                     */
+                    errorStrategy?: "skip" | "abort";
+                    /** @default false */
+                    longLived?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Import accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumImportResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getAdminDaumResourceImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Import progress */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumImportResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getAdminDaumResourceImportItems: {
+        parameters: {
+            query?: {
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Import line outcomes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumImportItemsResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postAdminDaumResourceValidations: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DaumValidationIDsRequest"];
+            };
+        };
+        responses: {
+            /** @description Validation tasks accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumValidationBatchResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    postAdminDaumResourceBatchValidation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DaumValidationIDsRequest"];
+            };
+        };
+        responses: {
+            /** @description Validation tasks accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumValidationBatchResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    postAdminDaumResourceBatch: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                action: "history" | "publish" | "unpublish" | "delete";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DaumBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Bulk task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumBulkTask"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getAdminDaumResource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Daum resource */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumResource"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteAdminDaumResource: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DaumResourceCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumResourceMutationResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    patchAdminDaumResource: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DaumResourceEditRequest"];
+            };
+        };
+        responses: {
+            /** @description Identity edit committed and resource returned to pending validation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumResourceMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getAdminDaumResourceMaintenance: {
+        parameters: {
+            query?: {
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: components["parameters"]["LimitQuery"];
+            };
+            header?: never;
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Daum maintenance runs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumMaintenanceListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    putAdminDaumResourceCredentials: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DaumCredentialsReplaceRequest"];
+            };
+        };
+        responses: {
+            /** @description Credentials replaced */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumResourceMutationResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postAdminDaumResourceValidate: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Existing command result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumResourceMutationResponse"];
+                };
+            };
+            /** @description Task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumResourceMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postAdminDaumResourceHistory: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Existing command result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumResourceMutationResponse"];
+                };
+            };
+            /** @description Task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumResourceMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postAdminDaumResourceBatchDisable: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DaumBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Committed disable result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMicrosoftBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    postAdminDaumResourceBulkDisable: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DaumDisableSelection"];
+            };
+        };
+        responses: {
+            /** @description Committed disable result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMicrosoftBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    postAdminDaumResourceCommand: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+                command: "enable" | "disable" | "publish" | "unpublish" | "recover";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DaumResourceCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Command result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumResourceMutationResponse"];
+                };
+            };
+            /** @description Command accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumValidationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postAdminDaumResourceRecover: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DaumResourceCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Recovered */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumResourceMutationResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postAdminDaumResourceBulk: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                command: "validate" | "history" | "publish" | "unpublish" | "delete";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DaumBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Bulk task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumBulkTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminDaumResourceBulkTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: components["parameters"]["DaumBulkTaskId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bulk progress */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumBulkTask"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAdminDaumResourceImportFailures: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe CSV without credentials */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getAdminDaumResourceAliases: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Fixed aliases */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["DaumAlias"][];
+                        total: number;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };

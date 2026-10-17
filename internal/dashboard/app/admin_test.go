@@ -229,3 +229,38 @@ func TestAdminDashboardIncludesProtoMetrics(t *testing.T) {
 		t.Fatalf("proto trend stats: %+v", got.Trend)
 	}
 }
+
+func TestAdminDashboardIncludesDaumMetrics(t *testing.T) {
+	oldLocal := time.Local
+	time.Local = time.UTC
+	defer func() { time.Local = oldLocal }()
+
+	from := time.Date(2026, 9, 7, 0, 0, 0, 0, time.UTC)
+	to := from.Add(23 * time.Hour)
+	key := bucketStart(from, granularity(from, to)).Format(bucketLayout(granularity(from, to)))
+	view := &fakeAdminView{
+		orders:    []CountBucket{{Bucket: key, Count: 2}},
+		codeOrder: []TypeCountBucket{{Bucket: key, ProductType: "daum", Count: 4}},
+		receipts:  []TypeReceiptBucket{{Bucket: key, ProductType: "daum", Received: 3, AvgSeconds: 12, TotalSeconds: 36, Timed: 3}},
+		purchases: []TypePurchaseSummary{{ProductType: "daum", PurchaseSummary: PurchaseSummary{Orders: 2, Activated: 1, TotalSeconds: 20, Timed: 1}}},
+		snapshot:  InventorySnapshot{DaumTotal: 9, DaumAvailable: 5},
+	}
+	svc := NewAdminQueryService(view, fakeFinance{}, fakeInventory{})
+	svc.now = func() time.Time { return to.Add(time.Hour) }
+	got, err := svc.AdminDashboard(context.Background(), &from, &to)
+	if err != nil {
+		t.Fatalf("AdminDashboard: %v", err)
+	}
+	if got.Stats.DaumTotalEmails != 9 || got.Stats.DaumAvailableEmails != 5 {
+		t.Fatalf("daum inventory stats: %+v", got.Stats)
+	}
+	if got.Stats.DaumCodeReceipts != 3 || got.Stats.DaumCodeSuccessRate != 75 || got.Stats.DaumAverageCodeReceiptSeconds != 12 {
+		t.Fatalf("daum code stats: %+v", got.Stats)
+	}
+	if got.Stats.DaumPurchaseActivations != 1 || got.Stats.DaumPurchaseActivationSuccessRate != 50 || got.Stats.DaumAveragePurchaseActivationSeconds != 20 {
+		t.Fatalf("daum purchase stats: %+v", got.Stats)
+	}
+	if len(got.Trend) < 1 || got.Trend[0].DaumReceivedCodes != 3 || got.Trend[0].SuccessfulCodeReceipts != 3 {
+		t.Fatalf("daum trend stats: %+v", got.Trend)
+	}
+}

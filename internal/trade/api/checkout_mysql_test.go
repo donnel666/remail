@@ -68,6 +68,9 @@ func pinTradeMicrosoftFixtureBucket(t *testing.T, db *gorm.DB) {
 	// tests remove this callback and exercise the production UUID distribution.
 	require.NoError(t, db.Callback().Create().Before("gorm:create").Register("test:allocation_bucket", func(tx *gorm.DB) {
 		order, ok := tx.Statement.Dest.(*tradeinfra.OrderModel)
+		if ok && order.ProductType == string(tradedomain.ProductTypeDaum) && len(order.OrderNo) == 34 && strings.HasPrefix(order.OrderNo, "OR") {
+			order.OrderNo = testmysql.AllocationOrderNo(order.OrderNo, order.ProjectID, "main", 0, allocapp.DaumBucketCount)
+		}
 		if ok && order.ProductType == string(tradedomain.ProductTypeMicrosoft) && len(order.OrderNo) == 34 && strings.HasPrefix(order.OrderNo, "OR") {
 			order.OrderNo = testmysql.AllocationOrderNo(order.OrderNo, order.ProjectID, "main", 1000, allocapp.MicrosoftBucketCount)
 		}
@@ -2733,7 +2736,7 @@ func seedTradeBaseFacts(t *testing.T, db *gorm.DB, productType string) {
 	dotWeight := 0
 	plusWeight := 0
 	codeWindowMinutes := 10
-	if productType == "microsoft" || productType == "gmail" || productType == "icloud" || productType == "proto" {
+	if productType == "microsoft" || productType == "gmail" || productType == "icloud" || productType == "proto" || productType == "daum" {
 		mainWeight = 1
 	}
 	if productType == "gmail" {

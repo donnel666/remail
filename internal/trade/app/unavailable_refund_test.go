@@ -365,3 +365,21 @@ func TestGmailCleanupUsesSharedAllocationAndTokenCleanup(t *testing.T) {
 	require.Equal(t, []string{repo.order.OrderNo}, tokens.disabled)
 	require.Equal(t, "succeeded", repo.cleanupStatus)
 }
+
+func (s *unavailableRefundRepoStub) ListUnavailableMicrosoftOrders(ctx context.Context, id uint, limit int) ([]MicrosoftUnavailableOrder, error) {
+	orders, err := s.ListUnavailableMicrosoftOrderNos(ctx, id, limit)
+	if err != nil {
+		return nil, err
+	}
+	proofs := make([]MicrosoftUnavailableOrder, 0, len(orders))
+	for _, no := range orders {
+		proofs = append(proofs, MicrosoftUnavailableOrder{OrderNo: no, ResourceID: s.resourceID, CredentialRevision: 1, ValidationGeneration: 1})
+	}
+	return proofs, nil
+}
+func (*unavailableRefundRepoStub) AssertMicrosoftRefundFailure(context.Context, MicrosoftUnavailableOrder) error {
+	return nil
+}
+func (*unavailableRefundAllocationStub) MicrosoftAllocationReady(context.Context, string, uint) (bool, error) {
+	return true, nil
+}

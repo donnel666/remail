@@ -137,6 +137,7 @@ func (e AdminAllocationItemSupplyScope) Valid() bool {
 
 // Defines values for AdminAllocationItemType.
 const (
+	AdminAllocationItemTypeDaum      AdminAllocationItemType = "daum"
 	AdminAllocationItemTypeDomain    AdminAllocationItemType = "domain"
 	AdminAllocationItemTypeGmail     AdminAllocationItemType = "gmail"
 	AdminAllocationItemTypeIcloud    AdminAllocationItemType = "icloud"
@@ -147,6 +148,8 @@ const (
 // Valid indicates whether the value is a known member of the AdminAllocationItemType enum.
 func (e AdminAllocationItemType) Valid() bool {
 	switch e {
+	case AdminAllocationItemTypeDaum:
+		return true
 	case AdminAllocationItemTypeDomain:
 		return true
 	case AdminAllocationItemTypeGmail:
@@ -206,12 +209,16 @@ func (e AdminAuxiliaryMessageSummaryStatus) Valid() bool {
 
 // Defines values for AdminBindingSummaryStatus.
 const (
-	AdminBindingSummaryStatusCodeSent AdminBindingSummaryStatus = "code_sent"
-	AdminBindingSummaryStatusExpired  AdminBindingSummaryStatus = "expired"
-	AdminBindingSummaryStatusFailed   AdminBindingSummaryStatus = "failed"
-	AdminBindingSummaryStatusPending  AdminBindingSummaryStatus = "pending"
-	AdminBindingSummaryStatusTimeout  AdminBindingSummaryStatus = "timeout"
-	AdminBindingSummaryStatusVerified AdminBindingSummaryStatus = "verified"
+	AdminBindingSummaryStatusCodeSent    AdminBindingSummaryStatus = "code_sent"
+	AdminBindingSummaryStatusConflict    AdminBindingSummaryStatus = "conflict"
+	AdminBindingSummaryStatusExpired     AdminBindingSummaryStatus = "expired"
+	AdminBindingSummaryStatusFailed      AdminBindingSummaryStatus = "failed"
+	AdminBindingSummaryStatusLinked      AdminBindingSummaryStatus = "linked"
+	AdminBindingSummaryStatusPending     AdminBindingSummaryStatus = "pending"
+	AdminBindingSummaryStatusTimeout     AdminBindingSummaryStatus = "timeout"
+	AdminBindingSummaryStatusUnavailable AdminBindingSummaryStatus = "unavailable"
+	AdminBindingSummaryStatusUnlinked    AdminBindingSummaryStatus = "unlinked"
+	AdminBindingSummaryStatusVerified    AdminBindingSummaryStatus = "verified"
 )
 
 // Valid indicates whether the value is a known member of the AdminBindingSummaryStatus enum.
@@ -219,13 +226,21 @@ func (e AdminBindingSummaryStatus) Valid() bool {
 	switch e {
 	case AdminBindingSummaryStatusCodeSent:
 		return true
+	case AdminBindingSummaryStatusConflict:
+		return true
 	case AdminBindingSummaryStatusExpired:
 		return true
 	case AdminBindingSummaryStatusFailed:
 		return true
+	case AdminBindingSummaryStatusLinked:
+		return true
 	case AdminBindingSummaryStatusPending:
 		return true
 	case AdminBindingSummaryStatusTimeout:
+		return true
+	case AdminBindingSummaryStatusUnavailable:
+		return true
+	case AdminBindingSummaryStatusUnlinked:
 		return true
 	case AdminBindingSummaryStatusVerified:
 		return true
@@ -1691,6 +1706,9 @@ func (e AdminSystemLogItemCategory) Valid() bool {
 
 // Defines values for AdminTaskBizType.
 const (
+	AdminTaskBizTypeDaumResource            AdminTaskBizType = "daum_resource"
+	AdminTaskBizTypeDaumResourceBulk        AdminTaskBizType = "daum_resource_bulk"
+	AdminTaskBizTypeDaumResourceImport      AdminTaskBizType = "daum_resource_import"
 	AdminTaskBizTypeDomainResource          AdminTaskBizType = "domain_resource"
 	AdminTaskBizTypeGmailResource           AdminTaskBizType = "gmail_resource"
 	AdminTaskBizTypeGmailResourceImport     AdminTaskBizType = "gmail_resource_import"
@@ -1707,6 +1725,12 @@ const (
 // Valid indicates whether the value is a known member of the AdminTaskBizType enum.
 func (e AdminTaskBizType) Valid() bool {
 	switch e {
+	case AdminTaskBizTypeDaumResource:
+		return true
+	case AdminTaskBizTypeDaumResourceBulk:
+		return true
+	case AdminTaskBizTypeDaumResourceImport:
+		return true
 	case AdminTaskBizTypeDomainResource:
 		return true
 	case AdminTaskBizTypeGmailResource:
@@ -2033,6 +2057,7 @@ func (e AllocationItemSupplyScope) Valid() bool {
 
 // Defines values for AllocationItemType.
 const (
+	AllocationItemTypeDaum      AllocationItemType = "daum"
 	AllocationItemTypeDomain    AllocationItemType = "domain"
 	AllocationItemTypeGmail     AllocationItemType = "gmail"
 	AllocationItemTypeIcloud    AllocationItemType = "icloud"
@@ -2043,6 +2068,8 @@ const (
 // Valid indicates whether the value is a known member of the AllocationItemType enum.
 func (e AllocationItemType) Valid() bool {
 	switch e {
+	case AllocationItemTypeDaum:
+		return true
 	case AllocationItemTypeDomain:
 		return true
 	case AllocationItemTypeGmail:
@@ -2327,6 +2354,7 @@ func (e BotProjectProductStatus) Valid() bool {
 
 // Defines values for BotProjectProductType.
 const (
+	BotProjectProductTypeDaum         BotProjectProductType = "daum"
 	BotProjectProductTypeDomain       BotProjectProductType = "domain"
 	BotProjectProductTypeGmail        BotProjectProductType = "gmail"
 	BotProjectProductTypeGmailVariant BotProjectProductType = "gmail_variant"
@@ -2338,6 +2366,8 @@ const (
 // Valid indicates whether the value is a known member of the BotProjectProductType enum.
 func (e BotProjectProductType) Valid() bool {
 	switch e {
+	case BotProjectProductTypeDaum:
+		return true
 	case BotProjectProductTypeDomain:
 		return true
 	case BotProjectProductTypeGmail:
@@ -2568,6 +2598,363 @@ func (e CreateTicketRequestTicketType) Valid() bool {
 	case CreateTicketRequestTicketTypeGeneral:
 		return true
 	case CreateTicketRequestTicketTypeOrder:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaumAliasSuffix.
+const (
+	Hanmail2Net DaumAliasSuffix = "hanmail2.net"
+	HanmailNet  DaumAliasSuffix = "hanmail.net"
+)
+
+// Valid indicates whether the value is a known member of the DaumAliasSuffix enum.
+func (e DaumAliasSuffix) Valid() bool {
+	switch e {
+	case Hanmail2Net:
+		return true
+	case HanmailNet:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaumBulkRequestSelectionMode.
+const (
+	DaumBulkRequestSelectionModeFilter DaumBulkRequestSelectionMode = "filter"
+	DaumBulkRequestSelectionModeIds    DaumBulkRequestSelectionMode = "ids"
+)
+
+// Valid indicates whether the value is a known member of the DaumBulkRequestSelectionMode enum.
+func (e DaumBulkRequestSelectionMode) Valid() bool {
+	switch e {
+	case DaumBulkRequestSelectionModeFilter:
+		return true
+	case DaumBulkRequestSelectionModeIds:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaumBulkTaskAction.
+const (
+	DaumBulkTaskActionDelete    DaumBulkTaskAction = "delete"
+	DaumBulkTaskActionDisable   DaumBulkTaskAction = "disable"
+	DaumBulkTaskActionHistory   DaumBulkTaskAction = "history"
+	DaumBulkTaskActionPublish   DaumBulkTaskAction = "publish"
+	DaumBulkTaskActionUnpublish DaumBulkTaskAction = "unpublish"
+	DaumBulkTaskActionValidate  DaumBulkTaskAction = "validate"
+)
+
+// Valid indicates whether the value is a known member of the DaumBulkTaskAction enum.
+func (e DaumBulkTaskAction) Valid() bool {
+	switch e {
+	case DaumBulkTaskActionDelete:
+		return true
+	case DaumBulkTaskActionDisable:
+		return true
+	case DaumBulkTaskActionHistory:
+		return true
+	case DaumBulkTaskActionPublish:
+		return true
+	case DaumBulkTaskActionUnpublish:
+		return true
+	case DaumBulkTaskActionValidate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaumBulkTaskKind.
+const (
+	DaumBulkTaskKindDaumResourceBulk DaumBulkTaskKind = "daum_resource_bulk"
+)
+
+// Valid indicates whether the value is a known member of the DaumBulkTaskKind enum.
+func (e DaumBulkTaskKind) Valid() bool {
+	switch e {
+	case DaumBulkTaskKindDaumResourceBulk:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaumBulkTaskResourceType.
+const (
+	DaumBulkTaskResourceTypeDaum DaumBulkTaskResourceType = "daum"
+)
+
+// Valid indicates whether the value is a known member of the DaumBulkTaskResourceType enum.
+func (e DaumBulkTaskResourceType) Valid() bool {
+	switch e {
+	case DaumBulkTaskResourceTypeDaum:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaumBulkTaskStatus.
+const (
+	DaumBulkTaskStatusFailed    DaumBulkTaskStatus = "failed"
+	DaumBulkTaskStatusQueued    DaumBulkTaskStatus = "queued"
+	DaumBulkTaskStatusRunning   DaumBulkTaskStatus = "running"
+	DaumBulkTaskStatusSucceeded DaumBulkTaskStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the DaumBulkTaskStatus enum.
+func (e DaumBulkTaskStatus) Valid() bool {
+	switch e {
+	case DaumBulkTaskStatusFailed:
+		return true
+	case DaumBulkTaskStatusQueued:
+		return true
+	case DaumBulkTaskStatusRunning:
+		return true
+	case DaumBulkTaskStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaumDisableSelectionSelectionMode.
+const (
+	DaumDisableSelectionSelectionModeIds DaumDisableSelectionSelectionMode = "ids"
+)
+
+// Valid indicates whether the value is a known member of the DaumDisableSelectionSelectionMode enum.
+func (e DaumDisableSelectionSelectionMode) Valid() bool {
+	switch e {
+	case DaumDisableSelectionSelectionModeIds:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaumImportItemOutcome.
+const (
+	DaumImportItemOutcomeFailed   DaumImportItemOutcome = "failed"
+	DaumImportItemOutcomeImported DaumImportItemOutcome = "imported"
+	DaumImportItemOutcomeRestored DaumImportItemOutcome = "restored"
+	DaumImportItemOutcomeSkipped  DaumImportItemOutcome = "skipped"
+)
+
+// Valid indicates whether the value is a known member of the DaumImportItemOutcome enum.
+func (e DaumImportItemOutcome) Valid() bool {
+	switch e {
+	case DaumImportItemOutcomeFailed:
+		return true
+	case DaumImportItemOutcomeImported:
+		return true
+	case DaumImportItemOutcomeRestored:
+		return true
+	case DaumImportItemOutcomeSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaumImportResponseDispatchStatus.
+const (
+	DaumImportResponseDispatchStatusDone      DaumImportResponseDispatchStatus = "done"
+	DaumImportResponseDispatchStatusFailed    DaumImportResponseDispatchStatus = "failed"
+	DaumImportResponseDispatchStatusPending   DaumImportResponseDispatchStatus = "pending"
+	DaumImportResponseDispatchStatusQueued    DaumImportResponseDispatchStatus = "queued"
+	DaumImportResponseDispatchStatusRunning   DaumImportResponseDispatchStatus = "running"
+	DaumImportResponseDispatchStatusSucceeded DaumImportResponseDispatchStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the DaumImportResponseDispatchStatus enum.
+func (e DaumImportResponseDispatchStatus) Valid() bool {
+	switch e {
+	case DaumImportResponseDispatchStatusDone:
+		return true
+	case DaumImportResponseDispatchStatusFailed:
+		return true
+	case DaumImportResponseDispatchStatusPending:
+		return true
+	case DaumImportResponseDispatchStatusQueued:
+		return true
+	case DaumImportResponseDispatchStatusRunning:
+		return true
+	case DaumImportResponseDispatchStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaumImportResponseStatus.
+const (
+	DaumImportResponseStatusFailed     DaumImportResponseStatus = "failed"
+	DaumImportResponseStatusImported   DaumImportResponseStatus = "imported"
+	DaumImportResponseStatusProcessing DaumImportResponseStatus = "processing"
+)
+
+// Valid indicates whether the value is a known member of the DaumImportResponseStatus enum.
+func (e DaumImportResponseStatus) Valid() bool {
+	switch e {
+	case DaumImportResponseStatusFailed:
+		return true
+	case DaumImportResponseStatusImported:
+		return true
+	case DaumImportResponseStatusProcessing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaumMaintenanceRunKind.
+const (
+	DaumMaintenanceRunKindHistory    DaumMaintenanceRunKind = "history"
+	DaumMaintenanceRunKindValidation DaumMaintenanceRunKind = "validation"
+)
+
+// Valid indicates whether the value is a known member of the DaumMaintenanceRunKind enum.
+func (e DaumMaintenanceRunKind) Valid() bool {
+	switch e {
+	case DaumMaintenanceRunKindHistory:
+		return true
+	case DaumMaintenanceRunKindValidation:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaumMaintenanceRunStatus.
+const (
+	DaumMaintenanceRunStatusCanceled  DaumMaintenanceRunStatus = "canceled"
+	DaumMaintenanceRunStatusFailed    DaumMaintenanceRunStatus = "failed"
+	DaumMaintenanceRunStatusQueued    DaumMaintenanceRunStatus = "queued"
+	DaumMaintenanceRunStatusRunning   DaumMaintenanceRunStatus = "running"
+	DaumMaintenanceRunStatusSucceeded DaumMaintenanceRunStatus = "succeeded"
+	DaumMaintenanceRunStatusUncertain DaumMaintenanceRunStatus = "uncertain"
+)
+
+// Valid indicates whether the value is a known member of the DaumMaintenanceRunStatus enum.
+func (e DaumMaintenanceRunStatus) Valid() bool {
+	switch e {
+	case DaumMaintenanceRunStatusCanceled:
+		return true
+	case DaumMaintenanceRunStatusFailed:
+		return true
+	case DaumMaintenanceRunStatusQueued:
+		return true
+	case DaumMaintenanceRunStatusRunning:
+		return true
+	case DaumMaintenanceRunStatusSucceeded:
+		return true
+	case DaumMaintenanceRunStatusUncertain:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaumOwnerSummaryRole.
+const (
+	DaumOwnerSummaryRoleAdmin      DaumOwnerSummaryRole = "admin"
+	DaumOwnerSummaryRoleSuperAdmin DaumOwnerSummaryRole = "super_admin"
+	DaumOwnerSummaryRoleSupplier   DaumOwnerSummaryRole = "supplier"
+	DaumOwnerSummaryRoleUser       DaumOwnerSummaryRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the DaumOwnerSummaryRole enum.
+func (e DaumOwnerSummaryRole) Valid() bool {
+	switch e {
+	case DaumOwnerSummaryRoleAdmin:
+		return true
+	case DaumOwnerSummaryRoleSuperAdmin:
+		return true
+	case DaumOwnerSummaryRoleSupplier:
+		return true
+	case DaumOwnerSummaryRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaumProtocol.
+const (
+	Imap DaumProtocol = "imap"
+	Pop3 DaumProtocol = "pop3"
+)
+
+// Valid indicates whether the value is a known member of the DaumProtocol enum.
+func (e DaumProtocol) Valid() bool {
+	switch e {
+	case Imap:
+		return true
+	case Pop3:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaumResourceBindingStatus.
+const (
+	DaumResourceBindingStatusConflict    DaumResourceBindingStatus = "conflict"
+	DaumResourceBindingStatusLinked      DaumResourceBindingStatus = "linked"
+	DaumResourceBindingStatusUnavailable DaumResourceBindingStatus = "unavailable"
+	DaumResourceBindingStatusUnlinked    DaumResourceBindingStatus = "unlinked"
+)
+
+// Valid indicates whether the value is a known member of the DaumResourceBindingStatus enum.
+func (e DaumResourceBindingStatus) Valid() bool {
+	switch e {
+	case DaumResourceBindingStatusConflict:
+		return true
+	case DaumResourceBindingStatusLinked:
+		return true
+	case DaumResourceBindingStatusUnavailable:
+		return true
+	case DaumResourceBindingStatusUnlinked:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DaumResourceStatus.
+const (
+	DaumResourceStatusAbnormal    DaumResourceStatus = "abnormal"
+	DaumResourceStatusDeleted     DaumResourceStatus = "deleted"
+	DaumResourceStatusDisabled    DaumResourceStatus = "disabled"
+	DaumResourceStatusIdentifying DaumResourceStatus = "identifying"
+	DaumResourceStatusNormal      DaumResourceStatus = "normal"
+	DaumResourceStatusPending     DaumResourceStatus = "pending"
+	DaumResourceStatusValidating  DaumResourceStatus = "validating"
+)
+
+// Valid indicates whether the value is a known member of the DaumResourceStatus enum.
+func (e DaumResourceStatus) Valid() bool {
+	switch e {
+	case DaumResourceStatusAbnormal:
+		return true
+	case DaumResourceStatusDeleted:
+		return true
+	case DaumResourceStatusDisabled:
+		return true
+	case DaumResourceStatusIdentifying:
+		return true
+	case DaumResourceStatusNormal:
+		return true
+	case DaumResourceStatusPending:
+		return true
+	case DaumResourceStatusValidating:
 		return true
 	default:
 		return false
@@ -2996,19 +3383,19 @@ func (e MonitoringMetricSeriesType) Valid() bool {
 
 // Defines values for MonitoringStatus.
 const (
-	Degraded    MonitoringStatus = "degraded"
-	Healthy     MonitoringStatus = "healthy"
-	Unavailable MonitoringStatus = "unavailable"
+	MonitoringStatusDegraded    MonitoringStatus = "degraded"
+	MonitoringStatusHealthy     MonitoringStatus = "healthy"
+	MonitoringStatusUnavailable MonitoringStatus = "unavailable"
 )
 
 // Valid indicates whether the value is a known member of the MonitoringStatus enum.
 func (e MonitoringStatus) Valid() bool {
 	switch e {
-	case Degraded:
+	case MonitoringStatusDegraded:
 		return true
-	case Healthy:
+	case MonitoringStatusHealthy:
 		return true
-	case Unavailable:
+	case MonitoringStatusUnavailable:
 		return true
 	default:
 		return false
@@ -3080,6 +3467,7 @@ func (e OrderEventResponseOperatorType) Valid() bool {
 
 // Defines values for OrderResponseAllocationType.
 const (
+	OrderResponseAllocationTypeDaum      OrderResponseAllocationType = "daum"
 	OrderResponseAllocationTypeDomain    OrderResponseAllocationType = "domain"
 	OrderResponseAllocationTypeGmail     OrderResponseAllocationType = "gmail"
 	OrderResponseAllocationTypeIcloud    OrderResponseAllocationType = "icloud"
@@ -3090,6 +3478,8 @@ const (
 // Valid indicates whether the value is a known member of the OrderResponseAllocationType enum.
 func (e OrderResponseAllocationType) Valid() bool {
 	switch e {
+	case OrderResponseAllocationTypeDaum:
+		return true
 	case OrderResponseAllocationTypeDomain:
 		return true
 	case OrderResponseAllocationTypeGmail:
@@ -3155,6 +3545,7 @@ func (e OrderResponseFailureCode) Valid() bool {
 
 // Defines values for OrderResponseProductType.
 const (
+	OrderResponseProductTypeDaum         OrderResponseProductType = "daum"
 	OrderResponseProductTypeDomain       OrderResponseProductType = "domain"
 	OrderResponseProductTypeGmail        OrderResponseProductType = "gmail"
 	OrderResponseProductTypeGmailVariant OrderResponseProductType = "gmail_variant"
@@ -3167,6 +3558,8 @@ const (
 // Valid indicates whether the value is a known member of the OrderResponseProductType enum.
 func (e OrderResponseProductType) Valid() bool {
 	switch e {
+	case OrderResponseProductTypeDaum:
+		return true
 	case OrderResponseProductTypeDomain:
 		return true
 	case OrderResponseProductTypeGmail:
@@ -3446,6 +3839,7 @@ func (e ProjectBulkFilterAccessType) Valid() bool {
 
 // Defines values for ProjectBulkFilterProductType.
 const (
+	ProjectBulkFilterProductTypeDaum         ProjectBulkFilterProductType = "daum"
 	ProjectBulkFilterProductTypeDomain       ProjectBulkFilterProductType = "domain"
 	ProjectBulkFilterProductTypeGmail        ProjectBulkFilterProductType = "gmail"
 	ProjectBulkFilterProductTypeGmailVariant ProjectBulkFilterProductType = "gmail_variant"
@@ -3457,6 +3851,8 @@ const (
 // Valid indicates whether the value is a known member of the ProjectBulkFilterProductType enum.
 func (e ProjectBulkFilterProductType) Valid() bool {
 	switch e {
+	case ProjectBulkFilterProductTypeDaum:
+		return true
 	case ProjectBulkFilterProductTypeDomain:
 		return true
 	case ProjectBulkFilterProductTypeGmail:
@@ -3620,6 +4016,7 @@ func (e ProjectProductStatus) Valid() bool {
 
 // Defines values for ProjectProductType.
 const (
+	ProjectProductTypeDaum         ProjectProductType = "daum"
 	ProjectProductTypeDomain       ProjectProductType = "domain"
 	ProjectProductTypeGmail        ProjectProductType = "gmail"
 	ProjectProductTypeGmailVariant ProjectProductType = "gmail_variant"
@@ -3631,6 +4028,8 @@ const (
 // Valid indicates whether the value is a known member of the ProjectProductType enum.
 func (e ProjectProductType) Valid() bool {
 	switch e {
+	case ProjectProductTypeDaum:
+		return true
 	case ProjectProductTypeDomain:
 		return true
 	case ProjectProductTypeGmail:
@@ -3650,6 +4049,7 @@ func (e ProjectProductType) Valid() bool {
 
 // Defines values for ProjectProductInventoryTotalProductType.
 const (
+	ProjectProductInventoryTotalProductTypeDaum         ProjectProductInventoryTotalProductType = "daum"
 	ProjectProductInventoryTotalProductTypeDomain       ProjectProductInventoryTotalProductType = "domain"
 	ProjectProductInventoryTotalProductTypeGmail        ProjectProductInventoryTotalProductType = "gmail"
 	ProjectProductInventoryTotalProductTypeGmailVariant ProjectProductInventoryTotalProductType = "gmail_variant"
@@ -3661,6 +4061,8 @@ const (
 // Valid indicates whether the value is a known member of the ProjectProductInventoryTotalProductType enum.
 func (e ProjectProductInventoryTotalProductType) Valid() bool {
 	switch e {
+	case ProjectProductInventoryTotalProductTypeDaum:
+		return true
 	case ProjectProductInventoryTotalProductTypeDomain:
 		return true
 	case ProjectProductInventoryTotalProductTypeGmail:
@@ -3698,6 +4100,7 @@ func (e ProjectProductRequestStatus) Valid() bool {
 
 // Defines values for ProjectProductRequestType.
 const (
+	ProjectProductRequestTypeDaum         ProjectProductRequestType = "daum"
 	ProjectProductRequestTypeDomain       ProjectProductRequestType = "domain"
 	ProjectProductRequestTypeGmail        ProjectProductRequestType = "gmail"
 	ProjectProductRequestTypeGmailVariant ProjectProductRequestType = "gmail_variant"
@@ -3709,6 +4112,8 @@ const (
 // Valid indicates whether the value is a known member of the ProjectProductRequestType enum.
 func (e ProjectProductRequestType) Valid() bool {
 	switch e {
+	case ProjectProductRequestTypeDaum:
+		return true
 	case ProjectProductRequestTypeDomain:
 		return true
 	case ProjectProductRequestTypeGmail:
@@ -3746,6 +4151,7 @@ func (e ProjectProductSummaryStatus) Valid() bool {
 
 // Defines values for ProjectProductSummaryType.
 const (
+	ProjectProductSummaryTypeDaum         ProjectProductSummaryType = "daum"
 	ProjectProductSummaryTypeDomain       ProjectProductSummaryType = "domain"
 	ProjectProductSummaryTypeGmail        ProjectProductSummaryType = "gmail"
 	ProjectProductSummaryTypeGmailVariant ProjectProductSummaryType = "gmail_variant"
@@ -3757,6 +4163,8 @@ const (
 // Valid indicates whether the value is a known member of the ProjectProductSummaryType enum.
 func (e ProjectProductSummaryType) Valid() bool {
 	switch e {
+	case ProjectProductSummaryTypeDaum:
+		return true
 	case ProjectProductSummaryTypeDomain:
 		return true
 	case ProjectProductSummaryTypeGmail:
@@ -3824,13 +4232,13 @@ func (e ProtoBulkTaskAction) Valid() bool {
 
 // Defines values for ProtoBulkTaskKind.
 const (
-	ProtoBulkTaskKindProtoResourceBulk ProtoBulkTaskKind = "proto_resource_bulk"
+	ProtoResourceBulk ProtoBulkTaskKind = "proto_resource_bulk"
 )
 
 // Valid indicates whether the value is a known member of the ProtoBulkTaskKind enum.
 func (e ProtoBulkTaskKind) Valid() bool {
 	switch e {
-	case ProtoBulkTaskKindProtoResourceBulk:
+	case ProtoResourceBulk:
 		return true
 	default:
 		return false
@@ -4793,6 +5201,7 @@ func (e HealthzParamsReady) Valid() bool {
 
 // Defines values for GetAdminAllocationsParamsType.
 const (
+	GetAdminAllocationsParamsTypeDaum      GetAdminAllocationsParamsType = "daum"
 	GetAdminAllocationsParamsTypeDomain    GetAdminAllocationsParamsType = "domain"
 	GetAdminAllocationsParamsTypeGmail     GetAdminAllocationsParamsType = "gmail"
 	GetAdminAllocationsParamsTypeIcloud    GetAdminAllocationsParamsType = "icloud"
@@ -4803,6 +5212,8 @@ const (
 // Valid indicates whether the value is a known member of the GetAdminAllocationsParamsType enum.
 func (e GetAdminAllocationsParamsType) Valid() bool {
 	switch e {
+	case GetAdminAllocationsParamsTypeDaum:
+		return true
 	case GetAdminAllocationsParamsTypeDomain:
 		return true
 	case GetAdminAllocationsParamsTypeGmail:
@@ -4865,6 +5276,7 @@ func (e GetAdminAllocationsParamsMailbox) Valid() bool {
 
 // Defines values for GetAdminAllocationParamsType.
 const (
+	GetAdminAllocationParamsTypeDaum      GetAdminAllocationParamsType = "daum"
 	GetAdminAllocationParamsTypeDomain    GetAdminAllocationParamsType = "domain"
 	GetAdminAllocationParamsTypeGmail     GetAdminAllocationParamsType = "gmail"
 	GetAdminAllocationParamsTypeIcloud    GetAdminAllocationParamsType = "icloud"
@@ -4875,6 +5287,8 @@ const (
 // Valid indicates whether the value is a known member of the GetAdminAllocationParamsType enum.
 func (e GetAdminAllocationParamsType) Valid() bool {
 	switch e {
+	case GetAdminAllocationParamsTypeDaum:
+		return true
 	case GetAdminAllocationParamsTypeDomain:
 		return true
 	case GetAdminAllocationParamsTypeGmail:
@@ -4892,6 +5306,7 @@ func (e GetAdminAllocationParamsType) Valid() bool {
 
 // Defines values for GetAdminBindingsParamsType.
 const (
+	GetAdminBindingsParamsTypeDaum      GetAdminBindingsParamsType = "daum"
 	GetAdminBindingsParamsTypeDomain    GetAdminBindingsParamsType = "domain"
 	GetAdminBindingsParamsTypeIcloud    GetAdminBindingsParamsType = "icloud"
 	GetAdminBindingsParamsTypeMicrosoft GetAdminBindingsParamsType = "microsoft"
@@ -4900,6 +5315,8 @@ const (
 // Valid indicates whether the value is a known member of the GetAdminBindingsParamsType enum.
 func (e GetAdminBindingsParamsType) Valid() bool {
 	switch e {
+	case GetAdminBindingsParamsTypeDaum:
+		return true
 	case GetAdminBindingsParamsTypeDomain:
 		return true
 	case GetAdminBindingsParamsTypeIcloud:
@@ -4913,6 +5330,7 @@ func (e GetAdminBindingsParamsType) Valid() bool {
 
 // Defines values for GetAdminBindingMessageParamsType.
 const (
+	GetAdminBindingMessageParamsTypeDaum      GetAdminBindingMessageParamsType = "daum"
 	GetAdminBindingMessageParamsTypeDomain    GetAdminBindingMessageParamsType = "domain"
 	GetAdminBindingMessageParamsTypeIcloud    GetAdminBindingMessageParamsType = "icloud"
 	GetAdminBindingMessageParamsTypeMicrosoft GetAdminBindingMessageParamsType = "microsoft"
@@ -4921,6 +5339,8 @@ const (
 // Valid indicates whether the value is a known member of the GetAdminBindingMessageParamsType enum.
 func (e GetAdminBindingMessageParamsType) Valid() bool {
 	switch e {
+	case GetAdminBindingMessageParamsTypeDaum:
+		return true
 	case GetAdminBindingMessageParamsTypeDomain:
 		return true
 	case GetAdminBindingMessageParamsTypeIcloud:
@@ -4968,6 +5388,135 @@ func (e GetAdminCardsParamsOwnerRole) Valid() bool {
 	case GetAdminCardsParamsOwnerRoleSupplier:
 		return true
 	case GetAdminCardsParamsOwnerRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetAdminDaumResourcesParamsStatus.
+const (
+	GetAdminDaumResourcesParamsStatusAbnormal    GetAdminDaumResourcesParamsStatus = "abnormal"
+	GetAdminDaumResourcesParamsStatusDeleted     GetAdminDaumResourcesParamsStatus = "deleted"
+	GetAdminDaumResourcesParamsStatusDisabled    GetAdminDaumResourcesParamsStatus = "disabled"
+	GetAdminDaumResourcesParamsStatusIdentifying GetAdminDaumResourcesParamsStatus = "identifying"
+	GetAdminDaumResourcesParamsStatusNormal      GetAdminDaumResourcesParamsStatus = "normal"
+	GetAdminDaumResourcesParamsStatusPending     GetAdminDaumResourcesParamsStatus = "pending"
+	GetAdminDaumResourcesParamsStatusValidating  GetAdminDaumResourcesParamsStatus = "validating"
+)
+
+// Valid indicates whether the value is a known member of the GetAdminDaumResourcesParamsStatus enum.
+func (e GetAdminDaumResourcesParamsStatus) Valid() bool {
+	switch e {
+	case GetAdminDaumResourcesParamsStatusAbnormal:
+		return true
+	case GetAdminDaumResourcesParamsStatusDeleted:
+		return true
+	case GetAdminDaumResourcesParamsStatusDisabled:
+		return true
+	case GetAdminDaumResourcesParamsStatusIdentifying:
+		return true
+	case GetAdminDaumResourcesParamsStatusNormal:
+		return true
+	case GetAdminDaumResourcesParamsStatusPending:
+		return true
+	case GetAdminDaumResourcesParamsStatusValidating:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostAdminDaumResourceBatchParamsAction.
+const (
+	PostAdminDaumResourceBatchParamsActionDelete    PostAdminDaumResourceBatchParamsAction = "delete"
+	PostAdminDaumResourceBatchParamsActionHistory   PostAdminDaumResourceBatchParamsAction = "history"
+	PostAdminDaumResourceBatchParamsActionPublish   PostAdminDaumResourceBatchParamsAction = "publish"
+	PostAdminDaumResourceBatchParamsActionUnpublish PostAdminDaumResourceBatchParamsAction = "unpublish"
+)
+
+// Valid indicates whether the value is a known member of the PostAdminDaumResourceBatchParamsAction enum.
+func (e PostAdminDaumResourceBatchParamsAction) Valid() bool {
+	switch e {
+	case PostAdminDaumResourceBatchParamsActionDelete:
+		return true
+	case PostAdminDaumResourceBatchParamsActionHistory:
+		return true
+	case PostAdminDaumResourceBatchParamsActionPublish:
+		return true
+	case PostAdminDaumResourceBatchParamsActionUnpublish:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostAdminDaumResourceBulkParamsCommand.
+const (
+	PostAdminDaumResourceBulkParamsCommandDelete    PostAdminDaumResourceBulkParamsCommand = "delete"
+	PostAdminDaumResourceBulkParamsCommandHistory   PostAdminDaumResourceBulkParamsCommand = "history"
+	PostAdminDaumResourceBulkParamsCommandPublish   PostAdminDaumResourceBulkParamsCommand = "publish"
+	PostAdminDaumResourceBulkParamsCommandUnpublish PostAdminDaumResourceBulkParamsCommand = "unpublish"
+	PostAdminDaumResourceBulkParamsCommandValidate  PostAdminDaumResourceBulkParamsCommand = "validate"
+)
+
+// Valid indicates whether the value is a known member of the PostAdminDaumResourceBulkParamsCommand enum.
+func (e PostAdminDaumResourceBulkParamsCommand) Valid() bool {
+	switch e {
+	case PostAdminDaumResourceBulkParamsCommandDelete:
+		return true
+	case PostAdminDaumResourceBulkParamsCommandHistory:
+		return true
+	case PostAdminDaumResourceBulkParamsCommandPublish:
+		return true
+	case PostAdminDaumResourceBulkParamsCommandUnpublish:
+		return true
+	case PostAdminDaumResourceBulkParamsCommandValidate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostAdminDaumResourceImportMultipartBodyErrorStrategy.
+const (
+	PostAdminDaumResourceImportMultipartBodyErrorStrategyAbort PostAdminDaumResourceImportMultipartBodyErrorStrategy = "abort"
+	PostAdminDaumResourceImportMultipartBodyErrorStrategySkip  PostAdminDaumResourceImportMultipartBodyErrorStrategy = "skip"
+)
+
+// Valid indicates whether the value is a known member of the PostAdminDaumResourceImportMultipartBodyErrorStrategy enum.
+func (e PostAdminDaumResourceImportMultipartBodyErrorStrategy) Valid() bool {
+	switch e {
+	case PostAdminDaumResourceImportMultipartBodyErrorStrategyAbort:
+		return true
+	case PostAdminDaumResourceImportMultipartBodyErrorStrategySkip:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostAdminDaumResourceCommandParamsCommand.
+const (
+	PostAdminDaumResourceCommandParamsCommandDisable   PostAdminDaumResourceCommandParamsCommand = "disable"
+	PostAdminDaumResourceCommandParamsCommandEnable    PostAdminDaumResourceCommandParamsCommand = "enable"
+	PostAdminDaumResourceCommandParamsCommandPublish   PostAdminDaumResourceCommandParamsCommand = "publish"
+	PostAdminDaumResourceCommandParamsCommandRecover   PostAdminDaumResourceCommandParamsCommand = "recover"
+	PostAdminDaumResourceCommandParamsCommandUnpublish PostAdminDaumResourceCommandParamsCommand = "unpublish"
+)
+
+// Valid indicates whether the value is a known member of the PostAdminDaumResourceCommandParamsCommand enum.
+func (e PostAdminDaumResourceCommandParamsCommand) Valid() bool {
+	switch e {
+	case PostAdminDaumResourceCommandParamsCommandDisable:
+		return true
+	case PostAdminDaumResourceCommandParamsCommandEnable:
+		return true
+	case PostAdminDaumResourceCommandParamsCommandPublish:
+		return true
+	case PostAdminDaumResourceCommandParamsCommandRecover:
+		return true
+	case PostAdminDaumResourceCommandParamsCommandUnpublish:
 		return true
 	default:
 		return false
@@ -5099,22 +5648,22 @@ func (e GetAdminInvitesParamsKind) Valid() bool {
 
 // Defines values for GetAdminInvitesParamsOwnerRole.
 const (
-	Admin      GetAdminInvitesParamsOwnerRole = "admin"
-	SuperAdmin GetAdminInvitesParamsOwnerRole = "super_admin"
-	Supplier   GetAdminInvitesParamsOwnerRole = "supplier"
-	User       GetAdminInvitesParamsOwnerRole = "user"
+	GetAdminInvitesParamsOwnerRoleAdmin      GetAdminInvitesParamsOwnerRole = "admin"
+	GetAdminInvitesParamsOwnerRoleSuperAdmin GetAdminInvitesParamsOwnerRole = "super_admin"
+	GetAdminInvitesParamsOwnerRoleSupplier   GetAdminInvitesParamsOwnerRole = "supplier"
+	GetAdminInvitesParamsOwnerRoleUser       GetAdminInvitesParamsOwnerRole = "user"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminInvitesParamsOwnerRole enum.
 func (e GetAdminInvitesParamsOwnerRole) Valid() bool {
 	switch e {
-	case Admin:
+	case GetAdminInvitesParamsOwnerRoleAdmin:
 		return true
-	case SuperAdmin:
+	case GetAdminInvitesParamsOwnerRoleSuperAdmin:
 		return true
-	case Supplier:
+	case GetAdminInvitesParamsOwnerRoleSupplier:
 		return true
-	case User:
+	case GetAdminInvitesParamsOwnerRoleUser:
 		return true
 	default:
 		return false
@@ -5150,6 +5699,7 @@ func (e GetAdminLotteriesParamsStatus) Valid() bool {
 
 // Defines values for GetAdminMessagesParamsType.
 const (
+	GetAdminMessagesParamsTypeDaum      GetAdminMessagesParamsType = "daum"
 	GetAdminMessagesParamsTypeDomain    GetAdminMessagesParamsType = "domain"
 	GetAdminMessagesParamsTypeGmail     GetAdminMessagesParamsType = "gmail"
 	GetAdminMessagesParamsTypeIcloud    GetAdminMessagesParamsType = "icloud"
@@ -5160,6 +5710,8 @@ const (
 // Valid indicates whether the value is a known member of the GetAdminMessagesParamsType enum.
 func (e GetAdminMessagesParamsType) Valid() bool {
 	switch e {
+	case GetAdminMessagesParamsTypeDaum:
+		return true
 	case GetAdminMessagesParamsTypeDomain:
 		return true
 	case GetAdminMessagesParamsTypeGmail:
@@ -5177,6 +5729,7 @@ func (e GetAdminMessagesParamsType) Valid() bool {
 
 // Defines values for GetAdminMessageParamsType.
 const (
+	GetAdminMessageParamsTypeDaum      GetAdminMessageParamsType = "daum"
 	GetAdminMessageParamsTypeDomain    GetAdminMessageParamsType = "domain"
 	GetAdminMessageParamsTypeGmail     GetAdminMessageParamsType = "gmail"
 	GetAdminMessageParamsTypeIcloud    GetAdminMessageParamsType = "icloud"
@@ -5187,6 +5740,8 @@ const (
 // Valid indicates whether the value is a known member of the GetAdminMessageParamsType enum.
 func (e GetAdminMessageParamsType) Valid() bool {
 	switch e {
+	case GetAdminMessageParamsTypeDaum:
+		return true
 	case GetAdminMessageParamsTypeDomain:
 		return true
 	case GetAdminMessageParamsTypeGmail:
@@ -5558,6 +6113,7 @@ func (e GetAdminMicrosoftResourceAliasesParamsKind) Valid() bool {
 
 // Defines values for PostAdminMicrosoftResourceMessagesFetchParamsType.
 const (
+	PostAdminMicrosoftResourceMessagesFetchParamsTypeDaum      PostAdminMicrosoftResourceMessagesFetchParamsType = "daum"
 	PostAdminMicrosoftResourceMessagesFetchParamsTypeGmail     PostAdminMicrosoftResourceMessagesFetchParamsType = "gmail"
 	PostAdminMicrosoftResourceMessagesFetchParamsTypeIcloud    PostAdminMicrosoftResourceMessagesFetchParamsType = "icloud"
 	PostAdminMicrosoftResourceMessagesFetchParamsTypeMicrosoft PostAdminMicrosoftResourceMessagesFetchParamsType = "microsoft"
@@ -5567,6 +6123,8 @@ const (
 // Valid indicates whether the value is a known member of the PostAdminMicrosoftResourceMessagesFetchParamsType enum.
 func (e PostAdminMicrosoftResourceMessagesFetchParamsType) Valid() bool {
 	switch e {
+	case PostAdminMicrosoftResourceMessagesFetchParamsTypeDaum:
+		return true
 	case PostAdminMicrosoftResourceMessagesFetchParamsTypeGmail:
 		return true
 	case PostAdminMicrosoftResourceMessagesFetchParamsTypeIcloud:
@@ -5582,6 +6140,8 @@ func (e PostAdminMicrosoftResourceMessagesFetchParamsType) Valid() bool {
 
 // Defines values for GetAdminTasksParamsBizType.
 const (
+	GetAdminTasksParamsBizTypeDaumResource         GetAdminTasksParamsBizType = "daum_resource"
+	GetAdminTasksParamsBizTypeDaumResourceImport   GetAdminTasksParamsBizType = "daum_resource_import"
 	GetAdminTasksParamsBizTypeDomainResource       GetAdminTasksParamsBizType = "domain_resource"
 	GetAdminTasksParamsBizTypeGmailResource        GetAdminTasksParamsBizType = "gmail_resource"
 	GetAdminTasksParamsBizTypeIcloudResource       GetAdminTasksParamsBizType = "icloud_resource"
@@ -5594,6 +6154,10 @@ const (
 // Valid indicates whether the value is a known member of the GetAdminTasksParamsBizType enum.
 func (e GetAdminTasksParamsBizType) Valid() bool {
 	switch e {
+	case GetAdminTasksParamsBizTypeDaumResource:
+		return true
+	case GetAdminTasksParamsBizTypeDaumResourceImport:
+		return true
 	case GetAdminTasksParamsBizTypeDomainResource:
 		return true
 	case GetAdminTasksParamsBizTypeGmailResource:
@@ -5618,6 +6182,10 @@ const (
 	Alias            GetAdminTasksParamsSource = "alias"
 	AliasSchedule    GetAdminTasksParamsSource = "alias_schedule"
 	Bulk             GetAdminTasksParamsSource = "bulk"
+	DaumBulk         GetAdminTasksParamsSource = "daum_bulk"
+	DaumHistory      GetAdminTasksParamsSource = "daum_history"
+	DaumImport       GetAdminTasksParamsSource = "daum_import"
+	DaumValidation   GetAdminTasksParamsSource = "daum_validation"
 	Fetch            GetAdminTasksParamsSource = "fetch"
 	GmailHistory     GetAdminTasksParamsSource = "gmail_history"
 	GmailValidation  GetAdminTasksParamsSource = "gmail_validation"
@@ -5642,6 +6210,14 @@ func (e GetAdminTasksParamsSource) Valid() bool {
 	case AliasSchedule:
 		return true
 	case Bulk:
+		return true
+	case DaumBulk:
+		return true
+	case DaumHistory:
+		return true
+	case DaumImport:
+		return true
+	case DaumValidation:
 		return true
 	case Fetch:
 		return true
@@ -6125,6 +6701,7 @@ func (e GetBotProjectsParamsAccessType) Valid() bool {
 
 // Defines values for GetBotProjectsParamsProductType.
 const (
+	GetBotProjectsParamsProductTypeDaum         GetBotProjectsParamsProductType = "daum"
 	GetBotProjectsParamsProductTypeDomain       GetBotProjectsParamsProductType = "domain"
 	GetBotProjectsParamsProductTypeGmail        GetBotProjectsParamsProductType = "gmail"
 	GetBotProjectsParamsProductTypeGmailVariant GetBotProjectsParamsProductType = "gmail_variant"
@@ -6136,6 +6713,8 @@ const (
 // Valid indicates whether the value is a known member of the GetBotProjectsParamsProductType enum.
 func (e GetBotProjectsParamsProductType) Valid() bool {
 	switch e {
+	case GetBotProjectsParamsProductTypeDaum:
+		return true
 	case GetBotProjectsParamsProductTypeDomain:
 		return true
 	case GetBotProjectsParamsProductTypeGmail:
@@ -6563,6 +7142,7 @@ func (e GetOrdersParamsServiceMode) Valid() bool {
 
 // Defines values for GetOrdersParamsProductType.
 const (
+	GetOrdersParamsProductTypeDaum         GetOrdersParamsProductType = "daum"
 	GetOrdersParamsProductTypeDomain       GetOrdersParamsProductType = "domain"
 	GetOrdersParamsProductTypeGmail        GetOrdersParamsProductType = "gmail"
 	GetOrdersParamsProductTypeGmailVariant GetOrdersParamsProductType = "gmail_variant"
@@ -6575,6 +7155,8 @@ const (
 // Valid indicates whether the value is a known member of the GetOrdersParamsProductType enum.
 func (e GetOrdersParamsProductType) Valid() bool {
 	switch e {
+	case GetOrdersParamsProductTypeDaum:
+		return true
 	case GetOrdersParamsProductTypeDomain:
 		return true
 	case GetOrdersParamsProductTypeGmail:
@@ -6728,6 +7310,7 @@ func (e GetProjectsParamsAccessType) Valid() bool {
 
 // Defines values for GetProjectsParamsProductType.
 const (
+	GetProjectsParamsProductTypeDaum         GetProjectsParamsProductType = "daum"
 	GetProjectsParamsProductTypeDomain       GetProjectsParamsProductType = "domain"
 	GetProjectsParamsProductTypeGmail        GetProjectsParamsProductType = "gmail"
 	GetProjectsParamsProductTypeGmailVariant GetProjectsParamsProductType = "gmail_variant"
@@ -6739,6 +7322,8 @@ const (
 // Valid indicates whether the value is a known member of the GetProjectsParamsProductType enum.
 func (e GetProjectsParamsProductType) Valid() bool {
 	switch e {
+	case GetProjectsParamsProductTypeDaum:
+		return true
 	case GetProjectsParamsProductTypeDomain:
 		return true
 	case GetProjectsParamsProductTypeGmail:
@@ -6791,19 +7376,19 @@ func (e ListProtoResourcesParamsStatus) Valid() bool {
 
 // Defines values for PostProtoResourceBulkParamsCommand.
 const (
-	Delete   PostProtoResourceBulkParamsCommand = "delete"
-	Publish  PostProtoResourceBulkParamsCommand = "publish"
-	Validate PostProtoResourceBulkParamsCommand = "validate"
+	PostProtoResourceBulkParamsCommandDelete   PostProtoResourceBulkParamsCommand = "delete"
+	PostProtoResourceBulkParamsCommandPublish  PostProtoResourceBulkParamsCommand = "publish"
+	PostProtoResourceBulkParamsCommandValidate PostProtoResourceBulkParamsCommand = "validate"
 )
 
 // Valid indicates whether the value is a known member of the PostProtoResourceBulkParamsCommand enum.
 func (e PostProtoResourceBulkParamsCommand) Valid() bool {
 	switch e {
-	case Delete:
+	case PostProtoResourceBulkParamsCommandDelete:
 		return true
-	case Publish:
+	case PostProtoResourceBulkParamsCommandPublish:
 		return true
-	case Validate:
+	case PostProtoResourceBulkParamsCommandValidate:
 		return true
 	default:
 		return false
@@ -6875,19 +7460,19 @@ func (e GetRechargesParamsStatus) Valid() bool {
 
 // Defines values for GetResourcesParamsType.
 const (
-	All       GetResourcesParamsType = "all"
-	Domain    GetResourcesParamsType = "domain"
-	Microsoft GetResourcesParamsType = "microsoft"
+	GetResourcesParamsTypeAll       GetResourcesParamsType = "all"
+	GetResourcesParamsTypeDomain    GetResourcesParamsType = "domain"
+	GetResourcesParamsTypeMicrosoft GetResourcesParamsType = "microsoft"
 )
 
 // Valid indicates whether the value is a known member of the GetResourcesParamsType enum.
 func (e GetResourcesParamsType) Valid() bool {
 	switch e {
-	case All:
+	case GetResourcesParamsTypeAll:
 		return true
-	case Domain:
+	case GetResourcesParamsTypeDomain:
 		return true
-	case Microsoft:
+	case GetResourcesParamsTypeMicrosoft:
 		return true
 	default:
 		return false
@@ -6917,16 +7502,16 @@ func (e GetResourcesParamsPurpose) Valid() bool {
 
 // Defines values for PostResourceImportMultipartBodyErrorStrategy.
 const (
-	Abort PostResourceImportMultipartBodyErrorStrategy = "abort"
-	Skip  PostResourceImportMultipartBodyErrorStrategy = "skip"
+	PostResourceImportMultipartBodyErrorStrategyAbort PostResourceImportMultipartBodyErrorStrategy = "abort"
+	PostResourceImportMultipartBodyErrorStrategySkip  PostResourceImportMultipartBodyErrorStrategy = "skip"
 )
 
 // Valid indicates whether the value is a known member of the PostResourceImportMultipartBodyErrorStrategy enum.
 func (e PostResourceImportMultipartBodyErrorStrategy) Valid() bool {
 	switch e {
-	case Abort:
+	case PostResourceImportMultipartBodyErrorStrategyAbort:
 		return true
-	case Skip:
+	case PostResourceImportMultipartBodyErrorStrategySkip:
 		return true
 	default:
 		return false
@@ -6953,19 +7538,19 @@ func (e GetTicketsParamsTicketType) Valid() bool {
 
 // Defines values for GetTicketsParamsStatus.
 const (
-	GetTicketsParamsStatusClosed     GetTicketsParamsStatus = "closed"
-	GetTicketsParamsStatusOpen       GetTicketsParamsStatus = "open"
-	GetTicketsParamsStatusProcessing GetTicketsParamsStatus = "processing"
+	Closed     GetTicketsParamsStatus = "closed"
+	Open       GetTicketsParamsStatus = "open"
+	Processing GetTicketsParamsStatus = "processing"
 )
 
 // Valid indicates whether the value is a known member of the GetTicketsParamsStatus enum.
 func (e GetTicketsParamsStatus) Valid() bool {
 	switch e {
-	case GetTicketsParamsStatusClosed:
+	case Closed:
 		return true
-	case GetTicketsParamsStatusOpen:
+	case Open:
 		return true
-	case GetTicketsParamsStatusProcessing:
+	case Processing:
 		return true
 	default:
 		return false
@@ -7303,9 +7888,10 @@ type AdminCreateProjectRequest struct {
 	AccessType *AdminCreateProjectRequestAccessType `json:"accessType,omitempty"`
 
 	// AccessUserIds Admin-only full replacement set for private project access. Ignored and cleared when accessType is public.
-	AccessUserIds *[]int  `json:"accessUserIds,omitempty"`
-	Description   *string `json:"description,omitempty"`
-	LogoUrl       *string `json:"logoUrl,omitempty"`
+	AccessUserIds       *[]int    `json:"accessUserIds,omitempty"`
+	DaumSuffixBlacklist *[]string `json:"daumSuffixBlacklist,omitempty"`
+	Description         *string   `json:"description,omitempty"`
+	LogoUrl             *string   `json:"logoUrl,omitempty"`
 
 	// LooseMatch true requires sender+recipient; false requires sender+recipient+subject+body.
 	LooseMatch               *bool                    `json:"looseMatch,omitempty"`
@@ -7368,7 +7954,19 @@ type AdminDashboardResponse struct {
 
 // AdminDashboardStats defines model for AdminDashboardStats.
 type AdminDashboardStats struct {
-	ActiveUsers                     int     `json:"activeUsers"`
+	ActiveUsers int `json:"activeUsers"`
+
+	// DaumAvailableEmails Healthy public Daum source accounts owned by active supplier or administrator accounts.
+	DaumAvailableEmails                  int     `json:"daumAvailableEmails"`
+	DaumAverageCodeReceiptSeconds        int     `json:"daumAverageCodeReceiptSeconds"`
+	DaumAveragePurchaseActivationSeconds int     `json:"daumAveragePurchaseActivationSeconds"`
+	DaumCodeReceipts                     int     `json:"daumCodeReceipts"`
+	DaumCodeSuccessRate                  float32 `json:"daumCodeSuccessRate"`
+	DaumPurchaseActivationSuccessRate    float32 `json:"daumPurchaseActivationSuccessRate"`
+	DaumPurchaseActivations              int     `json:"daumPurchaseActivations"`
+
+	// DaumTotalEmails Non-deleted Daum source accounts.
+	DaumTotalEmails                 int     `json:"daumTotalEmails"`
 	DomainAvailableMailboxes        int     `json:"domainAvailableMailboxes"`
 	DomainAverageCodeReceiptSeconds int     `json:"domainAverageCodeReceiptSeconds"`
 	DomainCodeReceipts              int     `json:"domainCodeReceipts"`
@@ -7456,6 +8054,11 @@ type AdminDashboardStats struct {
 // AdminDashboardTrendPoint defines model for AdminDashboardTrendPoint.
 type AdminDashboardTrendPoint struct {
 	ActiveUsers                           int     `json:"activeUsers"`
+	DaumAvailableEmails                   int     `json:"daumAvailableEmails"`
+	DaumAverageCodeReceiptSeconds         int     `json:"daumAverageCodeReceiptSeconds"`
+	DaumCodeSuccessRate                   float32 `json:"daumCodeSuccessRate"`
+	DaumReceivedCodes                     int     `json:"daumReceivedCodes"`
+	DaumTotalEmails                       int     `json:"daumTotalEmails"`
 	DomainAvailableMailboxes              int     `json:"domainAvailableMailboxes"`
 	DomainAverageCodeReceiptSeconds       int     `json:"domainAverageCodeReceiptSeconds"`
 	DomainCodeSuccessRate                 float32 `json:"domainCodeSuccessRate"`
@@ -8936,7 +9539,7 @@ type AdminMicrosoftOwnerSummary struct {
 // AdminMicrosoftOwnerSummaryRole defines model for AdminMicrosoftOwnerSummary.Role.
 type AdminMicrosoftOwnerSummaryRole string
 
-// AdminMicrosoftProxyBinding Safe proxy binding metadata for the Microsoft account. The raw proxy URL and any proxy credentials are never returned.
+// AdminMicrosoftProxyBinding Safe proxy binding metadata for a mailbox account. The raw proxy URL and any proxy credentials are never returned.
 type AdminMicrosoftProxyBinding struct {
 	Country  string    `json:"country"`
 	ExpireAt time.Time `json:"expireAt"`
@@ -10161,7 +10764,7 @@ type CreateOrderBatchItemResponseStatus string
 
 // CreateOrderBatchRequest defines model for CreateOrderBatchRequest.
 type CreateOrderBatchRequest struct {
-	// EmailSuffix Product selector. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted.
+	// EmailSuffix Product selector. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted.
 	EmailSuffix string `json:"emailSuffix"`
 	ProjectId   int    `json:"projectId"`
 
@@ -10174,7 +10777,7 @@ type CreateOrderBatchResponse = []CreateOrderBatchItemResponse
 
 // CreateOrderRequest defines model for CreateOrderRequest.
 type CreateOrderRequest struct {
-	// EmailSuffix Product selector. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted.
+	// EmailSuffix Product selector. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted.
 	EmailSuffix string `json:"emailSuffix"`
 	ProjectId   int    `json:"projectId"`
 }
@@ -10338,6 +10941,365 @@ type DashboardTrendPoint struct {
 	ReceivedCodes                    int     `json:"receivedCodes"`
 	Spend                            float32 `json:"spend"`
 }
+
+// DaumAlias defines model for DaumAlias.
+type DaumAlias struct {
+	CreatedAt   *time.Time          `json:"createdAt,omitempty"`
+	Email       openapi_types.Email `json:"email"`
+	Id          int64               `json:"id"`
+	OwnerUserId *int64              `json:"ownerUserId,omitempty"`
+	ResourceId  *int64              `json:"resourceId,omitempty"`
+	Status      string              `json:"status"`
+	Suffix      DaumAliasSuffix     `json:"suffix"`
+	UpdatedAt   *time.Time          `json:"updatedAt,omitempty"`
+	Version     *int64              `json:"version,omitempty"`
+}
+
+// DaumAliasSuffix defines model for DaumAlias.Suffix.
+type DaumAliasSuffix string
+
+// DaumBatchRequest defines model for DaumBatchRequest.
+type DaumBatchRequest struct {
+	ResourceIds []int64 `json:"resourceIds"`
+}
+
+// DaumBooleanFacets defines model for DaumBooleanFacets.
+type DaumBooleanFacets struct {
+	All int64 `json:"all"`
+	No  int64 `json:"no"`
+	Yes int64 `json:"yes"`
+}
+
+// DaumBulkRequest defines model for DaumBulkRequest.
+type DaumBulkRequest struct {
+	Selection struct {
+		Filter      *DaumResourceFilter          `json:"filter,omitempty"`
+		Mode        DaumBulkRequestSelectionMode `json:"mode"`
+		ResourceIds *[]int64                     `json:"resourceIds,omitempty"`
+	} `json:"selection"`
+}
+
+// DaumBulkRequestSelectionMode defines model for DaumBulkRequest.Selection.Mode.
+type DaumBulkRequestSelectionMode string
+
+// DaumBulkTask defines model for DaumBulkTask.
+type DaumBulkTask struct {
+	Action         DaumBulkTaskAction `json:"action"`
+	Affected       int                `json:"affected"`
+	Attempts       *int               `json:"attempts,omitempty"`
+	CreatedAt      time.Time          `json:"createdAt"`
+	FinishedAt     *time.Time         `json:"finishedAt,omitempty"`
+	Kind           DaumBulkTaskKind   `json:"kind"`
+	MaxAttempts    *int               `json:"maxAttempts,omitempty"`
+	OperatorUserId *int64             `json:"operatorUserId,omitempty"`
+	Processed      int                `json:"processed"`
+	ReasonCounts   []struct {
+		Count  int    `json:"count"`
+		Reason string `json:"reason"`
+	} `json:"reasonCounts"`
+	RequestId    *string                  `json:"requestId,omitempty"`
+	Requested    int                      `json:"requested"`
+	ResourceType DaumBulkTaskResourceType `json:"resourceType"`
+	Skipped      int                      `json:"skipped"`
+	StartedAt    *time.Time               `json:"startedAt,omitempty"`
+	Status       DaumBulkTaskStatus       `json:"status"`
+	TaskId       string                   `json:"taskId"`
+	UpdatedAt    time.Time                `json:"updatedAt"`
+}
+
+// DaumBulkTaskAction defines model for DaumBulkTask.Action.
+type DaumBulkTaskAction string
+
+// DaumBulkTaskKind defines model for DaumBulkTask.Kind.
+type DaumBulkTaskKind string
+
+// DaumBulkTaskResourceType defines model for DaumBulkTask.ResourceType.
+type DaumBulkTaskResourceType string
+
+// DaumBulkTaskStatus defines model for DaumBulkTask.Status.
+type DaumBulkTaskStatus string
+
+// DaumCredentialsReplaceRequest defines model for DaumCredentialsReplaceRequest.
+type DaumCredentialsReplaceRequest struct {
+	AppPassword *string       `json:"appPassword,omitempty"`
+	Password    *string       `json:"password,omitempty"`
+	Protocol    *DaumProtocol `json:"protocol,omitempty"`
+	Version     int64         `json:"version"`
+}
+
+// DaumDisableSelection defines model for DaumDisableSelection.
+type DaumDisableSelection struct {
+	Selection struct {
+		Mode        DaumDisableSelectionSelectionMode `json:"mode"`
+		ResourceIds []int64                           `json:"resourceIds"`
+	} `json:"selection"`
+}
+
+// DaumDisableSelectionSelectionMode defines model for DaumDisableSelection.Selection.Mode.
+type DaumDisableSelectionSelectionMode string
+
+// DaumImportItem defines model for DaumImportItem.
+type DaumImportItem struct {
+	Category      string                `json:"category"`
+	LastSafeError *string               `json:"lastSafeError,omitempty"`
+	Line          int                   `json:"line"`
+	Outcome       DaumImportItemOutcome `json:"outcome"`
+	ResourceId    *int64                `json:"resourceId,omitempty"`
+}
+
+// DaumImportItemOutcome defines model for DaumImportItem.Outcome.
+type DaumImportItemOutcome string
+
+// DaumImportItemsResponse defines model for DaumImportItemsResponse.
+type DaumImportItemsResponse struct {
+	Items  []DaumImportItem `json:"items"`
+	Limit  int              `json:"limit"`
+	Offset int              `json:"offset"`
+	Total  int64            `json:"total"`
+}
+
+// DaumImportResponse defines model for DaumImportResponse.
+type DaumImportResponse struct {
+	Accepted         int                              `json:"accepted"`
+	CreatedAt        *time.Time                       `json:"createdAt,omitempty"`
+	DispatchAttempts int                              `json:"dispatchAttempts"`
+	DispatchStatus   DaumImportResponseDispatchStatus `json:"dispatchStatus"`
+	Failed           int                              `json:"failed"`
+	FailureAvailable bool                             `json:"failureAvailable"`
+	ImportId         int64                            `json:"importId"`
+	Imported         int                              `json:"imported"`
+	LastSafeError    *string                          `json:"lastSafeError,omitempty"`
+	Reused           bool                             `json:"reused"`
+	Skipped          int                              `json:"skipped"`
+	Status           DaumImportResponseStatus         `json:"status"`
+	UpdatedAt        *time.Time                       `json:"updatedAt,omitempty"`
+}
+
+// DaumImportResponseDispatchStatus defines model for DaumImportResponse.DispatchStatus.
+type DaumImportResponseDispatchStatus string
+
+// DaumImportResponseStatus defines model for DaumImportResponse.Status.
+type DaumImportResponseStatus string
+
+// DaumInventory defines model for DaumInventory.
+type DaumInventory struct {
+	EligibleResources      int  `json:"eligibleResources"`
+	Enabled                bool `json:"enabled"`
+	ExplicitAliasAvailable *int `json:"explicitAliasAvailable,omitempty"`
+	MainAvailable          int  `json:"mainAvailable"`
+	PublicAvailable        int  `json:"publicAvailable"`
+	TotalAvailable         int  `json:"totalAvailable"`
+}
+
+// DaumMaintenanceListResponse defines model for DaumMaintenanceListResponse.
+type DaumMaintenanceListResponse struct {
+	Items  []DaumMaintenanceRun `json:"items"`
+	Limit  int                  `json:"limit"`
+	Offset int                  `json:"offset"`
+	Total  int64                `json:"total"`
+}
+
+// DaumMaintenanceRun defines model for DaumMaintenanceRun.
+type DaumMaintenanceRun struct {
+	Attempts             int                      `json:"attempts"`
+	CreatedAt            time.Time                `json:"createdAt"`
+	CredentialRevision   int64                    `json:"credentialRevision"`
+	FinishedAt           *time.Time               `json:"finishedAt,omitempty"`
+	Id                   int64                    `json:"id"`
+	Kind                 DaumMaintenanceRunKind   `json:"kind"`
+	LastSafeError        *string                  `json:"lastSafeError,omitempty"`
+	MaxAttempts          int                      `json:"maxAttempts"`
+	QueuedAt             time.Time                `json:"queuedAt"`
+	RequestId            *string                  `json:"requestId,omitempty"`
+	ResourceId           int64                    `json:"resourceId"`
+	StartedAt            *time.Time               `json:"startedAt,omitempty"`
+	Status               DaumMaintenanceRunStatus `json:"status"`
+	UpdatedAt            time.Time                `json:"updatedAt"`
+	ValidationGeneration int64                    `json:"validationGeneration"`
+}
+
+// DaumMaintenanceRunKind defines model for DaumMaintenanceRun.Kind.
+type DaumMaintenanceRunKind string
+
+// DaumMaintenanceRunStatus defines model for DaumMaintenanceRun.Status.
+type DaumMaintenanceRunStatus string
+
+// DaumOwnerSummary defines model for DaumOwnerSummary.
+type DaumOwnerSummary struct {
+	Email     string               `json:"email"`
+	Enabled   bool                 `json:"enabled"`
+	GroupName string               `json:"groupName"`
+	Id        int64                `json:"id"`
+	Nickname  string               `json:"nickname"`
+	Role      DaumOwnerSummaryRole `json:"role"`
+}
+
+// DaumOwnerSummaryRole defines model for DaumOwnerSummary.Role.
+type DaumOwnerSummaryRole string
+
+// DaumProtocol defines model for DaumProtocol.
+type DaumProtocol string
+
+// DaumResource defines model for DaumResource.
+type DaumResource struct {
+	ActiveTask            *AdminTaskSummary `json:"activeTask,omitempty"`
+	Aliases               []DaumAlias       `json:"aliases"`
+	AppPasswordConfigured bool              `json:"appPasswordConfigured"`
+
+	// BindingAddress Actual auxiliary mailbox address resolved from the pickup URL or an owned domain.
+	BindingAddress       *string                   `json:"bindingAddress,omitempty"`
+	BindingLastSafeError *string                   `json:"bindingLastSafeError,omitempty"`
+	BindingStatus        DaumResourceBindingStatus `json:"bindingStatus"`
+	CreatedAt            time.Time                 `json:"createdAt"`
+	CredentialRevision   int64                     `json:"credentialRevision"`
+	CredentialUpdatedAt  time.Time                 `json:"credentialUpdatedAt"`
+	Email                openapi_types.Email       `json:"email"`
+	ForSale              bool                      `json:"forSale"`
+	Id                   int64                     `json:"id"`
+
+	// KakaoEmail Kakao account address supplied separately from the pickup mailbox.
+	KakaoEmail              string     `json:"kakaoEmail"`
+	LastAllocatedAt         *time.Time `json:"lastAllocatedAt,omitempty"`
+	LastCheckedAt           *time.Time `json:"lastCheckedAt,omitempty"`
+	LastSafeError           *string    `json:"lastSafeError,omitempty"`
+	LoginPasswordConfigured bool       `json:"loginPasswordConfigured"`
+
+	// LongLived Supplier-provided lifecycle classification; not a protocol lifetime guarantee.
+	LongLived           bool                          `json:"longLived"`
+	Owner               *DaumOwnerSummary             `json:"owner,omitempty"`
+	OwnerUserId         int64                         `json:"ownerUserId"`
+	PasswordConfigured  bool                          `json:"passwordConfigured"`
+	PickupUrlConfigured bool                          `json:"pickupUrlConfigured"`
+	Protocol            DaumProtocol                  `json:"protocol"`
+	ProxyBindings       *[]AdminMicrosoftProxyBinding `json:"proxyBindings,omitempty"`
+	QualityScore        int                           `json:"qualityScore"`
+	RecentTasks         *[]AdminTaskSummary           `json:"recentTasks,omitempty"`
+
+	// Status Validation matches Microsoft resources. Retryable failures return to pending while attempts remain; non-retryable or exhausted validations become abnormal.
+	Status               DaumResourceStatus `json:"status"`
+	Suffix               string             `json:"suffix"`
+	UpdatedAt            time.Time          `json:"updatedAt"`
+	ValidationFailures   int                `json:"validationFailures"`
+	ValidationGeneration int64              `json:"validationGeneration"`
+	Version              int64              `json:"version"`
+}
+
+// DaumResourceBindingStatus defines model for DaumResource.BindingStatus.
+type DaumResourceBindingStatus string
+
+// DaumResourceCommandRequest defines model for DaumResourceCommandRequest.
+type DaumResourceCommandRequest struct {
+	Version int64 `json:"version"`
+}
+
+// DaumResourceEditRequest Patch changed metadata only. Kakao account email is independent of the auxiliary mailbox; pickupUrl determines its actual mailbox. A real owner change is blocked while an active Daum allocation exists.
+type DaumResourceEditRequest struct {
+	AppPassword *string `json:"appPassword,omitempty"`
+
+	// BindingAddress Omit to preserve; null removes the auxiliary association.
+	BindingAddress *openapi_types.Email `json:"bindingAddress,omitempty"`
+	Email          *openapi_types.Email `json:"email,omitempty"`
+	ForSale        *bool                `json:"forSale,omitempty"`
+
+	// KakaoEmail Kakao account email; an empty string clears it.
+	KakaoEmail *string `json:"kakaoEmail,omitempty"`
+	LongLived  *bool   `json:"longLived,omitempty"`
+	OwnerId    *int64  `json:"ownerId,omitempty"`
+	Password   *string `json:"password,omitempty"`
+
+	// PickupUrl Omit to preserve; null removes the auxiliary association.
+	PickupUrl    *string       `json:"pickupUrl,omitempty"`
+	Protocol     *DaumProtocol `json:"protocol,omitempty"`
+	QualityScore *int          `json:"qualityScore,omitempty"`
+	Version      int64         `json:"version"`
+}
+
+// DaumResourceFacets defines model for DaumResourceFacets.
+type DaumResourceFacets struct {
+	Abnormal    int64             `json:"abnormal"`
+	All         int64             `json:"all"`
+	Deleted     int64             `json:"deleted"`
+	Disabled    int64             `json:"disabled"`
+	ForSale     DaumBooleanFacets `json:"forSale"`
+	Identifying int64             `json:"identifying"`
+	LongLived   DaumBooleanFacets `json:"longLived"`
+	Normal      int64             `json:"normal"`
+	Pending     int64             `json:"pending"`
+	Status      struct {
+		Abnormal    int64 `json:"abnormal"`
+		All         int64 `json:"all"`
+		Deleted     int64 `json:"deleted"`
+		Disabled    int64 `json:"disabled"`
+		Identifying int64 `json:"identifying"`
+		Normal      int64 `json:"normal"`
+		Pending     int64 `json:"pending"`
+		Validating  int64 `json:"validating"`
+	} `json:"status"`
+	Suffixes []struct {
+		Count int64  `json:"count"`
+		Key   string `json:"key"`
+	} `json:"suffixes"`
+	Validating int64 `json:"validating"`
+}
+
+// DaumResourceFilter defines model for DaumResourceFilter.
+type DaumResourceFilter struct {
+	CreatedFrom *time.Time    `json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time    `json:"createdTo,omitempty"`
+	ForSale     *bool         `json:"forSale,omitempty"`
+	LongLived   *bool         `json:"longLived,omitempty"`
+	OwnerId     *int64        `json:"ownerId,omitempty"`
+	Protocol    *DaumProtocol `json:"protocol,omitempty"`
+	Search      *string       `json:"search,omitempty"`
+
+	// Status Validation matches Microsoft resources. Retryable failures return to pending while attempts remain; non-retryable or exhausted validations become abnormal.
+	Status *DaumResourceStatus `json:"status,omitempty"`
+	Suffix *string             `json:"suffix,omitempty"`
+}
+
+// DaumResourceListResponse defines model for DaumResourceListResponse.
+type DaumResourceListResponse struct {
+	Facets      DaumResourceFacets `json:"facets"`
+	HasMore     bool               `json:"hasMore"`
+	Items       []DaumResource     `json:"items"`
+	Limit       int                `json:"limit"`
+	NextAfterId *int64             `json:"nextAfterId,omitempty"`
+	Offset      int                `json:"offset"`
+
+	// Total Omitted when includeTotal is false.
+	Total *int64 `json:"total,omitempty"`
+}
+
+// DaumResourceMutationResponse defines model for DaumResourceMutationResponse.
+type DaumResourceMutationResponse struct {
+	// Changed Whether this command changed the resource; preserved on idempotent replay.
+	Changed    bool  `json:"changed"`
+	ForSale    bool  `json:"forSale"`
+	Queued     bool  `json:"queued"`
+	ResourceId int64 `json:"resourceId"`
+	Reused     bool  `json:"reused"`
+
+	// Status Validation matches Microsoft resources. Retryable failures return to pending while attempts remain; non-retryable or exhausted validations become abnormal.
+	Status               DaumResourceStatus `json:"status"`
+	Todo                 bool               `json:"todo"`
+	ValidationGeneration int64              `json:"validationGeneration"`
+	Version              int64              `json:"version"`
+}
+
+// DaumResourceStatus Validation matches Microsoft resources. Retryable failures return to pending while attempts remain; non-retryable or exhausted validations become abnormal.
+type DaumResourceStatus string
+
+// DaumValidationBatchResponse defines model for DaumValidationBatchResponse.
+type DaumValidationBatchResponse = DaumBulkTask
+
+// DaumValidationIDsRequest defines model for DaumValidationIDsRequest.
+type DaumValidationIDsRequest struct {
+	// ResourceIds Also bounded by the configured resource_validation_max_ids.
+	ResourceIds []int64 `json:"resourceIds"`
+}
+
+// DaumValidationResponse defines model for DaumValidationResponse.
+type DaumValidationResponse = DaumResourceMutationResponse
 
 // DeleteProxiesRequest defines model for DeleteProxiesRequest.
 type DeleteProxiesRequest struct {
@@ -11255,6 +12217,7 @@ type OrderPickupCredentialsResponse = []OrderPickupCredentialResponse
 // OrderProductTypeFacets defines model for OrderProductTypeFacets.
 type OrderProductTypeFacets struct {
 	All          int64 `json:"all"`
+	Daum         int64 `json:"daum"`
 	Domain       int64 `json:"domain"`
 	Gmail        int64 `json:"gmail"`
 	GmailVariant int64 `json:"gmailVariant"`
@@ -11559,7 +12522,7 @@ type PositiveIntegerPointAmount = string
 type ProductSuffixInventory struct {
 	PublicAvailable int64 `json:"publicAvailable"`
 
-	// Suffix Selectable inventory value. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned.
+	// Suffix Selectable inventory value. Microsoft and Proto products expose exact email domains. Daum exposes daum.net, hanmail.net and hanmail2.net as independently available addresses on a shared account. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned.
 	Suffix         string `json:"suffix"`
 	TotalAvailable int64  `json:"totalAvailable"`
 }
@@ -11641,7 +12604,8 @@ type ProjectBulkUpdateProductsRequest struct {
 
 // ProjectDetailResponse defines model for ProjectDetailResponse.
 type ProjectDetailResponse struct {
-	Accesses *[]ProjectAccess `json:"accesses,omitempty"`
+	Accesses            *[]ProjectAccess `json:"accesses,omitempty"`
+	DaumSuffixBlacklist *[]string        `json:"daumSuffixBlacklist,omitempty"`
 
 	// MailRules Returned to project admins and to the applicant while the project is an application; omitted for ordinary listed project detail.
 	MailRules                *[]ProjectMailRule `json:"mailRules,omitempty"`
@@ -11652,11 +12616,13 @@ type ProjectDetailResponse struct {
 
 // ProjectInventoryResponse defines model for ProjectInventoryResponse.
 type ProjectInventoryResponse struct {
+	ActiveDaumAllocations      *int               `json:"activeDaumAllocations,omitempty"`
 	ActiveDomainAllocations    int                `json:"activeDomainAllocations"`
 	ActiveGmailAllocations     int                `json:"activeGmailAllocations"`
 	ActiveICloudAllocations    int                `json:"activeICloudAllocations"`
 	ActiveMicrosoftAllocations int                `json:"activeMicrosoftAllocations"`
 	ActiveProtoAllocations     *int               `json:"activeProtoAllocations,omitempty"`
+	Daum                       DaumInventory      `json:"daum"`
 	Domain                     DomainInventory    `json:"domain"`
 	Gmail                      GmailInventory     `json:"gmail"`
 	Icloud                     ICloudInventory    `json:"icloud"`
@@ -11921,6 +12887,7 @@ type ProjectProductSummaryType string
 // ProjectProductTypeFacets defines model for ProjectProductTypeFacets.
 type ProjectProductTypeFacets struct {
 	All          int `json:"all"`
+	Daum         int `json:"daum"`
 	Domain       int `json:"domain"`
 	Gmail        int `json:"gmail"`
 	GmailVariant int `json:"gmailVariant"`
@@ -13094,6 +14061,21 @@ type CreatedToQuery = time.Time
 // CsrfToken defines model for CsrfToken.
 type CsrfToken = string
 
+// DaumBulkTaskId defines model for DaumBulkTaskId.
+type DaumBulkTaskId = string
+
+// DaumIncludeFacetsQuery defines model for DaumIncludeFacetsQuery.
+type DaumIncludeFacetsQuery = bool
+
+// DaumIncludeTotalQuery defines model for DaumIncludeTotalQuery.
+type DaumIncludeTotalQuery = bool
+
+// DaumLongLivedQuery defines model for DaumLongLivedQuery.
+type DaumLongLivedQuery = bool
+
+// DaumSuffixQuery defines model for DaumSuffixQuery.
+type DaumSuffixQuery = string
+
 // ExpectedAdminResourceVersion defines model for ExpectedAdminResourceVersion.
 type ExpectedAdminResourceVersion = int
 
@@ -13228,7 +14210,7 @@ type GetAdminAllocationParamsType string
 type GetAdminBindingsParams struct {
 	ResourceId int `form:"resourceId" json:"resourceId"`
 
-	// Type Query scope; defaults to one Microsoft resource. Use domain to query a purpose=binding domain resource, or icloud to query the exact current forwarding mailbox of one iCloud resource.
+	// Type Query scope; defaults to one Microsoft resource. Use domain to query a purpose=binding domain resource, or icloud to query the exact current forwarding mailbox of one iCloud resource. Daum uses its linked system mailbox, with current owner, order and pickup-token authorization checked on each read.
 	Type   *GetAdminBindingsParamsType `form:"type,omitempty" json:"type,omitempty"`
 	Search *string                     `form:"search,omitempty" json:"search,omitempty"`
 	Offset *int                        `form:"offset,omitempty" json:"offset,omitempty"`
@@ -13251,7 +14233,7 @@ type GetAdminBindingsParamsType string
 type GetAdminBindingMessageParams struct {
 	ResourceId int `form:"resourceId" json:"resourceId"`
 
-	// Type Association scope; defaults to one Microsoft resource. Use domain for a purpose=binding domain, or icloud for the exact current forwarding mailbox of one iCloud resource.
+	// Type Association scope; defaults to one Microsoft resource. Use domain for a purpose=binding domain, or icloud for the exact current forwarding mailbox of one iCloud resource. Daum requires the exact linked mailbox and current order/token authority.
 	Type *GetAdminBindingMessageParamsType `form:"type,omitempty" json:"type,omitempty"`
 }
 
@@ -13312,6 +14294,154 @@ type GetAdminDashboardParams struct {
 	CreatedFrom *time.Time `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
 	CreatedTo   *time.Time `form:"createdTo,omitempty" json:"createdTo,omitempty"`
 }
+
+// GetAdminDaumResourcesParams defines parameters for GetAdminDaumResources.
+type GetAdminDaumResourcesParams struct {
+	Protocol *DaumProtocol `form:"protocol,omitempty" json:"protocol,omitempty"`
+
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *LimitQuery  `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// AfterId Last ticket id from the previous page.
+	AfterId     *AfterIdQuery       `form:"afterId,omitempty" json:"afterId,omitempty"`
+	CreatedFrom *CreatedFromQuery   `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *CreatedToQuery     `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+	Suffix      *DaumSuffixQuery    `form:"suffix,omitempty" json:"suffix,omitempty"`
+	LongLived   *DaumLongLivedQuery `form:"longLived,omitempty" json:"longLived,omitempty"`
+
+	// IncludeTotal When false, the response omits total and returns only cursor pagination data.
+	IncludeTotal  *DaumIncludeTotalQuery  `form:"includeTotal,omitempty" json:"includeTotal,omitempty"`
+	IncludeFacets *DaumIncludeFacetsQuery `form:"includeFacets,omitempty" json:"includeFacets,omitempty"`
+	OwnerId       *int64                  `form:"ownerId,omitempty" json:"ownerId,omitempty"`
+
+	// Search Resource ID, full mailbox email, exact local part, @suffix, or owner email/nickname.
+	Search  *string                            `form:"search,omitempty" json:"search,omitempty"`
+	Status  *GetAdminDaumResourcesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	ForSale *bool                              `form:"forSale,omitempty" json:"forSale,omitempty"`
+}
+
+// GetAdminDaumResourcesParamsStatus defines parameters for GetAdminDaumResources.
+type GetAdminDaumResourcesParamsStatus string
+
+// PostAdminDaumResourceBatchDisableParams defines parameters for PostAdminDaumResourceBatchDisable.
+type PostAdminDaumResourceBatchDisableParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDaumResourceBatchValidationParams defines parameters for PostAdminDaumResourceBatchValidation.
+type PostAdminDaumResourceBatchValidationParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDaumResourceBatchParams defines parameters for PostAdminDaumResourceBatch.
+type PostAdminDaumResourceBatchParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDaumResourceBatchParamsAction defines parameters for PostAdminDaumResourceBatch.
+type PostAdminDaumResourceBatchParamsAction string
+
+// PostAdminDaumResourceBulkDisableParams defines parameters for PostAdminDaumResourceBulkDisable.
+type PostAdminDaumResourceBulkDisableParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDaumResourceBulkParams defines parameters for PostAdminDaumResourceBulk.
+type PostAdminDaumResourceBulkParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDaumResourceBulkParamsCommand defines parameters for PostAdminDaumResourceBulk.
+type PostAdminDaumResourceBulkParamsCommand string
+
+// PostAdminDaumResourceImportMultipartBody defines parameters for PostAdminDaumResourceImport.
+type PostAdminDaumResourceImportMultipartBody struct {
+	ErrorStrategy *PostAdminDaumResourceImportMultipartBodyErrorStrategy `json:"errorStrategy,omitempty"`
+	File          openapi_types.File                                     `json:"file"`
+	LongLived     *bool                                                  `json:"longLived,omitempty"`
+	OwnerId       int64                                                  `json:"ownerId"`
+	Protocol      *DaumProtocol                                          `json:"protocol,omitempty"`
+}
+
+// PostAdminDaumResourceImportParams defines parameters for PostAdminDaumResourceImport.
+type PostAdminDaumResourceImportParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDaumResourceImportMultipartBodyErrorStrategy defines parameters for PostAdminDaumResourceImport.
+type PostAdminDaumResourceImportMultipartBodyErrorStrategy string
+
+// GetAdminDaumResourceImportItemsParams defines parameters for GetAdminDaumResourceImportItems.
+type GetAdminDaumResourceImportItemsParams struct {
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *int         `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostAdminDaumResourceValidationsParams defines parameters for PostAdminDaumResourceValidations.
+type PostAdminDaumResourceValidationsParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// DeleteAdminDaumResourceParams defines parameters for DeleteAdminDaumResource.
+type DeleteAdminDaumResourceParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PatchAdminDaumResourceParams defines parameters for PatchAdminDaumResource.
+type PatchAdminDaumResourceParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PutAdminDaumResourceCredentialsParams defines parameters for PutAdminDaumResourceCredentials.
+type PutAdminDaumResourceCredentialsParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDaumResourceHistoryParams defines parameters for PostAdminDaumResourceHistory.
+type PostAdminDaumResourceHistoryParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// GetAdminDaumResourceMaintenanceParams defines parameters for GetAdminDaumResourceMaintenance.
+type GetAdminDaumResourceMaintenanceParams struct {
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *LimitQuery  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostAdminDaumResourceRecoverParams defines parameters for PostAdminDaumResourceRecover.
+type PostAdminDaumResourceRecoverParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDaumResourceValidateParams defines parameters for PostAdminDaumResourceValidate.
+type PostAdminDaumResourceValidateParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDaumResourceCommandParams defines parameters for PostAdminDaumResourceCommand.
+type PostAdminDaumResourceCommandParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// PostAdminDaumResourceCommandParamsCommand defines parameters for PostAdminDaumResourceCommand.
+type PostAdminDaumResourceCommandParamsCommand string
 
 // PostAdminDomainMailboxDisableParams defines parameters for PostAdminDomainMailboxDisable.
 type PostAdminDomainMailboxDisableParams struct {
@@ -16403,6 +17533,42 @@ type PatchAdminCardsExpirationJSONRequestBody = AdminCardExpirationBulkRequest
 // PatchAdminCardJSONRequestBody defines body for PatchAdminCard for application/json ContentType.
 type PatchAdminCardJSONRequestBody = UpdateCardRequest
 
+// PostAdminDaumResourceBatchDisableJSONRequestBody defines body for PostAdminDaumResourceBatchDisable for application/json ContentType.
+type PostAdminDaumResourceBatchDisableJSONRequestBody = DaumBatchRequest
+
+// PostAdminDaumResourceBatchValidationJSONRequestBody defines body for PostAdminDaumResourceBatchValidation for application/json ContentType.
+type PostAdminDaumResourceBatchValidationJSONRequestBody = DaumValidationIDsRequest
+
+// PostAdminDaumResourceBatchJSONRequestBody defines body for PostAdminDaumResourceBatch for application/json ContentType.
+type PostAdminDaumResourceBatchJSONRequestBody = DaumBatchRequest
+
+// PostAdminDaumResourceBulkDisableJSONRequestBody defines body for PostAdminDaumResourceBulkDisable for application/json ContentType.
+type PostAdminDaumResourceBulkDisableJSONRequestBody = DaumDisableSelection
+
+// PostAdminDaumResourceBulkJSONRequestBody defines body for PostAdminDaumResourceBulk for application/json ContentType.
+type PostAdminDaumResourceBulkJSONRequestBody = DaumBulkRequest
+
+// PostAdminDaumResourceImportMultipartRequestBody defines body for PostAdminDaumResourceImport for multipart/form-data ContentType.
+type PostAdminDaumResourceImportMultipartRequestBody PostAdminDaumResourceImportMultipartBody
+
+// PostAdminDaumResourceValidationsJSONRequestBody defines body for PostAdminDaumResourceValidations for application/json ContentType.
+type PostAdminDaumResourceValidationsJSONRequestBody = DaumValidationIDsRequest
+
+// DeleteAdminDaumResourceJSONRequestBody defines body for DeleteAdminDaumResource for application/json ContentType.
+type DeleteAdminDaumResourceJSONRequestBody = DaumResourceCommandRequest
+
+// PatchAdminDaumResourceJSONRequestBody defines body for PatchAdminDaumResource for application/json ContentType.
+type PatchAdminDaumResourceJSONRequestBody = DaumResourceEditRequest
+
+// PutAdminDaumResourceCredentialsJSONRequestBody defines body for PutAdminDaumResourceCredentials for application/json ContentType.
+type PutAdminDaumResourceCredentialsJSONRequestBody = DaumCredentialsReplaceRequest
+
+// PostAdminDaumResourceRecoverJSONRequestBody defines body for PostAdminDaumResourceRecover for application/json ContentType.
+type PostAdminDaumResourceRecoverJSONRequestBody = DaumResourceCommandRequest
+
+// PostAdminDaumResourceCommandJSONRequestBody defines body for PostAdminDaumResourceCommand for application/json ContentType.
+type PostAdminDaumResourceCommandJSONRequestBody = DaumResourceCommandRequest
+
 // PostAdminDomainJSONRequestBody defines body for PostAdminDomain for application/json ContentType.
 type PostAdminDomainJSONRequestBody = CreateAdminDomainRequest
 
@@ -18051,6 +19217,72 @@ type ServerInterface interface {
 	// Platform data dashboard (admin only)
 	// (GET /v1/admin/dashboard)
 	GetAdminDashboard(c *gin.Context, params GetAdminDashboardParams)
+	// List Daum resources for administrators
+	// (GET /v1/admin/daum/resources)
+	GetAdminDaumResources(c *gin.Context, params GetAdminDaumResourcesParams)
+	// Disable selected Daum resources synchronously
+	// (POST /v1/admin/daum/resources/batch/disable)
+	PostAdminDaumResourceBatchDisable(c *gin.Context, params PostAdminDaumResourceBatchDisableParams)
+	// Queue Daum validation for selected resources
+	// (POST /v1/admin/daum/resources/batch/validation)
+	PostAdminDaumResourceBatchValidation(c *gin.Context, params PostAdminDaumResourceBatchValidationParams)
+	// Run a lifecycle command for selected Daum resources
+	// (POST /v1/admin/daum/resources/batch/{action})
+	PostAdminDaumResourceBatch(c *gin.Context, action PostAdminDaumResourceBatchParamsAction, params PostAdminDaumResourceBatchParams)
+	// Get a Daum administration bulk task
+	// (GET /v1/admin/daum/resources/bulk-tasks/{taskId})
+	GetAdminDaumResourceBulkTask(c *gin.Context, taskId DaumBulkTaskId)
+	// Disable selected Daum resources synchronously
+	// (POST /v1/admin/daum/resources/bulk/disable)
+	PostAdminDaumResourceBulkDisable(c *gin.Context, params PostAdminDaumResourceBulkDisableParams)
+	// Queue a Daum administration command for selected resources or a filter
+	// (POST /v1/admin/daum/resources/bulk/{command})
+	PostAdminDaumResourceBulk(c *gin.Context, command PostAdminDaumResourceBulkParamsCommand, params PostAdminDaumResourceBulkParams)
+	// Import Daum resources for a selected owner
+	// (POST /v1/admin/daum/resources/imports)
+	PostAdminDaumResourceImport(c *gin.Context, params PostAdminDaumResourceImportParams)
+	// Get an administrator Daum import
+	// (GET /v1/admin/daum/resources/imports/{importId})
+	GetAdminDaumResourceImport(c *gin.Context, importId int64)
+	// Download safe Daum import failure details
+	// (GET /v1/admin/daum/resources/imports/{importId}/failures)
+	GetAdminDaumResourceImportFailures(c *gin.Context, importId int64)
+	// List safe per-line Daum import outcomes for administrators
+	// (GET /v1/admin/daum/resources/imports/{importId}/items)
+	GetAdminDaumResourceImportItems(c *gin.Context, importId int64, params GetAdminDaumResourceImportItemsParams)
+	// Queue Daum validation for selected resources
+	// (POST /v1/admin/daum/resources/validations)
+	PostAdminDaumResourceValidations(c *gin.Context, params PostAdminDaumResourceValidationsParams)
+	// Delete one Daum resource as an administrator
+	// (DELETE /v1/admin/daum/resources/{resourceId})
+	DeleteAdminDaumResource(c *gin.Context, resourceId int64, params DeleteAdminDaumResourceParams)
+	// Get one safe Daum resource
+	// (GET /v1/admin/daum/resources/{resourceId})
+	GetAdminDaumResource(c *gin.Context, resourceId int64)
+	// Edit Daum resource identity or owner
+	// (PATCH /v1/admin/daum/resources/{resourceId})
+	PatchAdminDaumResource(c *gin.Context, resourceId int64, params PatchAdminDaumResourceParams)
+	// List the two fixed aliases of a Daum account
+	// (GET /v1/admin/daum/resources/{resourceId}/aliases)
+	GetAdminDaumResourceAliases(c *gin.Context, resourceId int64)
+	// Replace Daum password as a write-only value
+	// (PUT /v1/admin/daum/resources/{resourceId}/credentials)
+	PutAdminDaumResourceCredentials(c *gin.Context, resourceId int64, params PutAdminDaumResourceCredentialsParams)
+	// Queue Daum history using the current resource version
+	// (POST /v1/admin/daum/resources/{resourceId}/history)
+	PostAdminDaumResourceHistory(c *gin.Context, resourceId int64, params PostAdminDaumResourceHistoryParams)
+	// List Daum maintenance runs for one resource
+	// (GET /v1/admin/daum/resources/{resourceId}/maintenance)
+	GetAdminDaumResourceMaintenance(c *gin.Context, resourceId int64, params GetAdminDaumResourceMaintenanceParams)
+	// Recover a deleted Daum resource
+	// (POST /v1/admin/daum/resources/{resourceId}/recover)
+	PostAdminDaumResourceRecover(c *gin.Context, resourceId int64, params PostAdminDaumResourceRecoverParams)
+	// Queue Daum validate using the current resource version
+	// (POST /v1/admin/daum/resources/{resourceId}/validate)
+	PostAdminDaumResourceValidate(c *gin.Context, resourceId int64, params PostAdminDaumResourceValidateParams)
+	// Run a lifecycle command for one Daum resource
+	// (POST /v1/admin/daum/resources/{resourceId}/{command})
+	PostAdminDaumResourceCommand(c *gin.Context, resourceId int64, command PostAdminDaumResourceCommandParamsCommand, params PostAdminDaumResourceCommandParams)
 	// Disable one generated domain mailbox
 	// (POST /v1/admin/domain-mailboxes/{mailboxId}/disable)
 	PostAdminDomainMailboxDisable(c *gin.Context, mailboxId int, params PostAdminDomainMailboxDisableParams)
@@ -20055,6 +21287,1086 @@ func (siw *ServerInterfaceWrapper) GetAdminDashboard(c *gin.Context) {
 	}
 
 	siw.Handler.GetAdminDashboard(c, params)
+}
+
+// GetAdminDaumResources operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminDaumResources(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminDaumResourcesParams
+
+	// ------------- Optional query parameter "protocol" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "protocol", c.Request.URL.Query(), &params.Protocol, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter protocol: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "afterId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "afterId", c.Request.URL.Query(), &params.AfterId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter afterId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "suffix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "suffix", c.Request.URL.Query(), &params.Suffix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter suffix: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "longLived" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "longLived", c.Request.URL.Query(), &params.LongLived, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter longLived: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "includeTotal" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeTotal", c.Request.URL.Query(), &params.IncludeTotal, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeTotal: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "includeFacets" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeFacets", c.Request.URL.Query(), &params.IncludeFacets, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeFacets: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "ownerId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "ownerId", c.Request.URL.Query(), &params.OwnerId, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ownerId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "forSale" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "forSale", c.Request.URL.Query(), &params.ForSale, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter forSale: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminDaumResources(c, params)
+}
+
+// PostAdminDaumResourceBatchDisable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDaumResourceBatchDisable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDaumResourceBatchDisableParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDaumResourceBatchDisable(c, params)
+}
+
+// PostAdminDaumResourceBatchValidation operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDaumResourceBatchValidation(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDaumResourceBatchValidationParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDaumResourceBatchValidation(c, params)
+}
+
+// PostAdminDaumResourceBatch operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDaumResourceBatch(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "action" -------------
+	var action PostAdminDaumResourceBatchParamsAction
+
+	err = runtime.BindStyledParameterWithOptions("simple", "action", c.Param("action"), &action, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter action: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDaumResourceBatchParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDaumResourceBatch(c, action, params)
+}
+
+// GetAdminDaumResourceBulkTask operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminDaumResourceBulkTask(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId DaumBulkTaskId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", c.Param("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter taskId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminDaumResourceBulkTask(c, taskId)
+}
+
+// PostAdminDaumResourceBulkDisable operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDaumResourceBulkDisable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDaumResourceBulkDisableParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDaumResourceBulkDisable(c, params)
+}
+
+// PostAdminDaumResourceBulk operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDaumResourceBulk(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "command" -------------
+	var command PostAdminDaumResourceBulkParamsCommand
+
+	err = runtime.BindStyledParameterWithOptions("simple", "command", c.Param("command"), &command, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter command: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDaumResourceBulkParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDaumResourceBulk(c, command, params)
+}
+
+// PostAdminDaumResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDaumResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDaumResourceImportParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDaumResourceImport(c, params)
+}
+
+// GetAdminDaumResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminDaumResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminDaumResourceImport(c, importId)
+}
+
+// GetAdminDaumResourceImportFailures operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminDaumResourceImportFailures(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminDaumResourceImportFailures(c, importId)
+}
+
+// GetAdminDaumResourceImportItems operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminDaumResourceImportItems(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminDaumResourceImportItemsParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminDaumResourceImportItems(c, importId, params)
+}
+
+// PostAdminDaumResourceValidations operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDaumResourceValidations(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDaumResourceValidationsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDaumResourceValidations(c, params)
+}
+
+// DeleteAdminDaumResource operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAdminDaumResource(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAdminDaumResourceParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteAdminDaumResource(c, resourceId, params)
+}
+
+// GetAdminDaumResource operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminDaumResource(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminDaumResource(c, resourceId)
+}
+
+// PatchAdminDaumResource operation middleware
+func (siw *ServerInterfaceWrapper) PatchAdminDaumResource(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PatchAdminDaumResourceParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PatchAdminDaumResource(c, resourceId, params)
+}
+
+// GetAdminDaumResourceAliases operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminDaumResourceAliases(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminDaumResourceAliases(c, resourceId)
+}
+
+// PutAdminDaumResourceCredentials operation middleware
+func (siw *ServerInterfaceWrapper) PutAdminDaumResourceCredentials(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PutAdminDaumResourceCredentialsParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PutAdminDaumResourceCredentials(c, resourceId, params)
+}
+
+// PostAdminDaumResourceHistory operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDaumResourceHistory(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDaumResourceHistoryParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDaumResourceHistory(c, resourceId, params)
+}
+
+// GetAdminDaumResourceMaintenance operation middleware
+func (siw *ServerInterfaceWrapper) GetAdminDaumResourceMaintenance(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAdminDaumResourceMaintenanceParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAdminDaumResourceMaintenance(c, resourceId, params)
+}
+
+// PostAdminDaumResourceRecover operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDaumResourceRecover(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDaumResourceRecoverParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDaumResourceRecover(c, resourceId, params)
+}
+
+// PostAdminDaumResourceValidate operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDaumResourceValidate(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDaumResourceValidateParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDaumResourceValidate(c, resourceId, params)
+}
+
+// PostAdminDaumResourceCommand operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminDaumResourceCommand(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "command" -------------
+	var command PostAdminDaumResourceCommandParamsCommand
+
+	err = runtime.BindStyledParameterWithOptions("simple", "command", c.Param("command"), &command, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter command: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminDaumResourceCommandParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminDaumResourceCommand(c, resourceId, command, params)
 }
 
 // PostAdminDomainMailboxDisable operation middleware
@@ -41576,6 +43888,28 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.PATCH(options.BaseURL+"/v1/admin/cards/:cardKey", wrapper.PatchAdminCard)
 	router.GET(options.BaseURL+"/v1/admin/cards/:cardKey/redemptions", wrapper.GetAdminCardRedemptions)
 	router.GET(options.BaseURL+"/v1/admin/dashboard", wrapper.GetAdminDashboard)
+	router.GET(options.BaseURL+"/v1/admin/daum/resources", wrapper.GetAdminDaumResources)
+	router.POST(options.BaseURL+"/v1/admin/daum/resources/batch/disable", wrapper.PostAdminDaumResourceBatchDisable)
+	router.POST(options.BaseURL+"/v1/admin/daum/resources/batch/validation", wrapper.PostAdminDaumResourceBatchValidation)
+	router.POST(options.BaseURL+"/v1/admin/daum/resources/batch/:action", wrapper.PostAdminDaumResourceBatch)
+	router.GET(options.BaseURL+"/v1/admin/daum/resources/bulk-tasks/:taskId", wrapper.GetAdminDaumResourceBulkTask)
+	router.POST(options.BaseURL+"/v1/admin/daum/resources/bulk/disable", wrapper.PostAdminDaumResourceBulkDisable)
+	router.POST(options.BaseURL+"/v1/admin/daum/resources/bulk/:command", wrapper.PostAdminDaumResourceBulk)
+	router.POST(options.BaseURL+"/v1/admin/daum/resources/imports", wrapper.PostAdminDaumResourceImport)
+	router.GET(options.BaseURL+"/v1/admin/daum/resources/imports/:importId", wrapper.GetAdminDaumResourceImport)
+	router.GET(options.BaseURL+"/v1/admin/daum/resources/imports/:importId/failures", wrapper.GetAdminDaumResourceImportFailures)
+	router.GET(options.BaseURL+"/v1/admin/daum/resources/imports/:importId/items", wrapper.GetAdminDaumResourceImportItems)
+	router.POST(options.BaseURL+"/v1/admin/daum/resources/validations", wrapper.PostAdminDaumResourceValidations)
+	router.DELETE(options.BaseURL+"/v1/admin/daum/resources/:resourceId", wrapper.DeleteAdminDaumResource)
+	router.GET(options.BaseURL+"/v1/admin/daum/resources/:resourceId", wrapper.GetAdminDaumResource)
+	router.PATCH(options.BaseURL+"/v1/admin/daum/resources/:resourceId", wrapper.PatchAdminDaumResource)
+	router.GET(options.BaseURL+"/v1/admin/daum/resources/:resourceId/aliases", wrapper.GetAdminDaumResourceAliases)
+	router.PUT(options.BaseURL+"/v1/admin/daum/resources/:resourceId/credentials", wrapper.PutAdminDaumResourceCredentials)
+	router.POST(options.BaseURL+"/v1/admin/daum/resources/:resourceId/history", wrapper.PostAdminDaumResourceHistory)
+	router.GET(options.BaseURL+"/v1/admin/daum/resources/:resourceId/maintenance", wrapper.GetAdminDaumResourceMaintenance)
+	router.POST(options.BaseURL+"/v1/admin/daum/resources/:resourceId/recover", wrapper.PostAdminDaumResourceRecover)
+	router.POST(options.BaseURL+"/v1/admin/daum/resources/:resourceId/validate", wrapper.PostAdminDaumResourceValidate)
+	router.POST(options.BaseURL+"/v1/admin/daum/resources/:resourceId/:command", wrapper.PostAdminDaumResourceCommand)
 	router.POST(options.BaseURL+"/v1/admin/domain-mailboxes/:mailboxId/disable", wrapper.PostAdminDomainMailboxDisable)
 	router.GET(options.BaseURL+"/v1/admin/domains", wrapper.GetAdminDomains)
 	router.POST(options.BaseURL+"/v1/admin/domains", wrapper.PostAdminDomain)

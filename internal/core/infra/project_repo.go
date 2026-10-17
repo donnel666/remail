@@ -284,6 +284,9 @@ func (r *ProjectRepo) CreateWithLog(ctx context.Context, detail *domain.ProjectD
 		if err := r.replaceMicrosoftSuffixBlacklist(ctx, tx, projectModel.ID, detail.MicrosoftSuffixBlacklist); err != nil {
 			return err
 		}
+		if err := r.replaceDaumSuffixBlacklist(ctx, tx, projectModel.ID, detail.DaumSuffixBlacklist); err != nil {
+			return err
+		}
 
 		if log != nil {
 			if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
@@ -399,6 +402,9 @@ func (r *ProjectRepo) UpdateWithLog(ctx context.Context, detail *domain.ProjectD
 		if err := r.replaceMicrosoftSuffixBlacklist(ctx, tx, projectModel.ID, detail.MicrosoftSuffixBlacklist); err != nil {
 			return err
 		}
+		if err := r.replaceDaumSuffixBlacklist(ctx, tx, projectModel.ID, detail.DaumSuffixBlacklist); err != nil {
+			return err
+		}
 		if err := r.replaceProjectAccesses(ctx, tx, projectModel.ID, detail); err != nil {
 			return err
 		}
@@ -446,6 +452,9 @@ func (r *ProjectRepo) ApproveWithConfigAndLog(ctx context.Context, detail *domai
 			return err
 		}
 		if err := r.replaceMicrosoftSuffixBlacklist(ctx, tx, projectModel.ID, detail.MicrosoftSuffixBlacklist); err != nil {
+			return err
+		}
+		if err := r.replaceDaumSuffixBlacklist(ctx, tx, projectModel.ID, detail.DaumSuffixBlacklist); err != nil {
 			return err
 		}
 		if err := r.replaceProjectAccesses(ctx, tx, projectModel.ID, detail); err != nil {
@@ -751,6 +760,8 @@ func (r *ProjectRepo) Facets(ctx context.Context, filter coreapp.ProjectListFilt
 			facets.ProductType.ICloud = row.Count
 		case domain.ProductTypeProto:
 			facets.ProductType.Proto = row.Count
+		case domain.ProductTypeDaum:
+			facets.ProductType.Daum = row.Count
 		}
 	}
 	return facets, nil
@@ -836,6 +847,14 @@ func (r *ProjectRepo) FindDetail(ctx context.Context, projectID uint, userID uin
 	for i := range suffixBlacklistModels {
 		suffixBlacklist[i] = suffixBlacklistModels[i].Suffix
 	}
+	var daumSuffixBlacklistModels []ProjectDaumSuffixBlacklistModel
+	if err := r.db.WithContext(ctx).Where("project_id = ?", project.ID).Order("suffix ASC").Find(&daumSuffixBlacklistModels).Error; err != nil {
+		return nil, fmt.Errorf("list project Daum suffix blacklist: %w", err)
+	}
+	daumSuffixBlacklist := make([]string, len(daumSuffixBlacklistModels))
+	for i := range daumSuffixBlacklistModels {
+		daumSuffixBlacklist[i] = daumSuffixBlacklistModels[i].Suffix
+	}
 	accesses := []domain.ProjectAccess{}
 	if isAdmin && domain.ProjectAccessType(project.AccessType) == domain.ProjectAccessPrivate {
 		accesses, err = r.listAccesses(ctx, project.ID)
@@ -850,6 +869,7 @@ func (r *ProjectRepo) FindDetail(ctx context.Context, projectID uint, userID uin
 		MailRules:                rules,
 		Accesses:                 accesses,
 		MicrosoftSuffixBlacklist: suffixBlacklist,
+		DaumSuffixBlacklist:      daumSuffixBlacklist,
 	}, nil
 }
 
@@ -1305,6 +1325,7 @@ func activeProjectProductTypes() []string {
 		string(domain.ProductTypeGmailVariant),
 		string(domain.ProductTypeICloud),
 		string(domain.ProductTypeProto),
+		string(domain.ProductTypeDaum),
 	}
 }
 
@@ -1363,4 +1384,30 @@ func (r *ProjectRepo) listAccesses(ctx context.Context, projectID uint) ([]domai
 		result[i] = models[i].toDomain()
 	}
 	return result, nil
+}
+
+type ProjectDaumSuffixBlacklistModel struct {
+	ProjectID uint   `gorm:"primaryKey;column:project_id"`
+	Suffix    string `gorm:"primaryKey;type:varchar(255);column:suffix"`
+}
+
+func (ProjectDaumSuffixBlacklistModel) TableName() string {
+	return "project_daum_suffix_blacklists"
+}
+
+func (r *ProjectRepo) replaceDaumSuffixBlacklist(ctx context.Context, tx *gorm.DB, projectID uint, suffixes []string) error {
+	if err := tx.WithContext(ctx).Where("project_id = ?", projectID).Delete(&ProjectDaumSuffixBlacklistModel{}).Error; err != nil {
+		return fmt.Errorf("replace project Daum suffix blacklist: %w", err)
+	}
+	if len(suffixes) == 0 {
+		return nil
+	}
+	models := make([]ProjectDaumSuffixBlacklistModel, len(suffixes))
+	for i, suffix := range suffixes {
+		models[i] = ProjectDaumSuffixBlacklistModel{ProjectID: projectID, Suffix: suffix}
+	}
+	if err := tx.WithContext(ctx).Create(&models).Error; err != nil {
+		return fmt.Errorf("create project Daum suffix blacklist: %w", err)
+	}
+	return nil
 }

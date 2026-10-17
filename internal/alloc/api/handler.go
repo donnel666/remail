@@ -134,12 +134,14 @@ func (h *Handler) GetProjectInventory(c *gin.Context) {
 		Gmail:                      gmailInventoryResponse(stats.Gmail),
 		ICloud:                     icloudInventoryResponse(stats.ICloud),
 		Proto:                      protoInventoryResponse(stats.Proto),
+		Daum:                       daumInventoryResponse(stats.Daum),
 		TotalAvailable:             stats.TotalAvailable,
 		ActiveMicrosoftAllocations: stats.ActiveMicrosoftAllocations,
 		ActiveDomainAllocations:    stats.ActiveDomainAllocations,
 		ActiveGmailAllocations:     stats.ActiveGmailAllocations,
 		ActiveICloudAllocations:    stats.ActiveICloudAllocations,
 		ActiveProtoAllocations:     stats.ActiveProtoAllocations,
+		ActiveDaumAllocations:      stats.ActiveDaumAllocations,
 	})
 }
 
@@ -374,5 +376,13 @@ func writeAllocError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"message": "Allocation conflict, please retry.", "requestId": rid})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "An unexpected error occurred.", "requestId": rid})
+	}
+}
+
+func daumInventoryResponse(stats allocapp.DaumInventoryStats) DaumInventoryResponse {
+	return DaumInventoryResponse{
+		Enabled: stats.Enabled, EligibleResources: stats.EligibleResources,
+		ExplicitAliasAvailable: stats.ExplicitAliasAvailable, MainAvailable: stats.MainAvailable, PublicAvailable: stats.PublicAvailable,
+		TotalAvailable: stats.TotalAvailable,
 	}
 }

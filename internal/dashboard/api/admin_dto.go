@@ -57,13 +57,21 @@ type AdminDashboardStats struct {
 	ICloudPurchaseActivationSuccessRate          float64 `json:"icloudPurchaseActivationSuccessRate"`
 	ICloudAveragePurchaseActivationSeconds       int     `json:"icloudAveragePurchaseActivationSeconds"`
 	ProtoTotalEmails                             int     `json:"protoTotalEmails"`
+	DaumTotalEmails                              int     `json:"daumTotalEmails"`
 	ProtoAvailableEmails                         int     `json:"protoAvailableEmails"`
+	DaumAvailableEmails                          int     `json:"daumAvailableEmails"`
 	ProtoCodeReceipts                            int     `json:"protoCodeReceipts"`
+	DaumCodeReceipts                             int     `json:"daumCodeReceipts"`
 	ProtoCodeSuccessRate                         float64 `json:"protoCodeSuccessRate"`
+	DaumCodeSuccessRate                          float64 `json:"daumCodeSuccessRate"`
 	ProtoAverageCodeReceiptSeconds               int     `json:"protoAverageCodeReceiptSeconds"`
+	DaumAverageCodeReceiptSeconds                int     `json:"daumAverageCodeReceiptSeconds"`
 	ProtoPurchaseActivations                     int     `json:"protoPurchaseActivations"`
+	DaumPurchaseActivations                      int     `json:"daumPurchaseActivations"`
 	ProtoPurchaseActivationSuccessRate           float64 `json:"protoPurchaseActivationSuccessRate"`
+	DaumPurchaseActivationSuccessRate            float64 `json:"daumPurchaseActivationSuccessRate"`
 	ProtoAveragePurchaseActivationSeconds        int     `json:"protoAveragePurchaseActivationSeconds"`
+	DaumAveragePurchaseActivationSeconds         int     `json:"daumAveragePurchaseActivationSeconds"`
 	DomainTotalMailboxes                         int     `json:"domainTotalMailboxes"`
 	DomainAvailableMailboxes                     int     `json:"domainAvailableMailboxes"`
 	DomainCodeReceipts                           int     `json:"domainCodeReceipts"`
@@ -104,10 +112,15 @@ type AdminDashboardTrendPoint struct {
 	ICloudCodeSuccessRate                 float64 `json:"icloudCodeSuccessRate"`
 	ICloudAverageCodeReceiptSeconds       int     `json:"icloudAverageCodeReceiptSeconds"`
 	ProtoTotalEmails                      int     `json:"protoTotalEmails"`
+	DaumTotalEmails                       int     `json:"daumTotalEmails"`
 	ProtoAvailableEmails                  int     `json:"protoAvailableEmails"`
+	DaumAvailableEmails                   int     `json:"daumAvailableEmails"`
 	ProtoReceivedCodes                    int     `json:"protoReceivedCodes"`
+	DaumReceivedCodes                     int     `json:"daumReceivedCodes"`
 	ProtoCodeSuccessRate                  float64 `json:"protoCodeSuccessRate"`
+	DaumCodeSuccessRate                   float64 `json:"daumCodeSuccessRate"`
 	ProtoAverageCodeReceiptSeconds        int     `json:"protoAverageCodeReceiptSeconds"`
+	DaumAverageCodeReceiptSeconds         int     `json:"daumAverageCodeReceiptSeconds"`
 	DomainTotalMailboxes                  int     `json:"domainTotalMailboxes"`
 	DomainAvailableMailboxes              int     `json:"domainAvailableMailboxes"`
 	DomainReceivedCodes                   int     `json:"domainReceivedCodes"`

@@ -286,6 +286,52 @@ export function AdminDashboardSummaryCards({
       ],
     },
     {
+	      color: "bg-[color-mix(in_oklch,#f59e0b_12%,var(--semi-color-bg-0))]",
+	      title: groupTitle(<Mail size={16} />, t("Daum Emails")),
+	      items: [
+	        {
+	          avatarColor: "cyan",
+	          icon: <Mail size={16} />,
+	          title: t("Total Daum emails"),
+	          trendColor: "#f59e0b",
+	          trendData: trend.map((point) => point.daumTotalEmails),
+	          value: formatCount(stats?.daumTotalEmails),
+	        },
+	        {
+	          avatarColor: "green",
+	          icon: <MailCheck size={16} />,
+	          title: t("Available Daum emails"),
+	          trendColor: "#22a06b",
+	          trendData: trend.map((point) => point.daumAvailableEmails),
+	          value: formatCount(stats?.daumAvailableEmails),
+	        },
+	        {
+	          avatarColor: "orange",
+	          icon: <IconTextStroked />,
+	          title: t("Code-purchase count"),
+	          trendColor: "#f59e0b",
+	          value: `${formatCount(stats?.daumCodeReceipts)} - ${formatCount(stats?.daumPurchaseActivations)}`,
+	        },
+
+        {
+	          avatarColor: "green",
+	          icon: <IconPulse />,
+	          title: t("Code-purchase success rate"),
+	          trendColor: "#22a06b",
+	          value: `${formatRate(stats?.daumCodeSuccessRate)} - ${formatRate(stats?.daumPurchaseActivationSuccessRate)}`,
+	        },
+
+        {
+	          avatarColor: "purple",
+	          icon: <IconStopwatchStroked />,
+	          title: t("Code-purchase average time"),
+	          trendColor: "#8b5cf6",
+	          value: `${stats?.daumAverageCodeReceiptSeconds ?? 0}s - ${stats?.daumAveragePurchaseActivationSeconds ?? 0}s`,
+	        },
+
+      ],
+    },
+    {
       color: "bg-[color-mix(in_oklch,#8b5cf6_12%,var(--semi-color-bg-0))]",
       title: groupTitle(<Mail size={16} />, t("Gmail Emails")),
       items: [

@@ -213,3 +213,60 @@ describe("Proto product hierarchy", () => {
     expect(mocks.createOrderBatch).not.toHaveBeenCalled();
   });
 });
+
+const daumProduct: ProjectProductSummary = { ...product, type: "daum", suffixes: [
+  { suffix: "daum.net", totalAvailable: 4, publicAvailable: 2 },
+  { suffix: "hanmail.net", totalAvailable: 5, publicAvailable: 3 },
+  { suffix: "hanmail2.net", totalAvailable: 3, publicAvailable: 2 },
+] };
+
+describe("Daum fixed suffix products", () => {
+  it("keeps one aggregate category and three separately priced-by-category address inventories", () => {
+    const products = toWorkbenchProducts(1, daumProduct);
+    expect(products.map((item) => item.emailSuffix)).toEqual(["daum", "daum.net", "hanmail.net", "hanmail2.net"]);
+    expect(products.map((item) => item.purchaseInventory)).toEqual([12, 4, 5, 3]);
+    expect(products.every((item) => item.codePrice === 1.25 && item.purchasePrice === 2.5)).toBe(true);
+    const next = mergeProjectInventory({ products } as WorkbenchProject, {
+      projectId: 1, totalAvailable: 2, products: [{ productType: "daum", totalAvailable: 2, publicAvailable: 1,
+        suffixes: [{ suffix: "hanmail2.net", totalAvailable: 2, publicAvailable: 1 }] }],
+    });
+    expect(next.products.map((item) => [item.emailSuffix, item.purchaseInventory])).toEqual([
+      ["daum", 2], ["daum.net", 0], ["hanmail.net", 0], ["hanmail2.net", 2],
+    ]);
+    expect(mergeProjectInventory(next, { projectId: 1, totalAvailable: 0, products: [] }).products).toEqual(next.products);
+  });
+
+  it("always exposes three known suffixes with zero fallback inventory and ignores unknown suffixes", () => {
+    const products = toWorkbenchProducts(1, { ...daumProduct, suffixes: [
+      { suffix: "fake.daum.net", totalAvailable: 500, publicAvailable: 500 },
+      { suffix: "@hanmail2.net", totalAvailable: 1, publicAvailable: 1 },
+    ] });
+    expect(products.map((item) => [item.emailSuffix, item.codeInventory])).toEqual([
+      ["daum", 12], ["daum.net", 0], ["hanmail.net", 0], ["hanmail2.net", 1],
+    ]);
+  });
+
+  it.each(["purchase", "code"] as ServiceMode[])("submits random and all exact suffixes through %s checkout", async (serviceMode) => {
+    mocks.listProjects.mockResolvedValue({ items: [{ ...project, products: [daumProduct] }] });
+    mocks.inventory.mockResolvedValue({ projectId: 1, totalAvailable: 12, products: [
+      { ...inventory.products[0], productType: "daum", suffixes: daumProduct.suffixes },
+    ] });
+    const { container } = render(<Dashboard />);
+    await waitFor(() => expect(productRows(container)).toHaveLength(4));
+    if (serviceMode === "code") fireEvent.click(screen.getByRole("button", { name: "Code receiving" }));
+    for (const selector of ["daum", "daum.net", "hanmail.net", "hanmail2.net"]) {
+      const suffix = selector === "daum" ? "Daum" : "@" + selector;
+      const row = productRows(container).find((item) => item.querySelector(".workbench-product-suffix")?.textContent === suffix)!;
+      fireEvent.click(row);
+      expect(screen.getByTestId("selected-selector")).toHaveTextContent(selector);
+      const create = screen.getByRole("button", { name: "Create fixture order" });
+      fireEvent.click(create);
+      await waitFor(() => expect(mocks.createOrder).toHaveBeenLastCalledWith(
+        { projectId: 1, emailSuffix: selector }, expect.objectContaining({ serviceMode, supply: "private_first" }),
+      ));
+      await waitFor(() => expect(create).toBeEnabled());
+    }
+    expect(mocks.createOrder.mock.calls.map(([payload]) => payload.emailSuffix)).toEqual(["daum", "daum.net", "hanmail.net", "hanmail2.net"]);
+    expect(mocks.toastError).not.toHaveBeenCalled();
+  });
+});

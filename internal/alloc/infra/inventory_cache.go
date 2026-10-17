@@ -80,7 +80,7 @@ func (c *InventoryCache) GetProductInventorySnapshots(ctx context.Context, proje
 		// Tolerate snapshots written without the mode-specific fields.
 		for itemIndex := range totals.Items {
 			item := &totals.Items[itemIndex]
-			if item.ProductType != coredomain.ProductTypeGmail && item.ProductType != coredomain.ProductTypeGmailVariant && item.ProductType != coredomain.ProductTypeICloud && item.ProductType != coredomain.ProductTypeProto {
+			if item.ProductType != coredomain.ProductTypeGmail && item.ProductType != coredomain.ProductTypeGmailVariant && item.ProductType != coredomain.ProductTypeICloud && item.ProductType != coredomain.ProductTypeProto && item.ProductType != coredomain.ProductTypeDaum {
 				continue
 			}
 			if item.CodeAvailable == nil {

@@ -129,7 +129,7 @@ export async function listAdminMicrosoftAllocations(
   offset = 0,
   limit = 20,
   signal?: AbortSignal,
-  resourceType: "microsoft" | "gmail" | "icloud" = "microsoft"
+  resourceType: "microsoft" | "gmail" | "icloud" | "daum" = "microsoft"
 ): Promise<AdminMicrosoftAllocationListResponse> {
   return unwrap(
     await client.GET("/v1/admin/allocations", {
@@ -389,7 +389,7 @@ export async function createAdminMicrosoftExplicitAlias(
 
 export async function fetchAdminMicrosoftMail(
   resourceId: number,
-  resourceType: "microsoft" | "gmail" | "icloud" = "microsoft"
+  resourceType: "microsoft" | "gmail" | "icloud" | "daum" = "microsoft"
 ): Promise<AdminMicrosoftTaskAcceptedResponse> {
   return unwrap(
     await client.POST("/v1/admin/resources/{resourceId}/messages/fetch", {
@@ -467,7 +467,7 @@ export async function getAdminMicrosoftTask(
   );
 }
 
-async function waitForAdminMicrosoftTask(
+export async function waitForAdminMicrosoftTask(
   task: AdminMicrosoftAsyncTask,
   options: {
     intervalMs?: number;
@@ -508,7 +508,7 @@ export async function listAdminMicrosoftMessages(
   limit = 100,
   cursor?: AdminMicrosoftMessageCursor,
   signal?: AbortSignal,
-  resourceType: "microsoft" | "gmail" | "icloud" = "microsoft"
+  resourceType: "microsoft" | "gmail" | "icloud" | "daum" = "microsoft"
 ): Promise<AdminMicrosoftMessageListResponse> {
   return unwrap(
     await client.GET("/v1/admin/messages", {
@@ -533,7 +533,7 @@ export async function getAdminMicrosoftMessage(
   resourceId: number,
   messageId: number,
   signal?: AbortSignal,
-  resourceType: "microsoft" | "gmail" | "icloud" = "microsoft"
+  resourceType: "microsoft" | "gmail" | "icloud" | "daum" = "microsoft"
 ): Promise<AdminMicrosoftMessageDetail> {
   return unwrap(
     await client.GET("/v1/admin/messages/{messageId}", {
@@ -549,7 +549,7 @@ export async function listAdminMicrosoftBindingMessages(
   limit = 100,
   cursor?: AdminMicrosoftMessageCursor,
   signal?: AbortSignal,
-  resourceType: "microsoft" | "icloud" = "microsoft"
+  resourceType: "microsoft" | "icloud" | "daum" = "microsoft"
 ): Promise<AdminMicrosoftBindingMessageListResponse> {
   return unwrap(
     await client.GET("/v1/admin/bindings", {
@@ -574,7 +574,7 @@ export async function getAdminMicrosoftBindingMessage(
   resourceId: number,
   messageId: number,
   signal?: AbortSignal,
-  resourceType: "microsoft" | "icloud" = "microsoft"
+  resourceType: "microsoft" | "icloud" | "daum" = "microsoft"
 ): Promise<AdminMicrosoftAuxiliaryMessageDetail> {
   return unwrap(
     await client.GET("/v1/admin/bindings/messages/{messageId}", {
