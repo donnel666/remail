@@ -74,20 +74,26 @@ function ResourceOverview({ detail, t }: { detail: AdminDaumResourceDetail; t: T
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <InfoItem label={t("Resource ID")} value={<span className="font-mono">#{detail.id}</span>} />
         <InfoItem label={t("Email")} value={<CopyableTableText copiedText={t("Copied")} text={detail.emailAddress} />} />
-        <InfoItem label={t("Kakao account email")} value={detail.kakaoEmail ? <CopyableTableText copiedText={t("Copied")} text={detail.kakaoEmail} /> : t("Not configured")} />
-        <InfoItem label={t("Auxiliary pickup email")} value={detail.bindingAddress ? <CopyableTableText copiedText={t("Copied")} text={detail.bindingAddress} /> : t("Not configured")} />
         <InfoItem label={t("Suffix")} value={detail.suffix} />
+        <InfoItem label={t("Auxiliary pickup email")} value={detail.bindingAddress ? <CopyableTableText copiedText={t("Copied")} text={detail.bindingAddress} /> : <span className="text-[var(--semi-color-text-2)]">{t("Not configured")}</span>} />
+        <InfoItem label={t("Kakao account email")} value={detail.kakaoEmail ? <CopyableTableText copiedText={t("Copied")} text={detail.kakaoEmail} /> : <span className="text-[var(--semi-color-text-2)]">{t("Not configured")}</span>} />
         <ResourceProxyDiagnostics bindings={detail.proxyBindings ?? []} t={t} />
-        <InfoItem label={t("Latest task")} value={detail.activeTask ? renderTaskStatusTag(detail.activeTask.status, t) : <Tag color="grey">{t("Idle")}</Tag>} />
         <InfoItem label={t("Owner")} value={<OwnerIdentity owner={detail.owner} ownerId={detail.ownerUserId} t={t} />} />
         <InfoItem label={t("Status")} value={renderStatusTag(detail.status, t, detail.lastSafeError)} />
         <InfoItem label={t("Private")} value={<Tag color={!detail.forSale ? "green" : "grey"} shape="circle" size="small">{t(detail.forSale ? "No" : "Yes")}</Tag>} />
         <InfoItem label={t("Long-lived")} value={<Tag color={detail.longLived ? "green" : "grey"} shape="circle" size="small">{t(detail.longLived ? "Yes" : "No")}</Tag>} />
-        <InfoItem label={t("Quality score")} value={detail.qualityScore + "/100"} />
+        <InfoItem label={t("Mail protocol")} value={<Tag color="blue" shape="circle" size="small">{detail.protocol.toUpperCase()}</Tag>} />
+        <InfoItem label={t("Quality score")} value={`${detail.qualityScore}/100`} />
         <InfoItem label={t("Created at")} value={formatTime(detail.createdAt)} />
         <InfoItem label={t("Updated at")} value={formatTime(detail.updatedAt)} />
         <InfoItem label={t("Last allocated")} value={formatTime(detail.lastAllocatedAt)} />
-        <InfoItem label={t("Version")} value={detail.version} />
+      </div>
+    </section>
+    <section>
+      <div className="mb-3 text-sm font-semibold text-[var(--semi-color-text-0)]">{t("Operational summary")}</div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <InfoItem label={t("Explicit aliases")} value={detail.aliases.length} />
+        <InfoItem label={t("Latest task")} value={detail.activeTask ? renderTaskStatusTag(detail.activeTask.status, t) : <Tag color="grey" shape="circle" size="small">{t("Idle")}</Tag>} />
       </div>
     </section>
     {detail.lastSafeError ? <section>
@@ -96,26 +102,29 @@ function ResourceOverview({ detail, t }: { detail: AdminDaumResourceDetail; t: T
     </section> : null}
   </div>;
 }
+
 function CredentialDiagnostics({ detail, onReplace, t }: { detail: AdminDaumResourceDetail; onReplace: () => void; t: TFunction }) {
-  return <section>
-    <div className="mb-3 flex items-center justify-between gap-3">
-      <div>
-        <div className="text-sm font-semibold text-[var(--semi-color-text-0)]">{t("Credential configuration")}</div>
-        <div className="mt-0.5 text-xs text-[var(--semi-color-text-2)]">{t("Only safe configuration flags are visible. Credential values are never returned.")}</div>
+  const bindingStatus = detail.bindingStatus === "linked" ? "Linked" : detail.bindingStatus === "conflict" ? "Binding conflict" : detail.bindingStatus === "unavailable" ? "Unavailable" : "Not linked";
+  return <div className="space-y-5">
+    <section>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-[var(--semi-color-text-0)]">{t("Credential configuration")}</div>
+          <div className="mt-0.5 text-xs text-[var(--semi-color-text-2)]">{t("Only safe configuration flags are visible. Credential values are never returned.")}</div>
+        </div>
+        <Button disabled={detail.status === "deleted"} onClick={onReplace} size="small" type="primary">{t("Replace credentials")}</Button>
       </div>
-      <Button disabled={detail.status === "deleted"} onClick={onReplace} size="small" type="primary">{t("Replace credentials")}</Button>
-    </div>
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      <InfoItem label={t("Login password")} value={<ConfiguredTag configured={detail.credentials.passwordConfigured} t={t} />} />
-      <InfoItem label={t("APP password")} value={<ConfiguredTag configured={detail.credentials.appPasswordConfigured} t={t} />} />
-      <InfoItem label={t("Mail protocol")} value={detail.protocol.toUpperCase()} />
-      <InfoItem label={t("Credential revision")} value={detail.credentials.revision} />
-      <InfoItem label={t("Credential updated at")} value={formatTime(detail.credentials.updatedAt)} />
-      <InfoItem label={t("Validation generation")} value={detail.validationGeneration} />
-      <InfoItem label={t("Validation failures")} value={detail.validationFailures} />
-      <InfoItem label={t("Last checked at")} value={formatTime(detail.lastCheckedAt)} />
-    </div>
-  </section>;
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <InfoItem label={t("Login password")} value={<ConfiguredTag configured={detail.credentials.passwordConfigured} t={t} />} />
+        <InfoItem label={t("APP password")} value={<ConfiguredTag configured={detail.credentials.appPasswordConfigured} t={t} />} />
+        <InfoItem label={t("remail pickup URL")} value={<ConfiguredTag configured={detail.pickupUrlConfigured} t={t} />} />
+        <InfoItem label={t("Credential revision")} value={detail.credentials.revision} />
+        <InfoItem label={t("Credential updated at")} value={formatTime(detail.credentials.updatedAt)} />
+        <InfoItem label={t("Binding status")} value={<Tag color={detail.bindingStatus === "linked" ? "green" : "grey"} shape="circle" size="small">{t(bindingStatus)}</Tag>} />
+      </div>
+      {detail.bindingLastSafeError ? <div className="mt-3 rounded-lg border border-[var(--semi-color-warning-light-active)] bg-[var(--semi-color-warning-light-default)] px-3 py-2 text-sm text-[var(--semi-color-text-0)]">{detail.bindingLastSafeError}</div> : null}
+    </section>
+  </div>;
 }
 
 export function ServerPaginatedDrawerTable({
@@ -448,7 +457,11 @@ function TaskDiagnostics({
       Toast.success(t(successKey));
       setPage(1);
       setRefreshKey((value) => value + 1);
-      await refreshRef.current();
+      try {
+        await refreshRef.current();
+      } catch (refreshError) {
+        if (!controller.signal.aborted) Toast.error(getIamErrorMessage(t, refreshError, "Admin Daum resources load failed."));
+      }
     } catch (error) {
       if (controller.signal.aborted) return;
       Toast.error(getIamErrorMessage(t, error, "Daum resource operation failed."));
@@ -594,30 +607,25 @@ function TaskDiagnostics({
   );
 }
 
-function BindingDiagnostics({ detail, t }: { detail: AdminDaumResourceDetail; t: TFunction }) {
-  const statusLabel = detail.bindingStatus === "linked" ? "Linked" : detail.bindingStatus === "conflict" ? "Binding conflict" : detail.bindingStatus === "unavailable" ? "Unavailable" : "Not linked";
-  return <section>
-    <div className="mb-3 text-sm font-semibold text-[var(--semi-color-text-0)]">{t("Auxiliary mailbox")}</div>
-    <div className="grid gap-3 sm:grid-cols-3">
-      <InfoItem label={t("Auxiliary pickup email")} value={detail.bindingAddress ? <CopyableTableText copiedText={t("Copied")} text={detail.bindingAddress} /> : t("Not configured")} />
-      <InfoItem label={t("Kakao account email")} value={detail.kakaoEmail ? <CopyableTableText copiedText={t("Copied")} text={detail.kakaoEmail} /> : t("Not configured")} />
-      <InfoItem label={t("Binding status")} value={<Tag color={detail.bindingStatus === "linked" ? "green" : "grey"}>{t(statusLabel)}</Tag>} />
-      <InfoItem label={t("remail pickup URL")} value={<ConfiguredTag configured={detail.pickupUrlConfigured} t={t} />} />
-    </div>
-    {detail.bindingLastSafeError ? <div role="status" className="mt-3 text-sm text-[var(--semi-color-warning)]">{detail.bindingLastSafeError}</div> : null}
-    <div className="mt-2 text-xs text-[var(--semi-color-text-2)]">{t("Auxiliary association is independent of Daum mail access. Existing pickup links remain valid.")}</div>
-  </section>;
-}
-
 function FixedAliasesPanel({ detail, t }: { detail: AdminDaumResourceDetail; t: TFunction }) {
-  return <div>
-    <div className="mb-4 rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-2 text-sm text-[var(--semi-color-text-2)]">{t("Daum fixed aliases share one inbox. Orders and inventory remain separated by the complete delivery address.")}</div>
-    <Table rowKey="id" size="small" pagination={false} scroll={{ x: 550 }} dataSource={detail.aliases ?? []} columns={[
+  const [pageSize, setPageSize] = useSharedPageSize();
+  const [page, setPage] = useState(1);
+  const aliases = detail.aliases ?? [];
+  return <ServerPaginatedDrawerTable
+    columns={[
       { title: t("Explicit alias"), dataIndex: "email", render: (value: string) => <CopyableTableText copiedText={t("Copied")} text={value} /> },
-      { title: t("Suffix"), dataIndex: "suffix", width: 150 },
-      { title: t("Status"), dataIndex: "status", width: 120, render: (value: string) => <Tag color={value === "normal" || value === "active" ? "green" : "grey"}>{t(value === "normal" || value === "active" ? "Normal" : value === "disabled" ? "Disabled" : value === "deleted" ? "Deleted" : "Unavailable")}</Tag> },
-    ]} />
-  </div>;
+      { title: t("Created at"), dataIndex: "createdAt", width: 220, render: (value: string) => formatTime(value) },
+    ]}
+    dataSource={aliases.slice((page - 1) * pageSize, page * pageSize)}
+    emptyDescription={t("No aliases yet")}
+    loading={false}
+    onPageChange={setPage}
+    onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+    page={page}
+    pageSize={pageSize}
+    t={t}
+    total={aliases.length}
+  />;
 }
 
 export function DaumDetailSheet({
@@ -675,9 +683,9 @@ export function DaumDetailSheet({
               <Tabs.TabPane itemKey="basic" tab={t("Basic info")} />
               <Tabs.TabPane itemKey="orders" tab={t("Orders")} />
               <Tabs.TabPane itemKey="explicit" tab={t("Explicit aliases")} />
-              <Tabs.TabPane itemKey="auxiliary" tab={t("Auxiliary mailbox")} />
               <Tabs.TabPane itemKey="tasks" tab={t("Task details")} />
               <Tabs.TabPane itemKey="mails" tab={t("Mailbox")} />
+              <Tabs.TabPane itemKey="auxiliary" tab={t("Auxiliary mailbox")} />
             </Tabs>
           </div>
 
@@ -686,12 +694,31 @@ export function DaumDetailSheet({
               <div className="space-y-6">
                 <ResourceOverview detail={detail} t={t} />
                 <CredentialDiagnostics detail={detail} onReplace={onReplaceCredentials} t={t} />
-                <BindingDiagnostics detail={detail} t={t} />
               </div>
             ) : null}
             {activeTab === "orders" ? <RelatedOrdersTable resourceId={detail.id} t={t} /> : null}
             {activeTab === "explicit" ? <FixedAliasesPanel detail={detail} t={t} /> : null}
-            {activeTab === "auxiliary" ? <div className="space-y-4"><BindingDiagnostics detail={detail} t={t} />{detail.bindingAddress ? <ResourceMailsPanel key={`daum-auxiliary:${detail.id}:${detail.version}`} auxiliary extraOffset={120} hideMailboxMeta fetchEnabled={false} resourceType="daum" resourceId={detail.id} t={t} /> : <Empty description={t("No auxiliary mailbox configured")} style={{ padding: 32 }} />}</div> : null}
+            {activeTab === "auxiliary" ? (
+              detail.bindingAddress ? (
+                <>
+                  <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+                    <span className="text-[var(--semi-color-text-2)]">{t("Auxiliary email")}</span>
+                    <CopyableTableText copiedText={t("Copied")} text={detail.bindingAddress} />
+                  </div>
+                  <ResourceMailsPanel
+                    key={`daum-auxiliary:${detail.id}:${detail.version}`}
+                    auxiliary
+                    emptyDescription={t("No auxiliary mail yet")}
+                    extraOffset={40}
+                    hideMailboxMeta
+                    fetchEnabled={false}
+                    resourceType="daum"
+                    resourceId={detail.id}
+                    t={t}
+                  />
+                </>
+              ) : <Empty description={t("No auxiliary mailbox configured")} style={{ padding: 32 }} />
+            ) : null}
             {activeTab === "tasks" ? (
               <TaskDiagnostics detail={detail} onRefresh={onRefresh} t={t} />
             ) : null}

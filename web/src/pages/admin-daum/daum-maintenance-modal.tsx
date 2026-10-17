@@ -114,21 +114,21 @@ export function DaumMaintenanceModal({
   }> = [
     {
       action: validateAdminDaumResource,
-      description: "Verify Daum mail access using the configured protocol and APP password, check fixed aliases, then identify historical project usage.",
+      description: "Re-run Daum resource health validation and update the resource result.",
       disabled: target.status === "disabled" || target.status === "deleted",
       disabledReason: "Enable the resource before validation.",
       icon: ShieldCheck,
       key: "validate",
       label: "Validate resource",
-      status: latest.get("validation")?.status ?? validationStatus(target),
+      status: validationStatus(target),
       success: "Resource validation submitted.",
       updatedAt: target.updatedAt,
     },
     {
       action: scanAdminDaumProjects,
-      description: "Scan Daum mail history and record project usage for each complete recipient address. IMAP is required for complete history.",
-      disabled: target.status !== "normal" && target.status !== "identifying",
-      disabledReason: "Project scanning requires a validated resource.",
+      description: "Scan full Inbox and Junk history and restore existing project relationships.",
+      disabled: (target.status !== "normal" && target.status !== "identifying") || !target.appPasswordConfigured,
+      disabledReason: "Project scanning requires a normal resource with an App Password.",
       icon: ScanSearch,
       key: "history",
       label: "Scan projects",
@@ -145,7 +145,8 @@ export function DaumMaintenanceModal({
     try {
       await selectedAction.action(target.id);
       Toast.success(t(selectedAction.success));
-      await onCompleted();
+      try { await onCompleted(); }
+      catch (error) { Toast.error(getIamErrorMessage(t, error, "Admin Daum resources load failed.")); }
       onCancel();
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Daum resource operation failed."));

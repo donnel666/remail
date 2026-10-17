@@ -302,7 +302,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		daumMod.Service.Protocol = daumClient
 		daumMod.Service.Proxies = proxyMod.ProxyUseCase
 		daumMod.ProxyBindings = proxyapi.NewAdminResourceProxyBindingQueryAdapter(proxyMod.AdminResourceBindings)
-		daumMod.Tasks = governanceMod.CoreTaskQuery
+		daumMod.Tasks = governanceapi.NewCoreTaskQueryAdapter(governanceMod.Tasks, governanceapp.AdminTaskBizDaumResource)
 		daumMod.ValidateOwner = func(ctx context.Context, ownerID uint) (bool, error) {
 			owner, err := iamMod.AdminResourceOwners.ValidateTargetOwner(ctx, ownerID)
 			return owner != nil && owner.ID != 0 && owner.Enabled, err

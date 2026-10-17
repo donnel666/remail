@@ -35,7 +35,7 @@ func (p *daumNetworkProxies) ReportFailure(_ context.Context, id uint, _ string)
 	return nil
 }
 
-func TestDaumNetworkMatchesMicrosoftRoutingAndFailureFeedback(t *testing.T) {
+func TestDaumNetworkUsesSharedRoutingAndFailureFeedbackWithIPv4(t *testing.T) {
 	proxies := &daumNetworkProxies{}
 	calls := 0
 	s := &Service{Proxies: proxies, Protocol: daumValidationClientStub{fetch: func(_ context.Context, c protocol.Credentials, _ protocol.FetchRequest) (protocol.FetchResult, error) {
@@ -51,7 +51,7 @@ func TestDaumNetworkMatchesMicrosoftRoutingAndFailureFeedback(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, proxies.requests, 2)
 	require.Equal(t, "user@daum.net", proxies.requests[0].Key)
-	require.Equal(t, proxydomain.ProxyIPv6, proxies.requests[0].IPVersion)
+	require.Equal(t, proxydomain.ProxyIPv4, proxies.requests[0].IPVersion)
 	require.Equal(t, proxydomain.ProxyPurposeFetch, proxies.requests[0].Purpose)
 	require.True(t, proxies.requests[0].AllowSystemFallback)
 	require.Equal(t, proxies.requests[0].RequestID, proxies.requests[1].RequestID)
@@ -63,6 +63,41 @@ func TestDaumNetworkMatchesMicrosoftRoutingAndFailureFeedback(t *testing.T) {
 	require.Equal(t, proxydomain.ProxyIPv4, proxies.requests[0].IPVersion)
 	require.Equal(t, proxydomain.ProxyPurposeAuth, proxies.requests[0].Purpose)
 	require.Equal(t, "validation-request", proxies.requests[0].RequestID)
+}
+
+func TestDaumAllOperationsAndRetriesAcquireIPv4(t *testing.T) {
+	for _, protocolName := range []string{"imap", "pop3"} {
+		for _, operation := range []string{"validation", "realtime", "history"} {
+			t.Run(protocolName+"/"+operation, func(t *testing.T) {
+				proxies := &daumNetworkProxies{}
+				calls := 0
+				attempt := func() error {
+					calls++
+					if calls == 1 {
+						return &protocol.Failure{Category: "transport", Retryable: true}
+					}
+					return nil
+				}
+				service := &Service{Proxies: proxies, Protocol: daumValidationClientStub{
+					validate: func(context.Context, protocol.Credentials) error { return attempt() },
+					fetch: func(context.Context, protocol.Credentials, protocol.FetchRequest) (protocol.FetchResult, error) {
+						return protocol.FetchResult{Complete: true}, attempt()
+					},
+				}}
+				_, err := service.runProtocol(context.Background(), Resource{EmailAddress: "fixture@daum.net", AppPassword: "fixture", Protocol: protocolName}, protocol.FetchRequest{FullHistory: operation == "history"}, "ipv4-contract", operation == "validation")
+				require.NoError(t, err)
+				require.Len(t, proxies.requests, 2)
+				for _, request := range proxies.requests {
+					require.Equal(t, proxydomain.ProxyIPv4, request.IPVersion)
+					if operation == "validation" {
+						require.Equal(t, proxydomain.ProxyPurposeAuth, request.Purpose)
+					} else {
+						require.Equal(t, proxydomain.ProxyPurposeFetch, request.Purpose)
+					}
+				}
+			})
+		}
+	}
 }
 
 func TestDaumPlatformDoesNotBypassMissingProxy(t *testing.T) {

@@ -10,11 +10,12 @@ import (
 // CoreTaskQueryAdapter is the Governance anti-corruption adapter for Core's
 // consumer-defined TaskQueryPort. It exposes only bounded safe summaries.
 type CoreTaskQueryAdapter struct {
-	tasks *governanceapp.AdminTaskQueryService
+	tasks   *governanceapp.AdminTaskQueryService
+	bizType string
 }
 
-func NewCoreTaskQueryAdapter(tasks *governanceapp.AdminTaskQueryService) *CoreTaskQueryAdapter {
-	return &CoreTaskQueryAdapter{tasks: tasks}
+func NewCoreTaskQueryAdapter(tasks *governanceapp.AdminTaskQueryService, bizType string) *CoreTaskQueryAdapter {
+	return &CoreTaskQueryAdapter{tasks: tasks, bizType: bizType}
 }
 
 func (a *CoreTaskQueryAdapter) GetRecentByResourceID(ctx context.Context, resourceID uint, limit int) ([]coreapp.AdminTaskSummary, error) {
@@ -26,7 +27,7 @@ func (a *CoreTaskQueryAdapter) GetRecentByResourceID(ctx context.Context, resour
 		limit = maxLimit
 	}
 	result, err := a.tasks.List(ctx, governanceapp.AdminTaskListFilter{
-		BizType: governanceapp.AdminTaskBizMicrosoftResource,
+		BizType: a.bizType,
 		BizID:   resourceID,
 		Limit:   limit,
 	})

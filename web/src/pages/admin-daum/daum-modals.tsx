@@ -161,36 +161,34 @@ export function EditDaumModal({ onCancel, onSaved, owners, target }: {
       if (error instanceof IamApiError && error.code === "resource_version_conflict") { await onSaved(); onCancel(); }
     } finally { setSubmitting(false); }
   };
-  return <Modal bodyStyle={{ maxHeight: "calc(100dvh - 180px)", overflowY: "auto" }} cancelText={t("Cancel")} centered confirmLoading={submitting}
+  return <Modal cancelText={t("Cancel")} centered confirmLoading={submitting}
     onCancel={() => { if (!submitting) onCancel(); }} onOk={() => void submit()} okText={t("Save")}
     okButtonProps={{ disabled: !canWrite }} title={t("Edit Daum resource")} visible={Boolean(target)} width={580}>
     {target ? <div className="space-y-4 py-1">
-      <label className="block">
-        <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">{t("Email")} *</span>
-        <Input className="font-mono" disabled={!canWrite} onChange={setEmailAddress} value={emailAddress} />
-      </label>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">{t("Email")} *</span>
+          <Input className="font-mono" disabled={!canWrite} onChange={setEmailAddress} placeholder="name@daum.net" value={emailAddress} />
+        </label>
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">{t("Auxiliary pickup email")}</span>
+          <Input className="font-mono" autoComplete="off" disabled={!canEditBinding || clearBinding}
+            readOnly={target.pickupUrlConfigured || Boolean(pickupUrl.trim())}
+            onChange={setBindingAddress} placeholder={t("Optional recovery mailbox")} showClear={!target.pickupUrlConfigured && !pickupUrl.trim()} value={bindingAddress} />
+        </label>
+      </div>
       <div className="text-xs text-[var(--semi-color-text-2)]">{t("Email is the resource identity; edit it only to correct a mistake.")}</div>
-      <label className="block">
-        <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">{t("Mail protocol")}</span>
-        <Select disabled={!canOperate} aria-label={t("Mail protocol")} style={{ width: "100%" }} value={protocol} onChange={(value) => setProtocol(value === "pop3" ? "pop3" : "imap")}>
-          <Select.Option value="imap">IMAP</Select.Option>
-          <Select.Option value="pop3">POP3</Select.Option>
-        </Select>
-      </label>
-      <label className="block">
-        <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">{t("Kakao account email")}</span>
-        <Input autoComplete="off" onChange={setKakaoEmail} value={kakaoEmail} />
-      </label>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">{t("Kakao account email")}</span>
+          <Input className="font-mono" autoComplete="off" onChange={setKakaoEmail} value={kakaoEmail} />
+        </label>
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">{t("remail pickup URL")}</span>
+          <Input autoComplete="off" disabled={!canEditBinding || clearBinding} mode="password" onChange={setPickupUrl} value={pickupUrl} placeholder={t("Leave blank to keep the existing pickup URL")} />
+        </label>
+      </div>
       {target.bindingAddress || target.pickupUrlConfigured ? <Checkbox checked={clearBinding} disabled={!canEditBinding} onChange={(event) => setClearBinding(Boolean(event.target.checked))}>{t("Unlink auxiliary mailbox")}</Checkbox> : null}
-      {target.pickupUrlConfigured || pickupUrl.trim() ? <InfoItem label={t("Auxiliary pickup email")} value={target.bindingAddress || t("Not configured")} /> : <label className="block">
-        <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">{t("Auxiliary pickup email")}</span>
-        <Input autoComplete="off" disabled={!canEditBinding || clearBinding} onChange={setBindingAddress} value={bindingAddress} />
-      </label>}
-      <label className="block">
-        <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">{t("remail pickup URL")}</span>
-        <Input autoComplete="off" disabled={!canEditBinding || clearBinding} mode="password" onChange={setPickupUrl} value={pickupUrl} placeholder={t("Leave blank to keep the existing pickup URL")} />
-      </label>
-      <div className="text-xs text-[var(--semi-color-text-2)]">{t("The pickup URL determines the auxiliary mailbox. The Kakao account email is separate and may differ.")}</div>
       <label className="block">
         <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">{t("Owner")}</span>
         <OwnerSelect onChange={setOwnerId} owners={owners} selectedOwner={target.owner ?? undefined} t={t} value={ownerId} />
@@ -200,7 +198,7 @@ export function EditDaumModal({ onCancel, onSaved, owners, target }: {
         <InputNumber max={100} min={0} onChange={setQualityScore} precision={0} step={1} style={{ width: "100%" }} value={qualityScore} />
       </label>
       <div className="flex items-center justify-between rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-2.5">
-        <div><div className="text-sm font-medium">{t("Public sale")}</div><div className="text-xs text-[var(--semi-color-text-2)]">{t("Public-sale resources require an enabled supplier or administrator owner.")}</div></div>
+        <div><div className="text-sm font-medium text-[var(--semi-color-text-0)]">{t("Public sale")}</div><div className="text-xs text-[var(--semi-color-text-2)]">{t("Public-sale resources require an enabled supplier or administrator owner.")}</div></div>
         <Switch aria-label={t("Public sale")} checked={forSale} disabled={!canOperate} onChange={setForSale} size="small" />
       </div>
       <div className="flex items-center justify-between rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-2.5">
@@ -210,15 +208,28 @@ export function EditDaumModal({ onCancel, onSaved, owners, target }: {
         </div>
         <Switch checked={longLived} onChange={setLongLived} size="small" />
       </div>
-      <div className="space-y-3 rounded-lg border border-[var(--semi-color-border)] p-3">
-        <div className="text-sm font-medium">{t("Credentials")}</div>
-        <div className="text-xs text-[var(--semi-color-text-2)]">{t("Write-only. Leave blank to keep current")}</div>
-        <label className="block"><span className="mb-1.5 block text-sm font-medium">{t("Login password")}</span>
-          <Input autoComplete="new-password" mode="password" disabled={!canOperate} onChange={setPassword} value={password} placeholder={t("Leave blank to keep the existing login password")} />
-        </label>
-        <label className="block"><span className="mb-1.5 block text-sm font-medium">{t("APP password")}</span>
-          <Input autoComplete="new-password" mode="password" disabled={!canOperate} onChange={setAppPassword} value={appPassword} placeholder={t("Leave blank to keep current")} />
-        </label>
+      <div className="rounded-lg border border-[var(--semi-color-border)] p-3">
+        <div className="mb-1 text-sm font-medium text-[var(--semi-color-text-0)]">{t("Credentials")}</div>
+        <div className="mb-3 text-xs text-[var(--semi-color-text-2)]">{t("Write-only. Leave blank to keep current")}</div>
+        <div className="space-y-3">
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">{t("Login password")}</span>
+            <Input autoComplete="new-password" mode="password" disabled={!canOperate} onChange={setPassword} value={password} placeholder={t("Leave blank to keep the existing login password")} />
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">{t("APP password")}</span>
+              <Input autoComplete="new-password" mode="password" disabled={!canOperate} onChange={setAppPassword} value={appPassword} placeholder={t("Leave blank to keep current")} />
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">{t("Mail protocol")}</span>
+              <Select disabled={!canOperate} aria-label={t("Mail protocol")} style={{ width: "100%" }} value={protocol} onChange={(value) => setProtocol(value === "pop3" ? "pop3" : "imap")}>
+                <Select.Option value="imap">IMAP</Select.Option>
+                <Select.Option value="pop3">POP3</Select.Option>
+              </Select>
+            </label>
+          </div>
+        </div>
       </div>
     </div> : null}
   </Modal>;
@@ -249,7 +260,7 @@ export function ReplaceCredentialsModal({ onCancel, onSaved, target }: {
       if (error instanceof IamApiError && error.code === "resource_version_conflict") { await onSaved(await getAdminDaumResourceDetail(target.id)); clearCredentials(); onCancel(); }
     } finally { setSubmitting(false); }
   };
-  return <Modal bodyStyle={{ maxHeight: "calc(100dvh - 180px)", overflowY: "auto" }} cancelText={t("Cancel")} centered confirmLoading={submitting}
+  return <Modal cancelText={t("Cancel")} centered confirmLoading={submitting}
     onCancel={() => { if (!submitting) { clearCredentials(); onCancel(); } }} onOk={() => void submit()}
     okText={t("Replace credentials")} size="small" title={t("Replace Daum credentials")} visible={Boolean(target)}>
     {target ? <div className="space-y-4 py-1">
@@ -258,13 +269,13 @@ export function ReplaceCredentialsModal({ onCancel, onSaved, target }: {
       </div>
       <InfoItem label={t("Email")} value={<span className="font-mono">{target.emailAddress}</span>} />
       <label className="block">
+        <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">{t("APP password")} *</span>
+        <Input autoComplete="new-password" mode="password" onChange={setAppPassword} placeholder={t("Enter a replacement APP password")} value={appPassword} />
+      </label>
+      <label className="block">
         <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">{t("Login password")}</span>
         <Input autoComplete="new-password" mode="password" onChange={setPassword}
           placeholder={t("Leave blank to keep the existing login password")} value={password} />
-      </label>
-      <label className="block">
-        <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">{t("APP password")} *</span>
-        <Input autoComplete="new-password" mode="password" onChange={setAppPassword} placeholder={t("Enter a replacement APP password")} value={appPassword} />
       </label>
     </div> : null}
   </Modal>;

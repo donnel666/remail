@@ -17,7 +17,7 @@ import {
   IllustrationNoResult,
   IllustrationNoResultDark,
 } from "@douyinfe/semi-illustrations";
-import { Layers, SlidersHorizontal, Upload } from "lucide-react";
+import { Layers, SlidersHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CardPro } from "@/components/semi/card-pro";
@@ -29,7 +29,7 @@ import {
 import { CompactModeToggle } from "@/components/semi/compact-mode-toggle";
 import { CopyableTableText } from "@/components/semi/copyable-table-text";
 import { StatisticFilterOption } from "@/components/semi/statistic-filter-option";
-import { AdminUserSelect, ownersWithCurrentUserFirst } from "@/components/semi/admin-user-select";
+import { ownersWithCurrentUserFirst } from "@/components/semi/admin-user-select";
 import { useAuth } from "@/context/auth-provider";
 import { useBlockPagedList } from "@/hooks/use-block-paged-list";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
@@ -63,13 +63,11 @@ import {
   normalizeDateRangeValue,
   type DateRangeValue,
 } from "./resources/date-range-filter";
-import { DaumBulkTaskProgress } from "./resources/daum-bulk-task-progress";
 import { DAUM_EMAIL_SUFFIXES } from "./resources/daum-model";
 import { useSelectionNotification } from "./resources/use-selection-notification";
 import {
   OwnerIdentity,
   STATUS_META,
-  formatTime,
   renderStatusTag,
 } from "./admin-daum/daum-meta";
 import {
@@ -99,10 +97,7 @@ export default function AdminDaumEmails() {
   const { t } = useTranslation();
   const { currentUser } = useAuth();
   const isMobile = useIsMobile();
-  const [bulkTaskId, setBulkTaskId] = useState<string | null>(null);
 
-  const [ownerFilter, setOwnerFilter] = useState<number | undefined>();
-  const [protocolFilter, setProtocolFilter] = useState<"all" | "imap" | "pop3">("all");
   const [suffixFilter, setSuffixFilter] = useState<string | undefined>();
   const [searchKeyword, setSearchKeyword] = useState("");
   const [createdAtRange, setCreatedAtRange] = useState<DateRangeValue>([]);
@@ -175,9 +170,7 @@ export default function AdminDaumEmails() {
     const createdFrom = createdFromISOString(createdAtRange);
     const createdTo = createdToISOString(createdAtRange);
     if (search) filter.search = search;
-    if (ownerFilter !== undefined) filter.ownerId = ownerFilter;
     if (suffixFilter) filter.suffix = suffixFilter;
-    if (protocolFilter !== "all") filter.protocol = protocolFilter;
     if (statusFilter !== "all") filter.status = statusFilter;
     if (privateFilter !== "all") filter.forSale = privateFilter === "no";
     if (longLivedFilter !== "all") filter.longLived = longLivedFilter === "yes";
@@ -186,13 +179,11 @@ export default function AdminDaumEmails() {
     return filter;
   }, [
     createdAtRange,
-    ownerFilter,
     debouncedSearchKeyword,
     longLivedFilter,
     privateFilter,
     statusFilter,
     suffixFilter,
-    protocolFilter,
   ]);
 
   const listFilterKey = JSON.stringify(listFilter);
@@ -306,7 +297,6 @@ export default function AdminDaumEmails() {
 
   const showBulkOutcome = useCallback(
     (response: AdminDaumBulkCommandResponse, successKey: string) => {
-      setBulkTaskId(response.taskId ?? null);
       if (response.taskId && response.status !== "succeeded") {
         Toast.success(t("Daum resources bulk operation submitted."));
         return;
@@ -371,8 +361,7 @@ export default function AdminDaumEmails() {
   const activeFilterCount =
     Number(statusFilter !== "all") +
     Number(privateFilter !== "all") +
-    Number(longLivedFilter !== "all") + Number(ownerFilter !== undefined) +
-    Number(protocolFilter !== "all");
+    Number(longLivedFilter !== "all");
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(activePage, totalPages);
@@ -386,9 +375,7 @@ export default function AdminDaumEmails() {
     setCreatedAtRange([]);
     setStatusFilter("all");
     setPrivateFilter("all");
-    setOwnerFilter(undefined);
     setSuffixFilter(undefined);
-    setProtocolFilter("all");
     setLongLivedFilter("all");
     setActivePage(1);
     setSelectedKeys([]);
@@ -711,7 +698,7 @@ export default function AdminDaumEmails() {
       const busyAction = rowBusy?.id === record.id ? rowBusy.action : null;
       if (record.status === "deleted") {
         return (
-          <Space spacing={4} wrap={isMobile}>
+          <Space spacing={4} wrap={false}>
             <Button
               disabled={Boolean(busyAction)}
               onClick={() => void openDetail(record.id)}
@@ -734,7 +721,7 @@ export default function AdminDaumEmails() {
       }
 
       return (
-        <Space spacing={4} wrap={isMobile}>
+        <Space spacing={4} wrap={false}>
           <Button
             disabled={Boolean(busyAction)}
             onClick={() => void openDetail(record.id)}
@@ -794,7 +781,6 @@ export default function AdminDaumEmails() {
       handleRecover,
       handleToggleDisabled,
       handleTogglePublish,
-      isMobile,
       openDetail,
       rowBusy,
       setEditTarget,
@@ -810,8 +796,8 @@ export default function AdminDaumEmails() {
           dataIndex: "suffix",
           key: "suffix",
           title: t("Suffix"),
-          width: 100,
-          render: (value: string) => <Tag color="blue" shape="circle">{value}</Tag>,
+          width: 120,
+          render: (value: unknown) => <Tag color="white" shape="circle">@{String(value).replace(/^@+/, "")}</Tag>,
         },
         {
           dataIndex: "emailAddress",
@@ -821,34 +807,6 @@ export default function AdminDaumEmails() {
           render: (value: unknown) => (
             <CopyableTableText copiedText={t("Copied")} text={String(value)} />
           ),
-        },
-        {
-          dataIndex: "kakaoEmail",
-          key: "kakaoEmail",
-          title: t("Kakao account email"),
-          width: 230,
-          render: (value: string) => value ? <CopyableTableText copiedText={t("Copied")} text={value} /> : t("Not configured"),
-        },
-        {
-          dataIndex: "bindingAddress",
-          key: "bindingAddress",
-          title: t("Auxiliary pickup email"),
-          width: 250,
-          render: (value: string) => value ? <CopyableTableText copiedText={t("Copied")} text={value} /> : <span className="text-[var(--semi-color-text-2)]">{t("Not linked")}</span>,
-        },
-        {
-          dataIndex: "aliases",
-          key: "aliases",
-          title: t("Explicit aliases"),
-          width: 180,
-          render: (_: unknown, record: AdminDaumResourceItem) => <Tooltip content={(record.aliases ?? []).map((alias) => alias.email).join(" · ")}><span>{(record.aliases ?? []).length}/2</span></Tooltip>,
-        },
-        {
-          dataIndex: "protocol",
-          key: "protocol",
-          title: t("Mail protocol"),
-          width: 110,
-          render: (value: string) => <Tag color="blue">{value.toUpperCase()}</Tag>,
         },
         {
           dataIndex: "ownerEmail",
@@ -898,13 +856,6 @@ export default function AdminDaumEmails() {
           ),
         },
         {
-          dataIndex: "lastCheckedAt",
-          key: "lastCheckedAt",
-          title: t("Last checked at"),
-          width: 180,
-          render: (value: string | null) => formatTime(value),
-        },
-        {
           dataIndex: "operate",
           fixed: "right",
           key: "operate",
@@ -937,15 +888,14 @@ export default function AdminDaumEmails() {
   const tabsArea = <Tabs activeKey={suffixFilter ?? "all"} className="mb-2" collapsible type="card"
     onChange={(key) => { setSuffixFilter(key === "all" ? undefined : String(key)); resetPageAndSelection(); }}>
     <Tabs.TabPane itemKey="all" tab={<span className="flex items-center gap-2">{t("All")}<Tag color={!suffixFilter ? "red" : "grey"} shape="circle">{allTabCount}</Tag></span>} />
-    {DAUM_EMAIL_SUFFIXES.map((suffix) => <Tabs.TabPane itemKey={suffix} key={suffix} tab={<span className="flex items-center gap-2"><Layers size={14} />@{suffix}<Tag color={suffixFilter === suffix ? "red" : "grey"} shape="circle">{stats.suffixes.find((item) => item.key === suffix)?.count ?? 0}</Tag></span>} />)}
+    {DAUM_EMAIL_SUFFIXES.map((suffix) => <Tabs.TabPane itemKey={suffix} key={suffix} tab={<span className="flex items-center gap-2"><Layers size={14} />{suffix}<Tag color={suffixFilter === suffix ? "red" : "grey"} shape="circle">{stats.suffixes.find((item) => item.key === suffix)?.count ?? 0}</Tag></span>} />)}
   </Tabs>;
 
   const actionsArea = (
-    <div className="flex w-full flex-col items-center justify-between gap-2 md:flex-row md:flex-wrap">
+    <div className="flex w-full flex-col items-center justify-between gap-2 md:flex-row">
       <div className="order-2 flex w-full flex-wrap gap-2 md:order-1 md:w-auto">
         <Button
           className="flex-1 md:flex-initial"
-          icon={<Upload size={14} />}
           onClick={() => setImportOpen(true)}
           size="small"
           type="primary"
@@ -1081,12 +1031,6 @@ export default function AdminDaumEmails() {
                 ))}
               </div>
 
-              <div className="px-2 pb-1 text-xs font-medium text-[var(--semi-color-text-2)]">{t("Mail protocol")}</div>
-              <div className="mb-2 space-y-1">
-                {(["all", "imap", "pop3"] as const).map((value) => <StatisticFilterOption key={value} active={protocolFilter === value}
-                  label={value === "all" ? t("All") : value.toUpperCase()} value={value}
-                  onSelect={(next) => { setProtocolFilter(next); resetPageAndSelection(); }} />)}
-              </div>
             </div>
           }
           trigger="click"
@@ -1103,26 +1047,11 @@ export default function AdminDaumEmails() {
           </Button>
         </Dropdown>
 
-        <AdminUserSelect
-          showClear
-          size="small"
-          value={ownerFilter}
-          onChange={(value) => { setOwnerFilter(value); resetPageAndSelection(); }}
-          options={owners.map((owner) => ({ value: owner.id, label: owner.email, data: owner }))}
-          loadOptions={async (search) => (await listAdminDaumOwners(search)).map((owner) => ({ value: owner.id, label: owner.email, data: owner }))}
-          placeholder={t("Owner")}
-          emptyContent={t("No users found")}
-          style={{ width: isMobile ? "100%" : 224 }}
-        />
         <Input
           className="resources-search-input w-full md:w-56"
           onChange={(value) => {
             setSearchKeyword(String(value));
             resetPageAndSelection();
-          }}
-          onEnterPress={() => {
-            flushSearchKeyword();
-            setActivePage(1);
           }}
           placeholder={t("Search email, owner or ID")}
           prefix={<IconSearch />}
@@ -1194,7 +1123,6 @@ export default function AdminDaumEmails() {
 
   return (
     <div className="console-content-width py-5">
-      <DaumBulkTaskProgress taskId={bulkTaskId} onCompleted={refresh} onClose={() => setBulkTaskId(null)} />
       <CardPro
         tabsArea={tabsArea}
         actionsArea={actionsArea}
@@ -1221,7 +1149,7 @@ export default function AdminDaumEmails() {
           pagination={false}
           rowKey="id"
           rowSelection={rowSelection}
-          scroll={{ x: "max(100%, 2340px)", y: DESKTOP_TABLE_SCROLL_Y }}
+          scroll={{ x: "max(100%, 1520px)", y: DESKTOP_TABLE_SCROLL_Y }}
           size="middle"
         />
       </CardPro>
@@ -1271,8 +1199,7 @@ export default function AdminDaumEmails() {
 
       <DaumBulkMaintenanceModal
         onCancel={() => setBulkMaintenanceTarget(null)}
-        onCompleted={async (taskId) => {
-          if (taskId) setBulkTaskId(taskId);
+        onCompleted={async () => {
           setSelectedKeys([]);
           await refreshAfterMutation();
         }}

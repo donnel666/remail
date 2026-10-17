@@ -23,7 +23,7 @@ vi.mock("@douyinfe/semi-ui", () => {
     InputNumber: ({ value, onChange }: any) => <input value={value} onChange={(event) => onChange(event.target.value)} />,
     Switch: ({ checked, onChange, disabled, "aria-label": ariaLabel }: any) => <input type="checkbox" aria-label={ariaLabel} disabled={disabled} checked={checked} onChange={(event) => onChange(event.target.checked)} />,
     TextArea: ({ onChange, placeholder, value, disabled }: any) => <textarea disabled={disabled} placeholder={placeholder} value={value} onChange={(event) => onChange(event.target.value)} />,
-    Modal: ({ children, visible, title, onOk, okText, onCancel, cancelText, confirmLoading, okButtonProps }: any) => visible ? <section role="dialog" aria-label={title}>{children}<button disabled={confirmLoading || okButtonProps?.disabled} onClick={onOk}>{okText}</button><button onClick={onCancel}>{cancelText}</button></section> : null,
+    Modal: ({ children, visible, title, onOk, okText, onCancel, cancelText, confirmLoading, okButtonProps, width, size }: any) => visible ? <section role="dialog" aria-label={title} data-width={width} data-size={size}>{children}<button disabled={confirmLoading || okButtonProps?.disabled} onClick={onOk}>{okText}</button><button onClick={onCancel}>{cancelText}</button></section> : null,
     Typography: { Text: ({ children }: any) => <span>{children}</span> },
     Toast: { error: mocks.toastError, warning: mocks.toastWarning, success: mocks.toastSuccess, info: mocks.toastInfo },
   };
@@ -43,7 +43,6 @@ vi.mock("@/lib/iam-errors", () => ({
   getApiErrorBodyMessage: (_t: unknown, error: {message: string}) => error.message,
 }));
 vi.mock("./daum-meta", () => ({ InfoItem: ({ label, value }: any) => <div>{label}: {value}</div>, ownerRoleLabel: (role: string) => role }));
-vi.mock("../resources/daum-import-result-panel", () => ({ DaumImportResultPanel: ({ result }: any) => <output>{result.status} #{result.importId}</output> }));
 import { EditDaumModal, ImportDaumModal, ReplaceCredentialsModal } from "./daum-modals";
 
 const owner: AdminDaumOwner = { id: 7, email: "owner@example.com", enabled: true, nickname: "Owner", role: "supplier", groupName: "Suppliers" };
@@ -65,30 +64,32 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Daum admin credential and import forms", () => {
-  it("submits mixed raw import text and POP3 explicitly, keeping result details available", async () => {
+  it("submits mixed raw import text with default IMAP and closes after refreshing like the administrator Microsoft modal", async () => {
     const onImported = vi.fn();
-    render(<ImportDaumModal visible owners={[owner]} onCancel={vi.fn()} onImported={onImported} />);
+    const onCancel = vi.fn();
+    render(<ImportDaumModal visible owners={[owner]} onCancel={onCancel} onImported={onImported} />);
     const content = "\uFEFF user@daum.net----  app  \r\nsecond@hanmail.net---- login ---- app2 \r\nthird@hanmail2.net----login----app----https://remail.example/v1/pickup?email=helper%40outlook.com&token=private----account@kakao.example";
-    fireEvent.change(screen.getByPlaceholderText("Daum import formats"), { target: { value: content } });
-    fireEvent.change(screen.getByRole("combobox", { name: "Mail protocol" }), { target: { value: "pop3" } });
+    fireEvent.change(screen.getByPlaceholderText("email----APP password"), { target: { value: content } });
+    expect(screen.queryByRole("combobox", { name: "Mail protocol" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     await waitFor(() => expect(mocks.importResources).toHaveBeenCalledWith(
-      { content: content.replace(/\r\n/g, "\n"), ownerId: 7, protocol: "pop3", errorStrategy: "skip", longLived: true }, expect.any(AbortSignal), expect.any(String),
+      { content: content.replace(/\r\n/g, "\n"), ownerId: 7, protocol: "imap", errorStrategy: "skip", longLived: true }, expect.any(AbortSignal), expect.any(String),
     ));
     await waitFor(() => expect(onImported).toHaveBeenCalledTimes(1));
-    expect(screen.getByText("imported #10")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Daum import formats")).toHaveValue("");
+    await waitFor(() => expect(onCancel).toHaveBeenCalledOnce());
+    expect(screen.queryByText("imported #10")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("email----APP password")).toHaveValue("");
   });
 
   it("submits invalid raw lines in abort mode so server diagnostics remain reviewable", async () => {
     mocks.importResources.mockResolvedValueOnce({ importId: 10, status: "failed", imported: 0, skipped: 0, lastSafeError: "Invalid import format." });
     render(<ImportDaumModal visible owners={[owner]} onCancel={vi.fn()} onImported={vi.fn()} />);
-    fireEvent.change(screen.getByPlaceholderText("Daum import formats"), { target: { value: "user@daum.net----login----app----ambiguous" } });
+    fireEvent.change(screen.getByPlaceholderText("email----APP password"), { target: { value: "user@daum.net----login----app----ambiguous" } });
     fireEvent.click(screen.getByRole("button", { name: "Abort on error" }));
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Resource import failed."));
     expect(mocks.importResources).toHaveBeenCalledWith(expect.objectContaining({ content: "user@daum.net----login----app----ambiguous", errorStrategy: "abort" }), expect.any(AbortSignal), expect.any(String));
-    expect(screen.getByText("failed #10")).toBeInTheDocument();
+    expect(screen.queryByText("failed #10")).not.toBeInTheDocument();
   });
 
   it("requires APP password, keeps login password absent unless supplied, and clears secrets on close", async () => {
@@ -109,7 +110,12 @@ describe("Daum admin credential and import forms", () => {
     render(<EditDaumModal target={resource} owners={[owner]} onCancel={vi.fn()} onSaved={vi.fn()} />);
     expect(screen.getByPlaceholderText("Leave blank to keep the existing pickup URL")).toHaveValue("");
     expect(screen.getByLabelText("Kakao account email")).toHaveValue("account@kakao.example");
-    expect(screen.getByText(/Auxiliary pickup email: helper@outlook.com/)).toBeInTheDocument();
+    const auxiliary = screen.getByLabelText("Auxiliary pickup email");
+    expect(auxiliary).toHaveValue("helper@outlook.com");
+    expect(auxiliary).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("Email *").closest(".grid")).toContainElement(auxiliary);
+    expect(screen.getByLabelText("APP password").closest(".grid")).toContainElement(screen.getByRole("combobox", { name: "Mail protocol" }));
+    expect(screen.getByRole("dialog")).toHaveAttribute("data-width", "580");
     fireEvent.change(screen.getByPlaceholderText("Leave blank to keep the existing pickup URL"), { target: { value: "   " } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(mocks.updateResource).toHaveBeenCalledWith(41, { version: 3, longLived: true, qualityScore: 80 }));
@@ -126,7 +132,7 @@ describe("Daum admin credential and import forms", () => {
   it("retries a lost upload response with the same idempotency key and default IMAP", async () => {
     mocks.importResources.mockRejectedValueOnce(new Error("Response lost"));
     render(<ImportDaumModal visible owners={[owner]} onCancel={vi.fn()} onImported={vi.fn()} />);
-    fireEvent.change(screen.getByPlaceholderText("Daum import formats"), { target: { value: "user@daum.net----app" } });
+    fireEvent.change(screen.getByPlaceholderText("email----APP password"), { target: { value: "user@daum.net----app" } });
     const submit = screen.getByRole("button", { name: "Import" });
     fireEvent.click(submit);
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalled());

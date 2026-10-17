@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -132,7 +133,8 @@ func (s *Service) commitValidation(ctx context.Context, task daumapp.ValidationT
 			maximum := min(runtimeconfig.Int("resource_validation_max_failures", 3, 1), 100)
 			failures, quality = min(resource.ValidationFailures+1, maximum), 0
 			status, runStatus = domain.StatusAbnormal, maintenanceFailed
-			safeError = safeSessionError(failure.Category + ": " + failure.SafeMessage)
+			stage, reason := protocol.FailureDiagnostics(failure)
+			safeError = safeSessionError(fmt.Sprintf("%s: %s (stage=%s; reason=%s)", failure.Category, failure.SafeMessage, stage, reason))
 			// Match Microsoft: only a retry with remaining budget returns to pending.
 			switch failure.Category {
 			case "invalid_credentials", "identity_mismatch", "account_disabled", "action_required":

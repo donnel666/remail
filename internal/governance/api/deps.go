@@ -19,6 +19,6 @@ func NewModule(db *gorm.DB, redisClients ...redis.UniversalClient) *Module {
 	return &Module{
 		Tasks:         tasks,
 		Logs:          logs,
-		CoreTaskQuery: NewCoreTaskQueryAdapter(tasks),
+		CoreTaskQuery: NewCoreTaskQueryAdapter(tasks, governanceapp.AdminTaskBizMicrosoftResource),
 	}
 }

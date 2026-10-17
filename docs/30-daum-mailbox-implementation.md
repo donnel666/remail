@@ -1,10 +1,11 @@
 # Daum 邮箱实现与验证
 
-日期：2026-10-17。对应需求与决策见 [29-daum-mailbox-plan.md](29-daum-mailbox-plan.md)。本次交付为工作区代码、迁移和测试，未部署生产环境。后续一致性修复及别名收益规则见 [32-daum-parity-fixes.md](32-daum-parity-fixes.md)。
+日期：2026-10-17。对应需求与决策见 [29-daum-mailbox-plan.md](29-daum-mailbox-plan.md)。基础版已随 `97f4c50` 上线，数据库迁移至 152；本次追加 UI、详情接口和 IPv4 验证修复的发布状态以对应 CI 记录为准。一致性修复及别名收益规则见 [32-daum-parity-fixes.md](32-daum-parity-fixes.md)。
 
 ## 已接通的功能
 
 - 管理员 `/admin/daum` 使用现有微软体系的列表、筛选、分页、移动端卡片、详情、导入、维护与批量操作结构。主邮箱和辅助邮箱邮件直接使用微软共享邮件面板；没有新增普通用户资源管理页面。
+- 后续 UI 收口直接对照管理员 `ImportMicrosoftModal`：移除 Daum 独有协议选择、导入结果面板和列表批任务进度条。列表只保留七个通用列，Kakao、辅助邮箱与显式别名仅在详情展示；导入成功后刷新并关闭。
 - Daum 资源管理及协议位于 `internal/daum`；主资源使用 `email_resources.id`，一个账号下固定维护 `ID@daum.net`、`ID@hanmail.net`、`ID@hanmail2.net` 三个完整地址。
 - `daum` 商品接入原 Core、Alloc、Trade、MailMatch、钱包与结算路径。项目商品、订单、工作台、管理统计、系统价格及任务参数已增加 Daum。
 - 指定后缀使用 `daum.net`、`hanmail.net`、`hanmail2.net`，随机选择使用 `daum`。随机按有效库存加权，遵守项目后缀屏蔽与 `private_first`；一个批次选定一次后缀，缺货不换后缀。
@@ -46,7 +47,8 @@
 
 ## 网络及故障处理
 
-- 平台 Daum 验证和抓信复用 Microsoft 的 ProxyUseCase，以规范化账号邮箱作为绑定键。验证使用 IPv4/Auth，实时抓信使用 IPv4/Fetch，全量历史使用 IPv6/Fetch；资源代理不可用时使用系统备用代理，验证沿用 `max_proxy_attempts`，抓信与微软共用固定三次轮内预算，并避开已失败的代理服务。
+- 平台 Daum 验证和抓信复用 Microsoft 的 ProxyUseCase，以规范化账号邮箱作为绑定键。按用户后续明确要求，Daum 验证使用 IPv4/Auth，实时抓信和全量历史均使用 IPv4/Fetch；微软原有的历史 IPv6 策略保持不变。资源代理不可用时使用系统备用代理，验证沿用 `max_proxy_attempts`，抓信与微软共用固定三次轮内预算，并避开已失败的代理服务。
+- 导入验证只确认 APP 密码认证及收件箱读取能力：IMAP 只读打开 Inbox，非空时读取一封邮件的信封信息；POP3 登录后执行 STAT。不以 Junk 目录或 MIME 内容解析作为首阶段验证条件，成功后才进入独立的历史项目识别。失败诊断仅记录白名单阶段和原因码，不记录账号、代理 URL、密码或底层错误原文。
 - Microsoft IMAP 与 Daum 共用 `internal/mailtransport/netdial` 的 HTTP/HTTPS CONNECT、SOCKS5/5h、TLS 连接代码及现有运行时超时设置。使用 Go TLS、最低 TLS 1.2、证书验证、目标主机 SNI，以及对应的 `imap`/`pop3` ALPN。微软网页登录的 HTTP 头、Cookie 和浏览器指纹不用于邮件协议。
 - 连接故障反馈代理失败；服务端临时拒绝与账号凭据拒绝不计为代理故障。平台缺少代理时返回可延期状态，不自动绕过代理直连；独立 CMD 可明确选择直连或环境变量代理。
 - 去掉了 Daum 独有的跨验证／历史／实时收件账号独占锁和固定 15 分钟外层截止，采用任务领取、共享实时取件租约及可配置历史超时。验证仅在明确新入队且领取证明未变化时进入 validating，重复入队不会覆盖 worker 结果。

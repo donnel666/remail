@@ -30,6 +30,7 @@ type Message struct {
 }
 type Failure struct {
 	Category, SafeMessage string
+	Stage                 string
 	Retryable             bool
 	Cause                 error
 }

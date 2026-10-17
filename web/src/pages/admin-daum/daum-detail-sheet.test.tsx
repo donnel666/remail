@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IamApiError } from "@/lib/api-client";
@@ -8,7 +8,7 @@ import type { AdminDaumResourceDetail } from "./admin-daum-types";
 
 const mocks = vi.hoisted(() => ({
   tasks: vi.fn(), validate: vi.fn(), scan: vi.fn(), fetchMail: vi.fn(), getDetail: vi.fn(),
-  toastError: vi.fn(), translate: (key: string) => key,
+  mailPanel: vi.fn(), toastError: vi.fn(), translate: (key: string) => key,
 }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: mocks.translate }) }));
 vi.mock("@douyinfe/semi-ui", async () => {
@@ -21,7 +21,7 @@ vi.mock("@douyinfe/semi-ui", async () => {
     Empty: ({ description }: any) => <div>{description}</div>,
     SideSheet: ({ children, visible }: any) => visible ? <section>{children}</section> : null,
     Space: Container, Spin: () => <span>Loading</span>, Tag: Container, Tabs,
-    Table: ({ dataSource }: any) => <div>{dataSource.map((item: any) => <span key={item.taskId}>{item.status}</span>)}</div>,
+    Table: ({ dataSource, columns }: any) => <table><thead><tr>{columns.map((column: any) => <th key={column.dataIndex}>{column.title}</th>)}</tr></thead><tbody>{dataSource.map((item: any) => <tr key={item.taskId ?? item.id}>{columns.map((column: any) => <td key={column.dataIndex}>{column.render ? column.render(item[column.dataIndex], item) : item[column.dataIndex]}</td>)}</tr>)}</tbody></table>,
     Typography: { Text: Container }, Toast: { error: mocks.toastError, success: vi.fn() },
   };
 });
@@ -29,7 +29,7 @@ vi.mock("@/hooks/use-shared-page-size", () => ({ useSharedPageSize: () => [20, v
 vi.mock("@/hooks/use-is-mobile", () => ({ useIsMobile: () => false }));
 vi.mock("@/components/semi/card-pro-pagination", () => ({ createCardProPagination: () => null }));
 vi.mock("@/components/semi/copyable-table-text", () => ({ CopyableTableText: ({ text }: any) => <span>{text}</span> }));
-vi.mock("../admin-microsoft/microsoft-detail-sheet", () => ({ ResourceMailsPanel: () => null, ResourceProxyDiagnostics: () => null }));
+vi.mock("../admin-microsoft/microsoft-detail-sheet", () => ({ ResourceMailsPanel: (props: unknown) => { mocks.mailPanel(props); return <div data-testid="mail-panel" />; }, ResourceProxyDiagnostics: () => null }));
 vi.mock("./use-admin-daum-allocation-page", () => ({ useAdminDaumAllocationPage: () => ({ items: [], total: 0 }) }));
 vi.mock("./daum-meta", () => ({
   ALLOCATION_STATUS_META: {}, ConfiguredTag: () => null, DRAWER_PANEL_HEIGHT: 360, DRAWER_TABLE_SCROLL_Y: 220,
@@ -73,6 +73,42 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("Daum task detail freshness", () => {
+  it("keeps the administrator Microsoft tab order and puts private metadata only in detail", () => {
+    const aliases = (["hanmail.net", "hanmail2.net"] as const).map((suffix, index) => ({
+      id: index + 1, resourceId: 41, ownerUserId: 1, email: `user@${suffix}`, suffix,
+      status: "normal" as const, version: 1, createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z",
+    }));
+    render(<Harness resource={{ ...initial, aliases }} />);
+    expect(within(screen.getByRole("tablist")).getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "Basic info", "Orders", "Explicit aliases", "Task details", "Mailbox", "Auxiliary mailbox",
+    ]);
+    expect(screen.getAllByText("helper@outlook.com")).toHaveLength(1);
+    expect(screen.getAllByText("account@kakao.example")).toHaveLength(1);
+    expect(screen.getByText("Operational summary")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Explicit aliases" }));
+    expect(screen.getAllByRole("columnheader").map((header) => header.textContent)).toEqual(["Explicit alias", "Created at"]);
+    expect(screen.getByText("user@hanmail.net")).toBeInTheDocument();
+    expect(screen.getByText("user@hanmail2.net")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Auxiliary mailbox" }));
+    expect(screen.getByText("helper@outlook.com")).toBeInTheDocument();
+    expect(screen.queryByText("account@kakao.example")).not.toBeInTheDocument();
+    expect(mocks.mailPanel).toHaveBeenLastCalledWith(expect.objectContaining({
+      auxiliary: true, extraOffset: 40, hideMailboxMeta: true, fetchEnabled: false, resourceType: "daum", resourceId: 41,
+    }));
+  });
+
+  it("keeps an accepted maintenance command successful when refreshing the parent fails", async () => {
+    mocks.getDetail.mockRejectedValueOnce(new Error("Detail refresh failed"));
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("tab", { name: "Task details" }));
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+    await settle();
+    expect(mocks.validate).toHaveBeenCalledTimes(1);
+    expect(mocks.toastError).toHaveBeenCalledWith("Admin Daum resources load failed.");
+    expect(mocks.toastError).not.toHaveBeenCalledWith("Daum resource operation failed.");
+  });
+
   it.each(["succeeded", "removed"])("refreshes the parent once when an active task is %s and uses the new version", async (status) => {
     mocks.tasks.mockResolvedValueOnce(page("running")).mockResolvedValue(page(status === "removed" ? undefined : status));
     render(<Harness />);

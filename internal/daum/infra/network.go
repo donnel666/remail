@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"github.com/donnel666/remail/internal/daum/infra/protocol"
@@ -34,11 +35,9 @@ func (s *Service) runProtocol(ctx context.Context, resource Resource, request pr
 	if s.Proxies == nil {
 		return protocol.FetchResult{}, unavailable
 	}
-	ipVersion, purpose := proxydomain.ProxyIPv4, proxydomain.ProxyPurposeFetch
+	purpose := proxydomain.ProxyPurposeFetch
 	if validation {
 		purpose = proxydomain.ProxyPurposeAuth
-	} else if request.FullHistory {
-		ipVersion = proxydomain.ProxyIPv6
 	}
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
@@ -55,7 +54,7 @@ func (s *Service) runProtocol(ctx context.Context, resource Resource, request pr
 			return protocol.FetchResult{}, err
 		}
 		selected, err := s.Proxies.Acquire(ctx, proxyapp.AcquireProxyRequest{
-			Key: strings.ToLower(strings.TrimSpace(resource.EmailAddress)), IPVersion: ipVersion,
+			Key: strings.ToLower(strings.TrimSpace(resource.EmailAddress)), IPVersion: proxydomain.ProxyIPv4,
 			Purpose: purpose, AllowSystemFallback: true, Attempt: attempt, RequestID: requestID,
 			AvoidProxyServerIDs: avoid,
 		})
@@ -88,6 +87,16 @@ func (s *Service) runProtocol(ctx context.Context, resource Resource, request pr
 			_ = s.Proxies.ReportSuccess(ctx, selected.ID)
 			return result, nil
 		}
+		stage, reason := protocol.FailureDiagnostics(err)
+		operation := "fetch"
+		if validation {
+			operation = "validation"
+		} else if request.FullHistory {
+			operation = "history"
+		}
+		slog.WarnContext(ctx, "Daum mailbox operation failed", "operation", operation, "resource_id", resource.ID, "request_id", requestID,
+			"credential_revision", resource.CredentialRevision, "validation_generation", resource.ValidationGeneration,
+			"proxy_id", selected.ID, "proxy_server_id", selected.ProxyServerID, "attempt", attempt+1, "stage", stage, "reason", reason)
 		last = err
 		var failure *protocol.Failure
 		proxyFailure := errors.As(err, &failure) && failure.Category == "transport"

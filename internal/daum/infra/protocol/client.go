@@ -32,10 +32,6 @@ type Client struct {
 
 func NewClient() *Client { return &Client{} }
 
-func (c *Client) Validate(ctx context.Context, credentials Credentials) error {
-	_, err := c.Fetch(ctx, credentials, FetchRequest{MaxMessages: 1})
-	return err
-}
 func (c *Client) Fetch(ctx context.Context, credentials Credentials, request FetchRequest) (FetchResult, error) {
 	timeout := runtimeconfig.Duration("imap_operation_timeout_seconds", 60*time.Second, time.Second, 1)
 	if request.FullHistory {
@@ -65,7 +61,7 @@ func (c *Client) connect(ctx context.Context, address, proxyURL, alpn string) (n
 		conn, err = netdial.DialTLS(ctx, proxyURL, address, alpn)
 	}
 	if err != nil {
-		return nil, nil, transportFailure(err)
+		return nil, nil, failureAt(transportFailure(err), "connect_tls")
 	}
 	deadline := time.Now().Add(runtimeconfig.Duration("imap_operation_timeout_seconds", 60*time.Second, time.Second, 1))
 	if end, ok := ctx.Deadline(); ok {
@@ -73,7 +69,7 @@ func (c *Client) connect(ctx context.Context, address, proxyURL, alpn string) (n
 	}
 	if err := conn.SetDeadline(deadline); err != nil {
 		_ = conn.Close()
-		return nil, nil, transportFailure(err)
+		return nil, nil, failureAt(transportFailure(err), "connect_tls")
 	}
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	return conn, func() { stop(); _ = conn.Close() }, nil
@@ -350,38 +346,50 @@ func messageKnown(known []string, message Message) bool {
 	return false
 }
 
-func (c *Client) fetchPOP3(ctx context.Context, credentials Credentials, request FetchRequest) (result FetchResult, err error) {
+func readPOP3OK(session *textproto.Conn) (string, error) {
+	line, err := session.ReadLine()
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(line, "+OK") {
+		return "", authFailure(errors.New(line))
+	}
+	return line, nil
+}
+
+func pop3Command(session *textproto.Conn, format string, args ...any) (string, error) {
+	if err := session.PrintfLine(format, args...); err != nil {
+		return "", err
+	}
+	return readPOP3OK(session)
+}
+
+func (c *Client) openPOP3(ctx context.Context, credentials Credentials) (*textproto.Conn, func(), error) {
 	conn, closeConn, err := c.connect(ctx, "pop.daum.net:995", credentials.ProxyURL, "pop3")
+	if err != nil {
+		return nil, nil, err
+	}
+	session := textproto.NewConn(conn)
+	if _, err := readPOP3OK(session); err != nil {
+		closeConn()
+		return nil, nil, failureAt(transportFailure(err), "greeting")
+	}
+	for _, command := range []struct{ format, value string }{{"USER %s", credentials.Email}, {"PASS %s", credentials.AppPassword}} {
+		if _, err := pop3Command(session, command.format, command.value); err != nil {
+			closeConn()
+			return nil, nil, failureAt(authFailure(err), "authenticate")
+		}
+	}
+	return session, closeConn, nil
+}
+
+func (c *Client) fetchPOP3(ctx context.Context, credentials Credentials, request FetchRequest) (result FetchResult, err error) {
+	text, closeConn, err := c.openPOP3(ctx, credentials)
 	if err != nil {
 		return result, err
 	}
 	defer closeConn()
-	text := textproto.NewConn(conn)
-	readOK := func() (string, error) {
-		line, err := text.ReadLine()
-		if err != nil {
-			return "", err
-		}
-		if !strings.HasPrefix(line, "+OK") {
-			return "", authFailure(errors.New(line))
-		}
-		return line, nil
-	}
-	command := func(format string, args ...any) (string, error) {
-		if err := text.PrintfLine(format, args...); err != nil {
-			return "", err
-		}
-		return readOK()
-	}
-	if _, err = readOK(); err != nil {
-		return result, transportFailure(err)
-	}
-	if _, err = command("USER %s", credentials.Email); err != nil {
-		return result, authFailure(err)
-	}
-	if _, err = command("PASS %s", credentials.AppPassword); err != nil {
-		return result, authFailure(err)
-	}
+	command := func(format string, args ...any) (string, error) { return pop3Command(text, format, args...) }
 	if _, err = command("STAT"); err != nil {
 		return result, transportFailure(err)
 	}

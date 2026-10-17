@@ -24,7 +24,7 @@ export function DaumBulkMaintenanceModal({
   target,
 }: {
   onCancel: () => void;
-  onCompleted: (taskId?: string) => void | Promise<void>;
+  onCompleted: () => void | Promise<void>;
   target: DaumBulkMaintenanceTarget | null;
 }) {
   const { t } = useTranslation();
@@ -52,7 +52,7 @@ export function DaumBulkMaintenanceModal({
       success: "Resource validation batch submitted.",
     },
     {
-      description: "Scan Daum mail history and record project usage for each complete recipient address. IMAP is required for complete history.",
+      description: "Scan full Inbox and Junk history for existing project relationships.",
       icon: ScanSearch,
       key: "history",
       label: "Scan projects",
@@ -70,7 +70,8 @@ export function DaumBulkMaintenanceModal({
           ? await maintainAdminDaumResourcesByIds(selectedAction.key, target.resourceIds)
           : await maintainAdminDaumResourcesByFilter(selectedAction.key, target.filter);
       Toast.success(t(selectedAction.success, { count: response.requested }));
-      await onCompleted(response.taskId);
+      try { await onCompleted(); }
+      catch (error) { Toast.error(getIamErrorMessage(t, error, "Admin Daum resources load failed.")); }
       onCancel();
     } catch (error) {
       Toast.error(getIamErrorMessage(t, error, "Daum resource operation failed."));

@@ -78,7 +78,7 @@
 | 项目 | Microsoft | Daum | 判断 |
 |---|---|---|---|
 | 代理获取与账号绑定 | ProxyUseCase，规范化邮箱键、资源代理与系统备用、失败服务器排除 | 同一服务与相同键规则 | 已复用 |
-| IP 用途 | 验证 IPv4，实时 IPv4，历史 IPv6；网页绑定还有 Binding 用途 | 验证 IPv4/Auth，实时 IPv4/Fetch，历史 IPv6/Fetch | 可对应的邮件场景一致；无网页绑定流程 |
+| IP 用途 | 验证 IPv4，实时 IPv4，历史 IPv6；网页绑定还有 Binding 用途 | 审查时历史使用 IPv6；用户后续明确指定验证 IPv4/Auth、实时及历史 IPv4/Fetch | 后续 IPv4 统一是用户明确要求的差异；微软策略不变，无网页绑定流程 |
 | IMAP TLS | `netdial.DialTLS`、Go TLS、最低 TLS 1.2、证书验证、SNI、imap ALPN | 同一代码；POP3 使用 pop3 ALPN、Daum 主机名 | 邮件协议层共用，目标及 ALPN 必须按协议改变 |
 | 网页及 Graph 指纹 | 浏览器／API HTTP 客户端使用 tls-client 浏览器 profile、Cookie、HTTP 头；Graph API 使用 Chrome profile | 没有这些 HTTP 调用，仅 IMAP/POP3 | 不应声称浏览器指纹也完全一致 |
 | 无代理时 | IMAP 拒绝空代理；Graph／网页路径可接收 Direct 配置继续请求 | 平台路径统一延期，不直连；CMD 可明确直连 | 行为不同，之前只对齐了微软 IMAP 的限制 |
