@@ -14,6 +14,20 @@ function visiblePaths(permissions: string[]) {
 }
 
 describe("admin navigation permissions", () => {
+  it("opens the Daum console while keeping administration permission gated", () => {
+    expect(visiblePaths([])).toContain("/daum");
+    expect(visiblePaths([])).not.toContain("/admin/daum");
+    expect(getSidebarRouteRequiredPermissions("/daum")).toEqual([]);
+    expect(getSidebarRouteRequiredPermissions("/admin/daum")).toEqual(["core:resource:read"]);
+    const entry = getVisibleSidebarNavGroups([])
+      .find((group) => group.id === "console")?.items.find((item) => item.path === "/daum");
+    expect(entry?.labelKey).toBe("Console Daum Emails");
+    for (const locale of ["en", "zh"]) {
+      const labels = JSON.parse(readFileSync(new URL(`../../../i18n/locales/${locale}.json`, import.meta.url), "utf8"));
+      expect(labels[entry!.labelKey]).toBe("daum.net");
+    }
+  });
+
   it("opens Apple email management to ordinary console users", () => {
     expect(visiblePaths([])).toContain("/icloud");
     expect(getSidebarRouteRequiredPermissions("/icloud")).toEqual([]);

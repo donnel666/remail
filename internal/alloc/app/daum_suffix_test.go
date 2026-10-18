@@ -69,10 +69,10 @@ func (r *daumScopedSuffixRepo) ListDaumSourceCandidates(ctx context.Context, pro
 func TestDaumRandomSuffixPreservesOwnedPriorityAndPinsAllocation(t *testing.T) {
 	for _, owned := range []bool{true, false} {
 		repo := &daumScopedSuffixRepo{daumAllocationLockRepo: daumSuffixRepo(), inventory: map[domain.SupplyScope]map[string]int64{
-			domain.SupplyScopePublic: {"daum.net": 1000, "daum.me": 10000},
+			domain.SupplyScopePublic: {"hanmail.net": 1000, "daum.me": 10000},
 		}}
 		if owned {
-			repo.inventory[domain.SupplyScopeOwned] = map[string]int64{"hanmail.net": 1}
+			repo.inventory[domain.SupplyScopeOwned] = map[string]int64{"daum.net": 1}
 		}
 		uc := NewUseCase(repo)
 		uc.SetDaumProtocolReady(true)
@@ -82,10 +82,10 @@ func TestDaumRandomSuffixPreservesOwnedPriorityAndPinsAllocation(t *testing.T) {
 			SupplyScopes: []domain.SupplyScope{domain.SupplyScopeOwned, domain.SupplyScopePublic},
 		})
 		require.NoError(t, err)
-		want, scopes := "daum.net", []domain.SupplyScope{domain.SupplyScopeOwned, domain.SupplyScopePublic}
+		want, scopes := "hanmail.net", []domain.SupplyScope{domain.SupplyScopeOwned, domain.SupplyScopePublic}
 		wantScope := domain.SupplyScopePublic
 		if owned {
-			want, scopes = "hanmail.net", scopes[:1]
+			want, scopes = "daum.net", scopes[:1]
 			wantScope = domain.SupplyScopeOwned
 		}
 		require.Equal(t, "one@"+want, result.Email)

@@ -12,23 +12,24 @@ import (
 )
 
 type ResourceFilter struct {
-	Search         string     `json:"search,omitempty"`
-	Protocol       string     `json:"protocol,omitempty"`
-	Suffix         string     `json:"suffix,omitempty"`
-	Status         string     `json:"status,omitempty"`
-	ForSale        *bool      `json:"forSale,omitempty"`
-	LongLived      *bool      `json:"longLived,omitempty"`
-	OwnerID        *uint      `json:"ownerId,omitempty"`
-	CreatedFrom    *time.Time `json:"createdFrom,omitempty"`
-	CreatedTo      *time.Time `json:"createdTo,omitempty"`
-	Offset         int        `json:"-"`
-	Limit          int        `json:"-"`
-	AfterID        uint       `json:"-"`
-	SkipTotal      bool       `json:"-"`
-	SkipFacets     bool       `json:"-"`
-	ExcludeDeleted bool       `json:"-"`
-	AdminSearch    bool       `json:"-"`
-	SearchOwnerIDs []uint     `json:"-"`
+	Search          string     `json:"search,omitempty"`
+	Protocol        string     `json:"protocol,omitempty"`
+	Suffix          string     `json:"suffix,omitempty"`
+	Status          string     `json:"status,omitempty"`
+	ForSale         *bool      `json:"forSale,omitempty"`
+	LongLived       *bool      `json:"longLived,omitempty"`
+	OwnerID         *uint      `json:"ownerId,omitempty"`
+	CreatedFrom     *time.Time `json:"createdFrom,omitempty"`
+	CreatedTo       *time.Time `json:"createdTo,omitempty"`
+	Offset          int        `json:"-"`
+	Limit           int        `json:"-"`
+	AfterID         uint       `json:"-"`
+	SkipTotal       bool       `json:"-"`
+	SkipFacets      bool       `json:"-"`
+	ExcludeDeleted  bool       `json:"-"`
+	AdminSearch     bool       `json:"-"`
+	SearchOwnerIDs  []uint     `json:"-"`
+	MainAddressOnly bool       `json:"-"`
 }
 type ResourcePage struct {
 	Items       []Resource
@@ -122,7 +123,11 @@ func resourceFilterQuery(db *gorm.DB, f ResourceFilter, ignore string) *gorm.DB 
 		}
 	}
 	if f.Suffix != "" && ignore != "suffix" {
-		q = q.Where("(email_domain = ? OR EXISTS (SELECT 1 FROM daum_explicit_aliases a WHERE a.resource_id = daum_resources.id AND a.email_domain = ?))", f.Suffix, f.Suffix)
+		if f.MainAddressOnly {
+			q = q.Where("email_domain = ?", f.Suffix)
+		} else {
+			q = q.Where("(email_domain = ? OR EXISTS (SELECT 1 FROM daum_explicit_aliases a WHERE a.resource_id = daum_resources.id AND a.email_domain = ?))", f.Suffix, f.Suffix)
+		}
 	}
 	if f.Protocol != "" {
 		q = q.Where("protocol = ?", f.Protocol)
@@ -165,6 +170,19 @@ func adminResourceSearch(q *gorm.DB, f ResourceFilter) *gorm.DB {
 }
 
 const safeResourceColumns = `id, resource_type, owner_user_id, email_address, email_domain, (password <> '') AS password_configured, (app_password <> '') AS app_password_configured, protocol, COALESCE((SELECT binding_address FROM daum_binding_mailboxes b WHERE b.resource_id = daum_resources.id), '') AS binding_address, COALESCE((SELECT status FROM daum_binding_mailboxes b WHERE b.resource_id = daum_resources.id), 'unlinked') AS binding_status, COALESCE((SELECT last_safe_error FROM daum_binding_mailboxes b WHERE b.resource_id = daum_resources.id), '') AS binding_last_safe_error, EXISTS (SELECT 1 FROM daum_binding_mailboxes b WHERE b.resource_id = daum_resources.id AND b.pickup_url <> '') AS pickup_url_configured, for_sale, long_lived, quality_score, alloc_bucket, status, (SELECT root.version FROM email_resources AS root WHERE root.id = daum_resources.id) AS version, validation_generation, credential_revision, credential_updated_at, kakao_email, failure_category, validation_request_id, validation_failures, last_safe_error, last_checked_at, last_allocated_at, created_at, updated_at`
+
+func ownedResourceFilter(f ResourceFilter, owner uint) ResourceFilter {
+	f.OwnerID, f.ExcludeDeleted, f.MainAddressOnly = &owner, true, true
+	f.AdminSearch, f.SearchOwnerIDs = false, nil
+	return f
+}
+
+func (s *Service) ListOwnedResources(ctx context.Context, owner uint, f ResourceFilter) (*ResourcePage, error) {
+	if owner == 0 {
+		return nil, domain.ErrInvalidResource
+	}
+	return s.ListResources(ctx, ownedResourceFilter(f, owner))
+}
 
 func (s *Service) ListResources(ctx context.Context, f ResourceFilter) (*ResourcePage, error) {
 	if s == nil || s.DB == nil {
@@ -253,7 +271,11 @@ func (s *Service) resourceFacets(ctx context.Context, f ResourceFilter) (Resourc
 			}
 		}
 	}
-	for _, suffix := range []string{"daum.net", "hanmail.net", "hanmail2.net"} {
+	suffixes := []string{"daum.net"}
+	if !f.MainAddressOnly {
+		suffixes = append(suffixes, "hanmail.net", "hanmail2.net")
+	}
+	for _, suffix := range suffixes {
 		suffixFilter := f
 		suffixFilter.Suffix = suffix
 		var count int64

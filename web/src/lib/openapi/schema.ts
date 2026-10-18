@@ -6690,6 +6690,197 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/daum/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the current user's Daum mailboxes
+         * @description Returns only the current user's primary @daum.net resources. Deleted resources are excluded. Search, pagination and facets share the same owner scope.
+         */
+        get: operations["getOwnedDaumResources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/daum/resources/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Daum mailboxes for the current user
+         * @description Accepts mixed email----appPassword, email----password----appPassword and email----password----appPassword----pickupUrl----kakaoEmail rows. Every first-field email must use @daum.net. Ownership is fixed to the authenticated user; ownerId is rejected. The five-field format associates an existing authorized remail pickup mailbox independently of the Kakao account address. Passwords and URLs are write-only. Duplicate active accounts are not overwritten.
+         */
+        post: operations["postOwnedDaumResourceImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/daum/resources/imports/{importId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get an owned Daum import */
+        get: operations["getOwnedDaumResourceImport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/daum/resources/imports/{importId}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List safe outcomes for an owned Daum import */
+        get: operations["getOwnedDaumResourceImportItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/daum/resources/imports/{importId}/failures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download safe failure outcomes for an owned Daum import */
+        get: operations["getOwnedDaumResourceImportFailures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/daum/resources/{resourceId}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue validation for an owned Daum mailbox
+         * @description Always scoped to the authenticated owner. Publishing additionally requires supplier, admin or super_admin role. Public resources cannot be deleted through this surface.
+         */
+        post: operations["postOwnedDaumResourceValidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/daum/resources/{resourceId}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish an owned Daum mailbox for sale
+         * @description Always scoped to the authenticated owner. Publishing additionally requires supplier, admin or super_admin role. Public resources cannot be deleted through this surface.
+         */
+        post: operations["postOwnedDaumResourcePublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/daum/resources/{resourceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete an owned private Daum mailbox
+         * @description Always scoped to the authenticated owner. Publishing additionally requires supplier, admin or super_admin role. Public resources cannot be deleted through this surface.
+         */
+        delete: operations["deleteOwnedDaumResource"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/daum/resources/bulk/{command}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue an owner-scoped Daum resource command
+         * @description Selection and the worker's frozen snapshot remain scoped to the authenticated user. Publishing requires supplier access; deletion skips public resources. No other lifecycle commands are accepted.
+         */
+        post: operations["postOwnedDaumResourceBulk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/daum/resources/bulk-tasks/{taskId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the current user's owned Daum bulk task
+         * @description The task operator and owner scope must both match the authenticated user. Administrator tasks are not visible through this endpoint.
+         */
+        get: operations["getOwnedDaumResourceBulkTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/daum/resources": {
         parameters: {
             query?: never;
@@ -9371,7 +9562,7 @@ export interface components {
             suffixes?: components["schemas"]["ProductSuffixInventory"][];
         };
         ProductSuffixInventory: {
-            /** @description Selectable inventory value. Microsoft and Proto products expose exact email domains. Daum exposes daum.net, hanmail.net and hanmail2.net as independently available addresses on a shared account. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned. */
+            /** @description Selectable inventory value. Microsoft and Proto products expose exact email domains. Daum exposes daum.net, hanmail.net and hanmail2.net as exact product suffixes. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned. */
             suffix: string;
             /** Format: int64 */
             totalAvailable: number;
@@ -12027,6 +12218,120 @@ export interface components {
          * @enum {string}
          */
         DaumResourceStatus: "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled" | "deleted";
+        OwnedDaumResource: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            version: number;
+            /** @enum {string} */
+            type: "daum";
+            /** Format: email */
+            email: string;
+            /** @enum {string} */
+            suffix: "daum.net";
+            status: components["schemas"]["DaumResourceStatus"];
+            forSale: boolean;
+            longLived: boolean;
+            qualityScore: number;
+            /** @description Fixed safe explanation derived from the failure category or stage; no raw provider diagnostics. */
+            lastSafeError?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        OwnedDaumResourceListResponse: {
+            items: components["schemas"]["OwnedDaumResource"][];
+            /**
+             * Format: int64
+             * @description Omitted when includeTotal is false.
+             */
+            total?: number;
+            offset: number;
+            limit: number;
+            /** Format: int64 */
+            nextAfterId: number | null;
+            hasMore: boolean;
+            facets: components["schemas"]["OwnedDaumResourceFacets"];
+        };
+        OwnedDaumResourceFacets: {
+            /** Format: int64 */
+            all: number;
+            /** Format: int64 */
+            pending: number;
+            /** Format: int64 */
+            validating: number;
+            /** Format: int64 */
+            identifying: number;
+            /** Format: int64 */
+            normal: number;
+            /** Format: int64 */
+            abnormal: number;
+            /** Format: int64 */
+            disabled: number;
+            /** Format: int64 */
+            deleted: number;
+            status: {
+                /** Format: int64 */
+                all: number;
+                /** Format: int64 */
+                pending: number;
+                /** Format: int64 */
+                validating: number;
+                /** Format: int64 */
+                identifying: number;
+                /** Format: int64 */
+                normal: number;
+                /** Format: int64 */
+                abnormal: number;
+                /** Format: int64 */
+                disabled: number;
+                /** Format: int64 */
+                deleted: number;
+            };
+            forSale: components["schemas"]["DaumBooleanFacets"];
+            longLived: components["schemas"]["DaumBooleanFacets"];
+            suffixes: {
+                /** @enum {string} */
+                key: "daum.net";
+                /** Format: int64 */
+                count: number;
+            }[];
+        };
+        OwnedDaumResourceFilter: {
+            search?: string;
+            /** @enum {string} */
+            suffix?: "daum.net";
+            status?: components["schemas"]["DaumResourceStatus"];
+            forSale?: boolean;
+            longLived?: boolean;
+            /** Format: date-time */
+            createdFrom?: string;
+            /** Format: date-time */
+            createdTo?: string;
+        };
+        OwnedDaumBulkRequest: {
+            selection: {
+                /** @enum {string} */
+                mode: "ids" | "filter";
+                resourceIds?: number[];
+                filter?: components["schemas"]["OwnedDaumResourceFilter"];
+            };
+        };
+        OwnedDaumImportItem: {
+            line: number;
+            /** @enum {string} */
+            outcome: "imported" | "restored" | "skipped" | "failed";
+            category: string;
+            lastSafeError?: string;
+        };
+        OwnedDaumImportItemsResponse: {
+            items: components["schemas"]["OwnedDaumImportItem"][];
+            /** Format: int64 */
+            total: number;
+            offset: number;
+            limit: number;
+        };
         DaumResource: {
             proxyBindings?: components["schemas"]["AdminMicrosoftProxyBinding"][];
             recentTasks?: components["schemas"]["AdminTaskSummary"][];
@@ -30453,6 +30758,328 @@ export interface operations {
                 };
                 content: {
                     "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getOwnedDaumResources: {
+        parameters: {
+            query?: {
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: components["parameters"]["LimitQuery"];
+                /** @description Last ticket id from the previous page. */
+                afterId?: components["parameters"]["AfterIdQuery"];
+                createdFrom?: components["parameters"]["CreatedFromQuery"];
+                createdTo?: components["parameters"]["CreatedToQuery"];
+                longLived?: components["parameters"]["DaumLongLivedQuery"];
+                /** @description When false, the response omits total and returns only cursor pagination data. */
+                includeTotal?: components["parameters"]["DaumIncludeTotalQuery"];
+                includeFacets?: components["parameters"]["DaumIncludeFacetsQuery"];
+                suffix?: "daum.net";
+                search?: string;
+                status?: components["schemas"]["DaumResourceStatus"];
+                forSale?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Owned Daum resources */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnedDaumResourceListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    postOwnedDaumResourceImport: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+                /** @description Single-use Turnstile token for the daum_resource_import action when CAPTCHA is enabled. */
+                "X-Turnstile-Token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                    /**
+                     * @default skip
+                     * @enum {string}
+                     */
+                    errorStrategy?: "skip" | "abort";
+                    /** @default false */
+                    longLived?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Import accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumImportResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getOwnedDaumResourceImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe import result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumImportResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getOwnedDaumResourceImportItems: {
+        parameters: {
+            query?: {
+                /** @description Row offset used when afterId is absent. */
+                offset?: components["parameters"]["OffsetQuery"];
+                limit?: components["parameters"]["LimitQuery"];
+            };
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe import result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnedDaumImportItemsResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getOwnedDaumResourceImportFailures: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                importId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe CSV containing line/category/message only */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    postOwnedDaumResourceValidate: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Command result */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumResourceMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    postOwnedDaumResourcePublish: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DaumResourceCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Command result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumResourceMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteOwnedDaumResource: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                resourceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DaumResourceCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Command result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumResourceMutationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    postOwnedDaumResourceBulk: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                command: "validate" | "publish" | "delete";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OwnedDaumBulkRequest"];
+            };
+        };
+        responses: {
+            /** @description Bulk task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumBulkTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getOwnedDaumResourceBulkTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: components["parameters"]["DaumBulkTaskId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bulk progress */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaumBulkTask"];
                 };
             };
             401: components["responses"]["Unauthorized"];

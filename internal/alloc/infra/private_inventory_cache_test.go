@@ -220,3 +220,51 @@ func TestPrivateInventoryCacheIsAsyncIsolatedAndKeepsSharedSnapshotLive(t *testi
 	_, err = uc.GetProductInventoryTotals(ctx, 10, 7)
 	require.ErrorContains(t, err, "access revoked", "cached inventory must still authorize each request")
 }
+
+func TestPrivateInventoryOmitsDaumAliasesFromExistingSnapshots(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	ctx := context.Background()
+	privateCache := platform.NewHourlySnapshotCache[allocapp.PrivateInventoryTotals](client)
+	require.NoError(t, privateCache.Refresh(ctx, "alloc:private-inventory:v1:10:7", func(context.Context) (allocapp.PrivateInventoryTotals, error) {
+		return allocapp.PrivateInventoryTotals{
+			Daum: []allocapp.PrivateProductInventoryTotal{
+				{ProductID: 20, Suffix: "daum.net", Available: 2},
+				{ProductID: 20, Suffix: "hanmail.net", Available: 5},
+				{ProductID: 20, Suffix: "hanmail2.net", Available: 7},
+			},
+			Microsoft: []allocapp.PrivateProductInventoryTotal{{ProductID: 21, Suffix: "outlook.com", Available: 4}},
+		}, nil
+	}))
+	available := int64(3)
+	repo := &inventoryCacheRepoStub{totals: allocapp.ProjectProductInventoryTotals{ProjectID: 10, TotalAvailable: 3, Items: []allocapp.ProductInventoryTotal{{
+		ProductID: 20, ProductType: coredomain.ProductTypeDaum, TotalAvailable: 3, PublicAvailable: 3,
+		CodeAvailable: &available, PurchaseAvailable: &available,
+		Suffixes: []allocapp.ProductInventorySuffixTotal{
+			{Suffix: "daum.net", TotalAvailable: 1, PublicAvailable: 1},
+			{Suffix: "hanmail.net", TotalAvailable: 1, PublicAvailable: 1},
+			{Suffix: "hanmail2.net", TotalAvailable: 1, PublicAvailable: 1},
+		},
+	}}}}
+	uc := allocapp.NewUseCase(repo)
+	uc.SetPrivateInventoryCache(privateCache)
+	uc.SetDaumProtocolReady(true)
+	totals, err := uc.GetProductInventoryTotals(ctx, 10, 7)
+	require.NoError(t, err)
+	require.EqualValues(t, 9, totals.TotalAvailable, "only Daum main and unchanged Microsoft private stock may augment public inventory")
+	require.Len(t, totals.Items, 2)
+	daum := totals.Items[0]
+	require.EqualValues(t, 5, daum.TotalAvailable)
+	require.EqualValues(t, 3, daum.PublicAvailable)
+	require.EqualValues(t, 5, *daum.CodeAvailable)
+	require.EqualValues(t, 5, *daum.PurchaseAvailable)
+	require.Equal(t, []allocapp.ProductInventorySuffixTotal{
+		{Suffix: "daum.net", TotalAvailable: 3, PublicAvailable: 1},
+		{Suffix: "hanmail.net", TotalAvailable: 1, PublicAvailable: 1},
+		{Suffix: "hanmail2.net", TotalAvailable: 1, PublicAvailable: 1},
+	}, daum.Suffixes)
+	public, err := uc.GetProductInventoryTotals(ctx, 10, 8)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, public.TotalAvailable, "private filtering must not mutate the shared public snapshot")
+}

@@ -82,7 +82,7 @@ func RegisterRoutes(
 	module *Module,
 	fetcher middleware.SessionFetcher,
 	checker middleware.PermissionChecker,
-	_ ...gin.HandlerFunc,
+	guards ...gin.HandlerFunc,
 ) {
 	if rg == nil {
 		return
@@ -92,6 +92,23 @@ func RegisterRoutes(
 		module.Service.ValidateOwner = module.ValidateOwner
 		module.Service.ValidateSupplierOwner = module.ValidateSupplierOwner
 	}
+	owned := rg.Group("/daum/resources")
+	owned.Use(middleware.LoadSession(fetcher), middleware.AuthRequired(), middleware.CSRFRequired())
+	for _, guard := range guards {
+		if guard != nil {
+			owned.Use(guard)
+		}
+	}
+	owned.GET("", h.listOwned)
+	owned.POST("/imports", h.importOwned)
+	owned.GET("/imports/:importId", h.getImportOwned)
+	owned.GET("/imports/:importId/items", h.getImportItemsOwned)
+	owned.GET("/imports/:importId/failures", h.getImportFailuresOwned)
+	owned.POST("/bulk/:command", h.bulkOwned)
+	owned.GET("/bulk-tasks/:taskId", h.getBulkOwned)
+	owned.POST("/:resourceId/validate", h.commandOwned("validate"))
+	owned.POST("/:resourceId/publish", h.commandOwned("publish"))
+	owned.DELETE("/:resourceId", h.commandOwned("delete"))
 	admin := rg.Group("/admin/daum/resources")
 	admin.Use(middleware.LoadSession(fetcher), middleware.AuthRequired(), middleware.CSRFRequired())
 	admin.Use(middleware.RoleRequired(iamdomain.RoleAdmin, iamdomain.RoleSuperAdmin))

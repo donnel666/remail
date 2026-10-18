@@ -25,7 +25,7 @@ describe("Daum public checkout contract", () => {
       expect(description).toContain("指定具体后缀缺货时不会切换其他后缀");
     }
     expect(schemas.CreateOrderBatchRequest.properties.emailSuffix.description).toContain("批量下单只随机一次");
-    expect(schemas.ProductSuffixInventory.properties.suffix.description).toContain("rather than three times the account count");
+    expect(schemas.ProductSuffixInventory.properties.suffix.description).toContain("currently available stock for that suffix");
     for (const suffix of DAUM_EMAIL_SUFFIXES) expect(schemas.ProductSuffixInventory.properties.suffix.description).toContain(suffix);
   });
 
@@ -51,5 +51,15 @@ describe("Daum public checkout contract", () => {
     for (const name of ["password", "appPassword", "pickupUrl", "bindingAddress", "kakaoEmail"]) expect(schemas.Order.properties).not.toHaveProperty(name);
     expect(schemas.Order.properties.serviceToken.description).toContain("不交付导入的 remail 取件 URL");
     expect(Object.keys(spec.paths).some((path) => path.includes("/daum/resources"))).toBe(false);
+  });
+
+  it("describes Daum purchase choices without disclosing account relationships", () => {
+    const descriptions = [
+      schemas.PickupCredentialRequest.properties.email.description,
+      schemas.ProductSuffixInventory.properties.suffix.description,
+      ...Object.values(spec.paths["/v1/open/orders"].post.requestBody.content["application/json"].examples).map((example: any) => example.summary),
+    ].join(" ");
+    expect(descriptions).not.toMatch(/显式别名|共用收件箱|主地址|alias|shared inbox|account count/i);
+    expect(schemas.PickupCredentialRequest.properties.email.description).toContain("取件必须使用订单交付的原始地址");
   });
 });

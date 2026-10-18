@@ -22,11 +22,11 @@ const emailSuffixDescription = "商品选择后缀。daum 在有货的 Daum 后�
 const batchEmailSuffixDescription = `${emailSuffixDescription} 批量下单只随机一次，所有子订单固定使用该后缀；该后缀库存耗尽后不再随机其他后缀。`;
 const daumOrderExamples = {
   daumRandom: { summary: "Daum 随机后缀", value: { projectId: 1001, emailSuffix: "daum" } },
-  daumMain: { summary: "Daum 主地址", value: { projectId: 1001, emailSuffix: "daum.net" } },
-  daumHanmail: { summary: "Daum 显式别名 hanmail.net", value: { projectId: 1001, emailSuffix: "hanmail.net" } },
-  daumHanmail2: { summary: "Daum 显式别名 hanmail2.net", value: { projectId: 1001, emailSuffix: "hanmail2.net" } },
+  daumMain: { summary: "Daum 后缀 daum.net", value: { projectId: 1001, emailSuffix: "daum.net" } },
+  daumHanmail: { summary: "Daum 后缀 hanmail.net", value: { projectId: 1001, emailSuffix: "hanmail.net" } },
+  daumHanmail2: { summary: "Daum 后缀 hanmail2.net", value: { projectId: 1001, emailSuffix: "hanmail2.net" } },
 };
-const pickupEmailDescription = "订单交付的完整邮箱地址。Daum 的 @daum.net、@hanmail.net、@hanmail2.net 分别匹配对应订单；即使共用收件箱，也不能将别名替换为主地址或另一个后缀。";
+const pickupEmailDescription = "订单交付的完整邮箱地址。Daum 的 @daum.net、@hanmail.net、@hanmail2.net 分别匹配对应订单；取件必须使用订单交付的原始地址，不可替换地址或后缀。";
 const listOf = (name) => ({ type: "array", items: ref(name) });
 const nullable = (type, schema = {}) => ({ type, nullable: true, ...schema });
 const id = (schema = {}) => ({ type: "integer", format: "int64", ...schema });
@@ -398,7 +398,7 @@ const schemas = {
       suffix: {
         type: "string",
         example: "com.cn",
-        description: "Selectable inventory value. Daum products expose daum.net, hanmail.net and hanmail2.net separately; each count reflects eligible, unused and unallocated delivery addresses rather than three times the account count. The random selector daum is not a separate suffix inventory row. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned.",
+        description: "Selectable inventory value. Daum products expose daum.net, hanmail.net and hanmail2.net separately; each count reflects currently available stock for that suffix. The random selector daum is not a separate suffix inventory row. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned.",
       },
       totalAvailable: { type: "integer", format: "int64", example: 120 },
       publicAvailable: { type: "integer", format: "int64", example: 80 },

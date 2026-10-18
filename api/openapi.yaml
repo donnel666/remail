@@ -16713,6 +16713,226 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
 
 
+  /v1/daum/resources:
+    get:
+      operationId: getOwnedDaumResources
+      summary: List the current user's Daum mailboxes
+      description: Returns only the current user's primary @daum.net resources. Deleted resources are excluded. Search, pagination and facets share the same owner scope.
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/OffsetQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+        - $ref: "#/components/parameters/AfterIdQuery"
+        - $ref: "#/components/parameters/CreatedFromQuery"
+        - $ref: "#/components/parameters/CreatedToQuery"
+        - $ref: "#/components/parameters/DaumLongLivedQuery"
+        - $ref: "#/components/parameters/DaumIncludeTotalQuery"
+        - $ref: "#/components/parameters/DaumIncludeFacetsQuery"
+        - name: suffix
+          in: query
+          schema: {type: string, enum: [daum.net]}
+        - name: search
+          in: query
+          schema: {type: string, maxLength: 320}
+        - name: status
+          in: query
+          schema: {$ref: "#/components/schemas/DaumResourceStatus"}
+        - name: forSale
+          in: query
+          schema: {type: boolean}
+      responses:
+        "200": {description: Owned Daum resources, content: {application/json: {schema: {$ref: "#/components/schemas/OwnedDaumResourceListResponse"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /v1/daum/resources/imports:
+    post:
+      operationId: postOwnedDaumResourceImport
+      summary: Import Daum mailboxes for the current user
+      description: Accepts mixed email----appPassword, email----password----appPassword and email----password----appPassword----pickupUrl----kakaoEmail rows. Every first-field email must use @daum.net. Ownership is fixed to the authenticated user; ownerId is rejected. The five-field format associates an existing authorized remail pickup mailbox independently of the Kakao account address. Passwords and URLs are write-only. Duplicate active accounts are not overwritten.
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: X-Turnstile-Token
+          in: header
+          description: Single-use Turnstile token for the daum_resource_import action when CAPTCHA is enabled.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {type: string, format: binary}
+                errorStrategy: {type: string, enum: [skip, abort], default: skip}
+                longLived: {type: boolean, default: false}
+              additionalProperties: false
+      responses:
+        "202": {description: Import accepted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumImportResponse"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  /v1/daum/resources/imports/{importId}:
+    get:
+      operationId: getOwnedDaumResourceImport
+      summary: Get an owned Daum import
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: importId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+      responses:
+        "200": {description: Safe import result, content: {application/json: {schema: {$ref: "#/components/schemas/DaumImportResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /v1/daum/resources/imports/{importId}/items:
+    get:
+      operationId: getOwnedDaumResourceImportItems
+      summary: List safe outcomes for an owned Daum import
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: importId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+        - $ref: "#/components/parameters/OffsetQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200": {description: Safe import result, content: {application/json: {schema: {$ref: "#/components/schemas/OwnedDaumImportItemsResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /v1/daum/resources/imports/{importId}/failures:
+    get:
+      operationId: getOwnedDaumResourceImportFailures
+      summary: Download safe failure outcomes for an owned Daum import
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: importId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+      responses:
+        "200": {description: Safe CSV containing line/category/message only, content: {text/csv: {schema: {type: string}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /v1/daum/resources/{resourceId}/validate:
+    post:
+      operationId: postOwnedDaumResourceValidate
+      summary: Queue validation for an owned Daum mailbox
+      description: Always scoped to the authenticated owner. Publishing additionally requires supplier, admin or super_admin role. Public resources cannot be deleted through this surface.
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "202": {description: Command result, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  /v1/daum/resources/{resourceId}/publish:
+    post:
+      operationId: postOwnedDaumResourcePublish
+      summary: Publish an owned Daum mailbox for sale
+      description: Always scoped to the authenticated owner. Publishing additionally requires supplier, admin or super_admin role. Public resources cannot be deleted through this surface.
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceCommandRequest"}}}}
+      responses:
+        "200": {description: Command result, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  /v1/daum/resources/{resourceId}:
+    delete:
+      operationId: deleteOwnedDaumResource
+      summary: Delete an owned private Daum mailbox
+      description: Always scoped to the authenticated owner. Publishing additionally requires supplier, admin or super_admin role. Public resources cannot be deleted through this surface.
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceCommandRequest"}}}}
+      responses:
+        "200": {description: Command result, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  /v1/daum/resources/bulk/{command}:
+    post:
+      operationId: postOwnedDaumResourceBulk
+      summary: Queue an owner-scoped Daum resource command
+      description: Selection and the worker's frozen snapshot remain scoped to the authenticated user. Publishing requires supplier access; deletion skips public resources. No other lifecycle commands are accepted.
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - name: command
+          in: path
+          required: true
+          schema: {type: string, enum: [validate, publish, delete]}
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/OwnedDaumBulkRequest"}}}}
+      responses:
+        "202": {description: Bulk task accepted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumBulkTask"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  /v1/daum/resources/bulk-tasks/{taskId}:
+    get:
+      operationId: getOwnedDaumResourceBulkTask
+      summary: Get the current user's owned Daum bulk task
+      description: The task operator and owner scope must both match the authenticated user. Administrator tasks are not visible through this endpoint.
+      tags: [Daum]
+      security: [{cookieAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/DaumBulkTaskId"
+      responses:
+        "200": {description: Bulk progress, content: {application/json: {schema: {$ref: "#/components/schemas/DaumBulkTask"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /v1/admin/daum/resources:
     get:
       operationId: getAdminDaumResources
@@ -23175,7 +23395,7 @@ components:
       properties:
         suffix:
           type: string
-          description: Selectable inventory value. Microsoft and Proto products expose exact email domains. Daum exposes daum.net, hanmail.net and hanmail2.net as independently available addresses on a shared account. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned.
+          description: Selectable inventory value. Microsoft and Proto products expose exact email domains. Daum exposes daum.net, hanmail.net and hanmail2.net as exact product suffixes. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned.
         totalAvailable:
           type: integer
           format: int64
@@ -29187,6 +29407,125 @@ components:
       description: Validation matches Microsoft resources. Retryable failures return to pending while attempts remain; non-retryable or exhausted validations become abnormal.
       enum: [pending, validating, identifying, normal, abnormal, disabled, deleted]
       x-enum-varnames: [Pending, Validating, Identifying, Normal, Abnormal, Disabled, Deleted]
+
+    OwnedDaumResource:
+      type: object
+      required: [id, version, type, email, suffix, status, forSale, longLived, qualityScore, createdAt, updatedAt]
+      properties:
+        id: {type: integer, format: int64}
+        version: {type: integer, format: int64}
+        type: {type: string, enum: [daum]}
+        email: {type: string, format: email}
+        suffix: {type: string, enum: [daum.net]}
+        status: {$ref: "#/components/schemas/DaumResourceStatus"}
+        forSale: {type: boolean}
+        longLived: {type: boolean}
+        qualityScore: {type: integer, minimum: 0, maximum: 100}
+        lastSafeError: {type: string, description: Fixed safe explanation derived from the failure category or stage; no raw provider diagnostics.}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+      additionalProperties: false
+
+    OwnedDaumResourceListResponse:
+      type: object
+      required: [items, offset, limit, nextAfterId, hasMore, facets]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/OwnedDaumResource"}}
+        total: {type: integer, format: int64, minimum: 0, description: Omitted when includeTotal is false.}
+        offset: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 200}
+        nextAfterId: {type: integer, format: int64, nullable: true}
+        hasMore: {type: boolean}
+        facets: {$ref: "#/components/schemas/OwnedDaumResourceFacets"}
+      additionalProperties: false
+
+    OwnedDaumResourceFacets:
+      type: object
+      required: [all, pending, validating, identifying, normal, abnormal, disabled, deleted, status, forSale, longLived, suffixes]
+      properties:
+        all: {type: integer, format: int64}
+        pending: {type: integer, format: int64}
+        validating: {type: integer, format: int64}
+        identifying: {type: integer, format: int64}
+        normal: {type: integer, format: int64}
+        abnormal: {type: integer, format: int64}
+        disabled: {type: integer, format: int64}
+        deleted: {type: integer, format: int64}
+        status:
+          type: object
+          required: [all, pending, validating, identifying, normal, abnormal, disabled, deleted]
+          properties:
+            all: {type: integer, format: int64}
+            pending: {type: integer, format: int64}
+            validating: {type: integer, format: int64}
+            identifying: {type: integer, format: int64}
+            normal: {type: integer, format: int64}
+            abnormal: {type: integer, format: int64}
+            disabled: {type: integer, format: int64}
+            deleted: {type: integer, format: int64}
+          additionalProperties: false
+        forSale: {$ref: "#/components/schemas/DaumBooleanFacets"}
+        longLived: {$ref: "#/components/schemas/DaumBooleanFacets"}
+        suffixes:
+          type: array
+          items:
+            type: object
+            required: [key, count]
+            properties:
+              key: {type: string, enum: [daum.net]}
+              count: {type: integer, format: int64}
+            additionalProperties: false
+      additionalProperties: false
+
+    OwnedDaumResourceFilter:
+      type: object
+      properties:
+        search: {type: string, maxLength: 320}
+        suffix: {type: string, enum: [daum.net]}
+        status: {$ref: "#/components/schemas/DaumResourceStatus"}
+        forSale: {type: boolean}
+        longLived: {type: boolean}
+        createdFrom: {type: string, format: date-time}
+        createdTo: {type: string, format: date-time}
+      additionalProperties: false
+
+    OwnedDaumBulkRequest:
+      type: object
+      required: [selection]
+      properties:
+        selection:
+          type: object
+          required: [mode]
+          properties:
+            mode: {type: string, enum: [ids, filter]}
+            resourceIds:
+              type: array
+              minItems: 1
+              maxItems: 1000
+              items: {type: integer, format: int64, minimum: 1}
+            filter: {$ref: "#/components/schemas/OwnedDaumResourceFilter"}
+          additionalProperties: false
+      additionalProperties: false
+
+    OwnedDaumImportItem:
+      type: object
+      required: [line, outcome, category]
+      properties:
+        line: {type: integer, minimum: 1}
+        outcome: {type: string, enum: [imported, restored, skipped, failed]}
+        category: {type: string}
+        lastSafeError: {type: string}
+      additionalProperties: false
+
+    OwnedDaumImportItemsResponse:
+      type: object
+      required: [items, total, offset, limit]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/OwnedDaumImportItem"}}
+        total: {type: integer, format: int64}
+        offset: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 200}
+      additionalProperties: false
 
     DaumResource:
       type: object

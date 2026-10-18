@@ -1091,6 +1091,10 @@ func mergePrivateProductInventory(result *ProjectProductInventoryTotals, invento
 		if private.Available <= 0 || private.Suffix == "" {
 			continue
 		}
+		// Older private snapshots can still contain platform-owned Daum aliases.
+		if productType == coredomain.ProductTypeDaum && private.Suffix != "daum.net" {
+			continue
+		}
 		itemIndex := -1
 		for i := range result.Items {
 			if result.Items[i].ProductID == private.ProductID {

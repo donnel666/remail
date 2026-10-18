@@ -81,6 +81,9 @@ func (s *Service) ExecuteCommand(ctx context.Context, cmd Command) (*CommandResu
 	if cmd.QualityScore != nil && (*cmd.QualityScore < 0 || *cmd.QualityScore > 100) {
 		return nil, domain.ErrInvalidResource
 	}
+	if cmd.ScopeOwnerID != nil && *cmd.ScopeOwnerID != cmd.OperatorUserID {
+		return nil, domain.ErrInvalidResource
+	}
 	if (cmd.Password != nil && !validPassword(*cmd.Password)) || (cmd.AppPassword != nil && !validPassword(*cmd.AppPassword)) || (cmd.Protocol != nil && !validProtocol(*cmd.Protocol)) {
 		return nil, domain.ErrInvalidResource
 	}
@@ -113,6 +116,11 @@ func (s *Service) ExecuteCommand(ctx context.Context, cmd Command) (*CommandResu
 			return domain.ErrImportConflict
 		}
 		if stored.ReservationToken != token {
+			if cmd.ScopeOwnerID != nil {
+				if _, err := lockResource(tx, cmd.ResourceID, cmd.ScopeOwnerID); err != nil {
+					return err
+				}
+			}
 			if stored.Status != "succeeded" || stored.ResultJSON == nil {
 				return domain.ErrImportConflict
 			}

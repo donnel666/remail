@@ -47,6 +47,7 @@ func turnstileRouter(verifier TurnstileVerifier) *gin.Engine {
 	v1.POST("/open/cards/redeem", func(c *gin.Context) { c.Status(http.StatusOK) })
 	v1.POST("/projects/:projectId/resubmit", func(c *gin.Context) { c.Status(http.StatusOK) })
 	v1.POST("/resources/imports", func(c *gin.Context) { c.Status(http.StatusAccepted) })
+	v1.POST("/daum/resources/imports", func(c *gin.Context) { c.Status(http.StatusAccepted) })
 	v1.POST("/proto/resources/imports", func(c *gin.Context) { c.Status(http.StatusAccepted) })
 	v1.POST("/icloud/resources/imports", func(c *gin.Context) { c.Status(http.StatusAccepted) })
 	v1.POST("/domains", func(c *gin.Context) { c.Status(http.StatusCreated) })
@@ -128,6 +129,8 @@ func TestTurnstileGuardVerifiesRouteAction(t *testing.T) {
 
 	require.Equal(t, http.StatusAccepted, doTurnstile(router, http.MethodPost, "/v1/resources/imports", "tok").Code)
 	require.Equal(t, "resource_import", verifier.action)
+	require.Equal(t, http.StatusAccepted, doTurnstile(router, http.MethodPost, "/v1/daum/resources/imports", "tok").Code)
+	require.Equal(t, "daum_resource_import", verifier.action)
 	require.Equal(t, http.StatusAccepted, doTurnstile(router, http.MethodPost, "/v1/proto/resources/imports", "tok").Code)
 	require.Equal(t, "proto_resource_import", verifier.action)
 	require.Equal(t, http.StatusAccepted, doTurnstile(router, http.MethodPost, "/v1/icloud/resources/imports", "tok").Code)

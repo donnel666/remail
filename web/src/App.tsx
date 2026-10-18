@@ -65,6 +65,7 @@ const pageLoaders = {
   orders: () => import("./pages/Orders"),
   tickets: () => import("./pages/Tickets"),
   microsoftEmails: () => import("./pages/MicrosoftEmails"),
+  daumEmails: () => import("./pages/DaumEmails"),
   icloudEmails: () => import("./pages/ICloudEmails"),
   domainEmails: () => import("./pages/DomainEmails"),
   adminDashboard: () => import("./pages/AdminDashboard"),
@@ -107,6 +108,7 @@ const PaymentReturn = lazy(pageLoaders.paymentReturn);
 const Orders = lazy(pageLoaders.orders);
 const Tickets = lazy(pageLoaders.tickets);
 const MicrosoftEmails = lazy(pageLoaders.microsoftEmails);
+const DaumEmails = lazy(pageLoaders.daumEmails);
 const ICloudEmails = lazy(pageLoaders.icloudEmails);
 const DomainEmails = lazy(pageLoaders.domainEmails);
 const AdminDashboard = lazy(pageLoaders.adminDashboard);
@@ -144,6 +146,7 @@ const routePreloadPriority = [
   "finance",
   "wallet",
   "microsoftEmails",
+  "daumEmails",
   "icloudEmails",
   "domainEmails",
   "adminDashboard",
@@ -204,6 +207,7 @@ const preloadRouteByLoader: Partial<Record<PageLoaderKey, string>> = {
   finance: "/finance",
   invite: "/invite",
   microsoftEmails: "/microsoft",
+  daumEmails: "/daum",
   icloudEmails: "/icloud",
   orders: "/orders",
   pickup: "/pickup",
@@ -564,6 +568,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/orders", component: Orders }),
   createRoute({ getParentRoute: () => rootRoute, path: "/tickets", component: Tickets }),
   createRoute({ getParentRoute: () => rootRoute, path: "/microsoft", component: MicrosoftEmails }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/daum", component: DaumEmails }),
   createRoute({ getParentRoute: () => rootRoute, path: "/icloud", component: ICloudEmails }),
   createRoute({ getParentRoute: () => rootRoute, path: "/domains", component: DomainEmails }),
   createRoute({ getParentRoute: () => rootRoute, path: "/invite", component: Invite }),

@@ -37,11 +37,15 @@ func TestDaumThreeAddressesCheckoutHistoryAndRefundMySQL(t *testing.T) {
 	totals, err := allocation.GetProductInventoryTotals(ctx, 10, 2)
 	require.NoError(t, err)
 	require.Len(t, totals.Items, 1)
-	require.EqualValues(t, 6, totals.Items[0].TotalAvailable)
+	require.EqualValues(t, 4, totals.Items[0].TotalAvailable)
 	require.EqualValues(t, 3, totals.Items[0].PublicAvailable)
 	var orders []*tradeapp.CheckoutResult
 	for _, suffix := range []string{"daum.net", "hanmail.net", "hanmail2.net"} {
-		request := tradeapp.CheckoutRequest{UserID: 2, ProjectID: 10, EmailSuffix: suffix, ServiceMode: "code", SupplyPolicy: "public_only", ClientChannel: tradedomain.ClientChannelConsole, IdempotencyKey: "daum-" + suffix}
+		policy := "public_only"
+		if suffix != "daum.net" {
+			policy = "private_first"
+		}
+		request := tradeapp.CheckoutRequest{UserID: 2, ProjectID: 10, EmailSuffix: suffix, ServiceMode: "code", SupplyPolicy: policy, ClientChannel: tradedomain.ClientChannelConsole, IdempotencyKey: "daum-" + suffix}
 		order, err := uc.Checkout(ctx, request)
 		require.NoError(t, err)
 		require.Equal(t, "public@"+suffix, order.Order.DeliveryEmail)
@@ -69,10 +73,13 @@ func TestDaumThreeAddressesCheckoutHistoryAndRefundMySQL(t *testing.T) {
 	for _, item := range facts.Items {
 		require.EqualValues(t, 3000, item.ResourceID)
 	}
-	require.NoError(t, db.Exec(`INSERT INTO project_daum_suffix_blacklists(project_id,suffix) VALUES(10,'daum.net'),(10,'hanmail.net')`).Error)
+	for _, suffix := range []string{"hanmail.net", "hanmail2.net"} {
+		_, err := uc.Checkout(ctx, tradeapp.CheckoutRequest{UserID: 2, ProjectID: 10, EmailSuffix: suffix, ServiceMode: "purchase", SupplyPolicy: "private_first", ClientChannel: tradedomain.ClientChannelConsole, IdempotencyKey: "daum-owned-" + suffix})
+		require.ErrorIs(t, err, tradedomain.ErrInsufficientInventory, "owned aliases must not substitute for exhausted public inventory")
+	}
 	owned, err := uc.Checkout(ctx, tradeapp.CheckoutRequest{UserID: 2, ProjectID: 10, EmailSuffix: "daum", ServiceMode: "purchase", SupplyPolicy: "private_first", ClientChannel: tradedomain.ClientChannelConsole, IdempotencyKey: "daum-owned"})
 	require.NoError(t, err)
-	require.Equal(t, "private@hanmail2.net", owned.Order.DeliveryEmail)
+	require.Equal(t, "private@daum.net", owned.Order.DeliveryEmail)
 	require.Equal(t, "0.00", owned.Order.PayAmount)
 	require.NoError(t, db.Exec(`UPDATE daum_resources SET status='abnormal',failure_category='invalid_credentials' WHERE id=3000`).Error)
 	count, err := uc.RefundUnavailableDaumOrders(ctx, 3000, "test")

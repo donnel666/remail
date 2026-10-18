@@ -151,7 +151,7 @@ func (s *Service) submitBulk(ctx context.Context, action string, selection BulkS
 	if s.Redis == nil || s.Queue == nil {
 		return nil, domain.ErrDependency
 	}
-	if operator == 0 || key == "" || len(key) > 128 {
+	if operator == 0 || key == "" || len(key) > 128 || (owner != nil && *owner != operator) {
 		return nil, domain.ErrInvalidResource
 	}
 	switch action {
@@ -167,10 +167,7 @@ func (s *Service) submitBulk(ctx context.Context, action string, selection BulkS
 		return nil, err
 	}
 	if owner != nil {
-		selection.Filter.OwnerID = owner
-		selection.Filter.ExcludeDeleted = true
-		selection.Filter.AdminSearch = false
-		selection.Filter.SearchOwnerIDs = nil
+		selection.Filter = ownedResourceFilter(selection.Filter, *owner)
 	} else {
 		selection.Filter.AdminSearch = true
 	}
@@ -264,7 +261,7 @@ func (s *Service) GetBulkStatus(ctx context.Context, id string, operator uint, a
 	if err := json.Unmarshal(raw, &status); err != nil {
 		return nil, err
 	}
-	if !admin && status.OperatorUserID != operator {
+	if !admin && (status.OperatorUserID != operator || status.OwnerID == nil || *status.OwnerID != operator) {
 		return nil, domain.ErrResourceMissing
 	}
 	return &status, nil
@@ -297,6 +294,14 @@ func (s *Service) storeBulkStatus(ctx context.Context, task BulkTask, status *Bu
 func (s *Service) ProcessBulk(ctx context.Context, task BulkTask) error {
 	if s.Redis == nil || s.Queue == nil || task.TaskID == "" || task.ClaimToken == "" {
 		return domain.ErrInvalidResource
+	}
+	if task.OwnerID != nil {
+		if *task.OwnerID != task.OperatorUserID {
+			return domain.ErrInvalidResource
+		}
+		// Query-only flags are not serialized in the durable task payload.
+		task.Selection.Filter = ownedResourceFilter(task.Selection.Filter, *task.OwnerID)
+		task.AdminSearch, task.SearchOwnerIDs = false, nil
 	}
 	owned, err := bulkRenew.Run(ctx, s.Redis, []string{bulkLeaseKey(task.BatchID)}, bulkLeaseValue(task), bulkTTL.Milliseconds()).Int()
 	if err != nil {

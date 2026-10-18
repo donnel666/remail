@@ -604,7 +604,7 @@
           "suffix": {
             "type": "string",
             "example": "com.cn",
-            "description": "Selectable inventory value. Daum products expose daum.net, hanmail.net and hanmail2.net separately; each count reflects eligible, unused and unallocated delivery addresses rather than three times the account count. The random selector daum is not a separate suffix inventory row. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned."
+            "description": "Selectable inventory value. Daum products expose daum.net, hanmail.net and hanmail2.net separately; each count reflects currently available stock for that suffix. The random selector daum is not a separate suffix inventory row. Microsoft products expose exact email domains. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned."
           },
           "totalAvailable": {
             "type": "integer",
@@ -1226,7 +1226,7 @@
             "format": "email",
             "minLength": 1,
             "maxLength": 254,
-            "description": "订单交付的完整邮箱地址。Daum 的 @daum.net、@hanmail.net、@hanmail2.net 分别匹配对应订单；即使共用收件箱，也不能将别名替换为主地址或另一个后缀。",
+            "description": "订单交付的完整邮箱地址。Daum 的 @daum.net、@hanmail.net、@hanmail2.net 分别匹配对应订单；取件必须使用订单交付的原始地址，不可替换地址或后缀。",
             "example": "account@hanmail2.net"
           },
           "token": {
@@ -3929,21 +3929,21 @@
                   }
                 },
                 "daumMain": {
-                  "summary": "Daum 主地址",
+                  "summary": "Daum 后缀 daum.net",
                   "value": {
                     "projectId": 1001,
                     "emailSuffix": "daum.net"
                   }
                 },
                 "daumHanmail": {
-                  "summary": "Daum 显式别名 hanmail.net",
+                  "summary": "Daum 后缀 hanmail.net",
                   "value": {
                     "projectId": 1001,
                     "emailSuffix": "hanmail.net"
                   }
                 },
                 "daumHanmail2": {
-                  "summary": "Daum 显式别名 hanmail2.net",
+                  "summary": "Daum 后缀 hanmail2.net",
                   "value": {
                     "projectId": 1001,
                     "emailSuffix": "hanmail2.net"
@@ -4203,7 +4203,7 @@
                   }
                 },
                 "daumMain": {
-                  "summary": "Daum 主地址",
+                  "summary": "Daum 后缀 daum.net",
                   "value": {
                     "projectId": 1001,
                     "emailSuffix": "daum.net",
@@ -4211,7 +4211,7 @@
                   }
                 },
                 "daumHanmail": {
-                  "summary": "Daum 显式别名 hanmail.net",
+                  "summary": "Daum 后缀 hanmail.net",
                   "value": {
                     "projectId": 1001,
                     "emailSuffix": "hanmail.net",
@@ -4219,7 +4219,7 @@
                   }
                 },
                 "daumHanmail2": {
-                  "summary": "Daum 显式别名 hanmail2.net",
+                  "summary": "Daum 后缀 hanmail2.net",
                   "value": {
                     "projectId": 1001,
                     "emailSuffix": "hanmail2.net",
@@ -4371,7 +4371,7 @@
             "name": "email",
             "in": "query",
             "required": true,
-            "description": "订单交付的完整邮箱地址。Daum 的 @daum.net、@hanmail.net、@hanmail2.net 分别匹配对应订单；即使共用收件箱，也不能将别名替换为主地址或另一个后缀。",
+            "description": "订单交付的完整邮箱地址。Daum 的 @daum.net、@hanmail.net、@hanmail2.net 分别匹配对应订单；取件必须使用订单交付的原始地址，不可替换地址或后缀。",
             "schema": {
               "type": "string",
               "format": "email",
@@ -4493,7 +4493,7 @@
             "name": "email",
             "in": "query",
             "required": true,
-            "description": "订单交付的完整邮箱地址。Daum 的 @daum.net、@hanmail.net、@hanmail2.net 分别匹配对应订单；即使共用收件箱，也不能将别名替换为主地址或另一个后缀。",
+            "description": "订单交付的完整邮箱地址。Daum 的 @daum.net、@hanmail.net、@hanmail2.net 分别匹配对应订单；取件必须使用订单交付的原始地址，不可替换地址或后缀。",
             "schema": {
               "type": "string",
               "format": "email",

@@ -85,7 +85,7 @@ func daumSourceCandidateQuery(db *gorm.DB, projectID, buyerUserID uint, scope do
 	owner := db.Table("email_resources AS er").Select("1").Joins("JOIN users AS owner ON owner.id = er.owner_user_id").
 		Where("er.id = dr.id AND er.type = 'daum' AND er.owner_user_id = dr.owner_user_id")
 	if scope == domain.SupplyScopeOwned {
-		query = query.Where("dr.for_sale = FALSE")
+		query = query.Where("dr.for_sale = FALSE AND suffix.suffix = 'daum.net'")
 		owner = owner.Where("er.owner_user_id = ?", buyerUserID)
 	} else {
 		query = query.Where("dr.for_sale = TRUE")

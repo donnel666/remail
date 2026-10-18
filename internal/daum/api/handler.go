@@ -419,7 +419,7 @@ func (h *handler) importAdmin(c *gin.Context) {
 		writeDaumError(c, domain.ErrInvalidResource)
 		return
 	}
-	h.importFile(c, *operator, uint(id))
+	h.importFile(c, *operator, uint(id), false)
 }
 func limitImportBody(c *gin.Context) {
 	maximum := maxImportBytesValue()
@@ -428,7 +428,7 @@ func limitImportBody(c *gin.Context) {
 func maxImportBytesValue() int {
 	return min(runtimeconfig.Int("resource_import_max_bytes", maxImportBytes, 1), maxConfiguredImportBytes)
 }
-func (h *handler) importFile(c *gin.Context, operator, owner uint) {
+func (h *handler) importFile(c *gin.Context, operator, owner uint, owned bool) {
 	if !requireDaumIdempotency(c) {
 		return
 	}
@@ -463,7 +463,16 @@ func (h *handler) importFile(c *gin.Context, operator, owner uint) {
 		return
 	}
 	for _, line := range strings.Split(string(content), "\n") {
-		if len(strings.Split(line, "----")) == 5 {
+		if owned && strings.TrimSpace(line) != "" {
+			address, _, _ := strings.Cut(strings.TrimPrefix(line, "\ufeff"), "----")
+			_, suffix, _ := strings.Cut(strings.ToLower(strings.TrimSpace(address)), "@")
+			// Ordinary malformed rows keep the worker's skip/abort behavior.
+			if _, supported := infra.CanonicalEmail(address); supported && suffix != "daum.net" {
+				writeDaumError(c, domain.ErrInvalidImportFormat)
+				return
+			}
+		}
+		if !owned && len(strings.Split(line, "----")) == 5 {
 			middleware.PermissionRequired(h.checker, "mailtransport:binding", "write")(c)
 			if c.IsAborted() {
 				return
@@ -485,7 +494,7 @@ func (h *handler) importFile(c *gin.Context, operator, owner uint) {
 		return
 	}
 	if replay != nil {
-		c.JSON(http.StatusAccepted, toImportResponse(replay, true))
+		c.JSON(http.StatusAccepted, importResponse(replay, true, owned))
 		return
 	}
 	if h.module.Files == nil {
@@ -515,7 +524,7 @@ func (h *handler) importFile(c *gin.Context, operator, owner uint) {
 		writeDaumError(c, err)
 		return
 	}
-	c.JSON(http.StatusAccepted, toImportResponse(status, reused))
+	c.JSON(http.StatusAccepted, importResponse(status, reused, owned))
 }
 func (h *handler) getImportAdmin(c *gin.Context)      { h.getImport(c, nil, false) }
 func (h *handler) getImportItemsAdmin(c *gin.Context) { h.getImport(c, nil, true) }
@@ -536,7 +545,7 @@ func (h *handler) getImport(c *gin.Context, owner *uint, items bool) {
 		return
 	}
 	if !items {
-		c.JSON(http.StatusOK, toImportResponse(status, false))
+		c.JSON(http.StatusOK, importResponse(status, false, owner != nil))
 		return
 	}
 	f, ok := parseFilter(c)
@@ -551,6 +560,9 @@ func (h *handler) getImport(c *gin.Context, owner *uint, items bool) {
 	out := make([]daumImportItemResponse, len(page.Items))
 	for i, item := range page.Items {
 		out[i] = daumImportItemResponse{item.LineNumber, item.ResourceID, item.Outcome, item.Category, item.LastSafeError}
+		if owner != nil {
+			out[i] = ownedImportItem(item)
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"items": out, "total": page.Total, "offset": f.Offset, "limit": f.Limit})
 }
@@ -680,6 +692,9 @@ func (h *handler) submitBulk(c *gin.Context, owner *uint, action string) {
 		selection = *request.Selection
 	}
 	if owner == nil && selection.Mode == "filter" && !h.resolveAdminSearch(c, &selection.Filter) {
+		return
+	}
+	if owner != nil && !validOwnedFilter(c, selection.Filter) {
 		return
 	}
 	operator := currentOwner(c)
@@ -824,6 +839,10 @@ func (h *handler) getImportFailures(c *gin.Context, owner *uint) {
 	}
 	if row.FailureObjectKey == "" {
 		writeDaumError(c, domain.ErrResourceMissing)
+		return
+	}
+	if owner != nil {
+		h.writeOwnedImportFailures(c, row.ID)
 		return
 	}
 	if h.module.Files == nil {

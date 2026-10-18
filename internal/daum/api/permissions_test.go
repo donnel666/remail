@@ -46,6 +46,9 @@ func TestDaumManagementRoutesRejectNonAdministrators(t *testing.T) {
 			// Even a direct per-user permission grant cannot reopen administrator-only management.
 			r := daumPermissionRouter(role, allowDaumPermission{})
 			for _, route := range r.Routes() {
+				if !strings.HasPrefix(route.Path, "/v1/admin/") {
+					continue
+				}
 				t.Run(route.Method+route.Path, func(t *testing.T) {
 					recorder := httptest.NewRecorder()
 					r.ServeHTTP(recorder, daumPermissionRequest(route))
@@ -73,6 +76,9 @@ func TestDaumManagementRoutesKeepActionPermissions(t *testing.T) {
 				return false, nil
 			}))
 			for _, route := range r.Routes() {
+				if !strings.HasPrefix(route.Path, "/v1/admin/") {
+					continue
+				}
 				t.Run(route.Method+route.Path, func(t *testing.T) {
 					checked = nil
 					recorder := httptest.NewRecorder()

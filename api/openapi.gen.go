@@ -3648,6 +3648,108 @@ func (e OrderResponseSupplyPolicy) Valid() bool {
 	}
 }
 
+// Defines values for OwnedDaumBulkRequestSelectionMode.
+const (
+	OwnedDaumBulkRequestSelectionModeFilter OwnedDaumBulkRequestSelectionMode = "filter"
+	OwnedDaumBulkRequestSelectionModeIds    OwnedDaumBulkRequestSelectionMode = "ids"
+)
+
+// Valid indicates whether the value is a known member of the OwnedDaumBulkRequestSelectionMode enum.
+func (e OwnedDaumBulkRequestSelectionMode) Valid() bool {
+	switch e {
+	case OwnedDaumBulkRequestSelectionModeFilter:
+		return true
+	case OwnedDaumBulkRequestSelectionModeIds:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OwnedDaumImportItemOutcome.
+const (
+	OwnedDaumImportItemOutcomeFailed   OwnedDaumImportItemOutcome = "failed"
+	OwnedDaumImportItemOutcomeImported OwnedDaumImportItemOutcome = "imported"
+	OwnedDaumImportItemOutcomeRestored OwnedDaumImportItemOutcome = "restored"
+	OwnedDaumImportItemOutcomeSkipped  OwnedDaumImportItemOutcome = "skipped"
+)
+
+// Valid indicates whether the value is a known member of the OwnedDaumImportItemOutcome enum.
+func (e OwnedDaumImportItemOutcome) Valid() bool {
+	switch e {
+	case OwnedDaumImportItemOutcomeFailed:
+		return true
+	case OwnedDaumImportItemOutcomeImported:
+		return true
+	case OwnedDaumImportItemOutcomeRestored:
+		return true
+	case OwnedDaumImportItemOutcomeSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OwnedDaumResourceSuffix.
+const (
+	OwnedDaumResourceSuffixDaumNet OwnedDaumResourceSuffix = "daum.net"
+)
+
+// Valid indicates whether the value is a known member of the OwnedDaumResourceSuffix enum.
+func (e OwnedDaumResourceSuffix) Valid() bool {
+	switch e {
+	case OwnedDaumResourceSuffixDaumNet:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OwnedDaumResourceType.
+const (
+	OwnedDaumResourceTypeDaum OwnedDaumResourceType = "daum"
+)
+
+// Valid indicates whether the value is a known member of the OwnedDaumResourceType enum.
+func (e OwnedDaumResourceType) Valid() bool {
+	switch e {
+	case OwnedDaumResourceTypeDaum:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OwnedDaumResourceFacetsSuffixesKey.
+const (
+	OwnedDaumResourceFacetsSuffixesKeyDaumNet OwnedDaumResourceFacetsSuffixesKey = "daum.net"
+)
+
+// Valid indicates whether the value is a known member of the OwnedDaumResourceFacetsSuffixesKey enum.
+func (e OwnedDaumResourceFacetsSuffixesKey) Valid() bool {
+	switch e {
+	case OwnedDaumResourceFacetsSuffixesKeyDaumNet:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OwnedDaumResourceFilterSuffix.
+const (
+	OwnedDaumResourceFilterSuffixDaumNet OwnedDaumResourceFilterSuffix = "daum.net"
+)
+
+// Valid indicates whether the value is a known member of the OwnedDaumResourceFilterSuffix enum.
+func (e OwnedDaumResourceFilterSuffix) Valid() bool {
+	switch e {
+	case OwnedDaumResourceFilterSuffixDaumNet:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OwnedICloudBatchCommandCommand.
 const (
 	OwnedICloudBatchCommandCommandDelete   OwnedICloudBatchCommandCommand = "delete"
@@ -4784,13 +4886,13 @@ func (e ResourceBulkSelectionMode) Valid() bool {
 
 // Defines values for ResourceBulkSelection0Mode.
 const (
-	Ids ResourceBulkSelection0Mode = "ids"
+	ResourceBulkSelection0ModeIds ResourceBulkSelection0Mode = "ids"
 )
 
 // Valid indicates whether the value is a known member of the ResourceBulkSelection0Mode enum.
 func (e ResourceBulkSelection0Mode) Valid() bool {
 	switch e {
-	case Ids:
+	case ResourceBulkSelection0ModeIds:
 		return true
 	default:
 		return false
@@ -7002,6 +7104,60 @@ func (e ConnectBotWebSocketParamsXBotChannel) Valid() bool {
 	}
 }
 
+// Defines values for GetOwnedDaumResourcesParamsSuffix.
+const (
+	GetOwnedDaumResourcesParamsSuffixDaumNet GetOwnedDaumResourcesParamsSuffix = "daum.net"
+)
+
+// Valid indicates whether the value is a known member of the GetOwnedDaumResourcesParamsSuffix enum.
+func (e GetOwnedDaumResourcesParamsSuffix) Valid() bool {
+	switch e {
+	case GetOwnedDaumResourcesParamsSuffixDaumNet:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostOwnedDaumResourceBulkParamsCommand.
+const (
+	PostOwnedDaumResourceBulkParamsCommandDelete   PostOwnedDaumResourceBulkParamsCommand = "delete"
+	PostOwnedDaumResourceBulkParamsCommandPublish  PostOwnedDaumResourceBulkParamsCommand = "publish"
+	PostOwnedDaumResourceBulkParamsCommandValidate PostOwnedDaumResourceBulkParamsCommand = "validate"
+)
+
+// Valid indicates whether the value is a known member of the PostOwnedDaumResourceBulkParamsCommand enum.
+func (e PostOwnedDaumResourceBulkParamsCommand) Valid() bool {
+	switch e {
+	case PostOwnedDaumResourceBulkParamsCommandDelete:
+		return true
+	case PostOwnedDaumResourceBulkParamsCommandPublish:
+		return true
+	case PostOwnedDaumResourceBulkParamsCommandValidate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostOwnedDaumResourceImportMultipartBodyErrorStrategy.
+const (
+	PostOwnedDaumResourceImportMultipartBodyErrorStrategyAbort PostOwnedDaumResourceImportMultipartBodyErrorStrategy = "abort"
+	PostOwnedDaumResourceImportMultipartBodyErrorStrategySkip  PostOwnedDaumResourceImportMultipartBodyErrorStrategy = "skip"
+)
+
+// Valid indicates whether the value is a known member of the PostOwnedDaumResourceImportMultipartBodyErrorStrategy enum.
+func (e PostOwnedDaumResourceImportMultipartBodyErrorStrategy) Valid() bool {
+	switch e {
+	case PostOwnedDaumResourceImportMultipartBodyErrorStrategyAbort:
+		return true
+	case PostOwnedDaumResourceImportMultipartBodyErrorStrategySkip:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OpenListProtoResourcesParamsStatus.
 const (
 	OpenListProtoResourcesParamsStatusAbnormal    OpenListProtoResourcesParamsStatus = "abnormal"
@@ -7376,19 +7532,19 @@ func (e ListProtoResourcesParamsStatus) Valid() bool {
 
 // Defines values for PostProtoResourceBulkParamsCommand.
 const (
-	PostProtoResourceBulkParamsCommandDelete   PostProtoResourceBulkParamsCommand = "delete"
-	PostProtoResourceBulkParamsCommandPublish  PostProtoResourceBulkParamsCommand = "publish"
-	PostProtoResourceBulkParamsCommandValidate PostProtoResourceBulkParamsCommand = "validate"
+	Delete   PostProtoResourceBulkParamsCommand = "delete"
+	Publish  PostProtoResourceBulkParamsCommand = "publish"
+	Validate PostProtoResourceBulkParamsCommand = "validate"
 )
 
 // Valid indicates whether the value is a known member of the PostProtoResourceBulkParamsCommand enum.
 func (e PostProtoResourceBulkParamsCommand) Valid() bool {
 	switch e {
-	case PostProtoResourceBulkParamsCommandDelete:
+	case Delete:
 		return true
-	case PostProtoResourceBulkParamsCommandPublish:
+	case Publish:
 		return true
-	case PostProtoResourceBulkParamsCommandValidate:
+	case Validate:
 		return true
 	default:
 		return false
@@ -7460,19 +7616,19 @@ func (e GetRechargesParamsStatus) Valid() bool {
 
 // Defines values for GetResourcesParamsType.
 const (
-	GetResourcesParamsTypeAll       GetResourcesParamsType = "all"
-	GetResourcesParamsTypeDomain    GetResourcesParamsType = "domain"
-	GetResourcesParamsTypeMicrosoft GetResourcesParamsType = "microsoft"
+	All       GetResourcesParamsType = "all"
+	Domain    GetResourcesParamsType = "domain"
+	Microsoft GetResourcesParamsType = "microsoft"
 )
 
 // Valid indicates whether the value is a known member of the GetResourcesParamsType enum.
 func (e GetResourcesParamsType) Valid() bool {
 	switch e {
-	case GetResourcesParamsTypeAll:
+	case All:
 		return true
-	case GetResourcesParamsTypeDomain:
+	case Domain:
 		return true
-	case GetResourcesParamsTypeMicrosoft:
+	case Microsoft:
 		return true
 	default:
 		return false
@@ -7502,16 +7658,16 @@ func (e GetResourcesParamsPurpose) Valid() bool {
 
 // Defines values for PostResourceImportMultipartBodyErrorStrategy.
 const (
-	PostResourceImportMultipartBodyErrorStrategyAbort PostResourceImportMultipartBodyErrorStrategy = "abort"
-	PostResourceImportMultipartBodyErrorStrategySkip  PostResourceImportMultipartBodyErrorStrategy = "skip"
+	Abort PostResourceImportMultipartBodyErrorStrategy = "abort"
+	Skip  PostResourceImportMultipartBodyErrorStrategy = "skip"
 )
 
 // Valid indicates whether the value is a known member of the PostResourceImportMultipartBodyErrorStrategy enum.
 func (e PostResourceImportMultipartBodyErrorStrategy) Valid() bool {
 	switch e {
-	case PostResourceImportMultipartBodyErrorStrategyAbort:
+	case Abort:
 		return true
-	case PostResourceImportMultipartBodyErrorStrategySkip:
+	case Skip:
 		return true
 	default:
 		return false
@@ -7538,19 +7694,19 @@ func (e GetTicketsParamsTicketType) Valid() bool {
 
 // Defines values for GetTicketsParamsStatus.
 const (
-	Closed     GetTicketsParamsStatus = "closed"
-	Open       GetTicketsParamsStatus = "open"
-	Processing GetTicketsParamsStatus = "processing"
+	GetTicketsParamsStatusClosed     GetTicketsParamsStatus = "closed"
+	GetTicketsParamsStatusOpen       GetTicketsParamsStatus = "open"
+	GetTicketsParamsStatusProcessing GetTicketsParamsStatus = "processing"
 )
 
 // Valid indicates whether the value is a known member of the GetTicketsParamsStatus enum.
 func (e GetTicketsParamsStatus) Valid() bool {
 	switch e {
-	case Closed:
+	case GetTicketsParamsStatusClosed:
 		return true
-	case Open:
+	case GetTicketsParamsStatusOpen:
 		return true
-	case Processing:
+	case GetTicketsParamsStatusProcessing:
 		return true
 	default:
 		return false
@@ -12330,6 +12486,123 @@ type OrderStatusFacets struct {
 	Refunded       int64 `json:"refunded"`
 }
 
+// OwnedDaumBulkRequest defines model for OwnedDaumBulkRequest.
+type OwnedDaumBulkRequest struct {
+	Selection struct {
+		Filter      *OwnedDaumResourceFilter          `json:"filter,omitempty"`
+		Mode        OwnedDaumBulkRequestSelectionMode `json:"mode"`
+		ResourceIds *[]int64                          `json:"resourceIds,omitempty"`
+	} `json:"selection"`
+}
+
+// OwnedDaumBulkRequestSelectionMode defines model for OwnedDaumBulkRequest.Selection.Mode.
+type OwnedDaumBulkRequestSelectionMode string
+
+// OwnedDaumImportItem defines model for OwnedDaumImportItem.
+type OwnedDaumImportItem struct {
+	Category      string                     `json:"category"`
+	LastSafeError *string                    `json:"lastSafeError,omitempty"`
+	Line          int                        `json:"line"`
+	Outcome       OwnedDaumImportItemOutcome `json:"outcome"`
+}
+
+// OwnedDaumImportItemOutcome defines model for OwnedDaumImportItem.Outcome.
+type OwnedDaumImportItemOutcome string
+
+// OwnedDaumImportItemsResponse defines model for OwnedDaumImportItemsResponse.
+type OwnedDaumImportItemsResponse struct {
+	Items  []OwnedDaumImportItem `json:"items"`
+	Limit  int                   `json:"limit"`
+	Offset int                   `json:"offset"`
+	Total  int64                 `json:"total"`
+}
+
+// OwnedDaumResource defines model for OwnedDaumResource.
+type OwnedDaumResource struct {
+	CreatedAt time.Time           `json:"createdAt"`
+	Email     openapi_types.Email `json:"email"`
+	ForSale   bool                `json:"forSale"`
+	Id        int64               `json:"id"`
+
+	// LastSafeError Fixed safe explanation derived from the failure category or stage; no raw provider diagnostics.
+	LastSafeError *string `json:"lastSafeError,omitempty"`
+	LongLived     bool    `json:"longLived"`
+	QualityScore  int     `json:"qualityScore"`
+
+	// Status Validation matches Microsoft resources. Retryable failures return to pending while attempts remain; non-retryable or exhausted validations become abnormal.
+	Status    DaumResourceStatus      `json:"status"`
+	Suffix    OwnedDaumResourceSuffix `json:"suffix"`
+	Type      OwnedDaumResourceType   `json:"type"`
+	UpdatedAt time.Time               `json:"updatedAt"`
+	Version   int64                   `json:"version"`
+}
+
+// OwnedDaumResourceSuffix defines model for OwnedDaumResource.Suffix.
+type OwnedDaumResourceSuffix string
+
+// OwnedDaumResourceType defines model for OwnedDaumResource.Type.
+type OwnedDaumResourceType string
+
+// OwnedDaumResourceFacets defines model for OwnedDaumResourceFacets.
+type OwnedDaumResourceFacets struct {
+	Abnormal    int64             `json:"abnormal"`
+	All         int64             `json:"all"`
+	Deleted     int64             `json:"deleted"`
+	Disabled    int64             `json:"disabled"`
+	ForSale     DaumBooleanFacets `json:"forSale"`
+	Identifying int64             `json:"identifying"`
+	LongLived   DaumBooleanFacets `json:"longLived"`
+	Normal      int64             `json:"normal"`
+	Pending     int64             `json:"pending"`
+	Status      struct {
+		Abnormal    int64 `json:"abnormal"`
+		All         int64 `json:"all"`
+		Deleted     int64 `json:"deleted"`
+		Disabled    int64 `json:"disabled"`
+		Identifying int64 `json:"identifying"`
+		Normal      int64 `json:"normal"`
+		Pending     int64 `json:"pending"`
+		Validating  int64 `json:"validating"`
+	} `json:"status"`
+	Suffixes []struct {
+		Count int64                              `json:"count"`
+		Key   OwnedDaumResourceFacetsSuffixesKey `json:"key"`
+	} `json:"suffixes"`
+	Validating int64 `json:"validating"`
+}
+
+// OwnedDaumResourceFacetsSuffixesKey defines model for OwnedDaumResourceFacets.Suffixes.Key.
+type OwnedDaumResourceFacetsSuffixesKey string
+
+// OwnedDaumResourceFilter defines model for OwnedDaumResourceFilter.
+type OwnedDaumResourceFilter struct {
+	CreatedFrom *time.Time `json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time `json:"createdTo,omitempty"`
+	ForSale     *bool      `json:"forSale,omitempty"`
+	LongLived   *bool      `json:"longLived,omitempty"`
+	Search      *string    `json:"search,omitempty"`
+
+	// Status Validation matches Microsoft resources. Retryable failures return to pending while attempts remain; non-retryable or exhausted validations become abnormal.
+	Status *DaumResourceStatus            `json:"status,omitempty"`
+	Suffix *OwnedDaumResourceFilterSuffix `json:"suffix,omitempty"`
+}
+
+// OwnedDaumResourceFilterSuffix defines model for OwnedDaumResourceFilter.Suffix.
+type OwnedDaumResourceFilterSuffix string
+
+// OwnedDaumResourceListResponse defines model for OwnedDaumResourceListResponse.
+type OwnedDaumResourceListResponse struct {
+	Facets      OwnedDaumResourceFacets `json:"facets"`
+	HasMore     bool                    `json:"hasMore"`
+	Items       []OwnedDaumResource     `json:"items"`
+	Limit       int                     `json:"limit"`
+	NextAfterId *int64                  `json:"nextAfterId"`
+	Offset      int                     `json:"offset"`
+
+	// Total Omitted when includeTotal is false.
+	Total *int64 `json:"total,omitempty"`
+}
+
 // OwnedICloudBatchCommand Supply exactly one of resources or filter. Filter commands affect at most 1000 matching resources owned by the current user; larger selections are rejected without changes.
 type OwnedICloudBatchCommand struct {
 	Command   OwnedICloudBatchCommandCommand `json:"command"`
@@ -12522,7 +12795,7 @@ type PositiveIntegerPointAmount = string
 type ProductSuffixInventory struct {
 	PublicAvailable int64 `json:"publicAvailable"`
 
-	// Suffix Selectable inventory value. Microsoft and Proto products expose exact email domains. Daum exposes daum.net, hanmail.net and hanmail2.net as independently available addresses on a shared account. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned.
+	// Suffix Selectable inventory value. Microsoft and Proto products expose exact email domains. Daum exposes daum.net, hanmail.net and hanmail2.net as exact product suffixes. Domain products expose public suffixes without a leading @ (for example com or com.cn) and each owned private domain as a full domain (for example mydomain.com). Full mailbox addresses are never returned.
 	Suffix         string `json:"suffix"`
 	TotalAvailable int64  `json:"totalAvailable"`
 }
@@ -16805,6 +17078,98 @@ type GetDashboardParams struct {
 	CreatedTo   *time.Time `form:"createdTo,omitempty" json:"createdTo,omitempty"`
 }
 
+// GetOwnedDaumResourcesParams defines parameters for GetOwnedDaumResources.
+type GetOwnedDaumResourcesParams struct {
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *LimitQuery  `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// AfterId Last ticket id from the previous page.
+	AfterId     *AfterIdQuery       `form:"afterId,omitempty" json:"afterId,omitempty"`
+	CreatedFrom *CreatedFromQuery   `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
+	CreatedTo   *CreatedToQuery     `form:"createdTo,omitempty" json:"createdTo,omitempty"`
+	LongLived   *DaumLongLivedQuery `form:"longLived,omitempty" json:"longLived,omitempty"`
+
+	// IncludeTotal When false, the response omits total and returns only cursor pagination data.
+	IncludeTotal  *DaumIncludeTotalQuery             `form:"includeTotal,omitempty" json:"includeTotal,omitempty"`
+	IncludeFacets *DaumIncludeFacetsQuery            `form:"includeFacets,omitempty" json:"includeFacets,omitempty"`
+	Suffix        *GetOwnedDaumResourcesParamsSuffix `form:"suffix,omitempty" json:"suffix,omitempty"`
+	Search        *string                            `form:"search,omitempty" json:"search,omitempty"`
+	Status        *DaumResourceStatus                `form:"status,omitempty" json:"status,omitempty"`
+	ForSale       *bool                              `form:"forSale,omitempty" json:"forSale,omitempty"`
+}
+
+// GetOwnedDaumResourcesParamsSuffix defines parameters for GetOwnedDaumResources.
+type GetOwnedDaumResourcesParamsSuffix string
+
+// PostOwnedDaumResourceBulkParams defines parameters for PostOwnedDaumResourceBulk.
+type PostOwnedDaumResourceBulkParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostOwnedDaumResourceBulkParamsCommand defines parameters for PostOwnedDaumResourceBulk.
+type PostOwnedDaumResourceBulkParamsCommand string
+
+// PostOwnedDaumResourceImportMultipartBody defines parameters for PostOwnedDaumResourceImport.
+type PostOwnedDaumResourceImportMultipartBody struct {
+	ErrorStrategy *PostOwnedDaumResourceImportMultipartBodyErrorStrategy `json:"errorStrategy,omitempty"`
+	File          openapi_types.File                                     `json:"file"`
+	LongLived     *bool                                                  `json:"longLived,omitempty"`
+}
+
+// PostOwnedDaumResourceImportParams defines parameters for PostOwnedDaumResourceImport.
+type PostOwnedDaumResourceImportParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+
+	// XTurnstileToken Single-use Turnstile token for the daum_resource_import action when CAPTCHA is enabled.
+	XTurnstileToken *string `json:"X-Turnstile-Token,omitempty"`
+}
+
+// PostOwnedDaumResourceImportMultipartBodyErrorStrategy defines parameters for PostOwnedDaumResourceImport.
+type PostOwnedDaumResourceImportMultipartBodyErrorStrategy string
+
+// GetOwnedDaumResourceImportItemsParams defines parameters for GetOwnedDaumResourceImportItems.
+type GetOwnedDaumResourceImportItemsParams struct {
+	// Offset Row offset used when afterId is absent.
+	Offset *OffsetQuery `form:"offset,omitempty" json:"offset,omitempty"`
+	Limit  *LimitQuery  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// DeleteOwnedDaumResourceParams defines parameters for DeleteOwnedDaumResource.
+type DeleteOwnedDaumResourceParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostOwnedDaumResourcePublishParams defines parameters for PostOwnedDaumResourcePublish.
+type PostOwnedDaumResourcePublishParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostOwnedDaumResourceValidateParams defines parameters for PostOwnedDaumResourceValidate.
+type PostOwnedDaumResourceValidateParams struct {
+	// IdempotencyKey Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409.
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // PostDomainParams defines parameters for PostDomain.
 type PostDomainParams struct {
 	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
@@ -17907,6 +18272,18 @@ type PostBotRechargeQuoteJSONRequestBody = RechargeQuoteRequest
 
 // PostCardRedeemJSONRequestBody defines body for PostCardRedeem for application/json ContentType.
 type PostCardRedeemJSONRequestBody = RedeemCardRequest
+
+// PostOwnedDaumResourceBulkJSONRequestBody defines body for PostOwnedDaumResourceBulk for application/json ContentType.
+type PostOwnedDaumResourceBulkJSONRequestBody = OwnedDaumBulkRequest
+
+// PostOwnedDaumResourceImportMultipartRequestBody defines body for PostOwnedDaumResourceImport for multipart/form-data ContentType.
+type PostOwnedDaumResourceImportMultipartRequestBody PostOwnedDaumResourceImportMultipartBody
+
+// DeleteOwnedDaumResourceJSONRequestBody defines body for DeleteOwnedDaumResource for application/json ContentType.
+type DeleteOwnedDaumResourceJSONRequestBody = DaumResourceCommandRequest
+
+// PostOwnedDaumResourcePublishJSONRequestBody defines body for PostOwnedDaumResourcePublish for application/json ContentType.
+type PostOwnedDaumResourcePublishJSONRequestBody = DaumResourceCommandRequest
 
 // PostDomainJSONRequestBody defines body for PostDomain for application/json ContentType.
 type PostDomainJSONRequestBody = CreateDomainRequest
@@ -20108,6 +20485,36 @@ type ServerInterface interface {
 	// Current user's console data dashboard
 	// (GET /v1/dashboard)
 	GetDashboard(c *gin.Context, params GetDashboardParams)
+	// List the current user's Daum mailboxes
+	// (GET /v1/daum/resources)
+	GetOwnedDaumResources(c *gin.Context, params GetOwnedDaumResourcesParams)
+	// Get the current user's owned Daum bulk task
+	// (GET /v1/daum/resources/bulk-tasks/{taskId})
+	GetOwnedDaumResourceBulkTask(c *gin.Context, taskId DaumBulkTaskId)
+	// Queue an owner-scoped Daum resource command
+	// (POST /v1/daum/resources/bulk/{command})
+	PostOwnedDaumResourceBulk(c *gin.Context, command PostOwnedDaumResourceBulkParamsCommand, params PostOwnedDaumResourceBulkParams)
+	// Import Daum mailboxes for the current user
+	// (POST /v1/daum/resources/imports)
+	PostOwnedDaumResourceImport(c *gin.Context, params PostOwnedDaumResourceImportParams)
+	// Get an owned Daum import
+	// (GET /v1/daum/resources/imports/{importId})
+	GetOwnedDaumResourceImport(c *gin.Context, importId int64)
+	// Download safe failure outcomes for an owned Daum import
+	// (GET /v1/daum/resources/imports/{importId}/failures)
+	GetOwnedDaumResourceImportFailures(c *gin.Context, importId int64)
+	// List safe outcomes for an owned Daum import
+	// (GET /v1/daum/resources/imports/{importId}/items)
+	GetOwnedDaumResourceImportItems(c *gin.Context, importId int64, params GetOwnedDaumResourceImportItemsParams)
+	// Delete an owned private Daum mailbox
+	// (DELETE /v1/daum/resources/{resourceId})
+	DeleteOwnedDaumResource(c *gin.Context, resourceId int64, params DeleteOwnedDaumResourceParams)
+	// Publish an owned Daum mailbox for sale
+	// (POST /v1/daum/resources/{resourceId}/publish)
+	PostOwnedDaumResourcePublish(c *gin.Context, resourceId int64, params PostOwnedDaumResourcePublishParams)
+	// Queue validation for an owned Daum mailbox
+	// (POST /v1/daum/resources/{resourceId}/validate)
+	PostOwnedDaumResourceValidate(c *gin.Context, resourceId int64, params PostOwnedDaumResourceValidateParams)
 	// Create a domain resource
 	// (POST /v1/domains)
 	PostDomain(c *gin.Context, params PostDomainParams)
@@ -38786,6 +39193,640 @@ func (siw *ServerInterfaceWrapper) GetDashboard(c *gin.Context) {
 	siw.Handler.GetDashboard(c, params)
 }
 
+// GetOwnedDaumResources operation middleware
+func (siw *ServerInterfaceWrapper) GetOwnedDaumResources(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetOwnedDaumResourcesParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "afterId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "afterId", c.Request.URL.Query(), &params.AfterId, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter afterId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdFrom" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdFrom", c.Request.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdFrom: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "createdTo" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdTo", c.Request.URL.Query(), &params.CreatedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter createdTo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "longLived" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "longLived", c.Request.URL.Query(), &params.LongLived, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter longLived: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "includeTotal" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeTotal", c.Request.URL.Query(), &params.IncludeTotal, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeTotal: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "includeFacets" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeFacets", c.Request.URL.Query(), &params.IncludeFacets, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter includeFacets: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "suffix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "suffix", c.Request.URL.Query(), &params.Suffix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter suffix: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "forSale" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "forSale", c.Request.URL.Query(), &params.ForSale, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter forSale: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetOwnedDaumResources(c, params)
+}
+
+// GetOwnedDaumResourceBulkTask operation middleware
+func (siw *ServerInterfaceWrapper) GetOwnedDaumResourceBulkTask(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId DaumBulkTaskId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", c.Param("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter taskId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetOwnedDaumResourceBulkTask(c, taskId)
+}
+
+// PostOwnedDaumResourceBulk operation middleware
+func (siw *ServerInterfaceWrapper) PostOwnedDaumResourceBulk(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "command" -------------
+	var command PostOwnedDaumResourceBulkParamsCommand
+
+	err = runtime.BindStyledParameterWithOptions("simple", "command", c.Param("command"), &command, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter command: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostOwnedDaumResourceBulkParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostOwnedDaumResourceBulk(c, command, params)
+}
+
+// PostOwnedDaumResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) PostOwnedDaumResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostOwnedDaumResourceImportParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional header parameter "X-Turnstile-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Turnstile-Token")]; found {
+		var XTurnstileToken string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-Turnstile-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Turnstile-Token", valueList[0], &XTurnstileToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-Turnstile-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XTurnstileToken = &XTurnstileToken
+
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostOwnedDaumResourceImport(c, params)
+}
+
+// GetOwnedDaumResourceImport operation middleware
+func (siw *ServerInterfaceWrapper) GetOwnedDaumResourceImport(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetOwnedDaumResourceImport(c, importId)
+}
+
+// GetOwnedDaumResourceImportFailures operation middleware
+func (siw *ServerInterfaceWrapper) GetOwnedDaumResourceImportFailures(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetOwnedDaumResourceImportFailures(c, importId)
+}
+
+// GetOwnedDaumResourceImportItems operation middleware
+func (siw *ServerInterfaceWrapper) GetOwnedDaumResourceImportItems(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "importId" -------------
+	var importId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", c.Param("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter importId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetOwnedDaumResourceImportItemsParams
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", c.Request.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter offset: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetOwnedDaumResourceImportItems(c, importId, params)
+}
+
+// DeleteOwnedDaumResource operation middleware
+func (siw *ServerInterfaceWrapper) DeleteOwnedDaumResource(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteOwnedDaumResourceParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteOwnedDaumResource(c, resourceId, params)
+}
+
+// PostOwnedDaumResourcePublish operation middleware
+func (siw *ServerInterfaceWrapper) PostOwnedDaumResourcePublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostOwnedDaumResourcePublishParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostOwnedDaumResourcePublish(c, resourceId, params)
+}
+
+// PostOwnedDaumResourceValidate operation middleware
+func (siw *ServerInterfaceWrapper) PostOwnedDaumResourceValidate(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "resourceId" -------------
+	var resourceId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "resourceId", c.Param("resourceId"), &resourceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resourceId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostOwnedDaumResourceValidateParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostOwnedDaumResourceValidate(c, resourceId, params)
+}
+
 // PostDomain operation middleware
 func (siw *ServerInterfaceWrapper) PostDomain(c *gin.Context) {
 
@@ -44185,6 +45226,16 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/cards/redeem", wrapper.PostCardRedeem)
 	router.GET(options.BaseURL+"/v1/customer-service", wrapper.GetCustomerService)
 	router.GET(options.BaseURL+"/v1/dashboard", wrapper.GetDashboard)
+	router.GET(options.BaseURL+"/v1/daum/resources", wrapper.GetOwnedDaumResources)
+	router.GET(options.BaseURL+"/v1/daum/resources/bulk-tasks/:taskId", wrapper.GetOwnedDaumResourceBulkTask)
+	router.POST(options.BaseURL+"/v1/daum/resources/bulk/:command", wrapper.PostOwnedDaumResourceBulk)
+	router.POST(options.BaseURL+"/v1/daum/resources/imports", wrapper.PostOwnedDaumResourceImport)
+	router.GET(options.BaseURL+"/v1/daum/resources/imports/:importId", wrapper.GetOwnedDaumResourceImport)
+	router.GET(options.BaseURL+"/v1/daum/resources/imports/:importId/failures", wrapper.GetOwnedDaumResourceImportFailures)
+	router.GET(options.BaseURL+"/v1/daum/resources/imports/:importId/items", wrapper.GetOwnedDaumResourceImportItems)
+	router.DELETE(options.BaseURL+"/v1/daum/resources/:resourceId", wrapper.DeleteOwnedDaumResource)
+	router.POST(options.BaseURL+"/v1/daum/resources/:resourceId/publish", wrapper.PostOwnedDaumResourcePublish)
+	router.POST(options.BaseURL+"/v1/daum/resources/:resourceId/validate", wrapper.PostOwnedDaumResourceValidate)
 	router.POST(options.BaseURL+"/v1/domains", wrapper.PostDomain)
 	router.GET(options.BaseURL+"/v1/domains/:domainId/mailboxes", wrapper.GetDomainMailboxes)
 	router.POST(options.BaseURL+"/v1/email/code", wrapper.PostEmailCode)
