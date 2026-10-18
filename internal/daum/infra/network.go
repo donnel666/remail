@@ -10,8 +10,6 @@ import (
 	"github.com/donnel666/remail/internal/mailbox"
 	"github.com/donnel666/remail/internal/platform"
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
-	proxydomain "github.com/donnel666/remail/internal/proxy/domain"
-	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
 
 type ProxyProvider interface {
@@ -31,42 +29,28 @@ func (s *Service) fetchProtocol(ctx context.Context, resource Resource, request 
 }
 
 func (s *Service) runProtocol(ctx context.Context, resource Resource, request protocol.FetchRequest, requestID string, validation bool) (protocol.FetchResult, error) {
-	unavailable := &protocol.Failure{Category: "proxy_unavailable", SafeMessage: "Daum mailbox proxy service is temporarily unavailable.", Retryable: true}
-	if s.Proxies == nil {
-		return protocol.FetchResult{}, unavailable
-	}
-	purpose := proxydomain.ProxyPurposeFetch
+	operation := "fetch"
 	if validation {
-		purpose = proxydomain.ProxyPurposeAuth
+		operation = "validation"
+	} else if request.FullHistory {
+		operation = "history"
 	}
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
 		requestID = platform.NewUUIDV7String()
 	}
-	var avoid []uint
-	var last error = unavailable
 	attempts := mailbox.FetchAttempts
 	if validation {
-		attempts = runtimeconfig.Int("max_proxy_attempts", 3, 1)
+		attempts = 1
 	}
-	for attempt := 0; attempt < attempts; attempt++ {
+	credentials := protocol.Credentials{Email: resource.EmailAddress, AppPassword: resource.AppPassword, Protocol: resource.Protocol}
+	var last error
+	for attempt := 1; attempt <= attempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return protocol.FetchResult{}, err
 		}
-		selected, err := s.Proxies.Acquire(ctx, proxyapp.AcquireProxyRequest{
-			Key: strings.ToLower(strings.TrimSpace(resource.EmailAddress)), IPVersion: proxydomain.ProxyIPv4,
-			Purpose: purpose, AllowSystemFallback: true, Attempt: attempt, RequestID: requestID,
-			AvoidProxyServerIDs: avoid,
-		})
-		if err != nil {
-			return protocol.FetchResult{}, &protocol.Failure{Category: unavailable.Category, SafeMessage: unavailable.SafeMessage, Retryable: true, Cause: err}
-		}
-		// Microsoft IMAP also refuses a direct fallback when no mailbox proxy exists.
-		if selected == nil || selected.Direct || strings.TrimSpace(selected.URL) == "" {
-			continue
-		}
-		credentials := protocol.Credentials{Email: resource.EmailAddress, AppPassword: resource.AppPassword, Protocol: resource.Protocol, ProxyURL: selected.URL}
 		var result protocol.FetchResult
+		var err error
 		streamed := false
 		if validation {
 			err = s.Protocol.Validate(ctx, credentials)
@@ -81,44 +65,28 @@ func (s *Service) runProtocol(ctx context.Context, resource Resource, request pr
 			result, err = s.Protocol.Fetch(ctx, credentials, fetch)
 		}
 		if ctx.Err() != nil {
-			return protocol.FetchResult{}, ctx.Err()
+			err = ctx.Err()
+		}
+		if err != nil {
+			stage, reason := protocol.FailureDiagnostics(err)
+			slog.WarnContext(ctx, "Daum mailbox operation failed", "operation", operation, "route", "direct_ipv4",
+				"resource_id", resource.ID, "request_id", requestID, "credential_revision", resource.CredentialRevision, "validation_generation", resource.ValidationGeneration,
+				"attempt", attempt, "stage", stage, "reason", reason)
 		}
 		if err == nil {
-			_ = s.Proxies.ReportSuccess(ctx, selected.ID)
 			return result, nil
 		}
-		stage, reason := protocol.FailureDiagnostics(err)
-		operation := "fetch"
-		if validation {
-			operation = "validation"
-		} else if request.FullHistory {
-			operation = "history"
-		}
-		slog.WarnContext(ctx, "Daum mailbox operation failed", "operation", operation, "resource_id", resource.ID, "request_id", requestID,
-			"credential_revision", resource.CredentialRevision, "validation_generation", resource.ValidationGeneration,
-			"proxy_id", selected.ID, "proxy_server_id", selected.ProxyServerID, "attempt", attempt+1, "stage", stage, "reason", reason)
 		last = err
-		var failure *protocol.Failure
-		proxyFailure := errors.As(err, &failure) && failure.Category == "transport"
-		if proxyFailure {
-			avoid = proxyapp.AppendAvoidProxyServerID(avoid, selected)
-			_ = s.Proxies.ReportFailure(ctx, selected.ID, "Daum mailbox proxy connection failed.")
-		} else {
-			_ = s.Proxies.ReportSuccess(ctx, selected.ID)
-		}
 		if streamed {
 			if request.OnReset == nil {
 				return protocol.FetchResult{}, err
 			}
 			request.OnReset()
 		}
-		if validation && !proxyFailure {
+		var failure *protocol.Failure
+		if ctx.Err() != nil || !errors.As(err, &failure) {
 			return protocol.FetchResult{}, err
 		}
-		if failure == nil {
-			return protocol.FetchResult{}, err
-		}
-
 	}
 	return protocol.FetchResult{}, last
 }

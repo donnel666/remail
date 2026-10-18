@@ -22,6 +22,15 @@ const ProxyHandshakeTimeout = 30 * time.Second
 
 // DialTLS uses the Microsoft mailbox TLS profile. Empty proxy is reserved for explicit direct callers.
 func DialTLS(ctx context.Context, proxyURL, target, alpn string) (net.Conn, error) {
+	return dialTLS(ctx, proxyURL, target, alpn, "tcp")
+}
+
+// DialDirectTLSIPv4 keeps the mailbox TLS profile while restricting direct dialing to IPv4.
+func DialDirectTLSIPv4(ctx context.Context, target, alpn string) (net.Conn, error) {
+	return dialTLS(ctx, "", target, alpn, "tcp4")
+}
+
+func dialTLS(ctx context.Context, proxyURL, target, alpn, network string) (net.Conn, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -29,7 +38,7 @@ func DialTLS(ctx context.Context, proxyURL, target, alpn string) (net.Conn, erro
 	var err error
 	if strings.TrimSpace(proxyURL) == "" {
 		dialer := &net.Dialer{Timeout: runtimeconfig.Duration("imap_dial_timeout_seconds", 20*time.Second, time.Second, 1), KeepAlive: runtimeconfig.Duration("imap_keepalive_seconds", 30*time.Second, time.Second, 1)}
-		conn, err = dialer.DialContext(ctx, "tcp", target)
+		conn, err = dialer.DialContext(ctx, network, target)
 	} else {
 		conn, err = DialProxy(ctx, proxyURL, target)
 	}

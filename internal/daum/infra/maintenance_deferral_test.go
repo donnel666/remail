@@ -157,15 +157,14 @@ func TestValidationDuplicateQueueDoesNotStrandDeferredResource(t *testing.T) {
 	}
 }
 
-func TestValidationProxyUnavailableDefersWithoutProviderAttempt(t *testing.T) {
+func TestValidationCapacityDefersWithoutConsumingAttempt(t *testing.T) {
 	s, _ := newDaumAsyncTestService(t)
-	s.Proxies = nil
+	s.Proxies = &daumNetworkProxies{t: t}
 	ctx := context.Background()
-	id, _, err := s.ImportLine(ctx, 7, domain.ImportLine{Email: "proxy-wait@daum.net", AppPassword: "test-only"})
+	id, _, err := s.ImportLine(ctx, 7, domain.ImportLine{Email: "capacity-wait@daum.net", AppPassword: "test-only"})
 	require.NoError(t, err)
 	s.Protocol = daumValidationClientStub{validate: func(context.Context, protocol.Credentials) error {
-		t.Fatal("missing proxy must not reach provider")
-		return nil
+		return &protocol.Failure{Category: "busy", Retryable: true, SafeMessage: "Waiting for mailbox capacity."}
 	}}
 	task := app.ValidationTaskPayload{ResourceID: id, OwnerUserID: 7, ValidationGeneration: 1, CredentialRevision: 1}
 	for i := 0; i < 6; i++ {

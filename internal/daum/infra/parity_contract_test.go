@@ -213,7 +213,9 @@ func TestDaumValidationEnqueueStatusDoesNotOverwriteImmediateDeferral(t *testing
 			ctx := context.Background()
 			id, _, err := s.ImportLine(ctx, 7, domain.ImportLine{Email: "queued@daum.net", AppPassword: "fixture"})
 			require.NoError(t, err)
-			s.Proxies = nil
+			s.Protocol = daumValidationClientStub{validate: func(context.Context, protocol.Credentials) error {
+				return &protocol.Failure{Category: "busy", Retryable: true}
+			}}
 			queue := dispatchCallbackQueue{callback: func(ctx context.Context, task *asynq.Task) error {
 				if !immediate {
 					return nil
@@ -242,7 +244,9 @@ func TestDaumOlderDispatcherCannotOverwriteANewerDuplicateReservation(t *testing
 	ctx := context.Background()
 	id, _, err := s.ImportLine(ctx, 7, domain.ImportLine{Email: "dispatch-race@daum.net", AppPassword: "fixture"})
 	require.NoError(t, err)
-	s.Proxies = nil
+	s.Protocol = daumValidationClientStub{validate: func(context.Context, protocol.Credentials) error {
+		return &protocol.Failure{Category: "busy", Retryable: true}
+	}}
 	queue := dispatchCallbackQueue{callback: func(ctx context.Context, task *asynq.Task) error {
 		payload, err := daumapp.DecodeValidationTask(task)
 		if err != nil {

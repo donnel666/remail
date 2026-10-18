@@ -73,16 +73,18 @@
 - 对齐方法：复用微软的代理摘要查询和展示，仅按 Daum 账号键查询。
 - 证据：`web/src/pages/admin-microsoft/microsoft-detail-sheet.tsx:134`；`web/src/pages/admin-daum/daum-detail-sheet.tsx:70`、`internal/daum/infra/network.go:31`。
 
+后续用户要求 Daum 默认服务器 IPv4 直连，生产装配已移除 Daum 的代理服务及绑定查询；此项保留为审查时的历史记录，当前 Daum 详情不查询无关代理绑定。
+
 ## 网络与收件：不能笼统称为完全一致
 
 | 项目 | Microsoft | Daum | 判断 |
 |---|---|---|---|
-| 代理获取与账号绑定 | ProxyUseCase，规范化邮箱键、资源代理与系统备用、失败服务器排除 | 同一服务与相同键规则 | 已复用 |
-| IP 用途 | 验证 IPv4，实时 IPv4，历史 IPv6；网页绑定还有 Binding 用途 | 审查时历史使用 IPv6；用户后续明确指定验证 IPv4/Auth、实时及历史 IPv4/Fetch | 后续 IPv4 统一是用户明确要求的差异；微软策略不变，无网页绑定流程 |
+| 代理获取与账号绑定 | ProxyUseCase，规范化邮箱键、资源代理与系统备用、失败服务器排除 | 审查时复用同一服务；用户后续要求默认直连，已移除代理获取及健康反馈 | 用户明确要求的路由差异，微软策略不变 |
+| IP 用途 | 验证 IPv4，实时 IPv4，历史 IPv6；网页绑定还有 Binding 用途 | 审查时历史使用 IPv6；经 IPv4/IPv6 代理实测后，用户要求验证、实时及历史全部默认服务器 IPv4 直连 | 使用 tcp4，共用 TLS 校验和超时，无网页绑定流程 |
 | IMAP TLS | `netdial.DialTLS`、Go TLS、最低 TLS 1.2、证书验证、SNI、imap ALPN | 同一代码；POP3 使用 pop3 ALPN、Daum 主机名 | 邮件协议层共用，目标及 ALPN 必须按协议改变 |
 | 网页及 Graph 指纹 | 浏览器／API HTTP 客户端使用 tls-client 浏览器 profile、Cookie、HTTP 头；Graph API 使用 Chrome profile | 没有这些 HTTP 调用，仅 IMAP/POP3 | 不应声称浏览器指纹也完全一致 |
-| 无代理时 | IMAP 拒绝空代理；Graph／网页路径可接收 Direct 配置继续请求 | 平台路径统一延期，不直连；CMD 可明确直连 | 行为不同，之前只对齐了微软 IMAP 的限制 |
-| 代理尝试预算 | 实时循环固定最多 3 次，ProxyUseCase 内再受配置约束；验证读取配置 | 循环直接读取 `max_proxy_attempts` | 默认值相同不等于配置行为相同 |
+| 无代理时 | IMAP 拒绝空代理；Graph／网页路径可接收 Direct 配置继续请求 | 当前所有 Daum 操作默认直连，不依赖代理池是否存在 | 用户明确授权的后续差异；取消终止后续尝试，微软策略不变 |
+| 连接尝试预算 | 实时循环固定最多 3 次，ProxyUseCase 内再受配置约束；验证读取配置 | 当前验证每任务 1 次直连，实时及历史每轮最多 3 次；不使用 `max_proxy_attempts` | 验证外层仍由 `resource_validation_max_failures` 限制失败轮次，默认 3 轮 |
 | 服务端错误的本轮重试 | 实时适配器可以继续当前轮次的剩余尝试 | 仅 transport 错误在本轮换代理重试，provider_unavailable 等直接交上层 | 重试机制不同 |
 | 增量边界 | 遇到已知最新邮件停止向旧邮件读取；全局按时间排序和上限截取 | 过滤已知邮件后继续找旧的未知邮件；协议客户端上限按目录计算 | 已复现边界差异，会改变抓取范围及开销 |
 | 原始邮件限制 | 当前 IMAP 路径没有 Daum 这项 8 MiB 拒绝条件 | 超过 8 MiB 返回失败，验证／历史也可能受影响 | Daum 自加限制，非上游协议要求 |

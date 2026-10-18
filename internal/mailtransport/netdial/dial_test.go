@@ -47,6 +47,67 @@ func TestMailboxTLSAdvertisesProtocolAndVerifiesCertificate(t *testing.T) {
 	}
 }
 
+func TestDirectIPv4TLSKeepsHostnameALPNAndCertificateVerification(t *testing.T) {
+	for _, alpn := range []string{"imap", "pop3"} {
+		t.Run(alpn, func(t *testing.T) {
+			hello := make(chan *tls.ClientHelloInfo, 1)
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+			server.Config.ErrorLog = log.New(io.Discard, "", 0)
+			server.TLS = &tls.Config{NextProtos: []string{alpn}, GetConfigForClient: func(info *tls.ClientHelloInfo) (*tls.Config, error) { hello <- info; return nil, nil }}
+			server.StartTLS()
+			defer server.Close()
+			_, port, err := net.SplitHostPort(server.Listener.Addr().String())
+			require.NoError(t, err)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			conn, err := DialDirectTLSIPv4(ctx, net.JoinHostPort("localhost", port), alpn)
+			require.Error(t, err, "direct IPv4 must still reject an untrusted certificate")
+			require.Nil(t, conn)
+			select {
+			case observed := <-hello:
+				require.Equal(t, "localhost", observed.ServerName)
+				require.Equal(t, []string{alpn}, observed.SupportedProtos)
+				require.NotNil(t, observed.Conn.RemoteAddr().(*net.TCPAddr).IP.To4())
+				for _, version := range observed.SupportedVersions {
+					require.GreaterOrEqual(t, version, uint16(tls.VersionTLS12))
+				}
+			case <-ctx.Done():
+				t.Fatal("no IPv4 TLS ClientHello received")
+			}
+		})
+	}
+}
+
+func TestDirectIPv4RejectsIPv6TargetWithoutChangingDefaultDialTLS(t *testing.T) {
+	listener, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skip("IPv6 loopback is unavailable")
+	}
+	hello := make(chan *tls.ClientHelloInfo, 1)
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	_ = server.Listener.Close()
+	server.Listener = listener
+	server.Config.ErrorLog = log.New(io.Discard, "", 0)
+	server.TLS = &tls.Config{GetConfigForClient: func(info *tls.ClientHelloInfo) (*tls.Config, error) { hello <- info; return nil, nil }}
+	server.StartTLS()
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	conn, err := DialDirectTLSIPv4(ctx, listener.Addr().String(), "imap")
+	require.Error(t, err)
+	require.Nil(t, conn)
+	require.Empty(t, hello, "the IPv4-only entry point must not reach an IPv6 listener")
+	conn, err = DialTLS(ctx, "", listener.Addr().String(), "imap")
+	require.Error(t, err, "default dialing reaches TLS but rejects the untrusted certificate")
+	require.Nil(t, conn)
+	select {
+	case observed := <-hello:
+		require.Nil(t, observed.Conn.RemoteAddr().(*net.TCPAddr).IP.To4())
+	case <-ctx.Done():
+		t.Fatal("the original default TCP behavior no longer reaches IPv6")
+	}
+}
+
 func TestMailboxHTTPProxyTargetsRequestedServerAndCarriesAuth(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)

@@ -57,6 +57,8 @@ func (c *Client) connect(ctx context.Context, address, proxyURL, alpn string) (n
 	var err error
 	if c.dial != nil {
 		conn, err = c.dial(ctx, address)
+	} else if strings.TrimSpace(proxyURL) == "" {
+		conn, err = netdial.DialDirectTLSIPv4(ctx, address, alpn)
 	} else {
 		conn, err = netdial.DialTLS(ctx, proxyURL, address, alpn)
 	}

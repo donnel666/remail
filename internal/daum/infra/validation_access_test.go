@@ -11,7 +11,6 @@ import (
 	daumapp "github.com/donnel666/remail/internal/daum/app"
 	"github.com/donnel666/remail/internal/daum/domain"
 	"github.com/donnel666/remail/internal/daum/infra/protocol"
-	proxydomain "github.com/donnel666/remail/internal/proxy/domain"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/stretchr/testify/require"
 )
@@ -21,8 +20,7 @@ func TestValidationUsesStoredAPPAndBoundsTransportFailuresBeforeHistory(t *testi
 	ctx := context.Background()
 	id, _, err := s.ImportLine(ctx, 7, domain.ImportLine{Email: "private-account@daum.net", Password: "fixture-login", AppPassword: "fixture-app"})
 	require.NoError(t, err)
-	proxies := &daumNetworkProxies{}
-	s.Proxies = proxies
+	s.Proxies = &daumNetworkProxies{t: t}
 	var logs bytes.Buffer
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
@@ -34,6 +32,7 @@ func TestValidationUsesStoredAPPAndBoundsTransportFailuresBeforeHistory(t *testi
 		require.Equal(t, "private-account@daum.net", credentials.Email)
 		require.Equal(t, "fixture-app", credentials.AppPassword)
 		require.Equal(t, "imap", credentials.Protocol)
+		require.Empty(t, credentials.ProxyURL)
 		if reachable {
 			return nil
 		}
@@ -58,15 +57,7 @@ func TestValidationUsesStoredAPPAndBoundsTransportFailuresBeforeHistory(t *testi
 		require.NoError(t, s.DB.Model(&MaintenanceRun{}).Where("resource_id=? AND kind='history'", id).Count(&history).Error)
 		require.Zero(t, history, "history only follows proven mailbox access")
 	}
-	require.Equal(t, 9, calls, "three validation rounds each honor the three-proxy attempt budget")
-	for i, request := range proxies.requests {
-		require.Equal(t, i%3, request.Attempt)
-		require.Equal(t, "validation-diagnostic", request.RequestID)
-		require.Equal(t, proxydomain.ProxyIPv4, request.IPVersion)
-		require.Equal(t, proxydomain.ProxyPurposeAuth, request.Purpose)
-		require.True(t, request.AllowSystemFallback)
-		require.Len(t, request.AvoidProxyServerIDs, i%3)
-	}
+	require.Equal(t, 3, calls, "each validation round makes one direct attempt")
 	queued, err := s.DispatchPendingValidations(ctx, &daumQueueStub{}, 10)
 	require.NoError(t, err)
 	require.Zero(t, queued, "exhausted validation must not retry forever")
@@ -75,6 +66,7 @@ func TestValidationUsesStoredAPPAndBoundsTransportFailuresBeforeHistory(t *testi
 	}
 	require.Contains(t, logs.String(), `"request_id":"validation-diagnostic"`)
 	require.Contains(t, logs.String(), `"reason":"network_unreachable"`)
+	require.Contains(t, logs.String(), `"route":"direct_ipv4"`)
 	reachable = true
 	generation, err := s.ClaimForValidation(ctx, id, nil)
 	require.NoError(t, err)
@@ -87,7 +79,7 @@ func TestValidationUsesStoredAPPAndBoundsTransportFailuresBeforeHistory(t *testi
 	require.Equal(t, maintenanceQueued, history.Status)
 }
 
-func TestDaumValidationUsesConfiguredProxyAttemptBudget(t *testing.T) {
+func TestDaumValidationMakesOneDirectAttemptRegardlessOfProxySetting(t *testing.T) {
 	previous, existed := runtimeconfig.Snapshot()["max_proxy_attempts"]
 	t.Cleanup(func() {
 		if existed {
@@ -98,16 +90,13 @@ func TestDaumValidationUsesConfiguredProxyAttemptBudget(t *testing.T) {
 	})
 	for _, budget := range []int{1, 2, 4} {
 		runtimeconfig.Set("max_proxy_attempts", fmt.Sprint(budget))
-		proxies := &daumNetworkProxies{}
-		s := &Service{Proxies: proxies, Protocol: daumValidationClientStub{validate: func(context.Context, protocol.Credentials) error {
+		calls := 0
+		s := &Service{Proxies: &daumNetworkProxies{t: t}, Protocol: daumValidationClientStub{validate: func(_ context.Context, credentials protocol.Credentials) error {
+			calls++
+			require.Empty(t, credentials.ProxyURL)
 			return &protocol.Failure{Category: "transport", SafeMessage: "Daum mailbox connection is temporarily unavailable.", Retryable: true}
 		}}}
 		require.Error(t, s.validateProtocol(context.Background(), Resource{ID: 7, EmailAddress: "fixture@daum.net", AppPassword: "fixture"}, "attempt-budget"))
-		require.Len(t, proxies.requests, budget)
-		for attempt, request := range proxies.requests {
-			require.Equal(t, attempt, request.Attempt)
-			require.Len(t, request.AvoidProxyServerIDs, attempt)
-			require.Equal(t, "attempt-budget", request.RequestID)
-		}
+		require.Equal(t, 1, calls)
 	}
 }

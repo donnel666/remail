@@ -31,7 +31,7 @@ unset daum_credential_line
 
 命令读取邮件时不改变已读状态、不删除邮件、不发送邮件、不写平台数据库。输出不包含原始密码、邮件正文或取件链接，主题中的常见数字验证码会遮蔽。
 
-默认通过直接 TCP/TLS 连接做独立诊断。需要检查代理链路时，用 `-proxy-env` 指定保存代理 URL 的环境变量名，支持 HTTP/HTTPS CONNECT 和 SOCKS5/5h；不会自动读取 `HTTP_PROXY`，也不会输出代理 URL 或认证信息：
+默认通过 IPv4 直接 TCP/TLS 连接做独立诊断。需要检查代理链路时，用 `-proxy-env` 指定保存代理 URL 的环境变量名，支持 HTTP/HTTPS CONNECT 和 SOCKS5/5h；不会自动读取 `HTTP_PROXY`，也不会输出代理 URL 或认证信息：
 
 ```bash
 read -rs DAUM_CHECK_PROXY
@@ -42,4 +42,4 @@ unset DAUM_CHECK_PROXY
 
 CMD 复用 Daum 后端协议客户端，以及微软 IMAP 共用的代理/TLS 拨号代码，校验服务端证书，最低 TLS 1.2，并按实际协议发送 `imap` 或 `pop3` ALPN。网页请求的 User-Agent、Cookie 和浏览器指纹不适用于 IMAP/POP3。
 
-平台服务通过同一个 ProxyUseCase 选择资源绑定代理、系统备用代理并反馈健康状态；CMD 不加载平台数据库或代理池，只检查明确选择的直连或代理。正文与微软共用 MIME 解析，优先 HTML，并已移除 Daum 原先独有的 8 MiB 拒绝条件。IMAP 读取 Inbox/Junk，保留只读语义。
+按用户授权，平台 Daum 验证、实时收件及历史读取默认使用服务器 IPv4 直连，不获取代理或反馈代理健康；微软策略保持不变。CMD 不加载平台数据库或代理池，只检查明确选择的 IPv4 直连或环境变量代理；显式代理诊断失败时不会自动切换直连。正文与微软共用 MIME 解析，优先 HTML，并已移除 Daum 原先独有的 8 MiB 拒绝条件。IMAP 读取 Inbox/Junk，保留只读语义。
