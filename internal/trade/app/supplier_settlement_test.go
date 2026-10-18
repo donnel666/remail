@@ -34,6 +34,47 @@ func TestSelfPurchaseHasNoDebitOrSupplierIncome(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrInvalidOrderRequest)
 }
 
+type supplierActivationRepoStub struct {
+	Repository
+	active domain.Order
+}
+
+func (*supplierActivationRepoStub) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+func (r *supplierActivationRepoStub) MarkActive(context.Context, MarkActiveCommand) (*domain.Order, error) {
+	return &r.active, nil
+}
+
+type supplierFreezeRecorder struct {
+	SupplierSettlementPort
+	request SupplierSettlementRequest
+}
+
+func (*supplierFreezeRecorder) LockSupplierWallets(context.Context, ...uint) error { return nil }
+func (r *supplierFreezeRecorder) FreezeSupplierSettlement(_ context.Context, request SupplierSettlementRequest) error {
+	r.request = request
+	return nil
+}
+
+func TestSupplierFreezeUsesPersistedOrderDeadline(t *testing.T) {
+	requested := time.Date(2026, 10, 18, 0, 0, 0, 750_000_000, time.UTC)
+	persistedStart := requested.Round(time.Second)
+	persistedUntil := persistedStart.Add(time.Hour)
+	supplier := uint(3)
+	paid := domain.Order{OrderNo: "PERSISTED-DEADLINE", UserID: 2, SupplierUserID: &supplier, SupplierAmount: "1.00", ServiceMode: domain.ServiceModePurchase, WarrantyMinutes: 1440}
+	active := paid
+	active.Status = domain.OrderStatusActive
+	active.ReceiveStartedAt, active.ReceiveUntil = &persistedStart, &persistedUntil
+	wallet := &supplierFreezeRecorder{}
+	uc := &UseCase{repo: &supplierActivationRepoStub{active: active}, settlements: wallet}
+	_, err := uc.activateAndFreezeSupplier(context.Background(), paid, MarkActiveCommand{OrderNo: paid.OrderNo, ReceiveStartedAt: requested, ReceiveUntil: requested.Add(time.Hour)})
+	require.NoError(t, err)
+	require.Equal(t, persistedStart.Add(24*time.Hour), wallet.request.AvailableAt)
+	require.NotEqual(t, requested.Add(24*time.Hour), wallet.request.AvailableAt, "freeze and later activation must use the same persisted time precision")
+}
+
 type supplierScanRepoStub struct {
 	Repository
 	t             *testing.T
@@ -75,6 +116,9 @@ func (r *supplierScanRepoStub) FindOrder(ctx context.Context, orderNo string) (*
 }
 func (r *supplierScanRepoStub) LockOrderForUpdate(ctx context.Context, orderNo string) (*domain.Order, error) {
 	return r.FindOrder(ctx, orderNo)
+}
+func (*supplierScanRepoStub) LockPurchaseRefundState(context.Context, string) (bool, error) {
+	return false, nil
 }
 func (r *supplierScanRepoStub) WithTx(ctx context.Context, fn func(context.Context) error) error {
 	return fn(ctx)

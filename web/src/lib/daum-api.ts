@@ -1,5 +1,7 @@
-import { apiClient as client, csrfHeader, IamApiError, turnstileHeader, unwrap } from "./api-client";
+import { apiClient as client, csrfHeader, turnstileHeader, unwrap } from "./api-client";
 import { generateIdempotencyKey } from "./idempotency";
+import { createDaumBulkSession, DaumBulkOutcomeUnconfirmedError, type DaumBulkSession } from "./daum-bulk-session";
+export { createDaumBulkSession, isDaumBulkOutcomeUnconfirmed } from "./daum-bulk-session";
 
 export type DaumResourceStatus = "pending" | "validating" | "identifying" | "normal" | "abnormal" | "disabled";
 export type DaumImportErrorStrategy = "skip" | "abort";
@@ -58,66 +60,6 @@ export interface DaumBulkResponse {
 }
 type DaumSelection = { mode: "ids"; resourceIds: number[] } | { mode: "filter"; filter: ReturnType<typeof listFilter> };
 type DaumBulkCommand = "validate" | "publish" | "delete";
-interface DaumBulkAttempt {
-  key: string;
-  uncertain?: boolean;
-  pending?: Promise<DaumBulkResponse>;
-}
-
-class DaumBulkOutcomeUnconfirmedError extends Error {
-  constructor(readonly cause: unknown) {
-    super("Daum bulk operation outcome is not confirmed. Retry to confirm.");
-  }
-}
-
-export function isDaumBulkOutcomeUnconfirmed(error: unknown) {
-  return error instanceof DaumBulkOutcomeUnconfirmedError || !(
-    error instanceof IamApiError && error.status >= 400 && error.status < 500 && error.status !== 408
-  );
-}
-
-// Keep this session in the mounted page, scoped to its authenticated user.
-// Unconfirmed operations survive selection changes without sharing credentials or receipts across users.
-export function createDaumBulkSession() {
-  const attempts = new Map<string, DaumBulkAttempt>();
-  return {
-    run(command: DaumBulkCommand, selection: DaumSelection): Promise<DaumBulkResponse> {
-      const signature = JSON.stringify({ command, selection });
-      let attempt = attempts.get(signature);
-      if (!attempt) {
-        attempt = { key: generateIdempotencyKey() };
-        attempts.set(signature, attempt);
-      }
-      if (attempt.pending) return attempt.pending;
-      const current = attempt;
-      const request = Promise.resolve().then(async () => {
-        try {
-          const accepted = await unwrap(await client.POST("/v1/daum/resources/bulk/{command}", {
-            params: { path: { command }, header: headers(current.key) }, body: { selection },
-          }));
-          if (!accepted?.taskId) throw new DaumBulkOutcomeUnconfirmedError(undefined);
-          const result = command === "validate" ? accepted : await waitForBulkTask(accepted);
-          // The caller now has a confirmed receipt, even if task polling was interrupted.
-          // A later explicit click starts a new operation; only an unknown POST keeps its key.
-          attempts.delete(signature);
-          return result;
-        } catch (error) {
-          if (isDaumBulkOutcomeUnconfirmed(error)) current.uncertain = true;
-          else if (!current.uncertain) attempts.delete(signature);
-          else {
-            // A rejection of this retry cannot disprove acceptance of an earlier lost response.
-            throw new DaumBulkOutcomeUnconfirmedError(error);
-          }
-          throw error;
-        }
-      });
-      current.pending = request.finally(() => { current.pending = undefined; });
-      return current.pending;
-    },
-  };
-}
-type DaumBulkSession = ReturnType<typeof createDaumBulkSession>;
-
 function headers(idempotencyKey = generateIdempotencyKey()) {
   return { ...csrfHeader(), "Idempotency-Key": idempotencyKey };
 }
@@ -206,7 +148,13 @@ export async function deleteDaumResource(resourceId: number, version: number) {
   await unwrap(await client.DELETE("/v1/daum/resources/{resourceId}", { params: { path: { resourceId }, header: headers() }, body: { version } }));
 }
 function bulk(command: DaumBulkCommand, selection: DaumSelection, session = createDaumBulkSession()): Promise<DaumBulkResponse> {
-  return session.run(command, selection);
+  return session.run(JSON.stringify({ command, selection }), async (key) => {
+    const accepted = await unwrap(await client.POST("/v1/daum/resources/bulk/{command}", {
+      params: { path: { command }, header: headers(key) }, body: { selection },
+    }));
+    if (!accepted?.taskId) throw new DaumBulkOutcomeUnconfirmedError();
+    return command === "validate" ? accepted : waitForBulkTask(accepted);
+  });
 }
 export async function getDaumBulkTask(taskId: string): Promise<DaumBulkResponse> {
   return unwrap(await client.GET("/v1/daum/resources/bulk-tasks/{taskId}", { params: { path: { taskId } } }));

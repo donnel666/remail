@@ -38,6 +38,7 @@ import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { IamApiError } from "@/lib/api-client";
 import {
+  createAdminDaumBulkSession,
   deleteAdminDaumResource,
   deleteAdminDaumResourcesByFilter,
   deleteAdminDaumResourcesByIds,
@@ -54,6 +55,7 @@ import {
   unpublishAdminDaumResource,
   type AdminDaumBulkCommandResponse,
 } from "@/lib/admin-daum-api";
+import { showAdminDaumBulkError, showAdminDaumBulkOutcome } from "./admin-daum/daum-bulk-feedback";
 
 import {
   DATE_RANGE_DROPDOWN_CLASS,
@@ -97,6 +99,14 @@ export default function AdminDaumEmails() {
   const { t } = useTranslation();
   const { currentUser } = useAuth();
   const isMobile = useIsMobile();
+  const bulkSession = useMemo(createAdminDaumBulkSession, [currentUser?.id]);
+  const currentBulkSessionRef = useRef(bulkSession);
+  currentBulkSessionRef.current = bulkSession;
+  const mountedRef = useRef(false);
+  const isCurrentPage = useCallback(
+    () => mountedRef.current && currentBulkSessionRef.current === bulkSession,
+    [bulkSession]
+  );
 
   const [suffixFilter, setSuffixFilter] = useState<string | undefined>();
   const [searchKeyword, setSearchKeyword] = useState("");
@@ -154,15 +164,28 @@ export default function AdminDaumEmails() {
         // Owner choices are optional UI data; the resource list remains usable.
       });
     return () => controller.abort();
-  }, []);
+  }, [currentUser?.id]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    setSelectedKeys([]);
+    setRowBusy(null);
+    setBulkBusy(null);
+    setDetailBusy(false);
+    setDetailLoading(false);
+    setDetail(null);
+    setEditTarget(null);
+    setCredentialsTarget(null);
+    setMaintenanceTarget(null);
+    setBulkMaintenanceTarget(null);
+    setImportOpen(false);
+    return () => {
+      mountedRef.current = false;
       activeDetailIdRef.current = null;
       detailRequestRef.current?.abort();
-    },
-    []
-  );
+      detailRequestRef.current = null;
+    };
+  }, [bulkSession]);
 
   const listFilter = useMemo<AdminDaumListFilter>(() => {
     const filter: AdminDaumListFilter = {};
@@ -186,7 +209,7 @@ export default function AdminDaumEmails() {
     suffixFilter,
   ]);
 
-  const listFilterKey = JSON.stringify(listFilter);
+  const listFilterKey = JSON.stringify([currentUser?.id, listFilter]);
 
   const loadDaumBlock = useCallback(
     async (
@@ -249,7 +272,7 @@ export default function AdminDaumEmails() {
     } finally {
       if (statsRequestRef.current === controller) statsRequestRef.current = null;
     }
-  }, [listFilter, setListTotal]);
+  }, [currentUser?.id, listFilter, setListTotal]);
 
   useEffect(() => {
     setFacets(null);
@@ -264,58 +287,53 @@ export default function AdminDaumEmails() {
   const refresh = useCallback(async () => {
     await refreshList();
   }, [refreshList]);
+  const currentRefreshRef = useRef(refresh);
+  currentRefreshRef.current = refresh;
 
   const refreshOpenDetail = useCallback(async (resourceId?: number) => {
-    const id = resourceId ?? detail?.id;
-    if (!id || activeDetailIdRef.current !== id) return;
+    const id = resourceId ?? activeDetailIdRef.current;
+    if (!isCurrentPage() || !id || activeDetailIdRef.current !== id) return;
     detailRequestRef.current?.abort();
     const controller = new AbortController();
     detailRequestRef.current = controller;
     try {
       const nextDetail = await getAdminDaumResourceDetail(id, controller.signal);
-      if (!controller.signal.aborted && activeDetailIdRef.current === id) setDetail(nextDetail);
+      if (isCurrentPage() && !controller.signal.aborted && activeDetailIdRef.current === id) setDetail(nextDetail);
     } catch (error) {
       if (!controller.signal.aborted) throw error;
     } finally {
       if (detailRequestRef.current === controller) detailRequestRef.current = null;
     }
-  }, [detail?.id]);
+  }, [isCurrentPage]);
 
   const refreshAfterMutation = useCallback(
     async (resourceId?: number) => {
+      if (!isCurrentPage()) return;
       try {
-        await refresh();
+        await currentRefreshRef.current();
         if (resourceId) await refreshOpenDetail(resourceId);
       } catch (error) {
+        if (!isCurrentPage()) return;
         Toast.error(
           getIamErrorMessage(t, error, "Admin Daum resources load failed.")
         );
       }
     },
-    [refresh, refreshOpenDetail, t]
+    [isCurrentPage, refreshOpenDetail, t]
   );
 
   const showBulkOutcome = useCallback(
     (response: AdminDaumBulkCommandResponse, successKey: string) => {
-      if (response.taskId && response.status !== "succeeded") {
-        Toast.success(t("Daum resources bulk operation submitted."));
-        return;
-      }
-      const outcome = { succeeded: response.affected, skipped: response.skipped, reasonCounts: response.reasonCounts ?? [] };
-      Toast.success(t(successKey, { count: outcome.succeeded }));
-      if (outcome.skipped === 0) return;
-      const reasons = outcome.reasonCounts
-        .map((item) => `${item.reason}: ${item.count}`)
-        .join(", ");
-      Toast.warning(
-        `${t("Succeeded")}: ${outcome.succeeded}/${outcome.succeeded + outcome.skipped}` +
-          (reasons ? ` · ${t("Reason")}: ${reasons}` : "")
-      );
+      if (isCurrentPage()) showAdminDaumBulkOutcome(t, response, successKey);
     },
-    [t]
+    [isCurrentPage, t]
   );
+  const showBulkError = useCallback((error: unknown) => {
+    if (isCurrentPage()) showAdminDaumBulkError(t, error);
+  }, [isCurrentPage, t]);
 
   const openDetail = useCallback(async (resourceId: number) => {
+    if (!isCurrentPage()) return;
     activeDetailIdRef.current = resourceId;
     detailRequestRef.current?.abort();
     const controller = new AbortController();
@@ -327,7 +345,7 @@ export default function AdminDaumEmails() {
         resourceId,
         controller.signal
       );
-      if (!controller.signal.aborted && activeDetailIdRef.current === resourceId) setDetail(nextDetail);
+      if (isCurrentPage() && !controller.signal.aborted && activeDetailIdRef.current === resourceId) setDetail(nextDetail);
     } catch (error) {
       if (controller.signal.aborted) return;
       Toast.error(getIamErrorMessage(t, error, "Daum resource detail load failed."));
@@ -337,7 +355,7 @@ export default function AdminDaumEmails() {
         setDetailLoading(false);
       }
     }
-  }, [t]);
+  }, [isCurrentPage, t]);
 
   const stats = useMemo(() => {
     if (facets) return facets;
@@ -393,19 +411,22 @@ export default function AdminDaumEmails() {
       operation: () => Promise<unknown>,
       successKey: string
     ) => {
+      if (!isCurrentPage()) return;
       setRowBusy({ action, id: record.id });
       try {
         await operation();
+        if (!isCurrentPage()) return;
         Toast.success(t(successKey));
-        await refreshAfterMutation(detail?.id === record.id ? record.id : undefined);
+        await refreshAfterMutation(record.id);
       } catch (error) {
+        if (!isCurrentPage()) return;
         Toast.error(getIamErrorMessage(t, error, "Daum resource operation failed."));
-        if (error instanceof IamApiError && error.code === "resource_version_conflict") await refreshAfterMutation(detail?.id === record.id ? record.id : undefined);
+        if (error instanceof IamApiError && error.code === "resource_version_conflict") await refreshAfterMutation(record.id);
       } finally {
-        setRowBusy(null);
+        if (isCurrentPage()) setRowBusy(null);
       }
     },
-    [detail?.id, refreshAfterMutation, t]
+    [isCurrentPage, refreshAfterMutation, t]
   );
 
   const handleToggleDisabled = useCallback(
@@ -475,21 +496,45 @@ export default function AdminDaumEmails() {
 
   const runDetailOperation = useCallback(
     async (operation: () => Promise<unknown>, successKey: string) => {
-      if (!detail) return;
+      if (!detail || !isCurrentPage()) return;
       setDetailBusy(true);
       try {
         await operation();
+        if (!isCurrentPage()) return;
         Toast.success(t(successKey));
         await refreshAfterMutation(detail.id);
       } catch (error) {
+        if (!isCurrentPage()) return;
         Toast.error(getIamErrorMessage(t, error, "Daum resource operation failed."));
         if (error instanceof IamApiError && error.code === "resource_version_conflict") await refreshAfterMutation(detail.id);
       } finally {
-        setDetailBusy(false);
+        if (isCurrentPage() && activeDetailIdRef.current === detail.id) setDetailBusy(false);
       }
     },
-    [detail, refreshAfterMutation, t]
+    [detail, isCurrentPage, refreshAfterMutation, t]
   );
+
+  const runBulkOperation = useCallback(async (
+    action: "disable" | "delete" | "publish" | "private",
+    operation: () => Promise<AdminDaumBulkCommandResponse>,
+    successKey: string,
+    resetPage = false
+  ) => {
+    if (!isCurrentPage()) return;
+    setBulkBusy(action);
+    try {
+      const response = await operation();
+      if (!isCurrentPage()) return;
+      showBulkOutcome(response, successKey);
+      setSelectedKeys([]);
+      if (resetPage) setActivePage(1);
+      await refreshAfterMutation();
+    } catch (error) {
+      showBulkError(error);
+    } finally {
+      if (isCurrentPage()) setBulkBusy(null);
+    }
+  }, [isCurrentPage, refreshAfterMutation, showBulkError, showBulkOutcome]);
 
   const openSelectedMaintenance = useCallback(() => {
     if (selectedKeys.length === 0) return;
@@ -508,22 +553,10 @@ export default function AdminDaumEmails() {
         count: selectedKeys.length,
       }),
       okText: t("Disable"),
-      onOk: async () => {
-        setBulkBusy("disable");
-        try {
-          const response = await disableAdminDaumResourcesByIds(selectedKeys);
-          showBulkOutcome(response, "Daum resources disabled.");
-          setSelectedKeys([]);
-          await refreshAfterMutation();
-        } catch (error) {
-          Toast.error(getIamErrorMessage(t, error, "Daum resource operation failed."));
-        } finally {
-          setBulkBusy(null);
-        }
-      },
+      onOk: () => runBulkOperation("disable", () => disableAdminDaumResourcesByIds(selectedKeys, bulkSession), "Daum resources disabled."),
       title: t("Confirm disable selected"),
     });
-  }, [refreshAfterMutation, selectedKeys, showBulkOutcome, t]);
+  }, [bulkSession, runBulkOperation, selectedKeys, t]);
 
   const confirmDeleteSelected = useCallback(() => {
     if (selectedKeys.length === 0) return;
@@ -534,23 +567,10 @@ export default function AdminDaumEmails() {
       }),
       okButtonProps: { type: "danger" },
       okText: t("Delete"),
-      onOk: async () => {
-        setBulkBusy("delete");
-        try {
-          const response = await deleteAdminDaumResourcesByIds(selectedKeys);
-          showBulkOutcome(response, "Daum resources deleted.");
-          setSelectedKeys([]);
-          setActivePage(1);
-          await refreshAfterMutation();
-        } catch (error) {
-          Toast.error(getIamErrorMessage(t, error, "Daum resource operation failed."));
-        } finally {
-          setBulkBusy(null);
-        }
-      },
+      onOk: () => runBulkOperation("delete", () => deleteAdminDaumResourcesByIds(selectedKeys, bulkSession), "Daum resources deleted.", true),
       title: t("Confirm delete selected"),
     });
-  }, [refreshAfterMutation, selectedKeys, showBulkOutcome, t]);
+  }, [bulkSession, runBulkOperation, selectedKeys, t]);
 
   const openAllMaintenance = useCallback(() => {
     if (total === 0) {
@@ -574,48 +594,21 @@ export default function AdminDaumEmails() {
       content: t("Confirm delete all matching Daum resources", { count: total }),
       okButtonProps: { type: "danger" },
       okText: t("Delete"),
-      onOk: async () => {
-        setBulkBusy("delete");
-        try {
-          const response = await deleteAdminDaumResourcesByFilter(listFilter);
-          showBulkOutcome(response, "Daum resources deleted.");
-          setSelectedKeys([]);
-          setActivePage(1);
-          await refreshAfterMutation();
-        } catch (error) {
-          Toast.error(getIamErrorMessage(t, error, "Daum resource operation failed."));
-        } finally {
-          setBulkBusy(null);
-        }
-      },
+      onOk: () => runBulkOperation("delete", () => deleteAdminDaumResourcesByFilter(listFilter, bulkSession), "Daum resources deleted.", true),
       title: t("Confirm delete all"),
     });
-  }, [listFilter, refreshAfterMutation, showBulkOutcome, t, total]);
+  }, [bulkSession, listFilter, runBulkOperation, t, total]);
 
   const runBulkForSale = useCallback(
     async (forSale: boolean) => {
       if (selectedKeys.length === 0) return;
-      setBulkBusy(forSale ? "publish" : "private");
-      try {
-        const response = await setAdminDaumResourcesForSaleByIds(
-          selectedKeys,
-          forSale
-        );
-        showBulkOutcome(
-          response,
-          forSale
-            ? "Daum resources published for public sale."
-            : "Daum resources converted to private."
-        );
-        setSelectedKeys([]);
-        await refreshAfterMutation();
-      } catch (error) {
-        Toast.error(getIamErrorMessage(t, error, "Daum resource operation failed."));
-      } finally {
-        setBulkBusy(null);
-      }
+      await runBulkOperation(
+        forSale ? "publish" : "private",
+        () => setAdminDaumResourcesForSaleByIds(selectedKeys, forSale, bulkSession),
+        forSale ? "Daum resources published for public sale." : "Daum resources converted to private."
+      );
     },
-    [refreshAfterMutation, selectedKeys, showBulkOutcome, t]
+    [bulkSession, runBulkOperation, selectedKeys]
   );
 
   const confirmForSaleAll = useCallback(
@@ -633,33 +626,15 @@ export default function AdminDaumEmails() {
           { count: total }
         ),
         okText: forSale ? t("Put on sale") : t("Convert to private"),
-        onOk: async () => {
-          setBulkBusy(forSale ? "publish" : "private");
-          try {
-            const response = await setAdminDaumResourcesForSaleByFilter(
-              listFilter,
-              forSale
-            );
-            showBulkOutcome(
-              response,
-              forSale
-                ? "Daum resources published for public sale."
-                : "Daum resources converted to private."
-            );
-            setSelectedKeys([]);
-            await refreshAfterMutation();
-          } catch (error) {
-            Toast.error(
-              getIamErrorMessage(t, error, "Daum resource operation failed.")
-            );
-          } finally {
-            setBulkBusy(null);
-          }
-        },
+        onOk: () => runBulkOperation(
+          forSale ? "publish" : "private",
+          () => setAdminDaumResourcesForSaleByFilter(listFilter, forSale, bulkSession),
+          forSale ? "Daum resources published for public sale." : "Daum resources converted to private."
+        ),
         title: forSale ? t("Confirm put all on sale") : t("Confirm convert all to private"),
       });
     },
-    [listFilter, refreshAfterMutation, showBulkOutcome, t, total]
+    [bulkSession, listFilter, runBulkOperation, t, total]
   );
 
   useSelectionNotification({
@@ -1155,8 +1130,9 @@ export default function AdminDaumEmails() {
       </CardPro>
 
       <ImportDaumModal
-        onCancel={() => setImportOpen(false)}
+        onCancel={() => { if (isCurrentPage()) setImportOpen(false); }}
         onImported={async () => {
+          if (!isCurrentPage()) return;
           setActivePage(1);
           setSelectedKeys([]);
           await refreshAfterMutation();
@@ -1166,43 +1142,38 @@ export default function AdminDaumEmails() {
       />
 
       <EditDaumModal
-        onCancel={() => setEditTarget(null)}
+        onCancel={() => { if (isCurrentPage()) setEditTarget(null); }}
         onSaved={async () => {
-          await refreshAfterMutation(
-            editTarget && detail?.id === editTarget.id ? editTarget.id : undefined
-          );
+          await refreshAfterMutation(editTarget?.id);
         }}
         owners={owners}
         target={editTarget}
       />
 
       <ReplaceCredentialsModal
-        onCancel={() => setCredentialsTarget(null)}
+        onCancel={() => { if (isCurrentPage()) setCredentialsTarget(null); }}
         onSaved={async (nextDetail) => {
-          await refreshAfterMutation();
-          if (activeDetailIdRef.current === nextDetail.id) setDetail(nextDetail);
+          await refreshAfterMutation(nextDetail.id);
         }}
         target={credentialsTarget}
       />
 
       <DaumMaintenanceModal
-        onCancel={() => setMaintenanceTarget(null)}
+        onCancel={() => { if (isCurrentPage()) setMaintenanceTarget(null); }}
         onCompleted={async () => {
-          await refreshAfterMutation(
-            maintenanceTarget && detail?.id === maintenanceTarget.id
-              ? maintenanceTarget.id
-              : undefined
-          );
+          await refreshAfterMutation(maintenanceTarget?.id);
         }}
         target={maintenanceTarget}
       />
 
       <DaumBulkMaintenanceModal
-        onCancel={() => setBulkMaintenanceTarget(null)}
+        onCancel={() => { if (isCurrentPage()) setBulkMaintenanceTarget(null); }}
         onCompleted={async () => {
+          if (!isCurrentPage()) return;
           setSelectedKeys([]);
           await refreshAfterMutation();
         }}
+        session={bulkSession}
         target={bulkMaintenanceTarget}
       />
 
@@ -1216,6 +1187,7 @@ export default function AdminDaumEmails() {
           detailRequestRef.current = null;
           setDetail(null);
           setDetailLoading(false);
+          setDetailBusy(false);
         }}
         onRefresh={async () => {
           await refreshAfterMutation(detail?.id);

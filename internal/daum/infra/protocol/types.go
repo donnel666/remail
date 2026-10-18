@@ -2,11 +2,13 @@ package protocol
 
 import (
 	"context"
+	"github.com/donnel666/remail/internal/mailbox"
 	"time"
 )
 
 type Credentials struct{ Email, AppPassword, Protocol, ProxyURL string }
 type FetchRequest struct {
+	Page            *mailbox.PageRequest
 	Recipient       string
 	SinceAt         time.Time
 	UntilAt         time.Time
@@ -17,6 +19,7 @@ type FetchRequest struct {
 	OnReset         func()
 }
 type FetchResult struct {
+	Page     *mailbox.PageResult
 	Messages []Message
 	Complete bool
 }

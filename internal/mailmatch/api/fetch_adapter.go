@@ -118,6 +118,7 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 			MaxMessages:     maxMessages,
 			StopAfterLimit:  stopAfterLimit,
 			KnownMessageIDs: req.KnownMessageIDs,
+			Page:            req.Page,
 			OnMessages:      onMessages,
 			OnReset:         req.OnReset,
 		}
@@ -180,6 +181,7 @@ func (a *MicrosoftFetchAdapter) FetchMicrosoftMessages(ctx context.Context, req 
 				Messages:       microsoftMessagesToMailmatch(req.Scope, result.Messages),
 				RefreshToken:   strings.TrimSpace(result.RefreshToken),
 				GraphAvailable: graphAvailable,
+				Page:           result.Page,
 			}, nil
 		}
 		failure := microsoftFetchFailure(result.Category, result.SafeMessage, result.ProxyFailure)

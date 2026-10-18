@@ -26,7 +26,7 @@ func TestDaumRealtimeStopsAtKnownNewestWithoutDownloadingBodies(t *testing.T) {
 	newMail := strings.ReplaceAll(koreanMail, "same-message@example.test", "newest@example.test")
 	var commands []string
 	client, _ := scriptedClient(t, imapScript(&commands, false, oldMail, newMail))
-	result, err := client.Fetch(context.Background(), Credentials{Email: "account@daum.net", AppPassword: "synthetic", Protocol: "imap"}, FetchRequest{MaxMessages: 1, KnownMessageIDs: []string{"internet:newest@example.test"}})
+	result, err := client.Fetch(context.Background(), Credentials{Email: "account@daum.net", AppPassword: "synthetic", Protocol: "imap"}, FetchRequest{MaxMessages: 1, KnownMessageIDs: []string{"provider:imap:inbox:imap:inbox:99:2"}})
 	require.NoError(t, err)
 	require.Empty(t, result.Messages)
 	require.True(t, result.Complete)
@@ -39,7 +39,7 @@ func TestDaumRecentLimitCombinesFoldersBeforeApplyingBoundary(t *testing.T) {
 	require.NoError(t, finishRecentFetch(&result, FetchRequest{MaxMessages: 1}))
 	require.Len(t, result.Messages, 1)
 	require.Equal(t, "imap:junk:2", result.Messages[0].ID)
-	require.NoError(t, finishRecentFetch(&result, FetchRequest{MaxMessages: 1, KnownMessageIDs: []string{"internet:newest"}}))
+	require.NoError(t, finishRecentFetch(&result, FetchRequest{MaxMessages: 1, KnownMessageIDs: []string{"imap:junk:2"}}))
 	require.Empty(t, result.Messages)
 }
 

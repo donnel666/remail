@@ -31135,6 +31135,8 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
             cookie?: never;
@@ -31233,6 +31235,8 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
             cookie?: never;
@@ -31262,6 +31266,8 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
             cookie?: never;
@@ -31291,6 +31297,8 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
                 action: "history" | "publish" | "unpublish" | "delete";
@@ -31347,6 +31355,8 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
                 resourceId: number;
@@ -31379,6 +31389,8 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
                 resourceId: number;
@@ -31442,6 +31454,8 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
                 resourceId: number;
@@ -31474,6 +31488,8 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
                 resourceId: number;
@@ -31512,6 +31528,8 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
                 resourceId: number;
@@ -31550,6 +31568,8 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
             cookie?: never;
@@ -31581,6 +31601,8 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path?: never;
             cookie?: never;
@@ -31612,6 +31634,8 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
                 resourceId: number;
@@ -31655,6 +31679,8 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
                 resourceId: number;
@@ -31687,6 +31713,8 @@ export interface operations {
             header: {
                 /** @description Required for money-write APIs. Reusing the same key with a different request fingerprint returns 409. */
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
             };
             path: {
                 command: "validate" | "history" | "publish" | "unpublish" | "delete";

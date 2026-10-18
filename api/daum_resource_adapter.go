@@ -33,6 +33,7 @@ func (a daumMailFetchAdapter) FetchDaumMessages(ctx context.Context, request mai
 		ctx = context.WithValue(ctx, platform.RequestIDKey, request.RequestID)
 	}
 	fetch := protocol.FetchRequest{
+		Page: request.Page,
 		// The fetch lease/cache covers the account; MailMatch isolates each exact recipient.
 		SinceAt: request.SinceAt, UntilAt: request.UntilAt, FullHistory: request.FullHistory,
 		MaxMessages: request.MaxMessages, KnownMessageIDs: request.KnownMessageIDs,
@@ -61,7 +62,7 @@ func (a daumMailFetchAdapter) FetchDaumMessages(ctx context.Context, request mai
 	if request.FullHistory && !result.Complete {
 		return nil, &mailmatchapp.MailFetchFailure{Category: "incomplete_history", SafeMessage: "Daum mailbox history was not completely read.", Retryable: true}
 	}
-	return &mailmatchapp.FetchMessagesResult{Messages: daumFetchedMessages(request, result.Messages)}, nil
+	return &mailmatchapp.FetchMessagesResult{Messages: daumFetchedMessages(request, result.Messages), Page: result.Page}, nil
 }
 
 func daumFetchedMessages(request mailmatchapp.FetchMessagesRequest, messages []protocol.Message) []mailmatchapp.FetchedMessage {

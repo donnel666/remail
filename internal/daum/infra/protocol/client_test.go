@@ -158,7 +158,16 @@ func imapMailboxScript(commands *[]string, deny, supportsSort bool, mailboxes ma
 				messages := mailboxes[folder]
 				var indices []int
 				for index, message := range messages {
-					if since.IsZero() || !message.receivedAt.Before(since) {
+					allowed := true
+					for field := commandIndex + 1; field+1 < len(fields); field++ {
+						if strings.EqualFold(fields[field], "UID") {
+							allowed, err = imapScriptSetContains(fields[field+1], message.uid, messages[len(messages)-1].uid)
+							if err != nil {
+								return err
+							}
+						}
+					}
+					if allowed && (since.IsZero() || !message.receivedAt.Before(since)) {
 						indices = append(indices, index)
 					}
 				}
@@ -237,7 +246,7 @@ func TestIMAPUsesAppPasswordReadOnlyPeekAndRealJunkFolder(t *testing.T) {
 	require.NotContains(t, all, " EXPUNGE")
 }
 func TestIMAPHistoryRequiresFullFolderProtocolAndSkipsKnownIdentities(t *testing.T) {
-	for _, known := range []string{"internet:same-message@example.test", "provider:imap:inbox:imap:inbox:99:7"} {
+	for _, known := range []string{"imap:INBOX:99:7", "provider:imap:inbox:imap:inbox:99:7"} {
 		t.Run(known, func(t *testing.T) {
 			var commands []string
 			client, endpoints := scriptedClient(t, imapScript(&commands, false))

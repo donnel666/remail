@@ -100,3 +100,43 @@ func (c *PickupMessageCache) Store(ctx context.Context, emailResourceID uint, me
 func pickupMessageCacheKey(emailResourceID uint) string {
 	return fmt.Sprintf("%s%d", pickupMessageCacheKeyPrefix, emailResourceID)
 }
+
+func (c *PickupMessageCache) LoadScanProgress(ctx context.Context, resourceID uint) (*mailmatchapp.PickupScanProgress, error) {
+	if c == nil || c.redis == nil || resourceID == 0 {
+		return nil, fmt.Errorf("pickup scan progress is unavailable")
+	}
+	raw, err := c.redis.Get(ctx, pickupScanProgressKey(resourceID)).Bytes()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read pickup scan progress: %w", err)
+	}
+	var progress mailmatchapp.PickupScanProgress
+	if err := json.Unmarshal(raw, &progress); err != nil {
+		return nil, fmt.Errorf("decode pickup scan progress: %w", err)
+	}
+	return &progress, nil
+}
+
+func (c *PickupMessageCache) StoreScanProgress(ctx context.Context, resourceID uint, leaseToken string, progress mailmatchapp.PickupScanProgress, ttl time.Duration) (bool, error) {
+	if c == nil || c.redis == nil || resourceID == 0 || leaseToken == "" || ttl <= 0 {
+		return false, fmt.Errorf("pickup scan progress is unavailable")
+	}
+	raw, err := json.Marshal(progress)
+	if err != nil {
+		return false, err
+	}
+	stored, err := pickupScanStoreScript.Run(ctx, c.redis, []string{pickupFetchStateKey(resourceID), pickupScanProgressKey(resourceID)}, leaseToken, string(raw), ttl.Milliseconds()).Int()
+	return stored == 1, err
+}
+
+func pickupScanProgressKey(resourceID uint) string {
+	return fmt.Sprintf("remail:mailmatch:pickup-scan:%d", resourceID)
+}
+
+var pickupScanStoreScript = redis.NewScript(`
+if redis.call('GET',KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('SET',KEYS[2],ARGV[2],'PX',ARGV[3])
+return 1
+`)

@@ -247,12 +247,13 @@ func TestAppendMessagesKeepFactsImmutableAndMatchedOwnershipTerminalMySQL(t *tes
 	changed.ReceivedAt = now.Add(time.Hour)
 	resolved, inserted, err := repo.AppendMessages(ctx, []domain.Message{changed})
 	require.NoError(t, err)
-	require.Zero(t, inserted)
+	require.Equal(t, 1, inserted)
 	require.Len(t, resolved, 1)
-	require.Equal(t, stored[0].ID, resolved[0].ID)
-	require.Equal(t, first.Recipient, resolved[0].Recipient)
-	require.Equal(t, first.Subject, resolved[0].Subject)
-	require.Equal(t, first.RawBody, resolved[0].RawBody)
+	require.NotEqual(t, stored[0].ID, resolved[0].ID)
+	require.NotEqual(t, first.DedupeKey, resolved[0].DedupeKey)
+	require.Equal(t, changed.Recipient, resolved[0].Recipient)
+	require.Equal(t, changed.Subject, resolved[0].Subject)
+	require.Equal(t, changed.RawBody, resolved[0].RawBody)
 	require.Empty(t, resolved[0].VerificationCode)
 	_, newlyMatched, err = repo.InsertMessageProjections(ctx, []domain.Message{changed})
 	require.NoError(t, err)
@@ -328,11 +329,11 @@ func TestAppendMessagesConcurrentOverlapMySQL(t *testing.T) {
 			<-start
 			messages := make([]domain.Message, 0, sharedCount+uniqueCount)
 			for i := sharedCount - 1; i >= 0; i-- {
-				messages = append(messages, concurrentAppendMessage(now, uint64(i+1), worker))
+				messages = append(messages, concurrentAppendMessage(now, uint64(i+1)))
 			}
 			for i := uniqueCount - 1; i >= 0; i-- {
 				key := uint64((worker+1)*1000 + i)
-				messages = append(messages, concurrentAppendMessage(now, key, worker))
+				messages = append(messages, concurrentAppendMessage(now, key))
 			}
 			stored, _, err := repo.AppendMessages(ctx, messages)
 			if err == nil {
@@ -448,12 +449,12 @@ func TestProjectionAndDeliveryCommitAfterSecondFenceMySQL(t *testing.T) {
 	require.Empty(t, pending)
 }
 
-func concurrentAppendMessage(now time.Time, key uint64, worker int) domain.Message {
+func concurrentAppendMessage(now time.Time, key uint64) domain.Message {
 	return domain.Message{
 		EmailResourceID: 100,
 		ResourceType:    domain.ResourceTypeMicrosoft,
 		Recipient:       "concurrent@example.com",
-		Sender:          fmt.Sprintf("worker-%d@example.net", worker),
+		Sender:          "sender@example.net",
 		Subject:         "Concurrent append",
 		RawBody:         "immutable body",
 		DedupeKey:       fmt.Sprintf("%064x", key),

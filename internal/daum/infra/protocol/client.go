@@ -167,6 +167,9 @@ func (c *Client) fetchIMAP(ctx context.Context, credentials Credentials, request
 	}
 	listed, _ := client.List("", "*", nil).Collect()
 	folders := daumIMAPFolders(listed)
+	if request.Page != nil && !request.FullHistory {
+		return fetchIMAPPage(ctx, client, folders, request)
+	}
 	realtime := !request.FullHistory && request.MaxMessages > 0
 	if realtime && request.Recipient == "" && len(request.KnownMessageIDs) > 0 {
 		heads, complete, headErr := daumIMAPHeads(ctx, client, folders)
@@ -335,10 +338,9 @@ func finishRecentFetch(result *FetchResult, request FetchRequest) error {
 
 func messageKnown(known []string, message Message) bool {
 	provider := "provider:" + strings.ToLower(strings.SplitN(message.ID, ":", 2)[0]) + ":" + strings.ToLower(message.Folder) + ":" + strings.ToLower(message.ID)
-	internet := "internet:" + strings.ToLower(strings.Trim(strings.TrimSpace(message.ExternalID), "<>"))
 	for _, value := range known {
 		key := strings.ToLower(strings.TrimSpace(value))
-		if key == provider || key == strings.ToLower(message.ID) || (message.ExternalID != "" && key == internet) {
+		if key == provider || key == strings.ToLower(message.ID) {
 			return true
 		}
 		if message.RawHash != "" && (strings.HasPrefix(key, "provider:imap:") || strings.HasPrefix(key, "provider:pop3:")) && strings.HasSuffix(key, ":sha256:"+message.RawHash) {
@@ -392,6 +394,9 @@ func (c *Client) fetchPOP3(ctx context.Context, credentials Credentials, request
 	}
 	defer closeConn()
 	command := func(format string, args ...any) (string, error) { return pop3Command(text, format, args...) }
+	if request.Page != nil {
+		return fetchPOP3Page(ctx, text, request)
+	}
 	if _, err = command("STAT"); err != nil {
 		return result, transportFailure(err)
 	}

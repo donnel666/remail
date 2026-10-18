@@ -159,6 +159,7 @@ type FetchedMessage struct {
 }
 
 type FetchMessagesRequest struct {
+	Page            *mailbox.PageRequest
 	Scope           OrderScope
 	SinceAt         time.Time
 	UntilAt         time.Time
@@ -172,6 +173,7 @@ type FetchMessagesRequest struct {
 }
 
 type FetchMessagesResult struct {
+	Page           *mailbox.PageResult
 	Messages       []FetchedMessage
 	RefreshToken   string
 	GraphAvailable *bool
@@ -733,7 +735,7 @@ func (uc *UseCase) applyLoadedPickupMessageCache(ctx context.Context, emailResou
 	if !found {
 		return pickupMessageCacheMatch{}
 	}
-	messages, allMatched := cachedMessagesMatchingScopes(messages, emailResourceID, scopes)
+	messages, allMatched := cachedMessagesMatchingScopes(messages, emailResourceID, scopes, uc.now())
 	if len(messages) == 0 {
 		return pickupMessageCacheMatch{satisfied: allMatched}
 	}
@@ -758,7 +760,7 @@ func (uc *UseCase) applyLoadedPickupMessageCache(ctx context.Context, emailResou
 	return pickupMessageCacheMatch{satisfied: allMatched, applied: true}
 }
 
-func cachedMessagesMatchingScopes(messages []FetchedMessage, emailResourceID uint, scopes []OrderScope) ([]FetchedMessage, bool) {
+func cachedMessagesMatchingScopes(messages []FetchedMessage, emailResourceID uint, scopes []OrderScope, now time.Time) ([]FetchedMessage, bool) {
 	if len(scopes) == 0 {
 		return nil, true
 	}
@@ -774,6 +776,10 @@ func cachedMessagesMatchingScopes(messages []FetchedMessage, emailResourceID uin
 				continue
 			}
 			if (scope.AllocationType == domain.ResourceTypeProto || scope.AllocationType == domain.ResourceTypeDaum) && message.CredentialRevision != scope.CredentialRevision {
+				continue
+			}
+			start, end := OrderReadWindow(scope, now)
+			if message.ReceivedAt.IsZero() || message.ReceivedAt.Before(start) || message.ReceivedAt.After(end) {
 				continue
 			}
 			if !matchesScopeFiltersAnyRecipient(message, scope) {
@@ -1068,7 +1074,7 @@ func (uc *UseCase) ProcessPickupRequestFetchWithOutcome(ctx context.Context, tas
 }
 
 func (uc *UseCase) processPickupRequestScope(ctx context.Context, requestedAt time.Time, scope PickupRequestFetchScope, timing pickupFetchTiming) (bool, error) {
-	orderNo, err := uc.selectPickupRequestOrder(ctx, scope)
+	orderNo, since, until, err := uc.selectPickupRequestOrder(ctx, scope)
 	if err != nil || orderNo == "" {
 		return false, err
 	}
@@ -1086,26 +1092,38 @@ func (uc *UseCase) processPickupRequestScope(ctx context.Context, requestedAt ti
 	}
 	err = uc.processFetch(ctx, FetchTask{
 		OrderNo: orderNo, EmailResourceID: scope.EmailResourceID,
-		LeaseToken: token, RequestedAt: requestedAt,
+		LeaseToken: token, RequestedAt: requestedAt, SinceAt: since, UntilAt: until,
 	}, timing)
 	return true, err
 }
 
-func (uc *UseCase) selectPickupRequestOrder(ctx context.Context, request PickupRequestFetchScope) (string, error) {
+func (uc *UseCase) selectPickupRequestOrder(ctx context.Context, request PickupRequestFetchScope) (string, time.Time, time.Time, error) {
+	var selected string
+	var since, until time.Time
+	now := uc.now()
 	for _, orderNo := range pickupRequestOrderNos(request) {
 		scope, err := uc.repo.LoadOrderScopeForServiceToken(ctx, orderNo)
 		if errors.Is(err, domain.ErrOrderNotFound) || errors.Is(err, domain.ErrOrderUnavailable) || errors.Is(err, domain.ErrOrderForbidden) {
 			continue
 		}
 		if err != nil {
-			return "", err
+			return "", since, until, err
 		}
 		if scope == nil || scope.EmailResourceID != request.EmailResourceID || !scopeFetchable(*scope, uc.now) {
 			continue
 		}
-		return strings.TrimSpace(scope.OrderNo), nil
+		start, end := OrderReadWindow(*scope, now)
+		if selected == "" {
+			selected = strings.TrimSpace(scope.OrderNo)
+		}
+		if since.IsZero() || start.Before(since) {
+			since = start
+		}
+		if until.IsZero() || end.After(until) {
+			until = end
+		}
 	}
-	return "", nil
+	return selected, since, until, nil
 }
 
 func pickupRequestOrderNos(scope PickupRequestFetchScope) []string {
@@ -1213,7 +1231,32 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 		cachedMessages = valid
 	}
 	job := domain.FetchJob{SinceAt: &task.SinceAt, UntilAt: &task.UntilAt}
-	fetched, fetchErr := uc.fetchMessages(ctx, *scope, job, pickupMessageIdentityKeys(cachedMessages))
+	var scan *pickupScanPage
+	var scanStore PickupScanStatePort
+	if scope.AllocationType == domain.ResourceTypeDaum || scope.AllocationType == domain.ResourceTypeMicrosoft {
+		scanStore, _ = uc.pickupMessages.(PickupScanStatePort)
+		if scanStore != nil {
+			previous, err := scanStore.LoadScanProgress(ctx, scope.EmailResourceID)
+			if err != nil {
+				return err
+			}
+			since, until := OrderReadWindow(*scope, uc.now())
+			if !task.SinceAt.IsZero() {
+				since = task.SinceAt
+			}
+			if !task.UntilAt.IsZero() {
+				until = task.UntilAt
+			}
+			page := nextPickupScanPage(*scope, since, until, previous)
+			scan = &page
+			job.SinceAt, job.UntilAt = &page.since, &page.until
+		}
+	}
+	var pageRequest *mailbox.PageRequest
+	if scan != nil {
+		pageRequest = &scan.request
+	}
+	fetched, fetchErr := uc.fetchMessages(ctx, *scope, job, pickupMessageIdentityKeys(cachedMessages), pageRequest)
 	if fetchErr != nil {
 		return fetchErr
 	}
@@ -1250,19 +1293,27 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 		if err != nil {
 			return err
 		}
-	}
-	messagesToIngest := fetched.Messages
-	if uc.pickupMessages != nil {
-		messagesToIngest = mergePickupMessages(fetched.Messages, cachedMessages)
-		cacheCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pickupMessageCacheIO)
-		err := uc.pickupMessages.Store(cacheCtx, task.EmailResourceID, messagesToIngest, boundedRuntimeDuration("pickup_message_cache_ttl_seconds", pickupMessageCacheTTL, time.Second, maxPickupMessageCacheTTL))
-		cancel()
-		if err != nil {
-			slog.Warn("pickup message cache write failed", "resource_id", task.EmailResourceID, "error", err)
-		} else {
-			platform.AddWorkUnits("mailmatch_fetch", "all", "cache_refresh", 1)
+		if scan != nil {
+			current, err := uc.repo.LoadOrderScopeForServiceToken(ctx, scope.OrderNo)
+			if err != nil {
+				return err
+			}
+			expectedRevision := scope.CredentialRevision
+			expectedToken := strings.TrimSpace(scope.MicrosoftRT)
+			if rotated := strings.TrimSpace(fetched.RefreshToken); rotated != "" && rotated != expectedToken {
+				expectedRevision++
+				expectedToken = rotated
+			}
+			if current == nil || current.EmailResourceID != scope.EmailResourceID || current.AllocationType != scope.AllocationType ||
+				current.CredentialRevision != expectedRevision || current.MicrosoftEmail != scope.MicrosoftEmail ||
+				current.MicrosoftClientID != scope.MicrosoftClientID || strings.TrimSpace(current.MicrosoftRT) != expectedToken {
+				return domain.ErrResourceFetchCredentialChanged
+			}
+			scan.progress.CredentialRevision = current.CredentialRevision
+			scope.CredentialRevision, scope.MicrosoftRT = current.CredentialRevision, current.MicrosoftRT
 		}
 	}
+	messagesToIngest := mergeUniquePickupMessages(fetched.Messages, cachedMessages)
 	stored := 0
 	matched := 0
 	if len(messagesToIngest) == 0 {
@@ -1289,6 +1340,25 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 		if scope.AllocationType == domain.ResourceTypeDaum {
 			return uc.assertDaumCredentialRevision(txCtx, scope.EmailResourceID, scope.CredentialRevision)
 		}
+		if scan != nil && scope.AllocationType == domain.ResourceTypeMicrosoft {
+			if uc.credentials == nil {
+				return domain.ErrMailServiceUnavailable
+			}
+			current, err := uc.credentials.LockMicrosoftCredentialScope(txCtx, scope.EmailResourceID)
+			if err != nil {
+				return err
+			}
+			if current == nil {
+				return domain.ErrResourceFetchCredentialChanged
+			}
+			if current.Status == "deleted" {
+				return domain.ErrResourceFetchDeleted
+			}
+			if current.CredentialRevision != scope.CredentialRevision || current.EmailAddress != scope.MicrosoftEmail ||
+				current.ClientID != scope.MicrosoftClientID || strings.TrimSpace(current.RefreshToken) != strings.TrimSpace(scope.MicrosoftRT) {
+				return domain.ErrResourceFetchCredentialChanged
+			}
+		}
 		return nil
 	}
 	stored, matched, lastReceivedAt, err = uc.ingestFetchedMessagesForResourcesWithFence(
@@ -1300,6 +1370,33 @@ func (uc *UseCase) processFetch(ctx context.Context, task FetchTask, timing pick
 	if fetched.CommitCursor != nil {
 		if err := fetched.CommitCursor(ctx, fetchFence); err != nil {
 			return err
+		}
+	}
+	if scan != nil {
+		if err := fetchFence(ctx); err != nil {
+			return err
+		}
+		progress, err := scan.completed(fetched.Page)
+		if err != nil {
+			return err
+		}
+		stored, err := scanStore.StoreScanProgress(ctx, task.EmailResourceID, task.LeaseToken, progress,
+			boundedRuntimeDuration("fetch_lookback_window_days", fetchLookbackWindow, 24*time.Hour, maxFetchLookbackWindow))
+		if err != nil {
+			return err
+		}
+		if !stored {
+			return domain.ErrFetchJobConflict
+		}
+	}
+	if uc.pickupMessages != nil {
+		cacheCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pickupMessageCacheIO)
+		err := uc.pickupMessages.Store(cacheCtx, task.EmailResourceID, mergePickupMessages(fetched.Messages, cachedMessages), boundedRuntimeDuration("pickup_message_cache_ttl_seconds", pickupMessageCacheTTL, time.Second, maxPickupMessageCacheTTL))
+		cancel()
+		if err != nil {
+			slog.Warn("pickup message cache write failed", "resource_id", task.EmailResourceID, "error", err)
+		} else {
+			platform.AddWorkUnits("mailmatch_fetch", "all", "cache_refresh", 1)
 		}
 	}
 	_ = lastReceivedAt
@@ -1324,7 +1421,7 @@ func pickupMessageIdentityKeys(messages []FetchedMessage) []string {
 	seen := make(map[string]struct{}, len(messages)*2)
 	for _, message := range messages {
 		messageID := strings.ToLower(strings.Trim(strings.TrimSpace(message.MessageIDHeader), "<>"))
-		if messageID != "" {
+		if messageID != "" && message.ResourceType != domain.ResourceTypeDaum && message.ResourceType != domain.ResourceTypeMicrosoft {
 			keys = appendUniqueIdentityKey(keys, seen, "internet:"+messageID)
 		}
 		providerID := strings.ToLower(strings.TrimSpace(message.ProviderMessageID))
@@ -1351,12 +1448,12 @@ func appendUniqueIdentityKey(keys []string, seen map[string]struct{}, key string
 	return append(keys, key)
 }
 
-func mergePickupMessages(fetched, cached []FetchedMessage) []FetchedMessage {
+func mergeUniquePickupMessages(fetched, cached []FetchedMessage) []FetchedMessage {
 	merged := make([]FetchedMessage, 0, len(fetched)+len(cached))
 	seen := make(map[string]struct{}, len(fetched)+len(cached))
 	for _, messages := range [][]FetchedMessage{fetched, cached} {
 		for _, message := range messages {
-			key := fmt.Sprintf("%d:%s", message.EmailResourceID, messageDedupeKey(message))
+			key := fmt.Sprintf("%d:%s:%s", message.EmailResourceID, messageDedupeKey(message), domain.MessageFactFingerprint(baseMessageFromFetched(message)))
 			if _, exists := seen[key]; exists {
 				continue
 			}
@@ -1367,6 +1464,11 @@ func mergePickupMessages(fetched, cached []FetchedMessage) []FetchedMessage {
 	sort.SliceStable(merged, func(i, j int) bool {
 		return merged[i].ReceivedAt.After(merged[j].ReceivedAt)
 	})
+	return merged
+}
+
+func mergePickupMessages(fetched, cached []FetchedMessage) []FetchedMessage {
+	merged := mergeUniquePickupMessages(fetched, cached)
 	limit := boundedRuntimeInt("pickup_message_cache_limit", pickupMessageCacheLimit, maxPickupMessageCacheLimit)
 	if len(merged) > limit {
 		merged = merged[:limit]
@@ -1509,6 +1611,7 @@ func (uc *UseCase) ingestFetchedMessagesWithScopeAndFence(
 	replayResourceIDs []uint,
 	fence func(context.Context) error,
 ) (int, int, *time.Time, error) {
+	appendRepo, appendOnly := uc.repo.(MessageAppendRepository)
 	messages := make([]domain.Message, 0, len(fetched))
 	matchDeliveries := make([]matchedDelivery, 0)
 	for _, item := range fetched {
@@ -1516,7 +1619,9 @@ func (uc *UseCase) ingestFetchedMessagesWithScopeAndFence(
 		var matchedScope *OrderScope
 		var priority extractionPriority
 		var err error
-		if fixedScope == nil {
+		if appendOnly {
+			message = baseMessageFromFetched(item)
+		} else if fixedScope == nil {
 			message, matchedScope, priority, err = uc.fetchedMessageToDomain(ctx, item)
 		} else {
 			message, matchedScope, priority = fetchedMessageToScope(item, *fixedScope)
@@ -1535,7 +1640,6 @@ func (uc *UseCase) ingestFetchedMessagesWithScopeAndFence(
 	matched := 0
 	newlyMatched := make(map[uint]struct{})
 	legacyMatched := make(map[uint]struct{})
-	appendRepo, appendOnly := uc.repo.(MessageAppendRepository)
 	if appendOnly {
 		var storedMessages []domain.Message
 		inserted := 0
@@ -1548,7 +1652,7 @@ func (uc *UseCase) ingestFetchedMessagesWithScopeAndFence(
 			return nil
 		}
 		var appendErr error
-		if fence != nil && ((replayResourceType == domain.ResourceTypeProto || replayResourceType == domain.ResourceTypeDaum) || ((replayResourceType == domain.ResourceTypeGmail || replayResourceType == domain.ResourceTypeICloud) && len(messages) == 1)) {
+		if fence != nil && ((replayResourceType == domain.ResourceTypeMicrosoft || replayResourceType == domain.ResourceTypeProto || replayResourceType == domain.ResourceTypeDaum) || ((replayResourceType == domain.ResourceTypeGmail || replayResourceType == domain.ResourceTypeICloud) && len(messages) == 1)) {
 			// IMAP administrator fetches ingest one message at a time. Keep the
 			// generation lock held through the append so a replacement job cannot
 			// become current between the fence check and durable fact insertion.
@@ -1574,25 +1678,28 @@ func (uc *UseCase) ingestFetchedMessagesWithScopeAndFence(
 			return 0, 0, lastReceivedAt, &mailIngestError{safe: "Mail message recovery failed.", err: err}
 		}
 		storedMessages = appendUniqueMessages(storedMessages, pendingMessages)
-		decisions := append([]domain.Message(nil), messages...)
-		knownDecisions := make(map[string]struct{}, len(decisions))
-		for _, decision := range decisions {
-			knownDecisions[mailMessageIdentity(decision)] = struct{}{}
-		}
-		for _, fact := range pendingMessages {
-			if _, exists := knownDecisions[mailMessageIdentity(fact)]; exists {
-				continue
+		decisions := make([]domain.Message, 0, len(storedMessages))
+		matchDeliveries = nil
+		for _, fact := range storedMessages {
+			var decision domain.Message
+			var matchedScope *OrderScope
+			var priority extractionPriority
+			var matchErr error
+			if fixedScope == nil {
+				decision, matchedScope, priority, matchErr = uc.fetchedMessageToDomain(ctx, fetchedMessageFromDomain(fact))
+			} else {
+				decision, matchedScope, priority = fetchedMessageToScope(fetchedMessageFromDomain(fact), *fixedScope)
 			}
-			decision, matchedScope, priority, matchErr := uc.fetchedMessageToDomain(ctx, fetchedMessageFromDomain(fact))
 			if matchErr != nil {
 				return 0, 0, lastReceivedAt, &mailIngestError{safe: "Mail message recovery failed.", err: matchErr}
 			}
+			decision.DedupeKey = fact.DedupeKey
 			decisions = append(decisions, decision)
-			knownDecisions[mailMessageIdentity(decision)] = struct{}{}
 			if matchedScope != nil && (strings.TrimSpace(decision.VerificationCode) != "" || matchedScope.ServiceMode == "purchase") {
 				matchDeliveries = append(matchDeliveries, matchedDelivery{scope: *matchedScope, message: decision, priority: priority})
 			}
 		}
+
 		for _, fact := range storedMessages {
 			if hasLegacyMatchedDecision(fact) {
 				legacyMatched[fact.ID] = struct{}{}
@@ -1759,6 +1866,9 @@ func mergeStoredMessageDecisions(stored, decisions []domain.Message) ([]domain.M
 		}
 		// Existing legacy rows may already contain the authoritative first
 		// decision. New append-only facts contain none of these derived fields.
+		if domain.MessageFactFingerprint(fact) != domain.MessageFactFingerprint(decision) {
+			return nil, fmt.Errorf("conflicting mail message decision: %w", domain.ErrInvalidRequest)
+		}
 		if !hasLegacyMatchedDecision(fact) {
 			fact.MatchedOrderID = decision.MatchedOrderID
 			fact.Status = decision.Status
@@ -1812,7 +1922,11 @@ func deliveryPrecedes(candidate, current matchedDelivery) bool {
 	return candidate.message.DedupeKey < current.message.DedupeKey
 }
 
-func (uc *UseCase) fetchMessages(ctx context.Context, scope OrderScope, job domain.FetchJob, knownMessageIDs []string) (*FetchMessagesResult, error) {
+func (uc *UseCase) fetchMessages(ctx context.Context, scope OrderScope, job domain.FetchJob, knownMessageIDs []string, pages ...*mailbox.PageRequest) (*FetchMessagesResult, error) {
+	var page *mailbox.PageRequest
+	if len(pages) > 0 {
+		page = pages[0]
+	}
 	sinceAt, untilAt := OrderReadWindow(scope, uc.now())
 	if job.SinceAt != nil && !job.SinceAt.IsZero() {
 		sinceAt = *job.SinceAt
@@ -1828,6 +1942,7 @@ func (uc *UseCase) fetchMessages(ctx context.Context, scope OrderScope, job doma
 		})
 	case domain.ResourceTypeDaum:
 		return uc.fetchDaumMessages(ctx, FetchMessagesRequest{
+			Page:  page,
 			Scope: scope, SinceAt: sinceAt, UntilAt: untilAt, Realtime: true,
 			MaxMessages: OrderReadLimit(scope), KnownMessageIDs: knownMessageIDs,
 		})
@@ -1836,6 +1951,7 @@ func (uc *UseCase) fetchMessages(ctx context.Context, scope OrderScope, job doma
 			return nil, domain.ErrMailServiceUnavailable
 		}
 		return uc.transport.FetchMicrosoftMessages(ctx, FetchMessagesRequest{
+			Page:  page,
 			Scope: scope, SinceAt: sinceAt, UntilAt: untilAt, Realtime: true, MaxMessages: OrderReadLimit(scope), KnownMessageIDs: knownMessageIDs,
 		})
 	case domain.ResourceTypeICloud:

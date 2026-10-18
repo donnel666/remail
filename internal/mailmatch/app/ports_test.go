@@ -1410,7 +1410,7 @@ func TestListPickupMailBatchKeepsValidFallbackOrderForSharedResource(t *testing.
 	require.Len(t, requests, 1)
 	require.Len(t, requests[0].Scopes, 1)
 	require.Equal(t, []string{"ORDER-STALE", "ORDER-VALID"}, requests[0].Scopes[0].OrderNos)
-	selected, err := uc.selectPickupRequestOrder(context.Background(), requests[0].Scopes[0])
+	selected, _, _, err := uc.selectPickupRequestOrder(context.Background(), requests[0].Scopes[0])
 	require.NoError(t, err)
 	require.Equal(t, "ORDER-VALID", selected)
 }

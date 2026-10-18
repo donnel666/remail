@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Modal, Tag, Toast } from "@douyinfe/semi-ui";
 import { ScanSearch, ShieldCheck } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -8,6 +8,8 @@ import {
   maintainAdminDaumResourcesByIds,
 } from "@/lib/admin-daum-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
+import type { DaumBulkSession } from "@/lib/daum-bulk-session";
+import { showAdminDaumBulkError, showAdminDaumBulkOutcome } from "./daum-bulk-feedback";
 
 import type {
   AdminDaumListFilter,
@@ -21,19 +23,30 @@ export type DaumBulkMaintenanceTarget =
 export function DaumBulkMaintenanceModal({
   onCancel,
   onCompleted,
+  session,
   target,
 }: {
   onCancel: () => void;
   onCompleted: () => void | Promise<void>;
+  session: DaumBulkSession;
   target: DaumBulkMaintenanceTarget | null;
 }) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<AdminDaumMaintenanceAction>("validate");
   const [submitting, setSubmitting] = useState(false);
+  const scopeRef = useRef({ target, session });
+  scopeRef.current = { target, session };
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     if (target) setSelected("validate");
-  }, [target]);
+    setSubmitting(false);
+  }, [session, target]);
 
   if (!target) return null;
 
@@ -62,21 +75,23 @@ export function DaumBulkMaintenanceModal({
   const selectedAction = actions.find((item) => item.key === selected) ?? actions[0];
 
   const submit = async () => {
-    if (!selectedAction) return;
+    if (!selectedAction || submitting) return;
+    const isCurrent = () => mountedRef.current && scopeRef.current.target === target && scopeRef.current.session === session;
     setSubmitting(true);
     try {
       const response =
         target.mode === "ids"
-          ? await maintainAdminDaumResourcesByIds(selectedAction.key, target.resourceIds)
-          : await maintainAdminDaumResourcesByFilter(selectedAction.key, target.filter);
-      Toast.success(t(selectedAction.success, { count: response.requested }));
+          ? await maintainAdminDaumResourcesByIds(selectedAction.key, target.resourceIds, session)
+          : await maintainAdminDaumResourcesByFilter(selectedAction.key, target.filter, session);
+      if (!isCurrent()) return;
+      showAdminDaumBulkOutcome(t, response, selectedAction.success, selectedAction.success);
       try { await onCompleted(); }
-      catch (error) { Toast.error(getIamErrorMessage(t, error, "Admin Daum resources load failed.")); }
-      onCancel();
+      catch (error) { if (isCurrent()) Toast.error(getIamErrorMessage(t, error, "Admin Daum resources load failed.")); }
+      if (isCurrent()) onCancel();
     } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Daum resource operation failed."));
+      if (isCurrent()) showAdminDaumBulkError(t, error);
     } finally {
-      setSubmitting(false);
+      if (isCurrent()) setSubmitting(false);
     }
   };
 

@@ -49,3 +49,39 @@ func TestPickupMessageCacheSharesContentByResourceForTenSeconds(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, found)
 }
+
+func TestPickupScanProgressSurvivesBodyExpiryAndRequiresCurrentLease(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	cache := NewPickupMessageCache(client)
+	lease := NewPickupFetchState(client)
+	ctx := context.Background()
+	acquired, err := lease.Acquire(ctx, 91, "owner-one", time.Minute)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	progress := mailmatchapp.PickupScanProgress{ResourceType: domain.ResourceTypeDaum, CredentialRevision: 3, BackfillCursor: "page-7"}
+	stored, err := cache.StoreScanProgress(ctx, 91, "owner-one", progress, 24*time.Hour)
+	require.NoError(t, err)
+	require.True(t, stored)
+	require.NoError(t, cache.Store(ctx, 91, []mailmatchapp.FetchedMessage{}, 10*time.Second))
+	server.FastForward(11 * time.Second)
+	_, found, err := cache.Load(ctx, 91)
+	require.NoError(t, err)
+	require.False(t, found)
+	loaded, err := cache.LoadScanProgress(ctx, 91)
+	require.NoError(t, err)
+	require.Equal(t, progress, *loaded)
+	require.NoError(t, lease.Release(ctx, 91, "owner-one"))
+	acquired, err = lease.Acquire(ctx, 91, "owner-two", time.Minute)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	stale := progress
+	stale.BackfillCursor = "stale-page"
+	stored, err = cache.StoreScanProgress(ctx, 91, "owner-one", stale, 24*time.Hour)
+	require.NoError(t, err)
+	require.False(t, stored)
+	loaded, err = cache.LoadScanProgress(ctx, 91)
+	require.NoError(t, err)
+	require.Equal(t, progress, *loaded)
+}

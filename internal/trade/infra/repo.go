@@ -594,13 +594,23 @@ func (r *Repo) AttachFailedOrderRefund(ctx context.Context, cmd tradeapp.RefundO
 	return &order, changed, nil
 }
 
-func (r *Repo) CompleteExpiredOrder(ctx context.Context, orderNo string, reason string) (*domain.Order, bool, error) {
+func (r *Repo) CompleteExpiredOrder(ctx context.Context, orderNo string, now time.Time, reason string) (*domain.Order, bool, error) {
 	orderNo = strings.TrimSpace(orderNo)
+	if orderNo == "" || now.IsZero() {
+		return nil, false, domain.ErrInvalidOrderRequest
+	}
 	var model OrderModel
 	changed := false
 	err := r.WithTx(ctx, func(txCtx context.Context) error {
 		tx := r.dbFor(txCtx)
 		model, changed = OrderModel{}, false
+		refundPending, err := r.lockPurchaseRefundState(txCtx, orderNo, true)
+		if errors.Is(err, domain.ErrOrderStateConflict) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 		// Lifecycle scans must not wait behind a busy order before reaching supplier settlement.
 		locked := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).Where("order_no = ?", orderNo).Limit(1).Find(&model)
 		if locked.Error != nil {
@@ -613,7 +623,15 @@ func (r *Repo) CompleteExpiredOrder(ctx context.Context, orderNo string, reason 
 		if current == domain.OrderStatusCompleted {
 			return nil
 		}
-		if current != domain.OrderStatusActive {
+		if current != domain.OrderStatusActive || model.ServiceMode != string(domain.ServiceModePurchase) || refundPending {
+			return nil
+		}
+		deadline := model.ReceiveUntil
+		if model.ActivatedAt != nil {
+			deadline = model.AfterSaleUntil
+		}
+		// A delivery can activate the purchase after the scan selected it.
+		if deadline == nil || now.Before(deadline.UTC()) {
 			return nil
 		}
 		result := tx.Model(&OrderModel{}).
@@ -1154,7 +1172,10 @@ func (r *Repo) CompleteCodeOrder(ctx context.Context, orderNo string, matchedAt 
 	return &order, changed, nil
 }
 
-func (r *Repo) ActivatePurchaseOrder(ctx context.Context, orderNo string, matchedAt time.Time, afterSaleUntil time.Time) (*domain.Order, bool, error) {
+func (r *Repo) ActivatePurchaseOrder(ctx context.Context, orderNo string, matchedAt time.Time, afterSaleUntil time.Time, now time.Time) (*domain.Order, bool, error) {
+	if now.IsZero() {
+		return nil, false, domain.ErrInvalidOrderRequest
+	}
 	var model OrderModel
 	changed := false
 	err := r.WithTx(ctx, func(txCtx context.Context) error {
@@ -1172,11 +1193,20 @@ func (r *Repo) ActivatePurchaseOrder(ctx context.Context, orderNo string, matche
 		if model.ActivatedAt != nil {
 			return nil
 		}
+		if model.ReceiveUntil != nil && matchedAt.After(model.ReceiveUntil.UTC()) {
+			return nil
+		}
 		previous := current
+		next := current
 		updates := map[string]any{
 			"activated_at":     matchedAt.UTC(),
 			"after_sale_until": afterSaleUntil.UTC(),
 			"version":          gorm.Expr("version + 1"),
+		}
+		// A valid delivery may be observed after activation expiry was recorded.
+		if current == domain.OrderStatusCompleted && afterSaleUntil.After(now) {
+			next = domain.OrderStatusActive
+			updates["status"] = string(next)
 		}
 		result := tx.Model(&OrderModel{}).
 			Where("order_no = ? AND service_mode = ? AND status IN ?", orderNo, string(domain.ServiceModePurchase), []string{
@@ -1195,7 +1225,7 @@ func (r *Repo) ActivatePurchaseOrder(ctx context.Context, orderNo string, matche
 		}
 		changed = true
 		reason := "Purchase activated by matched mail at " + matchedAt.UTC().Format(time.RFC3339)
-		return r.appendEvent(txCtx, tx, orderNo, "order.purchase_activated", &previous, &previous, domain.OperatorTypeSystem, reason)
+		return r.appendEvent(txCtx, tx, orderNo, "order.purchase_activated", &previous, &next, domain.OperatorTypeSystem, reason)
 	})
 	if err != nil {
 		return nil, false, err

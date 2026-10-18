@@ -1,6 +1,8 @@
 import type { components } from "./openapi/schema";
 import { apiClient as client, csrfHeader, unwrap } from "./api-client";
 import { generateIdempotencyKey } from "./idempotency";
+import { createDaumBulkSession, DaumBulkOutcomeUnconfirmedError, type DaumBulkSession } from "./daum-bulk-session";
+export { createDaumBulkSession as createAdminDaumBulkSession } from "./daum-bulk-session";
 import { abortableProtoDelay as abortableDaumDelay } from "./proto-api";
 import type {
   AdminDaumAllocationListResponse, AdminDaumBulkResponse,
@@ -14,13 +16,23 @@ function daumCommandHeaders(idempotencyKey = generateIdempotencyKey()) {
   return { ...csrfHeader(), "Idempotency-Key": idempotencyKey };
 }
 function daumFilter(filter: AdminDaumListFilter) {
-  return { ...filter, search: filter.search?.trim() || undefined, status: filter.status === "all" ? undefined : filter.status, suffix: filter.suffix?.replace(/^@/, "") || undefined };
+  return {
+    search: filter.search?.trim() || undefined,
+    status: filter.status === "all" ? undefined : filter.status,
+    forSale: filter.forSale,
+    longLived: filter.longLived,
+    suffix: filter.suffix?.trim().toLowerCase().replace(/^@/, "") || undefined,
+    protocol: filter.protocol,
+    ownerId: filter.ownerId,
+    createdFrom: filter.createdFrom,
+    createdTo: filter.createdTo,
+  };
 }
 function daumPageLimit(limit: number) {
   return Math.max(1, Math.min(100, Number.isFinite(limit) ? Math.trunc(limit) : 20));
 }
 function daumIdsSelection(resourceIds: number[]): Extract<AdminDaumResourceSelection, { mode: "ids" }> {
-  return { mode: "ids", resourceIds: Array.from(new Set(resourceIds)).filter((id) => Number.isInteger(id) && id > 0) };
+  return { mode: "ids", resourceIds: Array.from(new Set(resourceIds)).filter((id) => Number.isInteger(id) && id > 0).sort((a, b) => a - b) };
 }
 
 export type AdminDaumBulkCommandResponse = AdminDaumBulkResponse;
@@ -99,21 +111,36 @@ export const recoverAdminDaumResource = (id: number, version: number) => adminDa
 export async function deleteAdminDaumResource(resourceId: number, version: number) {
   return unwrap(await client.DELETE("/v1/admin/daum/resources/{resourceId}", { params: { path: { resourceId }, header: daumCommandHeaders() }, body: { version } }));
 }
-async function bulk(command: "validate" | "history" | "publish" | "unpublish" | "delete", selection: AdminDaumResourceSelection): Promise<AdminDaumBulkResponse> {
-  return unwrap(await client.POST("/v1/admin/daum/resources/bulk/{command}", { params: { path: { command }, header: daumCommandHeaders() }, body: { selection } }));
+function bulk(command: "validate" | "history" | "publish" | "unpublish" | "delete", selection: AdminDaumResourceSelection, session = createDaumBulkSession(), waitForResult = false): Promise<AdminDaumBulkResponse> {
+  return session.run(JSON.stringify({ command, selection }), async (key) => {
+    const accepted = await unwrap(await client.POST("/v1/admin/daum/resources/bulk/{command}", { params: { path: { command }, header: daumCommandHeaders(key) }, body: { selection } }));
+    if (!accepted?.taskId || !["queued", "running", "succeeded", "failed"].includes(accepted.status)) throw new DaumBulkOutcomeUnconfirmedError();
+    return waitForResult ? waitForSelectedBulk(accepted) : accepted;
+  });
 }
-export const maintainAdminDaumResourcesByIds = (action: AdminDaumMaintenanceAction, ids: number[]) => bulk(action, daumIdsSelection(ids));
-export const maintainAdminDaumResourcesByFilter = (action: AdminDaumMaintenanceAction, filter: AdminDaumListFilter) => bulk(action, { mode: "filter", filter: daumFilter(filter) });
-export async function disableAdminDaumResourcesByIds(ids: number[]): Promise<AdminDaumBulkResponse> {
-  return unwrap(await client.POST("/v1/admin/daum/resources/bulk/disable", { params: { header: daumCommandHeaders() }, body: { selection: daumIdsSelection(ids) } }));
+export const maintainAdminDaumResourcesByIds = (action: AdminDaumMaintenanceAction, ids: number[], session?: DaumBulkSession) => bulk(action, daumIdsSelection(ids), session);
+export const maintainAdminDaumResourcesByFilter = (action: AdminDaumMaintenanceAction, filter: AdminDaumListFilter, session?: DaumBulkSession) => bulk(action, { mode: "filter", filter: daumFilter(filter) }, session);
+export function disableAdminDaumResourcesByIds(ids: number[], session = createDaumBulkSession()): Promise<AdminDaumBulkResponse> {
+  const selection = daumIdsSelection(ids);
+  return session.run(JSON.stringify({ command: "disable", selection }), async (key) => {
+    const result = await unwrap(await client.POST("/v1/admin/daum/resources/bulk/disable", { params: { header: daumCommandHeaders(key) }, body: { selection } }));
+    // Disable commits synchronously and has no taskId; require its actual count receipt.
+    if (!result || ![result.requested, result.affected, result.skipped].every((value) => Number.isInteger(value) && value >= 0) || !Array.isArray(result.reasonCounts)) {
+      throw new DaumBulkOutcomeUnconfirmedError();
+    }
+    return result;
+  });
 }
 async function waitForSelectedBulk(result: AdminDaumBulkResponse): Promise<AdminDaumBulkResponse> {
   if (!result.taskId) return result;
   const taskId = result.taskId;
   let current = result;
   for (let attempt = 0; attempt < 300; attempt += 1) {
+    if (current.status !== "queued" && current.status !== "running") return current;
     try {
-      current = { ...await getAdminDaumBulkTask(taskId), taskId };
+      const next = await getAdminDaumBulkTask(taskId);
+      if (!next || !["queued", "running", "succeeded", "failed"].includes(next.status ?? "")) return current;
+      current = { ...next, taskId };
     } catch {
       // The mutation was accepted. Keep its task for the page's progress/retry UI.
       return current;
@@ -123,10 +150,10 @@ async function waitForSelectedBulk(result: AdminDaumBulkResponse): Promise<Admin
   }
   return current;
 }
-export const deleteAdminDaumResourcesByIds = async (ids: number[]) => waitForSelectedBulk(await bulk("delete", daumIdsSelection(ids)));
-export const deleteAdminDaumResourcesByFilter = (filter: AdminDaumListFilter) => bulk("delete", { mode: "filter", filter: daumFilter(filter) });
-export const setAdminDaumResourcesForSaleByIds = async (ids: number[], forSale: boolean) => waitForSelectedBulk(await bulk(forSale ? "publish" : "unpublish", daumIdsSelection(ids)));
-export const setAdminDaumResourcesForSaleByFilter = (filter: AdminDaumListFilter, forSale: boolean) => bulk(forSale ? "publish" : "unpublish", { mode: "filter", filter: daumFilter(filter) });
+export const deleteAdminDaumResourcesByIds = (ids: number[], session?: DaumBulkSession) => bulk("delete", daumIdsSelection(ids), session, true);
+export const deleteAdminDaumResourcesByFilter = (filter: AdminDaumListFilter, session?: DaumBulkSession) => bulk("delete", { mode: "filter", filter: daumFilter(filter) }, session);
+export const setAdminDaumResourcesForSaleByIds = (ids: number[], forSale: boolean, session?: DaumBulkSession) => bulk(forSale ? "publish" : "unpublish", daumIdsSelection(ids), session, true);
+export const setAdminDaumResourcesForSaleByFilter = (filter: AdminDaumListFilter, forSale: boolean, session?: DaumBulkSession) => bulk(forSale ? "publish" : "unpublish", { mode: "filter", filter: daumFilter(filter) }, session);
 
 export async function listAdminDaumAllocations(resourceId: number, offset = 0, limit = 20, signal?: AbortSignal): Promise<AdminDaumAllocationListResponse> {
   return unwrap(await client.GET("/v1/admin/allocations", { params: { query: { type: "daum", resourceId, offset, limit: daumPageLimit(limit) } }, signal }));

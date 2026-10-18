@@ -435,10 +435,11 @@ func TestMicrosoftMailFetchClientStopsAfterFolderHeadsWhenNewestMessageIsCached(
 			limits = append(limits, req.MaxMessages)
 			metadataOnly = append(metadataOnly, req.MetadataOnly)
 			message := MicrosoftFetchedMessage{
-				InternetMessageID: "older@example.com", FolderLabel: folder.Label,
+				ID: "older", InternetMessageID: "older@example.com", FolderLabel: folder.Label,
 				ReceivedAt: now.Add(-time.Minute), Protocol: "graph",
 			}
 			if folder.Label == "Inbox" {
+				message.ID = "cached"
 				message.InternetMessageID = "cached@example.com"
 				message.ReceivedAt = now
 			}
@@ -449,7 +450,7 @@ func TestMicrosoftMailFetchClientStopsAfterFolderHeadsWhenNewestMessageIsCached(
 	result, err := client.fetchAll(context.Background(), MicrosoftMailFetchRequest{
 		EmailAddress: "configured@example.com", ClientID: "client-id", RefreshToken: "refresh-token",
 		AccessToken: "access-token", MaxMessages: 30, StopAfterLimit: true,
-		KnownMessageIDs: []string{"internet:cached@example.com"},
+		KnownMessageIDs: []string{"provider:graph:inbox:cached"},
 	}, &fakeMicrosoftIMAPClient{})
 
 	require.NoError(t, err)
@@ -463,12 +464,12 @@ func TestMicrosoftMailFetchClientStopsAfterFolderHeadsWhenNewestMessageIsCached(
 func TestApplyMicrosoftMessageBoundaryReturnsOnlyMessagesNewerThanCachedID(t *testing.T) {
 	now := time.Now().UTC()
 	result := MicrosoftMailFetchResult{Messages: []MicrosoftFetchedMessage{
-		{InternetMessageID: "old@example.com", ReceivedAt: now.Add(-2 * time.Minute)},
-		{InternetMessageID: "new@example.com", ReceivedAt: now},
-		{InternetMessageID: "cached@example.com", ReceivedAt: now.Add(-time.Minute)},
+		{ID: "old", Protocol: "graph", FolderLabel: "Inbox", InternetMessageID: "old@example.com", ReceivedAt: now.Add(-2 * time.Minute)},
+		{ID: "new", Protocol: "graph", FolderLabel: "Inbox", InternetMessageID: "new@example.com", ReceivedAt: now},
+		{ID: "cached", Protocol: "graph", FolderLabel: "Inbox", InternetMessageID: "cached@example.com", ReceivedAt: now.Add(-time.Minute)},
 	}}
 
-	applyMicrosoftMessageBoundary(&result, []string{"internet:cached@example.com"}, 30)
+	applyMicrosoftMessageBoundary(&result, []string{"provider:graph:inbox:cached"}, 30)
 
 	require.Len(t, result.Messages, 1)
 	require.Equal(t, "new@example.com", result.Messages[0].InternetMessageID)
@@ -494,9 +495,9 @@ func TestMicrosoftMailFetchStreamsOnlyMessagesBeforeCachedBoundary(t *testing.T)
 				return microsoftFolderFetchResult{}, nil
 			}
 			messages := []MicrosoftFetchedMessage{
-				{InternetMessageID: "new@example.com", FolderLabel: folder.Label, ReceivedAt: now},
-				{InternetMessageID: "cached@example.com", FolderLabel: folder.Label, ReceivedAt: now.Add(-time.Minute)},
-				{InternetMessageID: "older@example.com", FolderLabel: folder.Label, ReceivedAt: now.Add(-2 * time.Minute)},
+				{ID: "new", Protocol: "graph", InternetMessageID: "new@example.com", FolderLabel: folder.Label, ReceivedAt: now},
+				{ID: "cached", Protocol: "graph", InternetMessageID: "cached@example.com", FolderLabel: folder.Label, ReceivedAt: now.Add(-time.Minute)},
+				{ID: "older", Protocol: "graph", InternetMessageID: "older@example.com", FolderLabel: folder.Label, ReceivedAt: now.Add(-2 * time.Minute)},
 			}
 			return microsoftFolderFetchResult{Count: len(messages), Messages: messages}, nil
 		},
@@ -506,7 +507,7 @@ func TestMicrosoftMailFetchStreamsOnlyMessagesBeforeCachedBoundary(t *testing.T)
 	result, err := client.fetchGraphAll(context.Background(), MicrosoftMailFetchRequest{
 		EmailAddress: "configured@example.com", ClientID: "client-id", RefreshToken: "refresh-token",
 		AccessToken: "access-token", MaxMessages: 30, StopAfterLimit: true,
-		KnownMessageIDs: []string{"internet:cached@example.com"},
+		KnownMessageIDs: []string{"provider:graph:inbox:cached"},
 		OnMessages:      func(messages []MicrosoftFetchedMessage) { streamed = append(streamed, messages...) },
 	})
 

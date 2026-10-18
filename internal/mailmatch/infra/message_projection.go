@@ -40,43 +40,67 @@ func (r *Repo) AppendMessages(ctx context.Context, messages []domain.Message) (s
 	if err != nil {
 		return nil, 0, err
 	}
-	models := make([]MessageModel, len(messages))
-	for i := range messages {
-		models[i] = messageModelFromDomain(messages[i])
-		// The fact table contains only provider-observed content. Matching
-		// ownership is published separately after the authoritative fence.
-		models[i].MatchedOrderID = nil
-		models[i].VerificationCode = ""
-		models[i].Status = string(domain.MessageStatusReceived)
-		models[i].MatchDiagnostic = ""
+	indices := make([]int, len(messages))
+	for i := range indices {
+		indices[i] = i
 	}
-	sort.SliceStable(models, func(i, j int) bool {
-		if models[i].EmailResourceID != models[j].EmailResourceID {
-			return models[i].EmailResourceID < models[j].EmailResourceID
+	sort.SliceStable(indices, func(i, j int) bool {
+		left, right := messages[indices[i]], messages[indices[j]]
+		if left.EmailResourceID != right.EmailResourceID {
+			return left.EmailResourceID < right.EmailResourceID
 		}
-		return models[i].DedupeKey < models[j].DedupeKey
+		return left.DedupeKey < right.DedupeKey
 	})
-	for i := range models {
-		if _, ok := storedByIdentity[messageIdentity(models[i].EmailResourceID, models[i].DedupeKey)]; ok {
-			continue
-		}
-		created := r.dbFor(ctx).
-			Session(&gorm.Session{SkipDefaultTransaction: true}).
-			Create(&models[i])
-		if created.Error != nil {
-			var mysqlErr *mysql.MySQLError
-			if errors.Is(created.Error, gorm.ErrDuplicatedKey) ||
-				(errors.As(created.Error, &mysqlErr) && mysqlErr.Number == 1062) {
-				storedByIdentity[messageIdentity(models[i].EmailResourceID, models[i].DedupeKey)] = domain.Message{}
-				continue
+	stored = make([]domain.Message, len(messages))
+	for _, index := range indices {
+		candidate := messageModelToDomain(messageModelFromDomain(messages[index]))
+		for attempt := 0; ; attempt++ {
+			identity := messageIdentity(candidate.EmailResourceID, candidate.DedupeKey)
+			fact, exists := storedByIdentity[identity]
+			if !exists && attempt > 0 {
+				found, findErr := r.findMessagesByIdentity(ctx, []domain.Message{candidate})
+				if findErr != nil {
+					return nil, 0, findErr
+				}
+				fact, exists = found[identity]
 			}
-			return nil, 0, fmt.Errorf("append mailmatch message: %w", created.Error)
+			if !exists {
+				model := messageModelFromDomain(candidate)
+				model.ID, model.MatchedOrderID = 0, nil
+				model.VerificationCode, model.MatchDiagnostic = "", ""
+				model.Status = string(domain.MessageStatusReceived)
+				created := r.dbFor(ctx).Session(&gorm.Session{SkipDefaultTransaction: true}).Create(&model)
+				if created.Error == nil {
+					inserted += int(created.RowsAffected)
+					fact, exists = messageModelToDomain(model), true
+				} else {
+					var mysqlErr *mysql.MySQLError
+					if !errors.Is(created.Error, gorm.ErrDuplicatedKey) && (!errors.As(created.Error, &mysqlErr) || mysqlErr.Number != 1062) {
+						return nil, 0, fmt.Errorf("append mailmatch message: %w", created.Error)
+					}
+					// A concurrent first insert may have the same Message-ID but different content.
+					found, findErr := r.findMessagesByIdentity(ctx, []domain.Message{candidate})
+					if findErr != nil {
+						return nil, 0, findErr
+					}
+					fact, exists = found[identity]
+				}
+			}
+			if !exists {
+				return nil, 0, domain.ErrMessageNotFound
+			}
+			storedByIdentity[identity] = fact
+			if domain.MessageFactFingerprint(fact) == domain.MessageFactFingerprint(candidate) {
+				stored[index] = fact
+				break
+			}
+			if attempt > 0 {
+				return nil, 0, fmt.Errorf("conflicting mail message facts: %w", domain.ErrInvalidRequest)
+			}
+			candidate.DedupeKey = domain.MessageCollisionKey(candidate)
 		}
-		inserted += int(created.RowsAffected)
-		storedByIdentity[messageIdentity(models[i].EmailResourceID, models[i].DedupeKey)] = domain.Message{}
 	}
-	stored, err = r.resolveAppendedMessages(ctx, messages)
-	return stored, inserted, err
+	return stored, inserted, nil
 }
 
 func (r *Repo) findMessagesByIdentity(ctx context.Context, messages []domain.Message) (map[string]domain.Message, error) {
@@ -101,22 +125,6 @@ func (r *Repo) findMessagesByIdentity(ctx context.Context, messages []domain.Mes
 		}
 	}
 	return storedByIdentity, nil
-}
-
-func (r *Repo) resolveAppendedMessages(ctx context.Context, messages []domain.Message) ([]domain.Message, error) {
-	storedByIdentity, err := r.findMessagesByIdentity(ctx, messages)
-	if err != nil {
-		return nil, err
-	}
-	stored := make([]domain.Message, len(messages))
-	for i := range messages {
-		item, ok := storedByIdentity[messageIdentity(messages[i].EmailResourceID, messages[i].DedupeKey)]
-		if !ok || item.ID == 0 {
-			return nil, fmt.Errorf("resolve appended mailmatch message: %w", domain.ErrMessageNotFound)
-		}
-		stored[i] = item
-	}
-	return stored, nil
 }
 
 // ListUnprojectedMessages returns a bounded set of remote-mail facts whose

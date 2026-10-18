@@ -28,6 +28,7 @@ type supplierSettlementRepository interface {
 	WithSupplierSettlementScan(context.Context, func() error) error
 	ListDueSupplierOrders(context.Context, time.Time, *SupplierSettlementOrder, int) ([]SupplierSettlementOrder, error)
 	HasOpenOrderTicket(context.Context, string) (bool, error)
+	LockPurchaseRefundState(context.Context, string) (bool, error)
 }
 
 type SupplierSettlementOrder struct {
@@ -81,21 +82,22 @@ func (uc *UseCase) activateAndFreezeSupplier(ctx context.Context, order domain.O
 	if *order.SupplierUserID == order.UserID {
 		return nil, domain.ErrInvalidOrderRequest
 	}
-	order.ReceiveStartedAt = &cmd.ReceiveStartedAt
-	order.ReceiveUntil = &cmd.ReceiveUntil
-	order.AfterSaleUntil = cmd.AfterSaleUntil
-	due, err := supplierSettlementDue(order)
-	if err != nil {
-		return nil, err
-	}
 	var active *domain.Order
-	err = uc.repo.WithTx(ctx, func(ctx context.Context) error {
+	err := uc.repo.WithTx(ctx, func(ctx context.Context) error {
 		// All money changes take wallet -> order -> settlement; matching needs no wallet lock.
 		if err := uc.settlements.LockSupplierWallets(ctx, *order.SupplierUserID); err != nil {
 			return err
 		}
 		var err error
 		active, err = uc.repo.MarkActive(ctx, cmd)
+		if err != nil {
+			return err
+		}
+		if active == nil {
+			return domain.ErrInvalidOrderRequest
+		}
+		// Orders and settlements use different database timestamp precision.
+		due, err := supplierSettlementDue(*active)
 		if err != nil {
 			return err
 		}
@@ -193,6 +195,10 @@ func (uc *UseCase) settleSupplierOrder(ctx context.Context, repo supplierSettlem
 		if err := uc.settlements.LockSupplierWallets(ctx, *order.SupplierUserID); err != nil {
 			return err
 		}
+		refundPending, err := repo.LockPurchaseRefundState(ctx, orderNo)
+		if err != nil {
+			return err
+		}
 		locked, err := uc.repo.LockOrderForUpdate(ctx, orderNo)
 		if err != nil {
 			return err
@@ -203,6 +209,9 @@ func (uc *UseCase) settleSupplierOrder(ctx context.Context, repo supplierSettlem
 		}
 		if *locked.SupplierUserID == locked.UserID {
 			return domain.ErrInvalidOrderRequest
+		}
+		if locked.Status == domain.OrderStatusActive && refundPending {
+			return nil
 		}
 		due, err := supplierSettlementDue(*locked)
 		if err != nil {
@@ -217,7 +226,7 @@ func (uc *UseCase) settleSupplierOrder(ctx context.Context, repo supplierSettlem
 		}
 		if locked.Status == domain.OrderStatusActive {
 			// Complete due purchases here too, so the lifecycle batch cannot cap payouts.
-			_, completed, err = uc.repo.CompleteExpiredOrder(ctx, orderNo, "Purchase settlement window expired.")
+			_, completed, err = uc.repo.CompleteExpiredOrder(ctx, orderNo, now, "Purchase settlement window expired.")
 			if err != nil {
 				return err
 			}

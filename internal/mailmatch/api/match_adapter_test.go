@@ -28,7 +28,7 @@ func (*purchaseMatchRepoStub) WithTx(ctx context.Context, fn func(context.Contex
 	return fn(ctx)
 }
 
-func (s *purchaseMatchRepoStub) ActivatePurchaseOrder(_ context.Context, _ string, matchedAt, afterSaleUntil time.Time) (*tradedomain.Order, bool, error) {
+func (s *purchaseMatchRepoStub) ActivatePurchaseOrder(_ context.Context, _ string, matchedAt, afterSaleUntil, _ time.Time) (*tradedomain.Order, bool, error) {
 	s.activated++
 	s.order.ActivatedAt = &matchedAt
 	s.order.AfterSaleUntil = &afterSaleUntil

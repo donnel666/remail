@@ -91,16 +91,16 @@ func TestDaumCacheRejectsOldCredentialsAndDerivedAddresses(t *testing.T) {
 	message := FetchedMessage{EmailResourceID: 91, ResourceType: domain.ResourceTypeDaum,
 		CredentialRevision: 6, Recipient: "one@daum.net", Sender: "service@example.com",
 		Subject: "code", Body: "123456", ReceivedAt: now}
-	messages, matched := cachedMessagesMatchingScopes([]FetchedMessage{message}, 91, []OrderScope{scope})
+	messages, matched := cachedMessagesMatchingScopes([]FetchedMessage{message}, 91, []OrderScope{scope}, now)
 	require.Empty(t, messages)
 	require.False(t, matched)
 	message.CredentialRevision = 7
 	message.Recipient = "one+tag@example.com"
-	messages, matched = cachedMessagesMatchingScopes([]FetchedMessage{message}, 91, []OrderScope{scope})
+	messages, matched = cachedMessagesMatchingScopes([]FetchedMessage{message}, 91, []OrderScope{scope}, now)
 	require.Empty(t, messages)
 	require.False(t, matched)
 	message.Recipient = scope.Recipient
-	messages, matched = cachedMessagesMatchingScopes([]FetchedMessage{message}, 91, []OrderScope{scope})
+	messages, matched = cachedMessagesMatchingScopes([]FetchedMessage{message}, 91, []OrderScope{scope}, now)
 	require.Len(t, messages, 1)
 	require.True(t, matched)
 }

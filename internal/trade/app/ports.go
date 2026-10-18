@@ -239,7 +239,7 @@ type Repository interface {
 	MarkFailed(ctx context.Context, cmd MarkFailedCommand) (*domain.Order, error)
 	RefundOrder(ctx context.Context, cmd RefundOrderCommand) (*domain.Order, bool, error)
 	AttachFailedOrderRefund(ctx context.Context, cmd RefundOrderCommand) (*domain.Order, bool, error)
-	CompleteExpiredOrder(ctx context.Context, orderNo string, reason string) (*domain.Order, bool, error)
+	CompleteExpiredOrder(ctx context.Context, orderNo string, now time.Time, reason string) (*domain.Order, bool, error)
 	CloseActiveOrder(ctx context.Context, orderNo string, reason string) (*domain.Order, bool, error)
 	MarkServiceCleanup(ctx context.Context, orderNo string, status string) error
 	Archive(ctx context.Context, orderNo string, userID uint, archivedAt time.Time) (*domain.Order, error)
@@ -248,7 +248,7 @@ type Repository interface {
 	OrderFacets(ctx context.Context, filter OrderListFilter) (*OrderListFacets, error)
 	ListEvents(ctx context.Context, orderNo string, userID uint, isAdmin bool, offset, limit int) ([]domain.OrderEvent, int64, error)
 	CompleteCodeOrder(ctx context.Context, orderNo string, matchedAt time.Time, readUntil time.Time) (*domain.Order, bool, error)
-	ActivatePurchaseOrder(ctx context.Context, orderNo string, matchedAt time.Time, afterSaleUntil time.Time) (*domain.Order, bool, error)
+	ActivatePurchaseOrder(ctx context.Context, orderNo string, matchedAt time.Time, afterSaleUntil time.Time, now time.Time) (*domain.Order, bool, error)
 	ListExpiredCodeOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error)
 	ListExpiredPurchaseActivationOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error)
 	ListExpiredPurchaseWarrantyOrderNos(ctx context.Context, now time.Time, limit int) ([]string, error)
@@ -2301,7 +2301,7 @@ func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrder
 		return nil, err
 	}
 	for _, orderNo := range purchaseActivationExpired {
-		changed, err := uc.completeExpiredOrder(ctx, orderNo, "Purchase activation window expired.")
+		changed, err := uc.completeExpiredOrder(ctx, orderNo, now, "Purchase activation window expired.")
 		if err != nil {
 			result.Failed++
 			continue
@@ -2315,7 +2315,7 @@ func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrder
 		return nil, err
 	}
 	for _, orderNo := range purchaseWarrantyExpired {
-		changed, err := uc.completeExpiredOrder(ctx, orderNo, "Purchase warranty window expired.")
+		changed, err := uc.completeExpiredOrder(ctx, orderNo, now, "Purchase warranty window expired.")
 		if err != nil {
 			result.Failed++
 			continue
@@ -2401,9 +2401,10 @@ func (uc *UseCase) NotifyMatchedCode(ctx context.Context, req MatchCodeResultReq
 	if orderNo == "" {
 		return domain.ErrInvalidOrderRequest
 	}
+	now := uc.now()
 	matchedAt := req.MatchedAt.UTC()
 	if matchedAt.IsZero() {
-		matchedAt = uc.now()
+		matchedAt = now
 	}
 	order, err := uc.repo.FindOrder(ctx, orderNo)
 	if err != nil {
@@ -2422,9 +2423,12 @@ func (uc *UseCase) NotifyMatchedCode(ctx context.Context, req MatchCodeResultReq
 		}
 		afterSaleUntil := purchaseWarrantyUntil(*order, quote.WarrantyMinutes, matchedAt)
 		return uc.repo.WithTx(ctx, func(txCtx context.Context) error {
-			updated, changed, err := uc.repo.ActivatePurchaseOrder(txCtx, orderNo, matchedAt, afterSaleUntil)
+			updated, changed, err := uc.repo.ActivatePurchaseOrder(txCtx, orderNo, matchedAt, afterSaleUntil, now)
 			if err != nil {
 				return err
+			}
+			if updated != nil && updated.Status == domain.OrderStatusCompleted && !afterSaleUntil.After(now) {
+				return nil
 			}
 			return uc.rescheduleSupplier(txCtx, updated, changed)
 		})
@@ -2476,8 +2480,8 @@ func (uc *UseCase) expireCodeOrder(ctx context.Context, orderNo string, _ time.T
 	return uc.cleanupOrderService(ctx, *order, true, "Code order expired.", "")
 }
 
-func (uc *UseCase) completeExpiredOrder(ctx context.Context, orderNo string, reason string) (bool, error) {
-	_, changed, err := uc.repo.CompleteExpiredOrder(ctx, strings.TrimSpace(orderNo), reason)
+func (uc *UseCase) completeExpiredOrder(ctx context.Context, orderNo string, now time.Time, reason string) (bool, error) {
+	_, changed, err := uc.repo.CompleteExpiredOrder(ctx, strings.TrimSpace(orderNo), now, reason)
 	return changed, err
 }
 

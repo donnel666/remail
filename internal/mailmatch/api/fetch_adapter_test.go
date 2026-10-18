@@ -3,10 +3,12 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/donnel666/remail/internal/mailbox"
 	mailmatchapp "github.com/donnel666/remail/internal/mailmatch/app"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
 	proxyapp "github.com/donnel666/remail/internal/proxy/app"
@@ -101,6 +103,28 @@ func TestMicrosoftFetchAdapterUsesKnownMicrosoftProtocol(t *testing.T) {
 	require.NotNil(t, graphResult.GraphAvailable)
 	require.True(t, *graphResult.GraphAvailable)
 	require.Equal(t, []string{"imap", "graph"}, client.protocols)
+}
+
+func TestMicrosoftFetchAdapterPreservesCandidatePageAndProgress(t *testing.T) {
+	for _, graph := range []bool{false, true} {
+		t.Run(fmt.Sprint(graph), func(t *testing.T) {
+			page := &mailbox.PageRequest{Cursor: "previous-page", Limit: 100}
+			next := &mailbox.PageResult{NextCursor: "next-page", Complete: false}
+			client := &microsoftMessageFetchClientStub{results: []mailinfra.MicrosoftMailFetchResult{{
+				Valid: true, Page: next, Messages: []mailinfra.MicrosoftFetchedMessage{{ID: "first"}, {ID: "second"}},
+			}}}
+			adapter := &MicrosoftFetchAdapter{client: client}
+			result, err := adapter.FetchMicrosoftMessages(context.Background(), mailmatchapp.FetchMessagesRequest{
+				Scope:    mailmatchapp.OrderScope{ServiceMode: "code", MicrosoftEmail: "owner@example.test", MicrosoftClientID: "client", MicrosoftRT: "refresh", MicrosoftGraphAvailable: graph},
+				Realtime: true, MaxMessages: 1, Page: page,
+			})
+			require.NoError(t, err)
+			require.Len(t, client.requests, 1)
+			require.Equal(t, page, client.requests[0].Page)
+			require.Equal(t, next, result.Page)
+			require.Len(t, result.Messages, 2)
+		})
+	}
 }
 
 func (s *microsoftMessageFetchClientStub) FetchGraphOnly(_ context.Context, req mailinfra.MicrosoftMailFetchRequest) (mailinfra.MicrosoftMailFetchResult, error) {

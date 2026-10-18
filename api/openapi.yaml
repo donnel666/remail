@@ -16980,6 +16980,7 @@ paths:
       security: [{cookieAuth: []}]
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
       requestBody:
         required: true
         content:
@@ -17046,6 +17047,7 @@ paths:
       security: [{cookieAuth: []}]
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumValidationIDsRequest"}}}}
       responses:
         "202": {description: Validation tasks accepted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumValidationBatchResponse"}}}}
@@ -17060,6 +17062,7 @@ paths:
       security: [{cookieAuth: []}]
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumValidationIDsRequest"}}}}
       responses:
         "202": {description: Validation tasks accepted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumValidationBatchResponse"}}}}
@@ -17078,6 +17081,7 @@ paths:
           required: true
           schema: {type: string, enum: [history, publish, unpublish, delete], x-enum-varnames: [History, Publish, Unpublish, Delete]}
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumBatchRequest"}}}}
       responses:
         "202": {description: Bulk task accepted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumBulkTask"}}}}
@@ -17111,6 +17115,7 @@ paths:
           required: true
           schema: {type: integer, format: int64, minimum: 1}
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceEditRequest"}}}}
       responses:
         "200": {description: Identity edit committed and resource returned to pending validation, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
@@ -17131,6 +17136,7 @@ paths:
           required: true
           schema: {type: integer, format: int64, minimum: 1}
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceCommandRequest"}}}}
       responses:
         "200": {description: Deleted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
@@ -17169,6 +17175,7 @@ paths:
           required: true
           schema: {type: integer, format: int64, minimum: 1}
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumCredentialsReplaceRequest"}}}}
       responses:
         "200": {description: Credentials replaced, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
@@ -17188,6 +17195,7 @@ paths:
           required: true
           schema: {type: integer, format: int64, minimum: 1}
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
       responses:
         "200": {description: Existing command result, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
         "202": {description: Task accepted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
@@ -17208,6 +17216,7 @@ paths:
           required: true
           schema: {type: integer, format: int64, minimum: 1}
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
       responses:
         "200": {description: Existing command result, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
         "202": {description: Task accepted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
@@ -17224,6 +17233,7 @@ paths:
       security: [{cookieAuth: []}]
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumBatchRequest"}}}}
       responses:
         "200": {description: Committed disable result, content: {application/json: {schema: {$ref: "#/components/schemas/AdminMicrosoftBulkResult"}}}}
@@ -17240,6 +17250,7 @@ paths:
       security: [{cookieAuth: []}]
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumDisableSelection"}}}}
       responses:
         "200": {description: Committed disable result, content: {application/json: {schema: {$ref: "#/components/schemas/AdminMicrosoftBulkResult"}}}}
@@ -17264,6 +17275,7 @@ paths:
           required: true
           schema: {type: string, enum: [enable, disable, publish, unpublish, recover], x-enum-varnames: [Enable, Disable, Publish, Unpublish, Recover]}
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceCommandRequest"}}}}
       responses:
         "200": {description: Command result, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
@@ -17285,6 +17297,7 @@ paths:
           required: true
           schema: {type: integer, format: int64, minimum: 1}
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceCommandRequest"}}}}
       responses:
         "200": {description: Recovered, content: {application/json: {schema: {$ref: "#/components/schemas/DaumResourceMutationResponse"}}}}
@@ -17304,6 +17317,7 @@ paths:
           required: true
           schema: {type: string, enum: [validate, history, publish, unpublish, delete]}
         - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CsrfToken"
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/DaumBulkRequest"}}}}
       responses:
         "202": {description: Bulk task accepted, content: {application/json: {schema: {$ref: "#/components/schemas/DaumBulkTask"}}}}

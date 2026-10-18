@@ -62,6 +62,7 @@ type MicrosoftMailFetchRequest struct {
 	MaxMessages     int
 	StopAfterLimit  bool
 	KnownMessageIDs []string
+	Page            *mailbox.PageRequest
 	MetadataOnly    bool
 	OnMessages      func([]MicrosoftFetchedMessage)
 	OnReset         func()
@@ -79,6 +80,7 @@ type MicrosoftMailFetchResult struct {
 	ProxyFailure   bool
 	Messages       []MicrosoftFetchedMessage
 	GraphSafeError string
+	Page           *mailbox.PageResult
 }
 
 type MicrosoftMailFolder struct {
@@ -89,6 +91,7 @@ type MicrosoftMailFolder struct {
 type microsoftFolderFetchResult struct {
 	Messages []MicrosoftFetchedMessage
 	Count    int
+	NextLink string
 }
 
 type MicrosoftFetchedMessage struct {
@@ -243,7 +246,7 @@ func (c *MicrosoftMailFetchClient) fetchAll(ctx context.Context, req MicrosoftMa
 	}
 	graphResult, graphErr := c.fetchGraphAll(ctx, req)
 	if graphErr == nil && graphResult.Valid {
-		if len(req.KnownMessageIDs) > 0 {
+		if req.Page == nil && len(req.KnownMessageIDs) > 0 {
 			applyMicrosoftMessageBoundary(&graphResult, req.KnownMessageIDs, req.MaxMessages)
 		}
 		return graphResult, nil
@@ -275,7 +278,7 @@ func (c *MicrosoftMailFetchClient) fetchAll(ctx context.Context, req MicrosoftMa
 				if imapRefreshToken != "" {
 					imapResult.RefreshToken = imapRefreshToken
 				}
-				if len(req.KnownMessageIDs) > 0 {
+				if req.Page == nil && len(req.KnownMessageIDs) > 0 {
 					applyMicrosoftMessageBoundary(&imapResult, req.KnownMessageIDs, req.MaxMessages)
 				}
 				return imapResult, nil
@@ -347,7 +350,7 @@ func (c *MicrosoftMailFetchClient) fetchIMAPOnly(ctx context.Context, req Micros
 	}
 	if result.Valid {
 		result.Protocol = "imap"
-		if len(req.KnownMessageIDs) > 0 {
+		if req.Page == nil && len(req.KnownMessageIDs) > 0 {
 			applyMicrosoftMessageBoundary(&result, req.KnownMessageIDs, req.MaxMessages)
 		}
 	}
@@ -425,6 +428,9 @@ func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req Micros
 	fetchFolder := fetchGraphFolderMessages
 	if c != nil && c.graphFolderFetch != nil {
 		fetchFolder = c.graphFolderFetch
+	}
+	if req.Page != nil {
+		return fetchMicrosoftGraphPage(ctx, session, accessToken, req, result, fetchFolder)
 	}
 	if req.StopAfterLimit && req.MaxMessages > 0 && len(req.KnownMessageIDs) > 0 {
 		headRequest := req
@@ -555,6 +561,12 @@ func isTemporaryMicrosoftMailFetchCategory(category string) bool {
 
 func fetchGraphFolderMessages(ctx context.Context, session *msacl.Session, accessToken string, folder MicrosoftMailFolder, req MicrosoftMailFetchRequest) (microsoftFolderFetchResult, error) {
 	nextURL := graphFolderMessagesURL(folder, req)
+	if req.Page != nil && req.Page.Cursor != "" {
+		if !validMicrosoftGraphPageURL(req.Page.Cursor) {
+			return microsoftFolderFetchResult{}, errors.New("invalid Microsoft Graph page cursor")
+		}
+		nextURL = req.Page.Cursor
+	}
 	headers := map[string]string{
 		"Authorization":    "Bearer " + accessToken,
 		"Accept":           "application/json",
@@ -580,7 +592,7 @@ func fetchGraphFolderMessages(ctx context.Context, session *msacl.Session, acces
 		for _, message := range page.Value {
 			messages = append(messages, normalizeGraphFetchedMessage(message, folder, req.MaxMessages > 0))
 		}
-		if req.MaxMessages > 0 && result.Count+len(messages) > req.MaxMessages {
+		if req.Page == nil && req.MaxMessages > 0 && result.Count+len(messages) > req.MaxMessages {
 			messages = messages[:req.MaxMessages-result.Count]
 		}
 		result.Count += len(messages)
@@ -588,6 +600,13 @@ func fetchGraphFolderMessages(ctx context.Context, session *msacl.Session, acces
 			req.OnMessages(messages)
 		} else {
 			result.Messages = append(result.Messages, messages...)
+		}
+		if req.Page != nil {
+			result.NextLink = strings.TrimSpace(page.NextLink)
+			if result.NextLink != "" && (!validMicrosoftGraphPageURL(result.NextLink) || result.NextLink == nextURL) {
+				return microsoftFolderFetchResult{}, errors.New("invalid Microsoft Graph next page")
+			}
+			break
 		}
 		if req.MaxMessages > 0 && result.Count >= req.MaxMessages {
 			break
@@ -600,7 +619,9 @@ func fetchGraphFolderMessages(ctx context.Context, session *msacl.Session, acces
 func graphFolderMessagesURL(folder MicrosoftMailFolder, req MicrosoftMailFetchRequest) string {
 	values := url.Values{}
 	top := min(runtimeconfig.Int("graph_message_page_top", microsoftGraphMessagePageTop, 1), 1000)
-	if req.MaxMessages > 0 && req.MaxMessages < top {
+	if req.Page != nil {
+		top = min(top, max(req.Page.Limit, 1))
+	} else if req.MaxMessages > 0 && req.MaxMessages < top {
 		top = req.MaxMessages
 	}
 	values.Set("$top", strconv.Itoa(top))
@@ -687,6 +708,11 @@ func (outlookIMAPClient) FetchAll(ctx context.Context, req MicrosoftMailFetchReq
 		FolderCounts: map[string]int{},
 	}
 	folders := imapCandidateFolders(client)
+	if req.Page != nil {
+		page, err := fetchMicrosoftIMAPPage(operationCtx, client, folders, req, result)
+		_ = client.Logout().Wait()
+		return page, err
+	}
 	if req.StopAfterLimit && req.MaxMessages > 0 && len(req.KnownMessageIDs) > 0 {
 		heads, complete, err := fetchLatestIMAPFolderHeads(operationCtx, client, folders)
 		if err != nil {
@@ -1210,11 +1236,7 @@ func microsoftMessageIdentityKnown(message MicrosoftFetchedMessage, knownMessage
 }
 
 func microsoftMessageIdentityKeys(message MicrosoftFetchedMessage) []string {
-	keys := make([]string, 0, 2)
-	messageID := strings.ToLower(strings.Trim(strings.TrimSpace(message.InternetMessageID), "<>"))
-	if messageID != "" {
-		keys = append(keys, "internet:"+messageID)
-	}
+	keys := make([]string, 0, 1)
 	providerID := strings.ToLower(strings.TrimSpace(message.ID))
 	if providerID != "" {
 		keys = append(keys, strings.Join([]string{

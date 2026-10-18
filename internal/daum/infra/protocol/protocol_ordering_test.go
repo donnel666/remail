@@ -28,8 +28,8 @@ func TestDaumRealtimeAscendingFetchRepliesKeepNewest(t *testing.T) {
 		recipient string
 	}{
 		{name: "initial_fetch"},
-		{name: "older_message_known", known: []string{"internet:m1@example.test"}},
-		{name: "recipient_filter_reads_all_candidates", known: []string{"internet:m1@example.test"}, recipient: "user@daum.net"},
+		{name: "older_message_known", known: []string{"provider:imap:inbox:imap:inbox:99:1"}},
+		{name: "recipient_filter_reads_all_candidates", known: []string{"provider:imap:inbox:imap:inbox:99:1"}, recipient: "user@daum.net"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var commands []string
@@ -81,8 +81,8 @@ func TestDaumIMAPSortUsesArrivalForHeadsAndBodies(t *testing.T) {
 		empty bool
 	}{
 		{name: "initial_fetch"},
-		{name: "higher_uid_is_known_imported_old_mail", known: []string{"internet:m2@example.test"}},
-		{name: "actual_newest_is_known", known: []string{"internet:m1@example.test"}, empty: true},
+		{name: "higher_uid_is_known_imported_old_mail", known: []string{"provider:imap:inbox:imap:inbox:99:2"}},
+		{name: "actual_newest_is_known", known: []string{"provider:imap:inbox:imap:inbox:99:1"}, empty: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var commands []string

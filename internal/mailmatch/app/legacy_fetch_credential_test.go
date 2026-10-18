@@ -251,7 +251,6 @@ func TestPickupFetchUsesCachedMessageIDsAndRefreshesCacheWithoutNewMail(t *testi
 	require.NoError(t, err)
 	require.Equal(t, 1, cache.loads)
 	require.Equal(t, []string{
-		"internet:cached@example.com",
 		"provider:graph:inbox:graph-id",
 	}, transport.request.KnownMessageIDs)
 	require.Equal(t, 1, cache.stores)
