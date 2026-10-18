@@ -62,4 +62,13 @@ describe("Daum public checkout contract", () => {
     expect(descriptions).not.toMatch(/显式别名|共用收件箱|主地址|alias|shared inbox|account count/i);
     expect(schemas.PickupCredentialRequest.properties.email.description).toContain("取件必须使用订单交付的原始地址");
   });
+
+  it.each(["en", "zh"])("keeps Daum account relationships out of the public %s language payload", (locale) => {
+    const labels = JSON.parse(readFileSync(new URL(`../i18n/locales/${locale}.json`, import.meta.url), "utf8")) as Record<string, string>;
+    const disclosedRelationships = Object.entries(labels)
+      .filter(([key, value]) => /daum/i.test(`${key} ${value}`))
+      .filter(([key, value]) => /fixed aliases|share.{0,20}inbox|固定别名|共用收件箱/i.test(`${key} ${value}`))
+      .map(([key]) => key);
+    expect(disclosedRelationships).toEqual([]);
+  });
 });

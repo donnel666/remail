@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -82,7 +83,11 @@ func bulkLeaseValue(task BulkTask) string {
 
 var bulkReserve = redis.NewScript(`
 local existing=redis.call('GET',KEYS[1])
-if existing then return {0,existing} end
+if existing then
+  local taskId=string.match(existing,'^[^:]+:[^:]+:(.+)$')
+  local status=taskId and redis.call('GET',KEYS[3]..taskId)
+  return {0,existing,status or ''}
+end
 local taskId='daum_bulk:'..redis.call('INCR',KEYS[2])
 local value=ARGV[1]..':'..taskId
 local task=string.gsub(ARGV[3],'"taskId":""','"taskId":"'..taskId..'"',1)
@@ -91,7 +96,7 @@ redis.call('SET',KEYS[1],value,'PX',ARGV[2])
 redis.call('SET',KEYS[3]..taskId,status,'PX',ARGV[2])
 redis.call('SET',KEYS[4],task,'PX',ARGV[2])
 redis.call('SADD',KEYS[5],ARGV[5])
-return {1,value}
+return {1,value,status}
 `)
 var bulkRenew = redis.NewScript(`if redis.call('GET',KEYS[1]) ~= ARGV[1] then return 0 end; redis.call('PEXPIRE',KEYS[1],ARGV[2]); return 1`)
 var bulkStore = redis.NewScript(`
@@ -185,6 +190,9 @@ func (s *Service) submitBulk(ctx context.Context, action string, selection BulkS
 	if err != nil {
 		return nil, err
 	}
+	if len(reservation) != 3 {
+		return nil, domain.ErrDependency
+	}
 	value, ok := reservation[1].(string)
 	if !ok {
 		return nil, domain.ErrDependency
@@ -194,15 +202,24 @@ func (s *Service) submitBulk(ctx context.Context, action string, selection BulkS
 		return nil, domain.ErrImportConflict
 	}
 	id := parts[2]
-	status, err = s.GetBulkStatus(ctx, id, operator, owner == nil)
+	receipt, ok := reservation[2].(string)
+	if !ok {
+		return nil, domain.ErrDependency
+	}
+	if receipt == "" {
+		return nil, domain.ErrResourceMissing
+	}
+	status, err = decodeBulkStatus([]byte(receipt), operator, owner == nil)
 	if err != nil {
 		return nil, err
 	}
-	// The reservation atomically stores the canonical cursor and observation.
-	// A replay or periodic seeder repairs a process exit before Redis enqueue.
+	if status.TaskID != id {
+		return nil, domain.ErrDependency
+	}
+	// The confirmed receipt remains accepted when dispatch must wait for the periodic seeder.
 	if status.Status == "queued" || status.Status == "running" {
 		if err := s.resumeBulk(ctx, batchID); err != nil {
-			return nil, err
+			slog.WarnContext(ctx, "Daum bulk accepted; queue dispatch deferred", "task_id", status.TaskID, "action", action, "request_id", requestID)
 		}
 	}
 	return status, nil
@@ -257,6 +274,9 @@ func (s *Service) GetBulkStatus(ctx context.Context, id string, operator uint, a
 	if err != nil {
 		return nil, err
 	}
+	return decodeBulkStatus(raw, operator, admin)
+}
+func decodeBulkStatus(raw []byte, operator uint, admin bool) (*BulkStatus, error) {
 	var status BulkStatus
 	if err := json.Unmarshal(raw, &status); err != nil {
 		return nil, err

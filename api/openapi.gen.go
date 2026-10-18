@@ -11129,9 +11129,11 @@ type DaumBooleanFacets struct {
 // DaumBulkRequest defines model for DaumBulkRequest.
 type DaumBulkRequest struct {
 	Selection struct {
-		Filter      *DaumResourceFilter          `json:"filter,omitempty"`
-		Mode        DaumBulkRequestSelectionMode `json:"mode"`
-		ResourceIds *[]int64                     `json:"resourceIds,omitempty"`
+		Filter *DaumResourceFilter          `json:"filter,omitempty"`
+		Mode   DaumBulkRequestSelectionMode `json:"mode"`
+
+		// ResourceIds Validation uses resource_validation_max_ids (default and maximum 10000); other commands use admin_resource_bulk_max_ids (default and maximum 1000).
+		ResourceIds *[]int64 `json:"resourceIds,omitempty"`
 	} `json:"selection"`
 }
 
@@ -12489,9 +12491,11 @@ type OrderStatusFacets struct {
 // OwnedDaumBulkRequest defines model for OwnedDaumBulkRequest.
 type OwnedDaumBulkRequest struct {
 	Selection struct {
-		Filter      *OwnedDaumResourceFilter          `json:"filter,omitempty"`
-		Mode        OwnedDaumBulkRequestSelectionMode `json:"mode"`
-		ResourceIds *[]int64                          `json:"resourceIds,omitempty"`
+		Filter *OwnedDaumResourceFilter          `json:"filter,omitempty"`
+		Mode   OwnedDaumBulkRequestSelectionMode `json:"mode"`
+
+		// ResourceIds Validation uses resource_validation_max_ids (default and maximum 10000); other commands use admin_resource_bulk_max_ids (default and maximum 1000).
+		ResourceIds *[]int64 `json:"resourceIds,omitempty"`
 	} `json:"selection"`
 }
 

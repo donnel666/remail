@@ -716,7 +716,7 @@ func (h *handler) submitBulk(c *gin.Context, owner *uint, action string) {
 	}
 	var status *infra.BulkStatus
 	var err error
-	if strings.HasSuffix(c.FullPath(), "/validations") || strings.HasSuffix(c.FullPath(), "/batch/validation") {
+	if action == "validate" {
 		status, err = h.module.Service.SubmitValidations(c.Request.Context(), selection, *operator, owner, c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c))
 	} else {
 		status, err = h.module.Service.SubmitBulk(c.Request.Context(), action, selection, *operator, owner, c.GetHeader("Idempotency-Key"), middleware.GetRequestID(c))

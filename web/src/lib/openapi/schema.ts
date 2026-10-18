@@ -12314,6 +12314,7 @@ export interface components {
             selection: {
                 /** @enum {string} */
                 mode: "ids" | "filter";
+                /** @description Validation uses resource_validation_max_ids (default and maximum 10000); other commands use admin_resource_bulk_max_ids (default and maximum 1000). */
                 resourceIds?: number[];
                 filter?: components["schemas"]["OwnedDaumResourceFilter"];
             };
@@ -12612,6 +12613,7 @@ export interface components {
             selection: {
                 /** @enum {string} */
                 mode: "ids" | "filter";
+                /** @description Validation uses resource_validation_max_ids (default and maximum 10000); other commands use admin_resource_bulk_max_ids (default and maximum 1000). */
                 resourceIds?: number[];
                 filter?: components["schemas"]["DaumResourceFilter"];
             };

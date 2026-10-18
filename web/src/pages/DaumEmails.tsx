@@ -36,10 +36,12 @@ import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
+  createDaumBulkSession,
   deleteDaumResource,
   deleteDaumResourcesByFilter,
   deleteDaumResourcesBatch,
   listOwnedDaumResources,
+  isDaumBulkOutcomeUnconfirmed,
   publishDaumResource,
   publishDaumResourcesByFilter,
   publishDaumResourcesBatch,
@@ -92,14 +94,14 @@ export default function DaumEmails() {
   const isMobile = useIsMobile();
   const validationControllersRef = useRef(new Set<AbortController>());
   const statsRequestRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    const controllers = validationControllersRef.current;
-    return () => {
-      for (const controller of controllers) controller.abort();
-      controllers.clear();
-    };
-  }, []);
+  const bulkSession = useMemo(createDaumBulkSession, [currentUser?.id]);
+  const currentBulkSessionRef = useRef(bulkSession);
+  currentBulkSessionRef.current = bulkSession;
+  const mountedRef = useRef(false);
+  const isCurrentPage = useCallback(
+    () => mountedRef.current && currentBulkSessionRef.current === bulkSession,
+    [bulkSession]
+  );
   const [activeSuffix, setActiveSuffix] = useState("all");
   const [searchKeyword, setSearchKeyword] = useState("");
   const [createdAtRange, setCreatedAtRange] = useState<DateRangeValue>([]);
@@ -125,6 +127,22 @@ export default function DaumEmails() {
   );
   const [publishingBatch, setPublishingBatch] = useState(false);
   const [deletingBatch, setDeletingBatch] = useState(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    setSelectedKeys([]);
+    setPublishingResourceID(null);
+    setDeletingResourceID(null);
+    setPublishingBatch(false);
+    setDeletingBatch(false);
+    const controllers = validationControllersRef.current;
+    return () => {
+      mountedRef.current = false;
+      for (const controller of controllers) controller.abort();
+      controllers.clear();
+    };
+  }, [bulkSession]);
+
   const dateRangePresets = useMemo(() => createDateRangePresets(t), [t]);
   const [debouncedSearchKeyword, flushSearchKeyword] =
     useDebouncedValue(searchKeyword);
@@ -186,11 +204,10 @@ export default function DaumEmails() {
     refresh: refreshList,
     setTotal: setListTotal,
     total,
-    updateLoadedItems,
   } = useBlockPagedList<EmailResource>({
     activePage,
     blockSize: 100,
-    filterKey: JSON.stringify(daumListFilter),
+    filterKey: JSON.stringify([currentUser?.id, daumListFilter]),
     loadBlock: loadDaumBlock,
     onError: (error) => {
       Toast.error(getIamErrorMessage(t, error, "Resources load failed."));
@@ -218,7 +235,7 @@ export default function DaumEmails() {
     } finally {
       if (statsRequestRef.current === controller) statsRequestRef.current = null;
     }
-  }, [daumListFilter, setListTotal]);
+  }, [currentUser?.id, daumListFilter, setListTotal]);
 
   useEffect(() => {
     setResourceFacets(null);
@@ -232,11 +249,25 @@ export default function DaumEmails() {
   const refresh = useCallback(async () => {
     await Promise.all([refreshStats(), refreshList()]);
   }, [refreshList, refreshStats]);
+  const currentRefreshRef = useRef(refresh);
+  currentRefreshRef.current = refresh;
 
   const refreshAfterMutation = useCallback(async () => {
-    try { await refresh(); }
-    catch (error) { Toast.error(getIamErrorMessage(t, error, "Resources load failed.")); }
-  }, [refresh, t]);
+    if (!isCurrentPage()) return;
+    try { await currentRefreshRef.current(); }
+    catch (error) {
+      if (isCurrentPage()) Toast.error(getIamErrorMessage(t, error, "Resources load failed."));
+    }
+  }, [isCurrentPage, t]);
+
+  const showBulkError = useCallback((error: unknown, fallback: string) => {
+    if (!isCurrentPage()) return;
+    if (isDaumBulkOutcomeUnconfirmed(error)) {
+      Toast.warning(t("Daum bulk operation outcome is not confirmed. Retry to confirm."));
+    } else {
+      Toast.error(getIamErrorMessage(t, error, fallback));
+    }
+  }, [isCurrentPage, t]);
 
   const bulkCompleted = useCallback((response: DaumBulkResponse) => {
     if (response.status === "succeeded") return true;
@@ -351,21 +382,25 @@ export default function DaumEmails() {
   };
 
   const handleCheckResource = useCallback(async (record: EmailResource) => {
+    if (!isCurrentPage()) return;
     const controller = new AbortController();
     validationControllersRef.current.add(controller);
     try {
       await validateDaumResource(record.id, controller.signal);
+      if (!isCurrentPage()) return;
       Toast.success(t("Resource validation submitted."));
       await refreshAfterMutation();
     } catch (error) {
+      if (!isCurrentPage()) return;
       if (error instanceof DOMException && error.name === "AbortError") return;
       Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
     } finally {
       validationControllersRef.current.delete(controller);
     }
-  }, [refreshAfterMutation, t]);
+  }, [isCurrentPage, refreshAfterMutation, t]);
 
   const queueResourceChecks = useCallback(async (resourceIds: number[]) => {
+    if (!isCurrentPage()) return;
     const ids = Array.from(new Set(resourceIds.filter((id) => id > 0)));
     if (ids.length === 0) {
       Toast.info(t("No resources to check."));
@@ -373,43 +408,49 @@ export default function DaumEmails() {
     }
 
     try {
-      const response = await validateDaumResourcesBatch(ids);
-      Toast.success(
-        t("Resource validations submitted.", { count: response.requested })
-      );
+      const response = await validateDaumResourcesBatch(ids, bulkSession);
+      if (!isCurrentPage()) return;
+      if (response.status === "failed") Toast.error(t("Daum resource operation failed."));
+      else Toast.success(t("Resource validations submitted.", { count: response.requested }));
       setSelectedKeys([]);
+      await refreshAfterMutation();
     } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
+      showBulkError(error, "Resource validation failed.");
     }
-  }, [t]);
+  }, [bulkSession, isCurrentPage, refreshAfterMutation, showBulkError, t]);
 
   const queueFilteredResourceChecks = useCallback(async () => {
+    if (!isCurrentPage()) return;
     if (total === 0) {
       Toast.info(t("No resources to check."));
       return;
     }
 
     try {
-      await validateDaumResourcesByFilter(daumBulkFilter);
-      Toast.success(t("Resource validation submitted."));
+      const response = await validateDaumResourcesByFilter(daumBulkFilter, bulkSession);
+      if (!isCurrentPage()) return;
+      if (response.status === "failed") Toast.error(t("Daum resource operation failed."));
+      else Toast.success(t("Resource validation submitted."));
       setSelectedKeys([]);
+      await refreshAfterMutation();
     } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Resource validation failed."));
+      showBulkError(error, "Resource validation failed.");
     }
-  }, [daumBulkFilter, t, total]);
+  }, [bulkSession, daumBulkFilter, isCurrentPage, refreshAfterMutation, showBulkError, t, total]);
 
   const ensureCanPublishForSale = useCallback(
     () =>
       ensureSupplierRole(currentUser?.role, refreshCurrentUser, () => {
-        setSupplierApplicationOpen(true);
+        if (isCurrentPage()) setSupplierApplicationOpen(true);
       }),
-    [currentUser?.role, refreshCurrentUser]
+    [currentUser?.role, isCurrentPage, refreshCurrentUser]
   );
 
   const handleSellResource = useCallback(async (record: EmailResource) => {
-    if (record.forSale) return;
+    if (record.forSale || !isCurrentPage()) return;
 
     if (!(await ensureCanPublishForSale())) return;
+    if (!isCurrentPage()) return;
 
     Modal.confirm({
       title: t("Confirm sell resource"),
@@ -419,25 +460,21 @@ export default function DaumEmails() {
       okText: t("Sell"),
       cancelText: t("Cancel"),
       onOk: async () => {
+        if (!isCurrentPage()) return;
         setPublishingResourceID(record.id);
         try {
           await publishDaumResource(record.id, record.version);
+          if (!isCurrentPage()) return;
           Toast.success(t("Resource published for sale."));
-          updateLoadedItems((previous) =>
-            previous.map((resource) =>
-              resource.id === record.id
-                ? { ...resource, forSale: true, usageScope: "public_sale" }
-                : resource
-            )
-          );
+          await refreshAfterMutation();
         } catch (error) {
-          Toast.error(getIamErrorMessage(t, error, "Publish failed."));
+          if (isCurrentPage()) Toast.error(getIamErrorMessage(t, error, "Publish failed."));
         } finally {
-          setPublishingResourceID(null);
+          if (isCurrentPage()) setPublishingResourceID(null);
         }
       },
     });
-  }, [ensureCanPublishForSale, t, updateLoadedItems]);
+  }, [ensureCanPublishForSale, isCurrentPage, refreshAfterMutation, t]);
 
   const selectedPrivateResourceIds = useMemo(() => {
     const selectedIDSet = new Set(selectedKeys);
@@ -458,12 +495,14 @@ export default function DaumEmails() {
   }, [queueFilteredResourceChecks]);
 
   const confirmSellAll = useCallback(async () => {
+    if (!isCurrentPage()) return;
     if (privateFilter === "no") {
       Toast.info(t("No private resources to publish."));
       return;
     }
 
     if (!(await ensureCanPublishForSale())) return;
+    if (!isCurrentPage()) return;
 
     Modal.confirm({
       title: t("Confirm sell all"),
@@ -471,11 +510,13 @@ export default function DaumEmails() {
       okText: t("Sell all"),
       cancelText: t("Cancel"),
       onOk: async () => {
+        if (!isCurrentPage()) return;
         setPublishingBatch(true);
         try {
           const response = await publishDaumResourcesByFilter(
-            daumBulkFilter
+            daumBulkFilter, bulkSession
           );
+          if (!isCurrentPage()) return;
           if (!bulkCompleted(response)) {
             setSelectedKeys([]);
             await refreshAfterMutation();
@@ -491,28 +532,33 @@ export default function DaumEmails() {
             await refreshAfterMutation();
           }
         } catch (error) {
-          Toast.error(getIamErrorMessage(t, error, "Publish failed."));
+          showBulkError(error, "Publish failed.");
         } finally {
-          setPublishingBatch(false);
+          if (isCurrentPage()) setPublishingBatch(false);
         }
       },
     });
   }, [
     bulkCompleted,
+    bulkSession,
     ensureCanPublishForSale,
     daumBulkFilter,
+    isCurrentPage,
     privateFilter,
     refreshAfterMutation,
+    showBulkError,
     t,
   ]);
 
   const confirmSellSelected = useCallback(async () => {
+    if (!isCurrentPage()) return;
     if (selectedPrivateResourceIds.length === 0) {
       Toast.info(t("No private resources to publish."));
       return;
     }
 
     if (!(await ensureCanPublishForSale())) return;
+    if (!isCurrentPage()) return;
 
     Modal.confirm({
       title: t("Confirm sell selected"),
@@ -522,11 +568,13 @@ export default function DaumEmails() {
       okText: t("Sell selected"),
       cancelText: t("Cancel"),
       onOk: async () => {
+        if (!isCurrentPage()) return;
         setPublishingBatch(true);
         try {
           const response = await publishDaumResourcesBatch(
-            selectedPrivateResourceIds
+            selectedPrivateResourceIds, bulkSession
           );
+          if (!isCurrentPage()) return;
           if (!bulkCompleted(response)) {
             setSelectedKeys([]);
             await refreshAfterMutation();
@@ -536,19 +584,22 @@ export default function DaumEmails() {
             t("Resources published for sale.", { count: response.affected })
           );
           await refreshAfterMutation();
-          setSelectedKeys([]);
+          if (isCurrentPage()) setSelectedKeys([]);
         } catch (error) {
-          Toast.error(getIamErrorMessage(t, error, "Publish failed."));
+          showBulkError(error, "Publish failed.");
         } finally {
-          setPublishingBatch(false);
+          if (isCurrentPage()) setPublishingBatch(false);
         }
       },
     });
   }, [
     bulkCompleted,
+    bulkSession,
     ensureCanPublishForSale,
+    isCurrentPage,
     selectedPrivateResourceIds,
     refreshAfterMutation,
+    showBulkError,
     t,
   ]);
 
@@ -557,6 +608,7 @@ export default function DaumEmails() {
   }, [confirmSellSelected]);
 
   const deleteResourceIds = useCallback(async (resourceIds: number[]) => {
+    if (!isCurrentPage()) return;
     if (resourceIds.length === 0) {
       Toast.info(t("No private resources to delete."));
       return;
@@ -564,22 +616,24 @@ export default function DaumEmails() {
 
     setDeletingBatch(true);
     try {
-      const response = await deleteDaumResourcesBatch(resourceIds);
+      const response = await deleteDaumResourcesBatch(resourceIds, bulkSession);
+      if (!isCurrentPage()) return;
       setSelectedKeys([]);
       if (!bulkCompleted(response)) {
         await refreshAfterMutation();
         return;
       }
       await refreshAfterMutation();
-      Toast.success(t("Resources deleted.", { count: response.affected }));
+      if (isCurrentPage()) Toast.success(t("Resources deleted.", { count: response.affected }));
     } catch (error) {
-      Toast.error(getIamErrorMessage(t, error, "Delete failed."));
+      showBulkError(error, "Delete failed.");
     } finally {
-      setDeletingBatch(false);
+      if (isCurrentPage()) setDeletingBatch(false);
     }
-  }, [bulkCompleted, refreshAfterMutation, t]);
+  }, [bulkCompleted, bulkSession, isCurrentPage, refreshAfterMutation, showBulkError, t]);
 
   const confirmDeleteSelected = useCallback(() => {
+    if (!isCurrentPage()) return;
     if (selectedPrivateResourceIds.length === 0) {
       Toast.info(t("No private resources to delete."));
       return;
@@ -594,9 +648,10 @@ export default function DaumEmails() {
       cancelText: t("Cancel"),
       onOk: () => deleteResourceIds(selectedPrivateResourceIds),
     });
-  }, [deleteResourceIds, selectedPrivateResourceIds, t]);
+  }, [deleteResourceIds, isCurrentPage, selectedPrivateResourceIds, t]);
 
   const confirmDeleteAll = useCallback(() => {
+    if (!isCurrentPage()) return;
     if (privateFilter === "no") {
       Toast.info(t("No private resources to delete."));
       return;
@@ -608,11 +663,13 @@ export default function DaumEmails() {
       okText: t("Delete all"),
       cancelText: t("Cancel"),
       onOk: async () => {
+        if (!isCurrentPage()) return;
         setDeletingBatch(true);
         try {
           const response = await deleteDaumResourcesByFilter(
-            daumBulkFilter
+            daumBulkFilter, bulkSession
           );
+          if (!isCurrentPage()) return;
           if (!bulkCompleted(response)) {
             setSelectedKeys([]);
             await refreshAfterMutation();
@@ -626,17 +683,20 @@ export default function DaumEmails() {
             await refreshAfterMutation();
           }
         } catch (error) {
-          Toast.error(getIamErrorMessage(t, error, "Delete failed."));
+          showBulkError(error, "Delete failed.");
         } finally {
-          setDeletingBatch(false);
+          if (isCurrentPage()) setDeletingBatch(false);
         }
       },
     });
   }, [
     bulkCompleted,
+    bulkSession,
     daumBulkFilter,
+    isCurrentPage,
     privateFilter,
     refreshAfterMutation,
+    showBulkError,
     t,
   ]);
 
@@ -645,13 +705,14 @@ export default function DaumEmails() {
   }, [confirmDeleteSelected]);
 
   const handleImportSuccess = useCallback(async () => {
+    if (!isCurrentPage()) return;
     setActivePage(1);
     setSelectedKeys([]);
     await refreshAfterMutation();
-  }, [refreshAfterMutation]);
+  }, [isCurrentPage, refreshAfterMutation]);
 
   const handleDeleteResource = useCallback((record: EmailResource) => {
-    if (record.forSale) return;
+    if (record.forSale || !isCurrentPage()) return;
 
     Modal.confirm({
       title: t("Confirm delete"),
@@ -659,22 +720,24 @@ export default function DaumEmails() {
       okText: t("Delete"),
       cancelText: t("Cancel"),
       onOk: async () => {
+        if (!isCurrentPage()) return;
         setDeletingResourceID(record.id);
         try {
           await deleteDaumResource(record.id, record.version);
+          if (!isCurrentPage()) return;
           Toast.success(t("Resource deleted."));
           setSelectedKeys((previous) =>
             previous.filter((resourceID) => resourceID !== record.id)
           );
           await refreshAfterMutation();
         } catch (error) {
-          Toast.error(getIamErrorMessage(t, error, "Delete failed."));
+          if (isCurrentPage()) Toast.error(getIamErrorMessage(t, error, "Delete failed."));
         } finally {
-          setDeletingResourceID(null);
+          if (isCurrentPage()) setDeletingResourceID(null);
         }
       },
     });
-  }, [refreshAfterMutation, t]);
+  }, [isCurrentPage, refreshAfterMutation, t]);
 
   useSelectionNotification({
     selectedCount: selectedKeys.length,

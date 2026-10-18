@@ -158,8 +158,9 @@ func TestBulkRestoresQueueHandoffAndFreezesFilterBoundary(t *testing.T) {
 		require.NoError(t, err)
 	}
 	q.fail = true
-	_, err := s.SubmitBulk(ctx, "publish", BulkSelection{Mode: "filter", Filter: ResourceFilter{Status: domain.StatusPending}}, 7, nil, "filter-batch", "bulk-test")
-	require.Error(t, err)
+	accepted, err := s.SubmitBulk(ctx, "publish", BulkSelection{Mode: "filter", Filter: ResourceFilter{Status: domain.StatusPending}}, 7, nil, "filter-batch", "bulk-test")
+	require.NoError(t, err)
+	require.Equal(t, "queued", accepted.Status)
 	late, _, err := s.ImportLine(ctx, 7, domain.ImportLine{Email: "late@daum.net", AppPassword: "secret"})
 	require.NoError(t, err)
 	q.fail = false
@@ -167,6 +168,7 @@ func TestBulkRestoresQueueHandoffAndFreezesFilterBoundary(t *testing.T) {
 	drainBulk(t, s, q)
 	status, err := s.SubmitBulk(ctx, "publish", BulkSelection{Mode: "filter", Filter: ResourceFilter{Status: domain.StatusPending}}, 7, nil, "filter-batch", "bulk-test")
 	require.NoError(t, err)
+	require.Equal(t, accepted.TaskID, status.TaskID)
 	require.Equal(t, "succeeded", status.Status)
 	require.Equal(t, 106, status.Affected)
 	require.Equal(t, 106, status.Processed)
