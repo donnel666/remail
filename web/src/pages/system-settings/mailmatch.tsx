@@ -64,6 +64,8 @@ export default function MailmatchSection({ options, onBulkSave }: SectionProps) 
       {field("Gmail 验证并发数", "gmail_validation_concurrency", 64)}
       {field("Gmail 历史并发数", "gmail_history_concurrency")}
       {field("项目历史每轮上限", "project_history_dispatch_limit")}
+      {field("微软企邮历史识别并发数", "microsoft_enterprise_history_concurrency", 8096)}
+      {field("微软企邮历史识别每轮上限", "microsoft_enterprise_history_dispatch_limit", 100)}
       <SettingsTextareaField
         label={t("系统兜底提取规则（从上到下优先）")}
         onChange={(value) => update("verification_code_pattern", value)}

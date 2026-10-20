@@ -59,6 +59,8 @@ export const MAILMATCH_KEYS = [
   "gmail_validation_concurrency",
   "gmail_history_concurrency",
   "project_history_dispatch_limit",
+  "microsoft_enterprise_history_concurrency",
+  "microsoft_enterprise_history_dispatch_limit",
   "verification_code_pattern",
 ] as const;
 
@@ -74,6 +76,10 @@ export const MICROSOFT_OPS_KEYS = [
   "token_refresh_scan_limit",
   "token_refresh_lookahead_days",
   "token_refresh_hour",
+  "microsoft_enterprise_token_dispatch_limit",
+  "microsoft_enterprise_token_refresh_scan_limit",
+  "microsoft_enterprise_token_refresh_lookahead_days",
+  "microsoft_enterprise_token_refresh_hour",
   "recovery_code_lease_minutes",
   "password_recovery_code_wait_seconds",
   "msacl_token_poll_timeout_seconds",

@@ -15,6 +15,7 @@ export const BACKGROUND_JOB_KEYS = [
   "asynq_queue_payment_reconcile_weight",
   "asynq_queue_mailtransport_weight",
   "asynq_queue_default_weight",
+  "asynq_queue_microsoft_enterprise_weight",
   "asynq_queue_background_validation_weight",
   "asynq_queue_background_microsoft_enterprise_validation_weight",
   "asynq_queue_background_microsoft_enterprise_history_weight",
@@ -55,6 +56,7 @@ export const BATCH_OPERATION_KEYS = [
 export const RETENTION_KEYS = [
   "idempotency_key_retain_days",
   "mailmatch_ms_retain_days",
+  "mailmatch_microsoft_enterprise_retain_days",
   "mailmatch_domain_retain_days",
   "gmail_code_retain_days",
   "daily_usage_retain_days",

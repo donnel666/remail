@@ -45,6 +45,7 @@ export default function BackgroundJobSection({ options, onBulkSave }: SectionPro
       {field("支付对账队列权重（payment_reconcile）", "asynq_queue_payment_reconcile_weight", 1, 10000)}
       {field("邮件发送队列权重（mailtransport）", "asynq_queue_mailtransport_weight", 1, 10000)}
       {field("通用任务队列权重（default）", "asynq_queue_default_weight", 1, 10000)}
+      {field("微软企邮前台任务队列权重", "asynq_queue_microsoft_enterprise_weight", 1, 10000)}
       {field("微软验证队列权重（background_validation）", "asynq_queue_background_validation_weight", 1, 10000)}
       {field("微软企邮验证队列权重", "asynq_queue_background_microsoft_enterprise_validation_weight", 1, 10000)}
       {field("微软企邮识别队列权重", "asynq_queue_background_microsoft_enterprise_history_weight", 1, 10000)}

@@ -20,7 +20,7 @@ export default function MicrosoftOpsSection({ options, onBulkSave }: SectionProp
     return Number.isFinite(parsed) ? parsed : undefined;
   };
   const invalidKeys = invalidNumericKeys(form, MICROSOFT_OPS_KEYS);
-  const field = (label: string, key: string) => <SettingsNumberField label={t(label)} value={number(form[key])} onChange={(value) => update(key, value)} min={1} />;
+  const field = (label: string, key: string, max?: number) => <SettingsNumberField label={t(label)} value={number(form[key])} onChange={(value) => update(key, value)} min={1} max={max} />;
   const save = async () => {
     setSaving(true);
     try {
@@ -42,6 +42,10 @@ export default function MicrosoftOpsSection({ options, onBulkSave }: SectionProp
       {field("Token 刷新扫描上限", "token_refresh_scan_limit")}
       {field("Token 刷新提前量（天）", "token_refresh_lookahead_days")}
       <SettingsNumberField label={t("Token 刷新触发时间（小时）")} value={number(form.token_refresh_hour)} onChange={(value) => update("token_refresh_hour", value)} min={0} max={23} />
+      {field("微软企邮 Token 刷新每轮上限", "microsoft_enterprise_token_dispatch_limit", 100)}
+      {field("微软企邮 Token 刷新扫描上限", "microsoft_enterprise_token_refresh_scan_limit", 10000)}
+      {field("微软企邮 Token 刷新提前量（天）", "microsoft_enterprise_token_refresh_lookahead_days", 365)}
+      <SettingsNumberField label={t("微软企邮 Token 刷新触发时间（小时）")} value={number(form.microsoft_enterprise_token_refresh_hour)} onChange={(value) => update("microsoft_enterprise_token_refresh_hour", value)} min={0} max={23} />
       {field("恢复码租约（分钟）", "recovery_code_lease_minutes")}
       {field("密码恢复验证码等待（秒）", "password_recovery_code_wait_seconds")}
       {field("Token 轮询最小预算（秒）", "msacl_token_poll_timeout_seconds")}
