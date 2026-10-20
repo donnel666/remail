@@ -51,14 +51,14 @@ func (r *allocationReplayRaceRepo) FindExistingAllocation(_ context.Context, ord
 	return nil, nil
 }
 
-func (r *allocationReplayRaceRepo) ListMicrosoftSourceCandidates(ctx context.Context, projectID, buyerID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, buckets []uint16, limit int, suffix string) ([]MicrosoftCandidate, error) {
+func (r *allocationReplayRaceRepo) ListMicrosoftSourceCandidates(ctx context.Context, projectID, buyerID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, buckets []uint16, limit int, suffix string, _ bool) ([]MicrosoftCandidate, error) {
 	// The winner commits after this request's initial idempotency read. Its
 	// allocation consumes the only mailbox, so every probed bucket is empty.
 	r.scanned = true
 	if r.scanErr != nil {
 		return nil, r.scanErr
 	}
-	return r.allocationLockRepo.ListMicrosoftSourceCandidates(ctx, projectID, buyerID, scope, mailbox, buckets, limit, suffix)
+	return r.allocationLockRepo.ListMicrosoftSourceCandidates(ctx, projectID, buyerID, scope, mailbox, buckets, limit, suffix, false)
 }
 
 func TestAllocationReplayAfterConcurrentWinnerCommit(t *testing.T) {

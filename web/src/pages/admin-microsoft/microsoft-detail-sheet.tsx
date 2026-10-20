@@ -1,3 +1,4 @@
+import { isMicrosoftEnterpriseEmail } from "../resources/microsoft-import-preprocess";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
@@ -148,6 +149,7 @@ function ResourceOverview({
   detail: AdminMicrosoftResourceDetail;
   t: TFunction;
 }) {
+  const enterprise = isMicrosoftEnterpriseEmail(detail.emailAddress);
   return (
     <div className="space-y-5">
       <section>
@@ -161,6 +163,7 @@ function ResourceOverview({
             value={<CopyableTableText copiedText={t("Copied")} text={detail.emailAddress} />}
           />
           <InfoItem label={t("Suffix")} value={detail.suffix} />
+          {!enterprise && (
           <InfoItem
             label={t("Auxiliary email")}
             value={
@@ -173,6 +176,7 @@ function ResourceOverview({
               )
             }
           />
+          )}
           <ResourceProxyDiagnostics bindings={detail.proxyBindings} t={t} />
           <InfoItem
             label={t("Owner")}
@@ -190,6 +194,7 @@ function ResourceOverview({
               </Tag>
             }
           />
+          {!enterprise && (
           <InfoItem
             label={t("Long-lived")}
             value={
@@ -198,6 +203,7 @@ function ResourceOverview({
               </Tag>
             }
           />
+          )}
           <InfoItem label={t("Mail protocol")} value={renderProtocolTag(detail, t)} />
           <InfoItem label={t("Quality score")} value={`${detail.qualityScore}/100`} />
           <InfoItem label={t("Created at")} value={formatTime(detail.createdAt)} />
@@ -223,10 +229,12 @@ function ResourceOverview({
             label={t("Refresh token remaining")}
             value={formatRemainingTime(detail.rtExpireAt, t)}
           />
+          {!enterprise && (
           <InfoItem
             label={t("Aliases")}
             value={`${detail.aliasCounts.explicit} / ${detail.aliasCounts.dot} / ${detail.aliasCounts.plus}`}
           />
+          )}
           <InfoItem
             label={t("Latest task")}
             value={
@@ -934,7 +942,7 @@ function TaskDiagnostics({
           <InfoItem label={t("Success rate")} value={<span className="font-mono tabular-nums">{successRate}%</span>} />
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
-          {actions.map((item) => (
+          {actions.filter((action) => !isMicrosoftEnterpriseEmail(detail.emailAddress) || action.key !== "alias").map((item) => (
             <Button
               disabled={deleted || (busy !== null && busy !== item.key)}
               key={item.key}
@@ -1583,6 +1591,7 @@ export function MicrosoftDetailSheet({
   onToggleDisabled: () => void;
   onMaintain: () => void;
 }) {
+  const enterprise = isMicrosoftEnterpriseEmail(detail?.emailAddress ?? "");
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const [activeTab, setActiveTab] = useState("basic");
@@ -1598,8 +1607,8 @@ export function MicrosoftDetailSheet({
       placement="right"
       title={
         detail
-          ? `${t("Microsoft resource detail")} #${detail.id}`
-          : t("Microsoft resource detail")
+          ? `${t(enterprise ? "Microsoft enterprise resource detail" : "Microsoft resource detail")} #${detail.id}`
+          : t(enterprise ? "Microsoft enterprise resource detail" : "Microsoft resource detail")
       }
       visible={Boolean(detail) || loading}
       width={isMobile ? "100%" : 940}
@@ -1610,11 +1619,11 @@ export function MicrosoftDetailSheet({
             <Tabs activeKey={activeTab} collapsible onChange={setActiveTab} type="line">
               <Tabs.TabPane itemKey="basic" tab={t("Basic info")} />
               <Tabs.TabPane itemKey="orders" tab={t("Orders")} />
-              <Tabs.TabPane itemKey="explicit" tab={t("Explicit aliases")} />
-              <Tabs.TabPane itemKey="other" tab={t("Other aliases")} />
+              {!enterprise && <Tabs.TabPane itemKey="explicit" tab={t("Explicit aliases")} />}
+              {!enterprise && <Tabs.TabPane itemKey="other" tab={t("Other aliases")} />}
               <Tabs.TabPane itemKey="tasks" tab={t("Task details")} />
               <Tabs.TabPane itemKey="mails" tab={t("Mailbox")} />
-              <Tabs.TabPane itemKey="auxiliary" tab={t("Auxiliary mailbox")} />
+              {!enterprise && <Tabs.TabPane itemKey="auxiliary" tab={t("Auxiliary mailbox")} />}
             </Tabs>
           </div>
 
@@ -1626,8 +1635,8 @@ export function MicrosoftDetailSheet({
               </div>
             ) : null}
             {activeTab === "orders" ? <RelatedOrdersTable resourceId={detail.id} t={t} /> : null}
-            {activeTab === "explicit" ? <AliasPanel kind="explicit" resourceId={detail.id} t={t} /> : null}
-            {activeTab === "other" ? <AliasPanel kind="other" resourceId={detail.id} t={t} /> : null}
+            {!enterprise && activeTab === "explicit" ? <AliasPanel kind="explicit" resourceId={detail.id} t={t} /> : null}
+            {!enterprise && activeTab === "other" ? <AliasPanel kind="other" resourceId={detail.id} t={t} /> : null}
             {activeTab === "tasks" ? (
               <TaskDiagnostics detail={detail} onRefresh={onRefresh} t={t} />
             ) : null}
@@ -1640,7 +1649,7 @@ export function MicrosoftDetailSheet({
                 t={t}
               />
             ) : null}
-            {activeTab === "auxiliary" ? (
+            {!enterprise && activeTab === "auxiliary" ? (
               detail.bindingAddress ? (
                 <>
                   <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">

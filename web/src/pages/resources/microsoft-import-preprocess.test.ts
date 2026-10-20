@@ -59,7 +59,7 @@ describe("preprocessMicrosoftImportContent", () => {
         "invalid-email----password",
         `password-too-long@outlook.com----${"p".repeat(513)}`,
         `client-too-long@outlook.com----password----${"c".repeat(256)}----refresh`,
-        `refresh-too-long@outlook.com----password----client----${"r".repeat(1025)}`,
+        `refresh-too-long@outlook.com----password----client----${"r".repeat(8193)}`,
         `binding-too-long@outlook.com----password----${"a".repeat(310)}@example.com`,
         "valid@outlook.com----password",
       ].join("\n"),
@@ -112,5 +112,16 @@ describe("preprocessMicrosoftImportContent", () => {
       category: "non_microsoft_domain",
       email: "nope@icloud.com",
     });
+  });
+});
+
+describe("Microsoft enterprise import", () => {
+  it("requires four fields and a tenant suffix while retaining long refresh tokens", () => {
+    const valid = `u@tenant.onmicrosoft.com---- password ----client----${"r".repeat(1800)}`;
+    const result = preprocessMicrosoftImportContent([valid, "u@outlook.com----p----c----r", "u@tenant.onmicrosoft.com.evil.test----p----c----r", "u@tenant.onmicrosoft.com----p", "u@tenant.onmicrosoft.com----p----c----r----aux@example.com"].join("\n"), "skip", true);
+    expect(result.validCount).toBe(1);
+    expect(result.skippedCount).toBe(4);
+    expect(result.content).toBe(valid);
+    expect(preprocessMicrosoftImportContent(valid, "abort").validCount).toBe(0);
   });
 });

@@ -63,7 +63,7 @@ type projectHistoryMatchesStub struct {
 func (*projectHistoryMatchesStub) WithTx(ctx context.Context, fn func(context.Context) error) error {
 	return fn(ctx)
 }
-func (s *projectHistoryMatchesStub) ListHistoricalProjectScopes(context.Context) ([]HistoricalProjectScope, error) {
+func (s *projectHistoryMatchesStub) ListHistoricalProjectScopes(context.Context, bool) ([]HistoricalProjectScope, error) {
 	if s.scopes != nil {
 		return s.scopes, nil
 	}
@@ -72,7 +72,7 @@ func (s *projectHistoryMatchesStub) ListHistoricalProjectScopes(context.Context)
 	}
 	return []HistoricalProjectScope{*s.scope}, nil
 }
-func (s *projectHistoryMatchesStub) FindHistoricalProjectScope(context.Context, uint) (*HistoricalProjectScope, error) {
+func (s *projectHistoryMatchesStub) FindHistoricalProjectScope(context.Context, uint, bool) (*HistoricalProjectScope, error) {
 	return s.scope, nil
 }
 func (s *projectHistoryMatchesStub) ClearLegacyMicrosoftProjectHistory(_ context.Context, resourceID uint, projectID uint) error {
@@ -114,12 +114,13 @@ func (q *projectHistoryQueueStub) EnqueueProjectHistoryDispatcher(context.Contex
 }
 
 type projectHistoryCredentialsStub struct {
-	maxID       uint
-	resources   []*coreapp.MicrosoftCredentialScope
-	rotation    coreapp.MicrosoftFetchRefreshTokenRotation
-	history     coreapp.MicrosoftHistoryScanResult
-	rotationErr error
-	events      *[]string
+	maxID           uint
+	cursorProjectID uint
+	resources       []*coreapp.MicrosoftCredentialScope
+	rotation        coreapp.MicrosoftFetchRefreshTokenRotation
+	history         coreapp.MicrosoftHistoryScanResult
+	rotationErr     error
+	events          *[]string
 }
 
 func (s *projectHistoryCredentialsStub) LockMicrosoftCredentialScope(_ context.Context, resourceID uint) (*coreapp.MicrosoftCredentialScope, error) {
@@ -133,7 +134,8 @@ func (s *projectHistoryCredentialsStub) LockMicrosoftCredentialScope(_ context.C
 func (s *projectHistoryCredentialsStub) MaxMicrosoftResourceID(context.Context) (uint, error) {
 	return s.maxID, nil
 }
-func (s *projectHistoryCredentialsStub) FindNextMicrosoftCredentialScope(_ context.Context, afterID, maxID uint) (*coreapp.MicrosoftCredentialScope, error) {
+func (s *projectHistoryCredentialsStub) FindNextMicrosoftCredentialScope(_ context.Context, afterID, maxID, projectID uint) (*coreapp.MicrosoftCredentialScope, error) {
+	s.cursorProjectID = projectID
 	for _, resource := range s.resources {
 		if resource.ResourceID > afterID && resource.ResourceID <= maxID {
 			return resource, nil
@@ -261,6 +263,20 @@ func TestProjectHistoryProcessCompletesCurrentGeneration(t *testing.T) {
 	require.True(t, transport.request.FullHistory)
 	require.True(t, transport.request.SinceAt.IsZero())
 	require.True(t, transport.request.UntilAt.IsZero())
+}
+
+func TestProjectHistoryEmptyProjectCursorFinishesWithoutContinuation(t *testing.T) {
+	jobs := &projectHistoryJobsStub{}
+	queue := &projectHistoryQueueStub{accepted: true}
+	credentials := &projectHistoryCredentialsStub{maxID: 100}
+	uc := NewProjectHistoryScanUseCase(jobs, &projectHistoryMatchesStub{}, queue, &projectHistoryTransportStub{})
+	uc.SetMicrosoftCredentialPort(credentials)
+	require.NoError(t, uc.Process(context.Background(), ProjectHistoryScanTask{ProjectID: 7, Generation: 1}))
+	require.Equal(t, uint(7), credentials.cursorProjectID)
+	require.Equal(t, 1, jobs.completed)
+	require.Zero(t, jobs.completedScanned)
+	require.Zero(t, jobs.completedSkipped)
+	require.Empty(t, queue.queued)
 }
 
 func TestProjectHistoryRetryableBusinessFailureIsRecorded(t *testing.T) {

@@ -110,6 +110,7 @@ var booleanKeys = map[string]struct{}{
 	"register_enabled":           {}, "captcha_enabled": {}, "announcement_enabled": {}, "announcement_email_enabled": {}, "faq_enabled": {}, "epay_enabled": {}, "epusdt_enabled": {},
 	"daily_checkin_enabled": {}, "leaderboard_reward_enabled": {}, "linuxdo_oauth_enabled": {}, "github_oauth_enabled": {}, "nodeloc_oauth_enabled": {},
 	"default_project_microsoft_code_enabled": {}, "default_project_microsoft_purchase_enabled": {},
+	"default_project_microsoft_enterprise_code_enabled": {}, "default_project_microsoft_enterprise_purchase_enabled": {},
 	"default_project_domain_code_enabled": {}, "default_project_domain_purchase_enabled": {},
 	"default_project_gmail_code_enabled": {}, "default_project_gmail_purchase_enabled": {},
 	"default_project_gmail_variant_code_enabled": {}, "default_project_gmail_variant_purchase_enabled": {},
@@ -172,7 +173,9 @@ func Validate(key, value string) error {
 		}
 	case "registration_reward_amount", "invitation_reward_amount", "single_rebate_cap", "cumulative_rebate_cap", "topup_fee_cap",
 		"default_project_microsoft_code_price", "default_project_microsoft_code_supplier_price",
+		"default_project_microsoft_enterprise_code_price", "default_project_microsoft_enterprise_code_supplier_price",
 		"default_project_microsoft_purchase_price", "default_project_microsoft_purchase_supplier_price",
+		"default_project_microsoft_enterprise_purchase_price", "default_project_microsoft_enterprise_purchase_supplier_price",
 		"default_project_domain_code_price", "default_project_domain_code_supplier_price",
 		"default_project_domain_purchase_price", "default_project_domain_purchase_supplier_price",
 		"default_project_gmail_code_price", "default_project_gmail_code_supplier_price",
@@ -213,7 +216,7 @@ func Validate(key, value string) error {
 		if err != nil || rate.IsNegative() || rate.GreaterThan(decimal.NewFromInt(100)) {
 			return domain.ErrInvalidValue
 		}
-	case "first_order_rebate_ratio", MicrosoftPriceMultiplierKey, GmailPriceMultiplierKey, ICloudPriceMultiplierKey, DomainPriceMultiplierKey, ProtoPriceMultiplierKey, DaumPriceMultiplierKey:
+	case "first_order_rebate_ratio", MicrosoftPriceMultiplierKey, MicrosoftEnterprisePriceMultiplierKey, GmailPriceMultiplierKey, ICloudPriceMultiplierKey, DomainPriceMultiplierKey, ProtoPriceMultiplierKey, DaumPriceMultiplierKey:
 		ratio, err := money.Parse(value)
 		if err != nil || ratio.IsNegative() || ratio.GreaterThan(decimal.NewFromInt(1)) {
 			return domain.ErrInvalidValue
@@ -551,7 +554,7 @@ func validateRelationships(values map[string]string) error {
 	if value("outbound_mail_timeout_minutes", 3)*60 < smtpTaskBudgetSeconds(retries) {
 		return domain.ErrInvalidValue
 	}
-	for _, productType := range []string{"microsoft", "domain", "gmail", "gmail_variant", "icloud", "proto", "daum"} {
+	for _, productType := range []string{"microsoft", "microsoft_enterprise", "domain", "gmail", "gmail_variant", "icloud", "proto", "daum"} {
 		if strings.TrimSpace(values["default_project_"+productType+"_code_enabled"]) == "false" &&
 			strings.TrimSpace(values["default_project_"+productType+"_purchase_enabled"]) == "false" {
 			return domain.ErrInvalidValue

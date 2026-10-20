@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"time"
 
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
@@ -106,7 +107,7 @@ FOR SHARE`, resourceID).Scan(&resource).Error; err != nil {
 	if resource.ID == 0 {
 		return nil, mailapp.ErrMicrosoftAliasResourceNotFound
 	}
-	if resource.Status != "normal" {
+	if resource.Status != "normal" || coredomain.IsMicrosoftEnterpriseEmail(resource.ResourceEmail) {
 		return nil, mailapp.ErrMicrosoftAliasResourceConflict
 	}
 

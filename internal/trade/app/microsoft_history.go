@@ -3,6 +3,7 @@ package app
 import (
 	"crypto/sha256"
 	"fmt"
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"strings"
 	"time"
 
@@ -38,6 +39,9 @@ func sameHistoricalMicrosoftOrder(
 		return false
 	}
 	if allocation.ProductID == match.ProductID {
+		if coredomain.IsMicrosoftEnterpriseEmail(allocation.Email) {
+			return order.ProductType == domain.ProductTypeMicrosoftEnterprise
+		}
 		return order.ProductType == domain.ProductTypeMicrosoft
 	}
 	return false

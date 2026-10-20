@@ -229,6 +229,7 @@ describe("admin Microsoft modal workflows", () => {
     await waitFor(() =>
       expect(mocks.importResources).toHaveBeenCalledWith({
         content: "one@outlook.com----write-only-password",
+      enterprise: false,
         errorStrategy: "skip",
         longLived: true,
         ownerId: 7,
@@ -295,7 +296,7 @@ describe("admin Microsoft modal workflows", () => {
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
 
     await waitFor(() => expect(mocks.importResources).toHaveBeenCalledWith({
-      content, errorStrategy: "abort", longLived: false, ownerId: 7,
+      content, errorStrategy: "abort", longLived: false, ownerId: 7, enterprise: false,
     }, expect.any(AbortSignal), expect.any(String)));
     expect(mocks.importResources).toHaveBeenCalledOnce();
     await waitFor(() => expect(onImported).toHaveBeenCalledOnce());

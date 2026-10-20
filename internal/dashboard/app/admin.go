@@ -103,135 +103,150 @@ type TypePurchaseSummary struct {
 }
 
 type InventorySnapshot struct {
-	MicrosoftTotal     int
-	MicrosoftAvailable int
-	DomainTotal        int
-	DomainAvailable    int
-	GmailTotal         int
-	GmailAvailable     int
-	ICloudTotal        int
-	ICloudAvailable    int
-	ProtoTotal         int
-	DaumTotal          int
-	ProtoAvailable     int
-	DaumAvailable      int
+	MicrosoftTotal               int
+	MicrosoftAvailable           int
+	MicrosoftEnterpriseTotal     int
+	MicrosoftEnterpriseAvailable int
+	DomainTotal                  int
+	DomainAvailable              int
+	GmailTotal                   int
+	GmailAvailable               int
+	ICloudTotal                  int
+	ICloudAvailable              int
+	ProtoTotal                   int
+	DaumTotal                    int
+	ProtoAvailable               int
+	DaumAvailable                int
 }
 
 // ---- assembled read model ------------------------------------------------
 
 type AdminStats struct {
+	RechargeAmount                                      float64
+	SpendAmount                                         float64
+	RefundAmount                                        float64
+	WithdrawAmount                                      float64
+	PlatformRevenue                                     float64
+	TotalOrders                                         int
+	SuccessfulCodeReceipts                              int
+	TotalUsers                                          int
+	ActiveUsers                                         int
+	NewUsers                                            int
+	MicrosoftTotalEmails                                int
+	MicrosoftAvailableEmails                            int
+	MicrosoftCodeReceipts                               int
+	MicrosoftCodeSuccessRate                            float64
+	MicrosoftAverageCodeReceiptSeconds                  int
+	MicrosoftPurchaseActivations                        int
+	MicrosoftPurchaseActivationSuccessRate              float64
+	MicrosoftAveragePurchaseActivationSeconds           int
+	MicrosoftEnterpriseTotalEmails                      int
+	MicrosoftEnterpriseAvailableEmails                  int
+	MicrosoftEnterpriseCodeReceipts                     int
+	MicrosoftEnterpriseCodeSuccessRate                  float64
+	MicrosoftEnterpriseAverageCodeReceiptSeconds        int
+	MicrosoftEnterprisePurchaseActivations              int
+	MicrosoftEnterprisePurchaseActivationSuccessRate    float64
+	MicrosoftEnterpriseAveragePurchaseActivationSeconds int
+	GmailTotalEmails                                    int
+	GmailAvailableEmails                                int
+	GmailCodeReceipts                                   int
+	GmailCodeSuccessRate                                float64
+	GmailAverageCodeReceiptSeconds                      int
+	GmailPurchaseActivations                            int
+	GmailPurchaseActivationSuccessRate                  float64
+	GmailAveragePurchaseActivationSeconds               int
+	GmailVariantTotalEmails                             int
+	GmailVariantAvailableEmails                         int
+	GmailVariantCodeReceipts                            int
+	GmailVariantCodeSuccessRate                         float64
+	GmailVariantAverageCodeReceiptSeconds               int
+	GmailVariantPurchaseActivations                     int
+	GmailVariantPurchaseActivationSuccessRate           float64
+	GmailVariantAveragePurchaseActivationSeconds        int
+	ICloudTotalEmails                                   int
+	ICloudAvailableEmails                               int
+	ICloudCodeReceipts                                  int
+	ICloudCodeSuccessRate                               float64
+	ICloudAverageCodeReceiptSeconds                     int
+	ICloudPurchaseActivations                           int
+	ICloudPurchaseActivationSuccessRate                 float64
+	ICloudAveragePurchaseActivationSeconds              int
+	ProtoTotalEmails                                    int
+	DaumTotalEmails                                     int
+	ProtoAvailableEmails                                int
+	DaumAvailableEmails                                 int
+	ProtoCodeReceipts                                   int
+	DaumCodeReceipts                                    int
+	ProtoCodeSuccessRate                                float64
+	DaumCodeSuccessRate                                 float64
+	ProtoAverageCodeReceiptSeconds                      int
+	DaumAverageCodeReceiptSeconds                       int
+	ProtoPurchaseActivations                            int
+	DaumPurchaseActivations                             int
+	ProtoPurchaseActivationSuccessRate                  float64
+	DaumPurchaseActivationSuccessRate                   float64
+	ProtoAveragePurchaseActivationSeconds               int
+	DaumAveragePurchaseActivationSeconds                int
+	DomainTotalMailboxes                                int
+	DomainAvailableMailboxes                            int
+	DomainCodeReceipts                                  int
+	DomainCodeSuccessRate                               float64
+	DomainAverageCodeReceiptSeconds                     int
+}
+
+type AdminTrendPoint struct {
+	Label                                        string
 	RechargeAmount                               float64
 	SpendAmount                                  float64
 	RefundAmount                                 float64
 	WithdrawAmount                               float64
 	PlatformRevenue                              float64
-	TotalOrders                                  int
+	Orders                                       int
 	SuccessfulCodeReceipts                       int
 	TotalUsers                                   int
 	ActiveUsers                                  int
 	NewUsers                                     int
 	MicrosoftTotalEmails                         int
 	MicrosoftAvailableEmails                     int
-	MicrosoftCodeReceipts                        int
+	MicrosoftReceivedCodes                       int
 	MicrosoftCodeSuccessRate                     float64
 	MicrosoftAverageCodeReceiptSeconds           int
-	MicrosoftPurchaseActivations                 int
-	MicrosoftPurchaseActivationSuccessRate       float64
-	MicrosoftAveragePurchaseActivationSeconds    int
+	MicrosoftEnterpriseTotalEmails               int
+	MicrosoftEnterpriseAvailableEmails           int
+	MicrosoftEnterpriseReceivedCodes             int
+	MicrosoftEnterpriseCodeSuccessRate           float64
+	MicrosoftEnterpriseAverageCodeReceiptSeconds int
 	GmailTotalEmails                             int
 	GmailAvailableEmails                         int
-	GmailCodeReceipts                            int
+	GmailReceivedCodes                           int
 	GmailCodeSuccessRate                         float64
 	GmailAverageCodeReceiptSeconds               int
-	GmailPurchaseActivations                     int
-	GmailPurchaseActivationSuccessRate           float64
-	GmailAveragePurchaseActivationSeconds        int
 	GmailVariantTotalEmails                      int
 	GmailVariantAvailableEmails                  int
-	GmailVariantCodeReceipts                     int
+	GmailVariantReceivedCodes                    int
 	GmailVariantCodeSuccessRate                  float64
 	GmailVariantAverageCodeReceiptSeconds        int
-	GmailVariantPurchaseActivations              int
-	GmailVariantPurchaseActivationSuccessRate    float64
-	GmailVariantAveragePurchaseActivationSeconds int
 	ICloudTotalEmails                            int
 	ICloudAvailableEmails                        int
-	ICloudCodeReceipts                           int
+	ICloudReceivedCodes                          int
 	ICloudCodeSuccessRate                        float64
 	ICloudAverageCodeReceiptSeconds              int
-	ICloudPurchaseActivations                    int
-	ICloudPurchaseActivationSuccessRate          float64
-	ICloudAveragePurchaseActivationSeconds       int
 	ProtoTotalEmails                             int
 	DaumTotalEmails                              int
 	ProtoAvailableEmails                         int
 	DaumAvailableEmails                          int
-	ProtoCodeReceipts                            int
-	DaumCodeReceipts                             int
+	ProtoReceivedCodes                           int
+	DaumReceivedCodes                            int
 	ProtoCodeSuccessRate                         float64
 	DaumCodeSuccessRate                          float64
 	ProtoAverageCodeReceiptSeconds               int
 	DaumAverageCodeReceiptSeconds                int
-	ProtoPurchaseActivations                     int
-	DaumPurchaseActivations                      int
-	ProtoPurchaseActivationSuccessRate           float64
-	DaumPurchaseActivationSuccessRate            float64
-	ProtoAveragePurchaseActivationSeconds        int
-	DaumAveragePurchaseActivationSeconds         int
 	DomainTotalMailboxes                         int
 	DomainAvailableMailboxes                     int
-	DomainCodeReceipts                           int
+	DomainReceivedCodes                          int
 	DomainCodeSuccessRate                        float64
 	DomainAverageCodeReceiptSeconds              int
-}
-
-type AdminTrendPoint struct {
-	Label                                 string
-	RechargeAmount                        float64
-	SpendAmount                           float64
-	RefundAmount                          float64
-	WithdrawAmount                        float64
-	PlatformRevenue                       float64
-	Orders                                int
-	SuccessfulCodeReceipts                int
-	TotalUsers                            int
-	ActiveUsers                           int
-	NewUsers                              int
-	MicrosoftTotalEmails                  int
-	MicrosoftAvailableEmails              int
-	MicrosoftReceivedCodes                int
-	MicrosoftCodeSuccessRate              float64
-	MicrosoftAverageCodeReceiptSeconds    int
-	GmailTotalEmails                      int
-	GmailAvailableEmails                  int
-	GmailReceivedCodes                    int
-	GmailCodeSuccessRate                  float64
-	GmailAverageCodeReceiptSeconds        int
-	GmailVariantTotalEmails               int
-	GmailVariantAvailableEmails           int
-	GmailVariantReceivedCodes             int
-	GmailVariantCodeSuccessRate           float64
-	GmailVariantAverageCodeReceiptSeconds int
-	ICloudTotalEmails                     int
-	ICloudAvailableEmails                 int
-	ICloudReceivedCodes                   int
-	ICloudCodeSuccessRate                 float64
-	ICloudAverageCodeReceiptSeconds       int
-	ProtoTotalEmails                      int
-	DaumTotalEmails                       int
-	ProtoAvailableEmails                  int
-	DaumAvailableEmails                   int
-	ProtoReceivedCodes                    int
-	DaumReceivedCodes                     int
-	ProtoCodeSuccessRate                  float64
-	DaumCodeSuccessRate                   float64
-	ProtoAverageCodeReceiptSeconds        int
-	DaumAverageCodeReceiptSeconds         int
-	DomainTotalMailboxes                  int
-	DomainAvailableMailboxes              int
-	DomainReceivedCodes                   int
-	DomainCodeSuccessRate                 float64
-	DomainAverageCodeReceiptSeconds       int
 }
 
 type AdminInventoryRankItem struct {
@@ -339,6 +354,7 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 		label := trendLabel(t, gran, sameYear)
 		f := financeByLabel[label]
 		msR := receiptsByType[productBucket{key, "microsoft"}]
+		enterpriseR := receiptsByType[productBucket{key, "microsoft_enterprise"}]
 		dR := receiptsByType[productBucket{key, "domain"}]
 		gmailR := receiptsByType[productBucket{key, "gmail"}]
 		gmailVariantR := receiptsByType[productBucket{key, "gmail_variant"}]
@@ -346,6 +362,7 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 		protoR := receiptsByType[productBucket{key, "proto"}]
 		daumR := receiptsByType[productBucket{key, "daum"}]
 		msCO := codeOrdersByType[productBucket{key, "microsoft"}]
+		enterpriseCO := codeOrdersByType[productBucket{key, "microsoft_enterprise"}]
 		dCO := codeOrdersByType[productBucket{key, "domain"}]
 		gmailCO := codeOrdersByType[productBucket{key, "gmail"}]
 		gmailVariantCO := codeOrdersByType[productBucket{key, "gmail_variant"}]
@@ -354,23 +371,39 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 		daumCO := codeOrdersByType[productBucket{key, "daum"}]
 		newUsers := newUserByKey[key]
 		activeUsers := activeUserByKey[key]
+		bucketReceipts := 0
+		for _, productType := range dashboardProductTypes {
+			receipt := receiptsByType[productBucket{key, productType}]
+			total := fulfillmentTotals[productType]
+			total.Received += receipt.Received
+			total.TotalSeconds += receipt.TotalSeconds
+			total.Timed += receipt.Timed
+			total.CodeOrders += codeOrdersByType[productBucket{key, productType}]
+			fulfillmentTotals[productType] = total
+			bucketReceipts += receipt.Received
+		}
 		trend = append(trend, AdminTrendPoint{
-			Label:                                 label,
-			RechargeAmount:                        f.Recharge,
-			SpendAmount:                           f.Spend,
-			RefundAmount:                          f.Refund,
-			WithdrawAmount:                        f.Withdraw,
-			PlatformRevenue:                       f.PlatformRevenue,
-			Orders:                                orderByKey[key],
-			SuccessfulCodeReceipts:                msR.Received + dR.Received + gmailR.Received + gmailVariantR.Received + iCloudR.Received + protoR.Received + daumR.Received,
-			TotalUsers:                            totalUsers,
-			ActiveUsers:                           activeUsers,
-			NewUsers:                              newUsers,
-			MicrosoftTotalEmails:                  snapshot.MicrosoftTotal,
-			MicrosoftAvailableEmails:              snapshot.MicrosoftAvailable,
-			MicrosoftReceivedCodes:                msR.Received,
-			MicrosoftCodeSuccessRate:              round1(minFloat(100, pct(msR.Received, msCO))),
-			MicrosoftAverageCodeReceiptSeconds:    msR.AvgSeconds,
+			Label:                              label,
+			RechargeAmount:                     f.Recharge,
+			SpendAmount:                        f.Spend,
+			RefundAmount:                       f.Refund,
+			WithdrawAmount:                     f.Withdraw,
+			PlatformRevenue:                    f.PlatformRevenue,
+			Orders:                             orderByKey[key],
+			SuccessfulCodeReceipts:             bucketReceipts,
+			TotalUsers:                         totalUsers,
+			ActiveUsers:                        activeUsers,
+			NewUsers:                           newUsers,
+			MicrosoftTotalEmails:               snapshot.MicrosoftTotal,
+			MicrosoftAvailableEmails:           snapshot.MicrosoftAvailable,
+			MicrosoftReceivedCodes:             msR.Received,
+			MicrosoftCodeSuccessRate:           round1(minFloat(100, pct(msR.Received, msCO))),
+			MicrosoftAverageCodeReceiptSeconds: msR.AvgSeconds,
+			MicrosoftEnterpriseTotalEmails:     snapshot.MicrosoftEnterpriseTotal,
+			MicrosoftEnterpriseAvailableEmails: snapshot.MicrosoftEnterpriseAvailable,
+			MicrosoftEnterpriseReceivedCodes:   enterpriseR.Received,
+			MicrosoftEnterpriseCodeSuccessRate: round1(minFloat(100, pct(enterpriseR.Received, enterpriseCO))),
+			MicrosoftEnterpriseAverageCodeReceiptSeconds: enterpriseR.AvgSeconds,
 			GmailTotalEmails:                      snapshot.GmailTotal,
 			GmailAvailableEmails:                  snapshot.GmailAvailable,
 			GmailReceivedCodes:                    gmailR.Received,
@@ -404,16 +437,7 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 		})
 
 		totalOrders += orderByKey[key]
-		for _, productType := range dashboardProductTypes {
-			receipt := receiptsByType[productBucket{key, productType}]
-			total := fulfillmentTotals[productType]
-			total.Received += receipt.Received
-			total.TotalSeconds += receipt.TotalSeconds
-			total.Timed += receipt.Timed
-			total.CodeOrders += codeOrdersByType[productBucket{key, productType}]
-			fulfillmentTotals[productType] = total
-			totalReceipts += receipt.Received
-		}
+		totalReceipts += bucketReceipts
 		// Accumulated in the loop (not sumCounts over all rows) so every header
 		// stat reflects the same visited buckets and stays internally consistent
 		// even if the trend loop ever caps.
@@ -424,6 +448,7 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 		trend = []AdminTrendPoint{}
 	}
 	ms := fulfillmentTotals["microsoft"]
+	enterprise := fulfillmentTotals["microsoft_enterprise"]
 	domain := fulfillmentTotals["domain"]
 	gmail := fulfillmentTotals["gmail"]
 	gmailVariant := fulfillmentTotals["gmail_variant"]
@@ -431,6 +456,7 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 	proto := fulfillmentTotals["proto"]
 	daum := fulfillmentTotals["daum"]
 	msPurchase := purchasesByType["microsoft"]
+	enterprisePurchase := purchasesByType["microsoft_enterprise"]
 	gmailPurchase := purchasesByType["gmail"]
 	gmailVariantPurchase := purchasesByType["gmail_variant"]
 	iCloudPurchase := purchasesByType["icloud"]
@@ -439,69 +465,77 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 
 	return &AdminDashboard{
 		Stats: AdminStats{
-			RechargeAmount:                               finance.RechargeAmount,
-			SpendAmount:                                  finance.SpendAmount,
-			RefundAmount:                                 finance.RefundAmount,
-			WithdrawAmount:                               finance.WithdrawAmount,
-			PlatformRevenue:                              finance.PlatformRevenue,
-			TotalOrders:                                  totalOrders,
-			SuccessfulCodeReceipts:                       totalReceipts,
-			TotalUsers:                                   totalUsers,
-			ActiveUsers:                                  activeUsersTotal,
-			NewUsers:                                     newUsersTotal,
-			MicrosoftTotalEmails:                         snapshot.MicrosoftTotal,
-			MicrosoftAvailableEmails:                     snapshot.MicrosoftAvailable,
-			MicrosoftCodeReceipts:                        ms.Received,
-			MicrosoftCodeSuccessRate:                     round1(minFloat(100, pct(ms.Received, ms.CodeOrders))),
-			MicrosoftAverageCodeReceiptSeconds:           averageSeconds(ms.TotalSeconds, ms.Timed),
-			MicrosoftPurchaseActivations:                 msPurchase.Activated,
-			MicrosoftPurchaseActivationSuccessRate:       round1(minFloat(100, pct(msPurchase.Activated, msPurchase.Orders))),
-			MicrosoftAveragePurchaseActivationSeconds:    averageSeconds(msPurchase.TotalSeconds, msPurchase.Timed),
-			GmailTotalEmails:                             snapshot.GmailTotal,
-			GmailAvailableEmails:                         snapshot.GmailAvailable,
-			GmailCodeReceipts:                            gmail.Received,
-			GmailCodeSuccessRate:                         round1(minFloat(100, pct(gmail.Received, gmail.CodeOrders))),
-			GmailAverageCodeReceiptSeconds:               averageSeconds(gmail.TotalSeconds, gmail.Timed),
-			GmailPurchaseActivations:                     gmailPurchase.Activated,
-			GmailPurchaseActivationSuccessRate:           round1(minFloat(100, pct(gmailPurchase.Activated, gmailPurchase.Orders))),
-			GmailAveragePurchaseActivationSeconds:        averageSeconds(gmailPurchase.TotalSeconds, gmailPurchase.Timed),
-			GmailVariantTotalEmails:                      snapshot.GmailTotal,
-			GmailVariantAvailableEmails:                  snapshot.GmailAvailable,
-			GmailVariantCodeReceipts:                     gmailVariant.Received,
-			GmailVariantCodeSuccessRate:                  round1(minFloat(100, pct(gmailVariant.Received, gmailVariant.CodeOrders))),
-			GmailVariantAverageCodeReceiptSeconds:        averageSeconds(gmailVariant.TotalSeconds, gmailVariant.Timed),
-			GmailVariantPurchaseActivations:              gmailVariantPurchase.Activated,
-			GmailVariantPurchaseActivationSuccessRate:    round1(minFloat(100, pct(gmailVariantPurchase.Activated, gmailVariantPurchase.Orders))),
-			GmailVariantAveragePurchaseActivationSeconds: averageSeconds(gmailVariantPurchase.TotalSeconds, gmailVariantPurchase.Timed),
-			ICloudTotalEmails:                            snapshot.ICloudTotal,
-			ICloudAvailableEmails:                        snapshot.ICloudAvailable,
-			ICloudCodeReceipts:                           iCloud.Received,
-			ICloudCodeSuccessRate:                        round1(minFloat(100, pct(iCloud.Received, iCloud.CodeOrders))),
-			ICloudAverageCodeReceiptSeconds:              averageSeconds(iCloud.TotalSeconds, iCloud.Timed),
-			ICloudPurchaseActivations:                    iCloudPurchase.Activated,
-			ICloudPurchaseActivationSuccessRate:          round1(minFloat(100, pct(iCloudPurchase.Activated, iCloudPurchase.Orders))),
-			ICloudAveragePurchaseActivationSeconds:       averageSeconds(iCloudPurchase.TotalSeconds, iCloudPurchase.Timed),
-			ProtoTotalEmails:                             snapshot.ProtoTotal,
-			DaumTotalEmails:                              snapshot.DaumTotal,
-			ProtoAvailableEmails:                         snapshot.ProtoAvailable,
-			DaumAvailableEmails:                          snapshot.DaumAvailable,
-			ProtoCodeReceipts:                            proto.Received,
-			DaumCodeReceipts:                             daum.Received,
-			ProtoCodeSuccessRate:                         round1(minFloat(100, pct(proto.Received, proto.CodeOrders))),
-			DaumCodeSuccessRate:                          round1(minFloat(100, pct(daum.Received, daum.CodeOrders))),
-			ProtoAverageCodeReceiptSeconds:               averageSeconds(proto.TotalSeconds, proto.Timed),
-			DaumAverageCodeReceiptSeconds:                averageSeconds(daum.TotalSeconds, daum.Timed),
-			ProtoPurchaseActivations:                     protoPurchase.Activated,
-			DaumPurchaseActivations:                      daumPurchase.Activated,
-			ProtoPurchaseActivationSuccessRate:           round1(minFloat(100, pct(protoPurchase.Activated, protoPurchase.Orders))),
-			DaumPurchaseActivationSuccessRate:            round1(minFloat(100, pct(daumPurchase.Activated, daumPurchase.Orders))),
-			ProtoAveragePurchaseActivationSeconds:        averageSeconds(protoPurchase.TotalSeconds, protoPurchase.Timed),
-			DaumAveragePurchaseActivationSeconds:         averageSeconds(daumPurchase.TotalSeconds, daumPurchase.Timed),
-			DomainTotalMailboxes:                         snapshot.DomainTotal,
-			DomainAvailableMailboxes:                     snapshot.DomainAvailable,
-			DomainCodeReceipts:                           domain.Received,
-			DomainCodeSuccessRate:                        round1(minFloat(100, pct(domain.Received, domain.CodeOrders))),
-			DomainAverageCodeReceiptSeconds:              averageSeconds(domain.TotalSeconds, domain.Timed),
+			RechargeAmount:                                      finance.RechargeAmount,
+			SpendAmount:                                         finance.SpendAmount,
+			RefundAmount:                                        finance.RefundAmount,
+			WithdrawAmount:                                      finance.WithdrawAmount,
+			PlatformRevenue:                                     finance.PlatformRevenue,
+			TotalOrders:                                         totalOrders,
+			SuccessfulCodeReceipts:                              totalReceipts,
+			TotalUsers:                                          totalUsers,
+			ActiveUsers:                                         activeUsersTotal,
+			NewUsers:                                            newUsersTotal,
+			MicrosoftTotalEmails:                                snapshot.MicrosoftTotal,
+			MicrosoftAvailableEmails:                            snapshot.MicrosoftAvailable,
+			MicrosoftCodeReceipts:                               ms.Received,
+			MicrosoftCodeSuccessRate:                            round1(minFloat(100, pct(ms.Received, ms.CodeOrders))),
+			MicrosoftAverageCodeReceiptSeconds:                  averageSeconds(ms.TotalSeconds, ms.Timed),
+			MicrosoftPurchaseActivations:                        msPurchase.Activated,
+			MicrosoftPurchaseActivationSuccessRate:              round1(minFloat(100, pct(msPurchase.Activated, msPurchase.Orders))),
+			MicrosoftAveragePurchaseActivationSeconds:           averageSeconds(msPurchase.TotalSeconds, msPurchase.Timed),
+			MicrosoftEnterpriseTotalEmails:                      snapshot.MicrosoftEnterpriseTotal,
+			MicrosoftEnterpriseAvailableEmails:                  snapshot.MicrosoftEnterpriseAvailable,
+			MicrosoftEnterpriseCodeReceipts:                     enterprise.Received,
+			MicrosoftEnterpriseCodeSuccessRate:                  round1(minFloat(100, pct(enterprise.Received, enterprise.CodeOrders))),
+			MicrosoftEnterpriseAverageCodeReceiptSeconds:        averageSeconds(enterprise.TotalSeconds, enterprise.Timed),
+			MicrosoftEnterprisePurchaseActivations:              enterprisePurchase.Activated,
+			MicrosoftEnterprisePurchaseActivationSuccessRate:    round1(minFloat(100, pct(enterprisePurchase.Activated, enterprisePurchase.Orders))),
+			MicrosoftEnterpriseAveragePurchaseActivationSeconds: averageSeconds(enterprisePurchase.TotalSeconds, enterprisePurchase.Timed),
+			GmailTotalEmails:                                    snapshot.GmailTotal,
+			GmailAvailableEmails:                                snapshot.GmailAvailable,
+			GmailCodeReceipts:                                   gmail.Received,
+			GmailCodeSuccessRate:                                round1(minFloat(100, pct(gmail.Received, gmail.CodeOrders))),
+			GmailAverageCodeReceiptSeconds:                      averageSeconds(gmail.TotalSeconds, gmail.Timed),
+			GmailPurchaseActivations:                            gmailPurchase.Activated,
+			GmailPurchaseActivationSuccessRate:                  round1(minFloat(100, pct(gmailPurchase.Activated, gmailPurchase.Orders))),
+			GmailAveragePurchaseActivationSeconds:               averageSeconds(gmailPurchase.TotalSeconds, gmailPurchase.Timed),
+			GmailVariantTotalEmails:                             snapshot.GmailTotal,
+			GmailVariantAvailableEmails:                         snapshot.GmailAvailable,
+			GmailVariantCodeReceipts:                            gmailVariant.Received,
+			GmailVariantCodeSuccessRate:                         round1(minFloat(100, pct(gmailVariant.Received, gmailVariant.CodeOrders))),
+			GmailVariantAverageCodeReceiptSeconds:               averageSeconds(gmailVariant.TotalSeconds, gmailVariant.Timed),
+			GmailVariantPurchaseActivations:                     gmailVariantPurchase.Activated,
+			GmailVariantPurchaseActivationSuccessRate:           round1(minFloat(100, pct(gmailVariantPurchase.Activated, gmailVariantPurchase.Orders))),
+			GmailVariantAveragePurchaseActivationSeconds:        averageSeconds(gmailVariantPurchase.TotalSeconds, gmailVariantPurchase.Timed),
+			ICloudTotalEmails:                                   snapshot.ICloudTotal,
+			ICloudAvailableEmails:                               snapshot.ICloudAvailable,
+			ICloudCodeReceipts:                                  iCloud.Received,
+			ICloudCodeSuccessRate:                               round1(minFloat(100, pct(iCloud.Received, iCloud.CodeOrders))),
+			ICloudAverageCodeReceiptSeconds:                     averageSeconds(iCloud.TotalSeconds, iCloud.Timed),
+			ICloudPurchaseActivations:                           iCloudPurchase.Activated,
+			ICloudPurchaseActivationSuccessRate:                 round1(minFloat(100, pct(iCloudPurchase.Activated, iCloudPurchase.Orders))),
+			ICloudAveragePurchaseActivationSeconds:              averageSeconds(iCloudPurchase.TotalSeconds, iCloudPurchase.Timed),
+			ProtoTotalEmails:                                    snapshot.ProtoTotal,
+			DaumTotalEmails:                                     snapshot.DaumTotal,
+			ProtoAvailableEmails:                                snapshot.ProtoAvailable,
+			DaumAvailableEmails:                                 snapshot.DaumAvailable,
+			ProtoCodeReceipts:                                   proto.Received,
+			DaumCodeReceipts:                                    daum.Received,
+			ProtoCodeSuccessRate:                                round1(minFloat(100, pct(proto.Received, proto.CodeOrders))),
+			DaumCodeSuccessRate:                                 round1(minFloat(100, pct(daum.Received, daum.CodeOrders))),
+			ProtoAverageCodeReceiptSeconds:                      averageSeconds(proto.TotalSeconds, proto.Timed),
+			DaumAverageCodeReceiptSeconds:                       averageSeconds(daum.TotalSeconds, daum.Timed),
+			ProtoPurchaseActivations:                            protoPurchase.Activated,
+			DaumPurchaseActivations:                             daumPurchase.Activated,
+			ProtoPurchaseActivationSuccessRate:                  round1(minFloat(100, pct(protoPurchase.Activated, protoPurchase.Orders))),
+			DaumPurchaseActivationSuccessRate:                   round1(minFloat(100, pct(daumPurchase.Activated, daumPurchase.Orders))),
+			ProtoAveragePurchaseActivationSeconds:               averageSeconds(protoPurchase.TotalSeconds, protoPurchase.Timed),
+			DaumAveragePurchaseActivationSeconds:                averageSeconds(daumPurchase.TotalSeconds, daumPurchase.Timed),
+			DomainTotalMailboxes:                                snapshot.DomainTotal,
+			DomainAvailableMailboxes:                            snapshot.DomainAvailable,
+			DomainCodeReceipts:                                  domain.Received,
+			DomainCodeSuccessRate:                               round1(minFloat(100, pct(domain.Received, domain.CodeOrders))),
+			DomainAverageCodeReceiptSeconds:                     averageSeconds(domain.TotalSeconds, domain.Timed),
 		},
 		Trend:                   trend,
 		ProjectCodeRanking:      adminRankItems(codeRanking),
@@ -533,7 +567,7 @@ func countByBucket(rows []CountBucket) map[string]int {
 	return m
 }
 
-var dashboardProductTypes = [...]string{"microsoft", "domain", "gmail", "gmail_variant", "icloud", "proto", "daum"}
+var dashboardProductTypes = [...]string{"microsoft", "microsoft_enterprise", "domain", "gmail", "gmail_variant", "icloud", "proto", "daum"}
 
 type productBucket struct {
 	Bucket      string

@@ -7,19 +7,19 @@ import (
 	"github.com/donnel666/remail/internal/mailmatch/app"
 )
 
-func (r *Repo) ListHistoricalProjectScopes(ctx context.Context) ([]app.HistoricalProjectScope, error) {
-	return r.listHistoricalProjectScopes(ctx, 0)
+func (r *Repo) ListHistoricalProjectScopes(ctx context.Context, enterprise bool) ([]app.HistoricalProjectScope, error) {
+	return r.listHistoricalProjectScopes(ctx, 0, enterprise)
 }
 
-func (r *Repo) FindHistoricalProjectScope(ctx context.Context, projectID uint) (*app.HistoricalProjectScope, error) {
-	scopes, err := r.listHistoricalProjectScopes(ctx, projectID)
+func (r *Repo) FindHistoricalProjectScope(ctx context.Context, projectID uint, enterprise bool) (*app.HistoricalProjectScope, error) {
+	scopes, err := r.listHistoricalProjectScopes(ctx, projectID, enterprise)
 	if err != nil || len(scopes) == 0 {
 		return nil, err
 	}
 	return &scopes[0], nil
 }
 
-func (r *Repo) listHistoricalProjectScopes(ctx context.Context, projectID uint) ([]app.HistoricalProjectScope, error) {
+func (r *Repo) listHistoricalProjectScopes(ctx context.Context, projectID uint, enterprise bool) ([]app.HistoricalProjectScope, error) {
 	var rows []struct {
 		ProjectID               uint   `gorm:"column:project_id"`
 		ProductID               uint   `gorm:"column:product_id"`
@@ -31,11 +31,15 @@ func (r *Repo) listHistoricalProjectScopes(ctx context.Context, projectID uint) 
 		Pattern                 string
 		Enabled                 bool
 	}
+	productType := "microsoft"
+	if enterprise {
+		productType = "microsoft_enterprise"
+	}
 	query := r.dbFor(ctx).
 		Table("projects AS p").
 		Select("p.id AS project_id, pp.id AS product_id, pp.code_window_minutes, pp.activation_window_minutes, pp.warranty_minutes, p.loose_match, pmr.rule_type, pmr.pattern, pmr.enabled").
-		Joins(`JOIN project_products AS pp ON pp.project_id = p.id AND pp.type = 'microsoft'
-			AND pp.id = (SELECT MIN(candidate.id) FROM project_products AS candidate WHERE candidate.project_id = p.id AND candidate.type = 'microsoft')`).
+		Joins(`JOIN project_products AS pp ON pp.project_id = p.id AND pp.type = ?
+			AND pp.id = (SELECT MIN(candidate.id) FROM project_products AS candidate WHERE candidate.project_id = p.id AND candidate.type = ?)`, productType, productType).
 		Joins("JOIN project_mail_rules AS pmr ON pmr.project_id = p.id AND pmr.enabled = 1").
 		Where("p.status IN ?", []string{"listed", "delisted"})
 	if projectID > 0 {

@@ -268,6 +268,7 @@ type adminMicrosoftIDsCommandRequest struct {
 }
 
 type adminMicrosoftBulkFilterRequest struct {
+	Enterprise     bool       `json:"enterprise"`
 	Type           string     `json:"type" binding:"required"`
 	Search         string     `json:"search"`
 	Suffix         string     `json:"suffix"`
@@ -378,6 +379,11 @@ func (h *CoreHandler) PostAdminMicrosoftResourceImport(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid import file.", "requestId": middleware.GetRequestID(c)})
 		return
 	}
+	enterprise, err := strconv.ParseBool(c.DefaultPostForm("enterprise", "false"))
+	if err != nil {
+		writeAdminResourceError(c, domain.ErrInvalidImportFormat)
+		return
+	}
 	accepted, err := h.module.ImportUseCase.AcceptAdminMicrosoftTXTFile(
 		c.Request.Context(),
 		mustCurrentAdminUserID(c),
@@ -385,6 +391,7 @@ func (h *CoreHandler) PostAdminMicrosoftResourceImport(c *gin.Context) {
 		header.Filename,
 		content,
 		longLived,
+		enterprise,
 		strategy,
 		c.GetHeader("Idempotency-Key"),
 		middleware.GetRequestID(c),
@@ -776,6 +783,11 @@ func adminMicrosoftFilterFromQuery(c *gin.Context) (coreapp.AdminMicrosoftListFi
 		TokenHealth: strings.TrimSpace(c.Query("tokenHealth")),
 	}
 	var ok bool
+	enterprise, ok := parseOptionalBoolQuery(c, "enterprise")
+	if !ok {
+		return filter, false
+	}
+	filter.Enterprise = enterprise != nil && *enterprise
 	filter.ForSale, ok = parseOptionalBoolQuery(c, "forSale")
 	if !ok {
 		return filter, false
@@ -961,7 +973,7 @@ func toAdminBulkSelection(c *gin.Context, request adminMicrosoftBulkSelectionReq
 		return coreapp.AdminResourceBulkSelection{
 			Mode: coreapp.AdminResourceBulkFilter,
 			Filter: coreapp.AdminResourceBulkFilterValue{
-				Search: request.Filter.Search, Suffix: request.Filter.Suffix,
+				Search: request.Filter.Search, Suffix: request.Filter.Suffix, Enterprise: request.Filter.Enterprise,
 				Status:  domain.MicrosoftResourceStatus(request.Filter.Status),
 				ForSale: request.Filter.ForSale, LongLived: request.Filter.LongLived,
 				GraphAvailable: request.Filter.GraphAvailable, TokenHealth: request.Filter.TokenHealth,

@@ -65,12 +65,14 @@ const pageLoaders = {
   orders: () => import("./pages/Orders"),
   tickets: () => import("./pages/Tickets"),
   microsoftEmails: () => import("./pages/MicrosoftEmails"),
+  microsoftEnterpriseEmails: () => import("./pages/MicrosoftEnterpriseEmails"),
   daumEmails: () => import("./pages/DaumEmails"),
   icloudEmails: () => import("./pages/ICloudEmails"),
   domainEmails: () => import("./pages/DomainEmails"),
   adminDashboard: () => import("./pages/AdminDashboard"),
   adminSystemMonitoring: () => import("./pages/AdminSystemMonitoring"),
   adminMicrosoftEmails: () => import("./pages/AdminMicrosoftEmails"),
+  adminMicrosoftEnterpriseEmails: () => import("./pages/AdminMicrosoftEnterpriseEmails"),
   adminProtoEmails: () => import("./pages/AdminProtoEmails"),
   adminDaumEmails: () => import("./pages/AdminDaumEmails"),
   adminKitesim: () => import("./pages/AdminKitesim"),
@@ -108,12 +110,14 @@ const PaymentReturn = lazy(pageLoaders.paymentReturn);
 const Orders = lazy(pageLoaders.orders);
 const Tickets = lazy(pageLoaders.tickets);
 const MicrosoftEmails = lazy(pageLoaders.microsoftEmails);
+const MicrosoftEnterpriseEmails = lazy(pageLoaders.microsoftEnterpriseEmails);
 const DaumEmails = lazy(pageLoaders.daumEmails);
 const ICloudEmails = lazy(pageLoaders.icloudEmails);
 const DomainEmails = lazy(pageLoaders.domainEmails);
 const AdminDashboard = lazy(pageLoaders.adminDashboard);
 const AdminSystemMonitoring = lazy(pageLoaders.adminSystemMonitoring);
 const AdminMicrosoftEmails = lazy(pageLoaders.adminMicrosoftEmails);
+const AdminMicrosoftEnterpriseEmails = lazy(pageLoaders.adminMicrosoftEnterpriseEmails);
 const AdminProtoEmails = lazy(pageLoaders.adminProtoEmails);
 const AdminDaumEmails = lazy(pageLoaders.adminDaumEmails);
 const AdminKitesim = lazy(pageLoaders.adminKitesim);
@@ -146,12 +150,14 @@ const routePreloadPriority = [
   "finance",
   "wallet",
   "microsoftEmails",
+  "microsoftEnterpriseEmails",
   "daumEmails",
   "icloudEmails",
   "domainEmails",
   "adminDashboard",
   "adminSystemMonitoring",
   "adminMicrosoftEmails",
+  "adminMicrosoftEnterpriseEmails",
   "adminProtoEmails",
   "adminDaumEmails",
   "adminKitesim",
@@ -195,6 +201,7 @@ const preloadRouteByLoader: Partial<Record<PageLoaderKey, string>> = {
   adminICloudEmails: "/admin/icloud",
   adminKitesim: "/admin/kitesim",
   adminMicrosoftEmails: "/admin/microsoft",
+  adminMicrosoftEnterpriseEmails: "/admin/microsoft-enterprise",
   adminProtoEmails: "/admin/proto",
   adminDaumEmails: "/admin/daum",
   adminProjects: "/admin/projects",
@@ -207,6 +214,7 @@ const preloadRouteByLoader: Partial<Record<PageLoaderKey, string>> = {
   finance: "/finance",
   invite: "/invite",
   microsoftEmails: "/microsoft",
+  microsoftEnterpriseEmails: "/microsoft-enterprise",
   daumEmails: "/daum",
   icloudEmails: "/icloud",
   orders: "/orders",
@@ -568,6 +576,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/orders", component: Orders }),
   createRoute({ getParentRoute: () => rootRoute, path: "/tickets", component: Tickets }),
   createRoute({ getParentRoute: () => rootRoute, path: "/microsoft", component: MicrosoftEmails }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/microsoft-enterprise", component: MicrosoftEnterpriseEmails }),
   createRoute({ getParentRoute: () => rootRoute, path: "/daum", component: DaumEmails }),
   createRoute({ getParentRoute: () => rootRoute, path: "/icloud", component: ICloudEmails }),
   createRoute({ getParentRoute: () => rootRoute, path: "/domains", component: DomainEmails }),
@@ -588,6 +597,7 @@ const routeTree = rootRoute.addChildren([
     path: "/admin/microsoft",
     component: AdminMicrosoftEmails,
   }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/admin/microsoft-enterprise", component: AdminMicrosoftEnterpriseEmails }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: "/admin/proto",

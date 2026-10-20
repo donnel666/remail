@@ -22,6 +22,7 @@ type ResourceImportModel struct {
 	OperatorUserID     *uint      `gorm:"column:operator_user_id"`
 	ResourceType       string     `gorm:"type:varchar(32);not null;column:resource_type"`
 	LongLived          bool       `gorm:"not null;default:false;column:long_lived"`
+	Enterprise         bool       `gorm:"not null;default:false;column:enterprise"`
 	ErrorStrategy      string     `gorm:"type:varchar(16);not null;default:'skip';column:error_strategy"`
 	SourceObjectKey    string     `gorm:"type:varchar(500);not null;column:source_object_key"`
 	FailureObjectKey   string     `gorm:"type:varchar(500);not null;default:'';column:failure_object_key"`
@@ -84,6 +85,7 @@ func fromResourceImportDomain(item *domain.ResourceImport) *ResourceImportModel 
 		OwnerUserID:      item.OwnerUserID,
 		ResourceType:     string(item.ResourceType),
 		LongLived:        item.LongLived,
+		Enterprise:       item.Enterprise,
 		ErrorStrategy:    string(errorStrategy),
 		SourceObjectKey:  item.SourceObjectKey,
 		FailureObjectKey: item.FailureObjectKey,
@@ -110,6 +112,7 @@ func (m *ResourceImportModel) toDomain() *domain.ResourceImport {
 		OperatorUserID:   operatorUserID,
 		ResourceType:     domain.ResourceType(m.ResourceType),
 		LongLived:        m.LongLived,
+		Enterprise:       m.Enterprise,
 		ErrorStrategy:    domain.ImportErrorStrategy(m.ErrorStrategy),
 		SourceObjectKey:  m.SourceObjectKey,
 		FailureObjectKey: m.FailureObjectKey,
@@ -348,7 +351,7 @@ func (r *ResourceImportRepo) CreateAdminWithLog(
 		operatorID := metadata.OperatorUserID
 		model := &ResourceImportModel{
 			OwnerUserID: item.OwnerUserID, OperatorUserID: &operatorID,
-			ResourceType: string(item.ResourceType), LongLived: metadata.LongLived,
+			ResourceType: string(item.ResourceType), LongLived: metadata.LongLived, Enterprise: item.Enterprise,
 			ErrorStrategy:   string(metadata.ErrorStrategy),
 			SourceObjectKey: item.SourceObjectKey, Status: string(item.Status),
 			RequestID: metadata.RequestID, Path: metadata.Path,

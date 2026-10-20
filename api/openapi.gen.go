@@ -2354,13 +2354,14 @@ func (e BotProjectProductStatus) Valid() bool {
 
 // Defines values for BotProjectProductType.
 const (
-	BotProjectProductTypeDaum         BotProjectProductType = "daum"
-	BotProjectProductTypeDomain       BotProjectProductType = "domain"
-	BotProjectProductTypeGmail        BotProjectProductType = "gmail"
-	BotProjectProductTypeGmailVariant BotProjectProductType = "gmail_variant"
-	BotProjectProductTypeIcloud       BotProjectProductType = "icloud"
-	BotProjectProductTypeMicrosoft    BotProjectProductType = "microsoft"
-	BotProjectProductTypeProto        BotProjectProductType = "proto"
+	BotProjectProductTypeDaum                BotProjectProductType = "daum"
+	BotProjectProductTypeDomain              BotProjectProductType = "domain"
+	BotProjectProductTypeGmail               BotProjectProductType = "gmail"
+	BotProjectProductTypeGmailVariant        BotProjectProductType = "gmail_variant"
+	BotProjectProductTypeIcloud              BotProjectProductType = "icloud"
+	BotProjectProductTypeMicrosoft           BotProjectProductType = "microsoft"
+	BotProjectProductTypeMicrosoftEnterprise BotProjectProductType = "microsoft_enterprise"
+	BotProjectProductTypeProto               BotProjectProductType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the BotProjectProductType enum.
@@ -2377,6 +2378,8 @@ func (e BotProjectProductType) Valid() bool {
 	case BotProjectProductTypeIcloud:
 		return true
 	case BotProjectProductTypeMicrosoft:
+		return true
+	case BotProjectProductTypeMicrosoftEnterprise:
 		return true
 	case BotProjectProductTypeProto:
 		return true
@@ -3545,14 +3548,15 @@ func (e OrderResponseFailureCode) Valid() bool {
 
 // Defines values for OrderResponseProductType.
 const (
-	OrderResponseProductTypeDaum         OrderResponseProductType = "daum"
-	OrderResponseProductTypeDomain       OrderResponseProductType = "domain"
-	OrderResponseProductTypeGmail        OrderResponseProductType = "gmail"
-	OrderResponseProductTypeGmailVariant OrderResponseProductType = "gmail_variant"
-	OrderResponseProductTypeIcloud       OrderResponseProductType = "icloud"
-	OrderResponseProductTypeMicrosoft    OrderResponseProductType = "microsoft"
-	OrderResponseProductTypeProto        OrderResponseProductType = "proto"
-	OrderResponseProductTypeRandom       OrderResponseProductType = "random"
+	OrderResponseProductTypeDaum                OrderResponseProductType = "daum"
+	OrderResponseProductTypeDomain              OrderResponseProductType = "domain"
+	OrderResponseProductTypeGmail               OrderResponseProductType = "gmail"
+	OrderResponseProductTypeGmailVariant        OrderResponseProductType = "gmail_variant"
+	OrderResponseProductTypeIcloud              OrderResponseProductType = "icloud"
+	OrderResponseProductTypeMicrosoft           OrderResponseProductType = "microsoft"
+	OrderResponseProductTypeMicrosoftEnterprise OrderResponseProductType = "microsoft_enterprise"
+	OrderResponseProductTypeProto               OrderResponseProductType = "proto"
+	OrderResponseProductTypeRandom              OrderResponseProductType = "random"
 )
 
 // Valid indicates whether the value is a known member of the OrderResponseProductType enum.
@@ -3569,6 +3573,8 @@ func (e OrderResponseProductType) Valid() bool {
 	case OrderResponseProductTypeIcloud:
 		return true
 	case OrderResponseProductTypeMicrosoft:
+		return true
+	case OrderResponseProductTypeMicrosoftEnterprise:
 		return true
 	case OrderResponseProductTypeProto:
 		return true
@@ -3941,13 +3947,14 @@ func (e ProjectBulkFilterAccessType) Valid() bool {
 
 // Defines values for ProjectBulkFilterProductType.
 const (
-	ProjectBulkFilterProductTypeDaum         ProjectBulkFilterProductType = "daum"
-	ProjectBulkFilterProductTypeDomain       ProjectBulkFilterProductType = "domain"
-	ProjectBulkFilterProductTypeGmail        ProjectBulkFilterProductType = "gmail"
-	ProjectBulkFilterProductTypeGmailVariant ProjectBulkFilterProductType = "gmail_variant"
-	ProjectBulkFilterProductTypeIcloud       ProjectBulkFilterProductType = "icloud"
-	ProjectBulkFilterProductTypeMicrosoft    ProjectBulkFilterProductType = "microsoft"
-	ProjectBulkFilterProductTypeProto        ProjectBulkFilterProductType = "proto"
+	ProjectBulkFilterProductTypeDaum                ProjectBulkFilterProductType = "daum"
+	ProjectBulkFilterProductTypeDomain              ProjectBulkFilterProductType = "domain"
+	ProjectBulkFilterProductTypeGmail               ProjectBulkFilterProductType = "gmail"
+	ProjectBulkFilterProductTypeGmailVariant        ProjectBulkFilterProductType = "gmail_variant"
+	ProjectBulkFilterProductTypeIcloud              ProjectBulkFilterProductType = "icloud"
+	ProjectBulkFilterProductTypeMicrosoft           ProjectBulkFilterProductType = "microsoft"
+	ProjectBulkFilterProductTypeMicrosoftEnterprise ProjectBulkFilterProductType = "microsoft_enterprise"
+	ProjectBulkFilterProductTypeProto               ProjectBulkFilterProductType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the ProjectBulkFilterProductType enum.
@@ -3964,6 +3971,8 @@ func (e ProjectBulkFilterProductType) Valid() bool {
 	case ProjectBulkFilterProductTypeIcloud:
 		return true
 	case ProjectBulkFilterProductTypeMicrosoft:
+		return true
+	case ProjectBulkFilterProductTypeMicrosoftEnterprise:
 		return true
 	case ProjectBulkFilterProductTypeProto:
 		return true
@@ -4118,13 +4127,14 @@ func (e ProjectProductStatus) Valid() bool {
 
 // Defines values for ProjectProductType.
 const (
-	ProjectProductTypeDaum         ProjectProductType = "daum"
-	ProjectProductTypeDomain       ProjectProductType = "domain"
-	ProjectProductTypeGmail        ProjectProductType = "gmail"
-	ProjectProductTypeGmailVariant ProjectProductType = "gmail_variant"
-	ProjectProductTypeIcloud       ProjectProductType = "icloud"
-	ProjectProductTypeMicrosoft    ProjectProductType = "microsoft"
-	ProjectProductTypeProto        ProjectProductType = "proto"
+	ProjectProductTypeDaum                ProjectProductType = "daum"
+	ProjectProductTypeDomain              ProjectProductType = "domain"
+	ProjectProductTypeGmail               ProjectProductType = "gmail"
+	ProjectProductTypeGmailVariant        ProjectProductType = "gmail_variant"
+	ProjectProductTypeIcloud              ProjectProductType = "icloud"
+	ProjectProductTypeMicrosoft           ProjectProductType = "microsoft"
+	ProjectProductTypeMicrosoftEnterprise ProjectProductType = "microsoft_enterprise"
+	ProjectProductTypeProto               ProjectProductType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductType enum.
@@ -4142,6 +4152,8 @@ func (e ProjectProductType) Valid() bool {
 		return true
 	case ProjectProductTypeMicrosoft:
 		return true
+	case ProjectProductTypeMicrosoftEnterprise:
+		return true
 	case ProjectProductTypeProto:
 		return true
 	default:
@@ -4151,13 +4163,14 @@ func (e ProjectProductType) Valid() bool {
 
 // Defines values for ProjectProductInventoryTotalProductType.
 const (
-	ProjectProductInventoryTotalProductTypeDaum         ProjectProductInventoryTotalProductType = "daum"
-	ProjectProductInventoryTotalProductTypeDomain       ProjectProductInventoryTotalProductType = "domain"
-	ProjectProductInventoryTotalProductTypeGmail        ProjectProductInventoryTotalProductType = "gmail"
-	ProjectProductInventoryTotalProductTypeGmailVariant ProjectProductInventoryTotalProductType = "gmail_variant"
-	ProjectProductInventoryTotalProductTypeIcloud       ProjectProductInventoryTotalProductType = "icloud"
-	ProjectProductInventoryTotalProductTypeMicrosoft    ProjectProductInventoryTotalProductType = "microsoft"
-	ProjectProductInventoryTotalProductTypeProto        ProjectProductInventoryTotalProductType = "proto"
+	ProjectProductInventoryTotalProductTypeDaum                ProjectProductInventoryTotalProductType = "daum"
+	ProjectProductInventoryTotalProductTypeDomain              ProjectProductInventoryTotalProductType = "domain"
+	ProjectProductInventoryTotalProductTypeGmail               ProjectProductInventoryTotalProductType = "gmail"
+	ProjectProductInventoryTotalProductTypeGmailVariant        ProjectProductInventoryTotalProductType = "gmail_variant"
+	ProjectProductInventoryTotalProductTypeIcloud              ProjectProductInventoryTotalProductType = "icloud"
+	ProjectProductInventoryTotalProductTypeMicrosoft           ProjectProductInventoryTotalProductType = "microsoft"
+	ProjectProductInventoryTotalProductTypeMicrosoftEnterprise ProjectProductInventoryTotalProductType = "microsoft_enterprise"
+	ProjectProductInventoryTotalProductTypeProto               ProjectProductInventoryTotalProductType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductInventoryTotalProductType enum.
@@ -4174,6 +4187,8 @@ func (e ProjectProductInventoryTotalProductType) Valid() bool {
 	case ProjectProductInventoryTotalProductTypeIcloud:
 		return true
 	case ProjectProductInventoryTotalProductTypeMicrosoft:
+		return true
+	case ProjectProductInventoryTotalProductTypeMicrosoftEnterprise:
 		return true
 	case ProjectProductInventoryTotalProductTypeProto:
 		return true
@@ -4202,13 +4217,14 @@ func (e ProjectProductRequestStatus) Valid() bool {
 
 // Defines values for ProjectProductRequestType.
 const (
-	ProjectProductRequestTypeDaum         ProjectProductRequestType = "daum"
-	ProjectProductRequestTypeDomain       ProjectProductRequestType = "domain"
-	ProjectProductRequestTypeGmail        ProjectProductRequestType = "gmail"
-	ProjectProductRequestTypeGmailVariant ProjectProductRequestType = "gmail_variant"
-	ProjectProductRequestTypeIcloud       ProjectProductRequestType = "icloud"
-	ProjectProductRequestTypeMicrosoft    ProjectProductRequestType = "microsoft"
-	ProjectProductRequestTypeProto        ProjectProductRequestType = "proto"
+	ProjectProductRequestTypeDaum                ProjectProductRequestType = "daum"
+	ProjectProductRequestTypeDomain              ProjectProductRequestType = "domain"
+	ProjectProductRequestTypeGmail               ProjectProductRequestType = "gmail"
+	ProjectProductRequestTypeGmailVariant        ProjectProductRequestType = "gmail_variant"
+	ProjectProductRequestTypeIcloud              ProjectProductRequestType = "icloud"
+	ProjectProductRequestTypeMicrosoft           ProjectProductRequestType = "microsoft"
+	ProjectProductRequestTypeMicrosoftEnterprise ProjectProductRequestType = "microsoft_enterprise"
+	ProjectProductRequestTypeProto               ProjectProductRequestType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductRequestType enum.
@@ -4225,6 +4241,8 @@ func (e ProjectProductRequestType) Valid() bool {
 	case ProjectProductRequestTypeIcloud:
 		return true
 	case ProjectProductRequestTypeMicrosoft:
+		return true
+	case ProjectProductRequestTypeMicrosoftEnterprise:
 		return true
 	case ProjectProductRequestTypeProto:
 		return true
@@ -4253,13 +4271,14 @@ func (e ProjectProductSummaryStatus) Valid() bool {
 
 // Defines values for ProjectProductSummaryType.
 const (
-	ProjectProductSummaryTypeDaum         ProjectProductSummaryType = "daum"
-	ProjectProductSummaryTypeDomain       ProjectProductSummaryType = "domain"
-	ProjectProductSummaryTypeGmail        ProjectProductSummaryType = "gmail"
-	ProjectProductSummaryTypeGmailVariant ProjectProductSummaryType = "gmail_variant"
-	ProjectProductSummaryTypeIcloud       ProjectProductSummaryType = "icloud"
-	ProjectProductSummaryTypeMicrosoft    ProjectProductSummaryType = "microsoft"
-	ProjectProductSummaryTypeProto        ProjectProductSummaryType = "proto"
+	ProjectProductSummaryTypeDaum                ProjectProductSummaryType = "daum"
+	ProjectProductSummaryTypeDomain              ProjectProductSummaryType = "domain"
+	ProjectProductSummaryTypeGmail               ProjectProductSummaryType = "gmail"
+	ProjectProductSummaryTypeGmailVariant        ProjectProductSummaryType = "gmail_variant"
+	ProjectProductSummaryTypeIcloud              ProjectProductSummaryType = "icloud"
+	ProjectProductSummaryTypeMicrosoft           ProjectProductSummaryType = "microsoft"
+	ProjectProductSummaryTypeMicrosoftEnterprise ProjectProductSummaryType = "microsoft_enterprise"
+	ProjectProductSummaryTypeProto               ProjectProductSummaryType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the ProjectProductSummaryType enum.
@@ -4276,6 +4295,8 @@ func (e ProjectProductSummaryType) Valid() bool {
 	case ProjectProductSummaryTypeIcloud:
 		return true
 	case ProjectProductSummaryTypeMicrosoft:
+		return true
+	case ProjectProductSummaryTypeMicrosoftEnterprise:
 		return true
 	case ProjectProductSummaryTypeProto:
 		return true
@@ -6803,13 +6824,14 @@ func (e GetBotProjectsParamsAccessType) Valid() bool {
 
 // Defines values for GetBotProjectsParamsProductType.
 const (
-	GetBotProjectsParamsProductTypeDaum         GetBotProjectsParamsProductType = "daum"
-	GetBotProjectsParamsProductTypeDomain       GetBotProjectsParamsProductType = "domain"
-	GetBotProjectsParamsProductTypeGmail        GetBotProjectsParamsProductType = "gmail"
-	GetBotProjectsParamsProductTypeGmailVariant GetBotProjectsParamsProductType = "gmail_variant"
-	GetBotProjectsParamsProductTypeIcloud       GetBotProjectsParamsProductType = "icloud"
-	GetBotProjectsParamsProductTypeMicrosoft    GetBotProjectsParamsProductType = "microsoft"
-	GetBotProjectsParamsProductTypeProto        GetBotProjectsParamsProductType = "proto"
+	GetBotProjectsParamsProductTypeDaum                GetBotProjectsParamsProductType = "daum"
+	GetBotProjectsParamsProductTypeDomain              GetBotProjectsParamsProductType = "domain"
+	GetBotProjectsParamsProductTypeGmail               GetBotProjectsParamsProductType = "gmail"
+	GetBotProjectsParamsProductTypeGmailVariant        GetBotProjectsParamsProductType = "gmail_variant"
+	GetBotProjectsParamsProductTypeIcloud              GetBotProjectsParamsProductType = "icloud"
+	GetBotProjectsParamsProductTypeMicrosoft           GetBotProjectsParamsProductType = "microsoft"
+	GetBotProjectsParamsProductTypeMicrosoftEnterprise GetBotProjectsParamsProductType = "microsoft_enterprise"
+	GetBotProjectsParamsProductTypeProto               GetBotProjectsParamsProductType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the GetBotProjectsParamsProductType enum.
@@ -6826,6 +6848,8 @@ func (e GetBotProjectsParamsProductType) Valid() bool {
 	case GetBotProjectsParamsProductTypeIcloud:
 		return true
 	case GetBotProjectsParamsProductTypeMicrosoft:
+		return true
+	case GetBotProjectsParamsProductTypeMicrosoftEnterprise:
 		return true
 	case GetBotProjectsParamsProductTypeProto:
 		return true
@@ -7298,14 +7322,15 @@ func (e GetOrdersParamsServiceMode) Valid() bool {
 
 // Defines values for GetOrdersParamsProductType.
 const (
-	GetOrdersParamsProductTypeDaum         GetOrdersParamsProductType = "daum"
-	GetOrdersParamsProductTypeDomain       GetOrdersParamsProductType = "domain"
-	GetOrdersParamsProductTypeGmail        GetOrdersParamsProductType = "gmail"
-	GetOrdersParamsProductTypeGmailVariant GetOrdersParamsProductType = "gmail_variant"
-	GetOrdersParamsProductTypeIcloud       GetOrdersParamsProductType = "icloud"
-	GetOrdersParamsProductTypeMicrosoft    GetOrdersParamsProductType = "microsoft"
-	GetOrdersParamsProductTypeProto        GetOrdersParamsProductType = "proto"
-	GetOrdersParamsProductTypeRandom       GetOrdersParamsProductType = "random"
+	GetOrdersParamsProductTypeDaum                GetOrdersParamsProductType = "daum"
+	GetOrdersParamsProductTypeDomain              GetOrdersParamsProductType = "domain"
+	GetOrdersParamsProductTypeGmail               GetOrdersParamsProductType = "gmail"
+	GetOrdersParamsProductTypeGmailVariant        GetOrdersParamsProductType = "gmail_variant"
+	GetOrdersParamsProductTypeIcloud              GetOrdersParamsProductType = "icloud"
+	GetOrdersParamsProductTypeMicrosoft           GetOrdersParamsProductType = "microsoft"
+	GetOrdersParamsProductTypeMicrosoftEnterprise GetOrdersParamsProductType = "microsoft_enterprise"
+	GetOrdersParamsProductTypeProto               GetOrdersParamsProductType = "proto"
+	GetOrdersParamsProductTypeRandom              GetOrdersParamsProductType = "random"
 )
 
 // Valid indicates whether the value is a known member of the GetOrdersParamsProductType enum.
@@ -7322,6 +7347,8 @@ func (e GetOrdersParamsProductType) Valid() bool {
 	case GetOrdersParamsProductTypeIcloud:
 		return true
 	case GetOrdersParamsProductTypeMicrosoft:
+		return true
+	case GetOrdersParamsProductTypeMicrosoftEnterprise:
 		return true
 	case GetOrdersParamsProductTypeProto:
 		return true
@@ -7466,13 +7493,14 @@ func (e GetProjectsParamsAccessType) Valid() bool {
 
 // Defines values for GetProjectsParamsProductType.
 const (
-	GetProjectsParamsProductTypeDaum         GetProjectsParamsProductType = "daum"
-	GetProjectsParamsProductTypeDomain       GetProjectsParamsProductType = "domain"
-	GetProjectsParamsProductTypeGmail        GetProjectsParamsProductType = "gmail"
-	GetProjectsParamsProductTypeGmailVariant GetProjectsParamsProductType = "gmail_variant"
-	GetProjectsParamsProductTypeIcloud       GetProjectsParamsProductType = "icloud"
-	GetProjectsParamsProductTypeMicrosoft    GetProjectsParamsProductType = "microsoft"
-	GetProjectsParamsProductTypeProto        GetProjectsParamsProductType = "proto"
+	GetProjectsParamsProductTypeDaum                GetProjectsParamsProductType = "daum"
+	GetProjectsParamsProductTypeDomain              GetProjectsParamsProductType = "domain"
+	GetProjectsParamsProductTypeGmail               GetProjectsParamsProductType = "gmail"
+	GetProjectsParamsProductTypeGmailVariant        GetProjectsParamsProductType = "gmail_variant"
+	GetProjectsParamsProductTypeIcloud              GetProjectsParamsProductType = "icloud"
+	GetProjectsParamsProductTypeMicrosoft           GetProjectsParamsProductType = "microsoft"
+	GetProjectsParamsProductTypeMicrosoftEnterprise GetProjectsParamsProductType = "microsoft_enterprise"
+	GetProjectsParamsProductTypeProto               GetProjectsParamsProductType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the GetProjectsParamsProductType enum.
@@ -7489,6 +7517,8 @@ func (e GetProjectsParamsProductType) Valid() bool {
 	case GetProjectsParamsProductTypeIcloud:
 		return true
 	case GetProjectsParamsProductTypeMicrosoft:
+		return true
+	case GetProjectsParamsProductTypeMicrosoftEnterprise:
 		return true
 	case GetProjectsParamsProductTypeProto:
 		return true
@@ -8176,7 +8206,27 @@ type AdminDashboardStats struct {
 	MicrosoftCodeReceipts int `json:"microsoftCodeReceipts"`
 
 	// MicrosoftCodeSuccessRate Successful Microsoft code deliveries divided by charged, non-history Microsoft code orders created in the selected range across all users.
-	MicrosoftCodeSuccessRate float32 `json:"microsoftCodeSuccessRate"`
+	MicrosoftCodeSuccessRate           float32 `json:"microsoftCodeSuccessRate"`
+	MicrosoftEnterpriseAvailableEmails int     `json:"microsoftEnterpriseAvailableEmails"`
+
+	// MicrosoftEnterpriseAverageCodeReceiptSeconds Global average seconds from receiveStartedAt to the first matched code message for successful Microsoft enterprise code orders created in the selected range.
+	MicrosoftEnterpriseAverageCodeReceiptSeconds int `json:"microsoftEnterpriseAverageCodeReceiptSeconds"`
+
+	// MicrosoftEnterpriseAveragePurchaseActivationSeconds Global average seconds from receiveStartedAt to activatedAt for activated Microsoft enterprise purchase orders created in the selected range.
+	MicrosoftEnterpriseAveragePurchaseActivationSeconds int `json:"microsoftEnterpriseAveragePurchaseActivationSeconds"`
+
+	// MicrosoftEnterpriseCodeReceipts Successful deliveries for charged, non-history Microsoft enterprise code orders created in the selected range across all users.
+	MicrosoftEnterpriseCodeReceipts int `json:"microsoftEnterpriseCodeReceipts"`
+
+	// MicrosoftEnterpriseCodeSuccessRate Successful Microsoft enterprise code deliveries divided by charged, non-history Microsoft enterprise code orders created in the selected range across all users.
+	MicrosoftEnterpriseCodeSuccessRate float32 `json:"microsoftEnterpriseCodeSuccessRate"`
+
+	// MicrosoftEnterprisePurchaseActivationSuccessRate Activated Microsoft enterprise purchases divided by charged Microsoft enterprise purchase orders created in the selected range across all users.
+	MicrosoftEnterprisePurchaseActivationSuccessRate float32 `json:"microsoftEnterprisePurchaseActivationSuccessRate"`
+
+	// MicrosoftEnterprisePurchaseActivations Successfully activated charged Microsoft enterprise purchase orders created in the selected range across all users.
+	MicrosoftEnterprisePurchaseActivations int `json:"microsoftEnterprisePurchaseActivations"`
+	MicrosoftEnterpriseTotalEmails         int `json:"microsoftEnterpriseTotalEmails"`
 
 	// MicrosoftPurchaseActivationSuccessRate Activated Microsoft purchases divided by charged Microsoft purchase orders created in the selected range across all users.
 	MicrosoftPurchaseActivationSuccessRate float32 `json:"microsoftPurchaseActivationSuccessRate"`
@@ -8209,52 +8259,57 @@ type AdminDashboardStats struct {
 
 // AdminDashboardTrendPoint defines model for AdminDashboardTrendPoint.
 type AdminDashboardTrendPoint struct {
-	ActiveUsers                           int     `json:"activeUsers"`
-	DaumAvailableEmails                   int     `json:"daumAvailableEmails"`
-	DaumAverageCodeReceiptSeconds         int     `json:"daumAverageCodeReceiptSeconds"`
-	DaumCodeSuccessRate                   float32 `json:"daumCodeSuccessRate"`
-	DaumReceivedCodes                     int     `json:"daumReceivedCodes"`
-	DaumTotalEmails                       int     `json:"daumTotalEmails"`
-	DomainAvailableMailboxes              int     `json:"domainAvailableMailboxes"`
-	DomainAverageCodeReceiptSeconds       int     `json:"domainAverageCodeReceiptSeconds"`
-	DomainCodeSuccessRate                 float32 `json:"domainCodeSuccessRate"`
-	DomainReceivedCodes                   int     `json:"domainReceivedCodes"`
-	DomainTotalMailboxes                  int     `json:"domainTotalMailboxes"`
-	GmailAvailableEmails                  int     `json:"gmailAvailableEmails"`
-	GmailAverageCodeReceiptSeconds        int     `json:"gmailAverageCodeReceiptSeconds"`
-	GmailCodeSuccessRate                  float32 `json:"gmailCodeSuccessRate"`
-	GmailReceivedCodes                    int     `json:"gmailReceivedCodes"`
-	GmailTotalEmails                      int     `json:"gmailTotalEmails"`
-	GmailVariantAvailableEmails           int     `json:"gmailVariantAvailableEmails"`
-	GmailVariantAverageCodeReceiptSeconds int     `json:"gmailVariantAverageCodeReceiptSeconds"`
-	GmailVariantCodeSuccessRate           float32 `json:"gmailVariantCodeSuccessRate"`
-	GmailVariantReceivedCodes             int     `json:"gmailVariantReceivedCodes"`
-	GmailVariantTotalEmails               int     `json:"gmailVariantTotalEmails"`
-	IcloudAvailableEmails                 int     `json:"icloudAvailableEmails"`
-	IcloudAverageCodeReceiptSeconds       int     `json:"icloudAverageCodeReceiptSeconds"`
-	IcloudCodeSuccessRate                 float32 `json:"icloudCodeSuccessRate"`
-	IcloudReceivedCodes                   int     `json:"icloudReceivedCodes"`
-	IcloudTotalEmails                     int     `json:"icloudTotalEmails"`
-	Label                                 string  `json:"label"`
-	MicrosoftAvailableEmails              int     `json:"microsoftAvailableEmails"`
-	MicrosoftAverageCodeReceiptSeconds    int     `json:"microsoftAverageCodeReceiptSeconds"`
-	MicrosoftCodeSuccessRate              float32 `json:"microsoftCodeSuccessRate"`
-	MicrosoftReceivedCodes                int     `json:"microsoftReceivedCodes"`
-	MicrosoftTotalEmails                  int     `json:"microsoftTotalEmails"`
-	NewUsers                              int     `json:"newUsers"`
-	Orders                                int     `json:"orders"`
-	PlatformRevenue                       float32 `json:"platformRevenue"`
-	ProtoAvailableEmails                  int     `json:"protoAvailableEmails"`
-	ProtoAverageCodeReceiptSeconds        int     `json:"protoAverageCodeReceiptSeconds"`
-	ProtoCodeSuccessRate                  float32 `json:"protoCodeSuccessRate"`
-	ProtoReceivedCodes                    int     `json:"protoReceivedCodes"`
-	ProtoTotalEmails                      int     `json:"protoTotalEmails"`
-	RechargeAmount                        float32 `json:"rechargeAmount"`
-	RefundAmount                          float32 `json:"refundAmount"`
-	SpendAmount                           float32 `json:"spendAmount"`
-	SuccessfulCodeReceipts                int     `json:"successfulCodeReceipts"`
-	TotalUsers                            int     `json:"totalUsers"`
-	WithdrawAmount                        float32 `json:"withdrawAmount"`
+	ActiveUsers                                  int     `json:"activeUsers"`
+	DaumAvailableEmails                          int     `json:"daumAvailableEmails"`
+	DaumAverageCodeReceiptSeconds                int     `json:"daumAverageCodeReceiptSeconds"`
+	DaumCodeSuccessRate                          float32 `json:"daumCodeSuccessRate"`
+	DaumReceivedCodes                            int     `json:"daumReceivedCodes"`
+	DaumTotalEmails                              int     `json:"daumTotalEmails"`
+	DomainAvailableMailboxes                     int     `json:"domainAvailableMailboxes"`
+	DomainAverageCodeReceiptSeconds              int     `json:"domainAverageCodeReceiptSeconds"`
+	DomainCodeSuccessRate                        float32 `json:"domainCodeSuccessRate"`
+	DomainReceivedCodes                          int     `json:"domainReceivedCodes"`
+	DomainTotalMailboxes                         int     `json:"domainTotalMailboxes"`
+	GmailAvailableEmails                         int     `json:"gmailAvailableEmails"`
+	GmailAverageCodeReceiptSeconds               int     `json:"gmailAverageCodeReceiptSeconds"`
+	GmailCodeSuccessRate                         float32 `json:"gmailCodeSuccessRate"`
+	GmailReceivedCodes                           int     `json:"gmailReceivedCodes"`
+	GmailTotalEmails                             int     `json:"gmailTotalEmails"`
+	GmailVariantAvailableEmails                  int     `json:"gmailVariantAvailableEmails"`
+	GmailVariantAverageCodeReceiptSeconds        int     `json:"gmailVariantAverageCodeReceiptSeconds"`
+	GmailVariantCodeSuccessRate                  float32 `json:"gmailVariantCodeSuccessRate"`
+	GmailVariantReceivedCodes                    int     `json:"gmailVariantReceivedCodes"`
+	GmailVariantTotalEmails                      int     `json:"gmailVariantTotalEmails"`
+	IcloudAvailableEmails                        int     `json:"icloudAvailableEmails"`
+	IcloudAverageCodeReceiptSeconds              int     `json:"icloudAverageCodeReceiptSeconds"`
+	IcloudCodeSuccessRate                        float32 `json:"icloudCodeSuccessRate"`
+	IcloudReceivedCodes                          int     `json:"icloudReceivedCodes"`
+	IcloudTotalEmails                            int     `json:"icloudTotalEmails"`
+	Label                                        string  `json:"label"`
+	MicrosoftAvailableEmails                     int     `json:"microsoftAvailableEmails"`
+	MicrosoftAverageCodeReceiptSeconds           int     `json:"microsoftAverageCodeReceiptSeconds"`
+	MicrosoftCodeSuccessRate                     float32 `json:"microsoftCodeSuccessRate"`
+	MicrosoftEnterpriseAvailableEmails           int     `json:"microsoftEnterpriseAvailableEmails"`
+	MicrosoftEnterpriseAverageCodeReceiptSeconds int     `json:"microsoftEnterpriseAverageCodeReceiptSeconds"`
+	MicrosoftEnterpriseCodeSuccessRate           float32 `json:"microsoftEnterpriseCodeSuccessRate"`
+	MicrosoftEnterpriseReceivedCodes             int     `json:"microsoftEnterpriseReceivedCodes"`
+	MicrosoftEnterpriseTotalEmails               int     `json:"microsoftEnterpriseTotalEmails"`
+	MicrosoftReceivedCodes                       int     `json:"microsoftReceivedCodes"`
+	MicrosoftTotalEmails                         int     `json:"microsoftTotalEmails"`
+	NewUsers                                     int     `json:"newUsers"`
+	Orders                                       int     `json:"orders"`
+	PlatformRevenue                              float32 `json:"platformRevenue"`
+	ProtoAvailableEmails                         int     `json:"protoAvailableEmails"`
+	ProtoAverageCodeReceiptSeconds               int     `json:"protoAverageCodeReceiptSeconds"`
+	ProtoCodeSuccessRate                         float32 `json:"protoCodeSuccessRate"`
+	ProtoReceivedCodes                           int     `json:"protoReceivedCodes"`
+	ProtoTotalEmails                             int     `json:"protoTotalEmails"`
+	RechargeAmount                               float32 `json:"rechargeAmount"`
+	RefundAmount                                 float32 `json:"refundAmount"`
+	SpendAmount                                  float32 `json:"spendAmount"`
+	SuccessfulCodeReceipts                       int     `json:"successfulCodeReceipts"`
+	TotalUsers                                   int     `json:"totalUsers"`
+	WithdrawAmount                               float32 `json:"withdrawAmount"`
 }
 
 // AdminDomainBulkCommandRequest defines model for AdminDomainBulkCommandRequest.
@@ -9556,8 +9611,11 @@ type AdminMicrosoftBulkCommandRequest struct {
 
 // AdminMicrosoftBulkFilter defines model for AdminMicrosoftBulkFilter.
 type AdminMicrosoftBulkFilter struct {
-	CreatedFrom    *time.Time                    `json:"createdFrom,omitempty"`
-	CreatedTo      *time.Time                    `json:"createdTo,omitempty"`
+	CreatedFrom *time.Time `json:"createdFrom,omitempty"`
+	CreatedTo   *time.Time `json:"createdTo,omitempty"`
+
+	// Enterprise Select enterprise Microsoft resources; omitted means personal Microsoft resources.
+	Enterprise     *bool                         `json:"enterprise,omitempty"`
 	ForSale        *bool                         `json:"forSale,omitempty"`
 	GraphAvailable *bool                         `json:"graphAvailable,omitempty"`
 	LongLived      *bool                         `json:"longLived,omitempty"`
@@ -10920,7 +10978,7 @@ type CreateOrderBatchItemResponseStatus string
 
 // CreateOrderBatchRequest defines model for CreateOrderBatchRequest.
 type CreateOrderBatchRequest struct {
-	// EmailSuffix Product selector. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted.
+	// EmailSuffix Product selector. microsoft_enterprise randomly selects an available tenant.onmicrosoft.com suffix from Microsoft enterprise inventory; an exact tenant.onmicrosoft.com suffix selects that tenant. Enterprise products allocate only the main mailbox. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted.
 	EmailSuffix string `json:"emailSuffix"`
 	ProjectId   int    `json:"projectId"`
 
@@ -10933,7 +10991,7 @@ type CreateOrderBatchResponse = []CreateOrderBatchItemResponse
 
 // CreateOrderRequest defines model for CreateOrderRequest.
 type CreateOrderRequest struct {
-	// EmailSuffix Product selector. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted.
+	// EmailSuffix Product selector. microsoft_enterprise randomly selects an available tenant.onmicrosoft.com suffix from Microsoft enterprise inventory; an exact tenant.onmicrosoft.com suffix selects that tenant. Enterprise products allocate only the main mailbox. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted.
 	EmailSuffix string `json:"emailSuffix"`
 	ProjectId   int    `json:"projectId"`
 }
@@ -12374,15 +12432,16 @@ type OrderPickupCredentialsResponse = []OrderPickupCredentialResponse
 
 // OrderProductTypeFacets defines model for OrderProductTypeFacets.
 type OrderProductTypeFacets struct {
-	All          int64 `json:"all"`
-	Daum         int64 `json:"daum"`
-	Domain       int64 `json:"domain"`
-	Gmail        int64 `json:"gmail"`
-	GmailVariant int64 `json:"gmailVariant"`
-	Icloud       int64 `json:"icloud"`
-	Microsoft    int64 `json:"microsoft"`
-	Proto        int64 `json:"proto"`
-	Random       int64 `json:"random"`
+	All                 int64  `json:"all"`
+	Daum                int64  `json:"daum"`
+	Domain              int64  `json:"domain"`
+	Gmail               int64  `json:"gmail"`
+	GmailVariant        int64  `json:"gmailVariant"`
+	Icloud              int64  `json:"icloud"`
+	Microsoft           int64  `json:"microsoft"`
+	MicrosoftEnterprise *int64 `json:"microsoft_enterprise,omitempty"`
+	Proto               int64  `json:"proto"`
+	Random              int64  `json:"random"`
 }
 
 // OrderProjectFacet defines model for OrderProjectFacet.
@@ -12893,20 +12952,21 @@ type ProjectDetailResponse struct {
 
 // ProjectInventoryResponse defines model for ProjectInventoryResponse.
 type ProjectInventoryResponse struct {
-	ActiveDaumAllocations      *int               `json:"activeDaumAllocations,omitempty"`
-	ActiveDomainAllocations    int                `json:"activeDomainAllocations"`
-	ActiveGmailAllocations     int                `json:"activeGmailAllocations"`
-	ActiveICloudAllocations    int                `json:"activeICloudAllocations"`
-	ActiveMicrosoftAllocations int                `json:"activeMicrosoftAllocations"`
-	ActiveProtoAllocations     *int               `json:"activeProtoAllocations,omitempty"`
-	Daum                       DaumInventory      `json:"daum"`
-	Domain                     DomainInventory    `json:"domain"`
-	Gmail                      GmailInventory     `json:"gmail"`
-	Icloud                     ICloudInventory    `json:"icloud"`
-	Microsoft                  MicrosoftInventory `json:"microsoft"`
-	ProjectId                  int                `json:"projectId"`
-	Proto                      ProtoInventory     `json:"proto"`
-	TotalAvailable             int                `json:"totalAvailable"`
+	ActiveDaumAllocations      *int                `json:"activeDaumAllocations,omitempty"`
+	ActiveDomainAllocations    int                 `json:"activeDomainAllocations"`
+	ActiveGmailAllocations     int                 `json:"activeGmailAllocations"`
+	ActiveICloudAllocations    int                 `json:"activeICloudAllocations"`
+	ActiveMicrosoftAllocations int                 `json:"activeMicrosoftAllocations"`
+	ActiveProtoAllocations     *int                `json:"activeProtoAllocations,omitempty"`
+	Daum                       DaumInventory       `json:"daum"`
+	Domain                     DomainInventory     `json:"domain"`
+	Gmail                      GmailInventory      `json:"gmail"`
+	Icloud                     ICloudInventory     `json:"icloud"`
+	Microsoft                  MicrosoftInventory  `json:"microsoft"`
+	MicrosoftEnterprise        *MicrosoftInventory `json:"microsoftEnterprise,omitempty"`
+	ProjectId                  int                 `json:"projectId"`
+	Proto                      ProtoInventory      `json:"proto"`
+	TotalAvailable             int                 `json:"totalAvailable"`
 }
 
 // ProjectInventoryTotalResponse defines model for ProjectInventoryTotalResponse.
@@ -13163,14 +13223,15 @@ type ProjectProductSummaryType string
 
 // ProjectProductTypeFacets defines model for ProjectProductTypeFacets.
 type ProjectProductTypeFacets struct {
-	All          int `json:"all"`
-	Daum         int `json:"daum"`
-	Domain       int `json:"domain"`
-	Gmail        int `json:"gmail"`
-	GmailVariant int `json:"gmailVariant"`
-	Icloud       int `json:"icloud"`
-	Microsoft    int `json:"microsoft"`
-	Proto        int `json:"proto"`
+	All                 int    `json:"all"`
+	Daum                int    `json:"daum"`
+	Domain              int    `json:"domain"`
+	Gmail               int    `json:"gmail"`
+	GmailVariant        int    `json:"gmailVariant"`
+	Icloud              int    `json:"icloud"`
+	Microsoft           int    `json:"microsoft"`
+	MicrosoftEnterprise *int64 `json:"microsoft_enterprise,omitempty"`
+	Proto               int    `json:"proto"`
 }
 
 // ProjectStatusFacets defines model for ProjectStatusFacets.
@@ -13780,6 +13841,9 @@ type ResourceBulkFilter struct {
 
 	// CreatedTo Inclusive resource creation upper bound. The frontend must send ISO date-time.
 	CreatedTo *time.Time `json:"createdTo,omitempty"`
+
+	// Enterprise Select enterprise Microsoft resources; omitted means personal Microsoft resources.
+	Enterprise *bool `json:"enterprise,omitempty"`
 
 	// ForSale Microsoft public supply filter. false is private; true is public sale.
 	ForSale *bool `json:"forSale,omitempty"`
@@ -16152,6 +16216,9 @@ type PostAdminProxyCheckParams struct {
 
 // GetAdminMicrosoftResourcesParams defines parameters for GetAdminMicrosoftResources.
 type GetAdminMicrosoftResourcesParams struct {
+	// Enterprise Select Microsoft enterprise mailboxes under tenant.onmicrosoft.com. Defaults to personal Microsoft mailboxes.
+	Enterprise *bool `form:"enterprise,omitempty" json:"enterprise,omitempty"`
+
 	// Type This administrator query is limited to Microsoft resources.
 	Type GetAdminMicrosoftResourcesParamsType `form:"type" json:"type"`
 
@@ -16209,6 +16276,8 @@ type PostAdminMicrosoftResourcesDisableParams struct {
 
 // PostAdminMicrosoftResourceImportMultipartBody defines parameters for PostAdminMicrosoftResourceImport.
 type PostAdminMicrosoftResourceImportMultipartBody struct {
+	// Enterprise Require email----password----clientId----refreshToken with a tenant.onmicrosoft.com address; validate receive access and project history without aliases or recovery binding.
+	Enterprise    *bool                                                      `json:"enterprise,omitempty"`
 	ErrorStrategy PostAdminMicrosoftResourceImportMultipartBodyErrorStrategy `json:"errorStrategy"`
 
 	// File UTF-8 TXT using one of the four documented `----`-delimited credential line formats.
@@ -17693,8 +17762,10 @@ type PostRechargeQuoteParams struct {
 
 // GetResourcesParams defines parameters for GetResources.
 type GetResourcesParams struct {
-	Scope *string                 `form:"scope,omitempty" json:"scope,omitempty"`
-	Type  *GetResourcesParamsType `form:"type,omitempty" json:"type,omitempty"`
+	// Enterprise Select Microsoft enterprise mailboxes under tenant.onmicrosoft.com. Defaults to personal Microsoft mailboxes.
+	Enterprise *bool                   `form:"enterprise,omitempty" json:"enterprise,omitempty"`
+	Scope      *string                 `form:"scope,omitempty" json:"scope,omitempty"`
+	Type       *GetResourcesParamsType `form:"type,omitempty" json:"type,omitempty"`
 
 	// Search Unified fuzzy search. Microsoft matches email and suffix; domain matches domain and TLD.
 	Search *string `form:"search,omitempty" json:"search,omitempty"`
@@ -17750,6 +17821,9 @@ type PostResourceDeleteBatchParams struct {
 
 // PostResourceImportMultipartBody defines parameters for PostResourceImport.
 type PostResourceImportMultipartBody struct {
+	// Enterprise Require email----password----clientId----refreshToken with a tenant.onmicrosoft.com address; validate receive access and project history without aliases or recovery binding.
+	Enterprise *bool `json:"enterprise,omitempty"`
+
 	// ErrorStrategy Row-level import error strategy. skip imports valid rows and records skipped row details; abort fails the import on the first row-level error.
 	ErrorStrategy *PostResourceImportMultipartBodyErrorStrategy `json:"errorStrategy,omitempty"`
 	File          openapi_types.File                            `json:"file"`
@@ -33337,6 +33411,14 @@ func (siw *ServerInterfaceWrapper) GetAdminMicrosoftResources(c *gin.Context) {
 	// Parameter object where we will unmarshal all parameters from the context
 	var params GetAdminMicrosoftResourcesParams
 
+	// ------------- Optional query parameter "enterprise" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "enterprise", c.Request.URL.Query(), &params.Enterprise, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter enterprise: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	// ------------- Required query parameter "type" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, true, "type", c.Request.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
@@ -43785,6 +43867,14 @@ func (siw *ServerInterfaceWrapper) GetResources(c *gin.Context) {
 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params GetResourcesParams
+
+	// ------------- Optional query parameter "enterprise" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "enterprise", c.Request.URL.Query(), &params.Enterprise, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter enterprise: %w", err), http.StatusBadRequest)
+		return
+	}
 
 	// ------------- Optional query parameter "scope" -------------
 

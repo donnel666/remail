@@ -235,6 +235,7 @@ func microsoftValidationCandidateQuery(ctx context.Context, tx *gorm.DB, ownerUs
 		Table("email_resources AS er").
 		Joins("JOIN microsoft_resources AS ms ON ms.id = er.id").
 		Where("er.type = ?", string(domain.ResourceTypeMicrosoft)).
+		Where("(ms.email_domain LIKE ?) = ?", "%.onmicrosoft.com", filter.Enterprise).
 		Where("er.id <= ?", throughID).
 		Where("ms.status NOT IN ?", []string{string(domain.MicrosoftStatusDeleted), string(domain.MicrosoftStatusDisabled)})
 	if !selection.AdminScope {

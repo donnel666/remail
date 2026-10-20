@@ -527,7 +527,7 @@ func TestAdminGuardWaitsForAllocationRootThenSeesActiveAllocationMySQL(t *testin
 	lockedRoot, err := repo.LockResourceRoot(allocationCtx, 1000, domain.AllocationTypeMicrosoft)
 	require.NoError(t, err)
 	require.True(t, lockedRoot)
-	lockedCandidate, err := repo.LockMicrosoftCandidate(allocationCtx, 1000, 10, 2, domain.SupplyScopePublic, domain.MicrosoftMailboxMain, "")
+	lockedCandidate, err := repo.LockMicrosoftCandidate(allocationCtx, 1000, 10, 2, domain.SupplyScopePublic, domain.MicrosoftMailboxMain, "", false)
 	require.NoError(t, err)
 	require.NotNil(t, lockedCandidate)
 
@@ -1638,7 +1638,7 @@ VALUES (1001, 1, 'high@hotmail.com', 'normal')`).Error)
 
 	candidates, err := NewRepo(db).ListMicrosoftSourceCandidates(
 		context.Background(), 10, 2, domain.SupplyScopePublic,
-		domain.MicrosoftMailboxMain, []uint16{1000, 1001}, 2, "hotmail.com",
+		domain.MicrosoftMailboxMain, []uint16{1000, 1001}, 2, "hotmail.com", false,
 	)
 	require.NoError(t, err)
 	require.Len(t, candidates, 2)
@@ -1665,7 +1665,7 @@ func (l *candidateSQLCapture) Trace(ctx context.Context, begin time.Time, fc fun
 
 func TestMicrosoftCandidatesRequireBoundedBuckets(t *testing.T) {
 	for _, buckets := range [][]uint16{nil, {}, make([]uint16, 101), {allocapp.MicrosoftBucketCount}} {
-		_, err := NewRepo(nil).ListMicrosoftSourceCandidates(context.Background(), 10, 2, domain.SupplyScopePublic, domain.MicrosoftMailboxMain, buckets, 4, "example.com")
+		_, err := NewRepo(nil).ListMicrosoftSourceCandidates(context.Background(), 10, 2, domain.SupplyScopePublic, domain.MicrosoftMailboxMain, buckets, 4, "example.com", false)
 		require.ErrorIs(t, err, domain.ErrInvalidAllocationRequest)
 	}
 }
@@ -1719,7 +1719,7 @@ func TestMicrosoftCandidatePlansStayWithinRequestedBucketsMySQL(t *testing.T) {
 	for _, selectedBuckets := range [][]uint16{{bucket}, expanded} {
 		candidates, err := repo.ListMicrosoftSourceCandidates(
 			context.Background(), 10, 2, domain.SupplyScopePublic,
-			domain.MicrosoftMailboxMain, selectedBuckets, 8, "example.com",
+			domain.MicrosoftMailboxMain, selectedBuckets, 8, "example.com", false,
 		)
 		require.NoError(t, err)
 		require.Empty(t, candidates)
@@ -1750,7 +1750,7 @@ func TestMicrosoftCandidatePlansStayWithinRequestedBucketsMySQL(t *testing.T) {
 	require.LessOrEqual(t, expandedAliasWork, float64(100))
 
 	capture.queries = nil
-	candidates, err := repo.ListMicrosoftSourceCandidates(context.Background(), 10, 2, domain.SupplyScopePublic, domain.MicrosoftMailboxMain, expanded, 8, "")
+	candidates, err := repo.ListMicrosoftSourceCandidates(context.Background(), 10, 2, domain.SupplyScopePublic, domain.MicrosoftMailboxMain, expanded, 8, "", false)
 	require.NoError(t, err)
 	require.Empty(t, candidates)
 	require.Len(t, capture.queries, 2)

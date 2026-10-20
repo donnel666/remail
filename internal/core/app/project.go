@@ -28,51 +28,57 @@ const (
 const ProjectBulkMaxExplicitIDs = 1000
 
 var projectPriceFallbacks = map[string]string{
-	"default_project_microsoft_code_price":                  "8",
-	"default_project_microsoft_code_supplier_price":         "5",
-	"default_project_microsoft_purchase_price":              "10",
-	"default_project_microsoft_purchase_supplier_price":     "7",
-	"default_project_domain_code_price":                     "80",
-	"default_project_domain_code_supplier_price":            "40",
-	"default_project_domain_purchase_price":                 "0",
-	"default_project_domain_purchase_supplier_price":        "0",
-	"default_project_gmail_code_price":                      "8",
-	"default_project_gmail_code_supplier_price":             "0",
-	"default_project_gmail_purchase_price":                  "0",
-	"default_project_gmail_purchase_supplier_price":         "0",
-	"default_project_gmail_variant_code_price":              "8",
-	"default_project_gmail_variant_code_supplier_price":     "0",
-	"default_project_gmail_variant_purchase_price":          "0",
-	"default_project_gmail_variant_purchase_supplier_price": "0",
-	"default_project_icloud_code_price":                     "8",
-	"default_project_icloud_code_supplier_price":            "5",
-	"default_project_icloud_purchase_price":                 "10",
-	"default_project_icloud_purchase_supplier_price":        "7",
-	"default_project_proto_code_price":                      "8",
-	"default_project_daum_code_price":                       "8",
-	"default_project_proto_code_supplier_price":             "5",
-	"default_project_daum_code_supplier_price":              "5",
-	"default_project_proto_purchase_price":                  "10",
-	"default_project_daum_purchase_price":                   "10",
-	"default_project_proto_purchase_supplier_price":         "7",
-	"default_project_daum_purchase_supplier_price":          "7",
+	"default_project_microsoft_enterprise_code_price":              "8",
+	"default_project_microsoft_enterprise_code_supplier_price":     "5",
+	"default_project_microsoft_enterprise_purchase_price":          "10",
+	"default_project_microsoft_enterprise_purchase_supplier_price": "7",
+	"default_project_microsoft_code_price":                         "8",
+	"default_project_microsoft_code_supplier_price":                "5",
+	"default_project_microsoft_purchase_price":                     "10",
+	"default_project_microsoft_purchase_supplier_price":            "7",
+	"default_project_domain_code_price":                            "80",
+	"default_project_domain_code_supplier_price":                   "40",
+	"default_project_domain_purchase_price":                        "0",
+	"default_project_domain_purchase_supplier_price":               "0",
+	"default_project_gmail_code_price":                             "8",
+	"default_project_gmail_code_supplier_price":                    "0",
+	"default_project_gmail_purchase_price":                         "0",
+	"default_project_gmail_purchase_supplier_price":                "0",
+	"default_project_gmail_variant_code_price":                     "8",
+	"default_project_gmail_variant_code_supplier_price":            "0",
+	"default_project_gmail_variant_purchase_price":                 "0",
+	"default_project_gmail_variant_purchase_supplier_price":        "0",
+	"default_project_icloud_code_price":                            "8",
+	"default_project_icloud_code_supplier_price":                   "5",
+	"default_project_icloud_purchase_price":                        "10",
+	"default_project_icloud_purchase_supplier_price":               "7",
+	"default_project_proto_code_price":                             "8",
+	"default_project_daum_code_price":                              "8",
+	"default_project_proto_code_supplier_price":                    "5",
+	"default_project_daum_code_supplier_price":                     "5",
+	"default_project_proto_purchase_price":                         "10",
+	"default_project_daum_purchase_price":                          "10",
+	"default_project_proto_purchase_supplier_price":                "7",
+	"default_project_daum_purchase_supplier_price":                 "7",
 }
 
 var projectServiceFallbacks = map[string]bool{
-	"default_project_microsoft_code_enabled":         true,
-	"default_project_microsoft_purchase_enabled":     true,
-	"default_project_domain_code_enabled":            true,
-	"default_project_domain_purchase_enabled":        false,
-	"default_project_gmail_code_enabled":             true,
-	"default_project_gmail_purchase_enabled":         false,
-	"default_project_gmail_variant_code_enabled":     true,
-	"default_project_gmail_variant_purchase_enabled": false,
-	"default_project_icloud_code_enabled":            true,
-	"default_project_icloud_purchase_enabled":        true,
-	"default_project_proto_code_enabled":             true,
-	"default_project_daum_code_enabled":              true,
-	"default_project_proto_purchase_enabled":         true,
-	"default_project_daum_purchase_enabled":          true,
+	"default_project_microsoft_enterprise_code_enabled":     true,
+	"default_project_microsoft_enterprise_purchase_enabled": true,
+	"default_project_microsoft_code_enabled":                true,
+	"default_project_microsoft_purchase_enabled":            true,
+	"default_project_domain_code_enabled":                   true,
+	"default_project_domain_purchase_enabled":               false,
+	"default_project_gmail_code_enabled":                    true,
+	"default_project_gmail_purchase_enabled":                false,
+	"default_project_gmail_variant_code_enabled":            true,
+	"default_project_gmail_variant_purchase_enabled":        false,
+	"default_project_icloud_code_enabled":                   true,
+	"default_project_icloud_purchase_enabled":               true,
+	"default_project_proto_code_enabled":                    true,
+	"default_project_daum_code_enabled":                     true,
+	"default_project_proto_purchase_enabled":                true,
+	"default_project_daum_purchase_enabled":                 true,
 }
 
 func projectNameMaxValue() int {
@@ -167,14 +173,15 @@ type ProjectMatchFacets struct {
 }
 
 type ProjectProductTypeFacets struct {
-	All          int64
-	Microsoft    int64
-	Domain       int64
-	Gmail        int64
-	GmailVariant int64
-	ICloud       int64
-	Proto        int64
-	Daum         int64
+	All                 int64
+	Microsoft           int64
+	MicrosoftEnterprise int64
+	Domain              int64
+	Gmail               int64
+	GmailVariant        int64
+	ICloud              int64
+	Proto               int64
+	Daum                int64
 }
 
 type ProjectListFacets struct {
@@ -727,7 +734,7 @@ func (uc *ProjectUseCase) notifyApplication(ctx context.Context, project domain.
 
 func projectHasMicrosoftProduct(products []domain.Product) bool {
 	for _, product := range products {
-		if product.Type == domain.ProductTypeMicrosoft {
+		if product.Type == domain.ProductTypeMicrosoft || product.Type == domain.ProductTypeMicrosoftEnterprise {
 			return true
 		}
 	}
@@ -1107,7 +1114,7 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled, 
 			product.MainWeight = 0
 			product.DotWeight = 0
 			product.PlusWeight = 1
-		case domain.ProductTypeDaum:
+		case domain.ProductTypeDaum, domain.ProductTypeMicrosoftEnterprise:
 			if product.DotWeight != 0 || product.PlusWeight != 0 {
 				return nil, domain.ErrInvalidProduct
 			}
@@ -1123,7 +1130,7 @@ func normalizeProductRequests(requests []ProjectProductRequest, requireEnabled, 
 		if product.PurchaseEnabled && (product.ActivationWindowMinutes <= 0 || product.WarrantyMinutes <= 0) {
 			return nil, domain.ErrInvalidProduct
 		}
-		if (product.Type == domain.ProductTypeMicrosoft || product.Type == domain.ProductTypeGmail || product.Type == domain.ProductTypeGmailVariant || product.Type == domain.ProductTypeICloud || product.Type == domain.ProductTypeProto || product.Type == domain.ProductTypeDaum) && product.MainWeight+product.DotWeight+product.PlusWeight <= 0 {
+		if (product.Type == domain.ProductTypeMicrosoft || product.Type == domain.ProductTypeMicrosoftEnterprise || product.Type == domain.ProductTypeGmail || product.Type == domain.ProductTypeGmailVariant || product.Type == domain.ProductTypeICloud || product.Type == domain.ProductTypeProto || product.Type == domain.ProductTypeDaum) && product.MainWeight+product.DotWeight+product.PlusWeight <= 0 {
 			return nil, domain.ErrInvalidProduct
 		}
 		if product.Type == domain.ProductTypeDomain {

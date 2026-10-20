@@ -24,13 +24,14 @@ const (
 type ProductType string
 
 const (
-	ProductTypeMicrosoft    ProductType = "microsoft"
-	ProductTypeDomain       ProductType = "domain"
-	ProductTypeGmail        ProductType = "gmail"
-	ProductTypeGmailVariant ProductType = "gmail_variant"
-	ProductTypeICloud       ProductType = "icloud"
-	ProductTypeProto        ProductType = "proto"
-	ProductTypeDaum         ProductType = "daum"
+	ProductTypeMicrosoft           ProductType = "microsoft"
+	ProductTypeMicrosoftEnterprise ProductType = "microsoft_enterprise"
+	ProductTypeDomain              ProductType = "domain"
+	ProductTypeGmail               ProductType = "gmail"
+	ProductTypeGmailVariant        ProductType = "gmail_variant"
+	ProductTypeICloud              ProductType = "icloud"
+	ProductTypeProto               ProductType = "proto"
+	ProductTypeDaum                ProductType = "daum"
 
 	// ProductTypeLegacyRandom is read only. New checkout quotes reject it.
 	ProductTypeLegacyRandom ProductType = "random"

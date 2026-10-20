@@ -270,3 +270,11 @@ describe("Daum fixed suffix products", () => {
     expect(mocks.toastError).not.toHaveBeenCalled();
   });
 });
+
+it("uses a separate selector and tenant suffixes for Microsoft enterprise products", () => {
+  const product = { type: "microsoft_enterprise", codeEnabled: true, purchaseEnabled: true } as ProjectProductSummary;
+  const products = toWorkbenchProducts(10, product, { productType: "microsoft_enterprise", totalAvailable: 1, publicAvailable: 1, suffixes: [{ suffix: "tenant.onmicrosoft.com", totalAvailable: 1, publicAvailable: 1 }] });
+  expect(products[0].emailSuffix).toBe("microsoft_enterprise");
+  expect(products[0].productType).toBe("microsoft_enterprise");
+  expect(products[1].emailSuffix).toBe("tenant.onmicrosoft.com");
+});

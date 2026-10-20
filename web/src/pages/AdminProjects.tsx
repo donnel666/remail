@@ -90,7 +90,7 @@ const projectLogoGalleryStorageKey = "remail.project.logo.gallery.v1";
 
 type ProjectStatusFilter = "all" | "reviewing" | "listed" | "delisted";
 type BooleanFilter = "all" | "yes" | "no";
-const projectProductTypes = ["microsoft", "domain", "gmail", "gmail_variant", "icloud", "proto", "daum"] as const;
+const projectProductTypes = ["microsoft", "microsoft_enterprise", "domain", "gmail", "gmail_variant", "icloud", "proto", "daum"] as const;
 type ProjectProductType = (typeof projectProductTypes)[number];
 type ProjectProductStatus = "enabled" | "disabled";
 type ProjectProductTypeFilter = "all" | ProjectProductType;
@@ -170,6 +170,7 @@ const protoProjectPriceDefaults = {
 
 const fallbackProjectPriceDefaults: ProjectPriceDefaults = {
   microsoft: microsoftProjectPriceDefaults,
+  microsoft_enterprise: microsoftProjectPriceDefaults,
   icloud: microsoftProjectPriceDefaults,
   domain: {
     codeEnabled: true,
@@ -213,6 +214,7 @@ function projectPriceDefaultsFromValues(
   };
   return {
     microsoft: readProduct("microsoft"),
+    microsoft_enterprise: readProduct("microsoft_enterprise"),
     domain: readProduct("domain"),
     gmail: readProduct("gmail"),
     gmail_variant: readProduct("gmail_variant"),
@@ -267,7 +269,7 @@ function createDefaultProduct(
     codeSupplierPrice: priceDefaults[type].codeSupplierPrice,
     codeWindowMinutes: "10",
     dotWeight: "0",
-    mainWeight: hasMailboxWeights || type === "gmail" || type === "proto" || type === "daum" ? "1" : "0",
+    mainWeight: hasMailboxWeights || type === "gmail" || type === "proto" || type === "daum" || type === "microsoft_enterprise" ? "1" : "0",
     plusWeight: type === "gmail_variant" ? "1" : "0",
     purchaseEnabled: priceDefaults[type].purchaseEnabled,
     purchasePrice: priceDefaults[type].purchasePrice,
@@ -320,6 +322,7 @@ function booleanTag(value: boolean, t: (key: string) => string) {
 }
 
 function productTypeLabel(type: string, t: (key: string) => string) {
+  if (type === "microsoft_enterprise") return t("Microsoft Enterprise Emails");
   if (type === "microsoft") return t("Microsoft email");
   if (type === "domain") return t("Domain email");
   if (type === "gmail") return t("Gmail email");
@@ -533,7 +536,7 @@ function productDraftToRequest(
         ? 1
         : hasMailboxWeights
           ? toNonNegativeInt(product.mainWeight)
-          : product.type === "proto" || product.type === "daum" ? 1 : 0,
+          : product.type === "proto" || product.type === "daum" || product.type === "microsoft_enterprise" ? 1 : 0,
     plusWeight:
       product.type === "gmail_variant"
         ? 1
@@ -1851,6 +1854,7 @@ export default function AdminProjects() {
         gmail_variant: 0,
         icloud: 0,
         microsoft: 0,
+        microsoft_enterprise: 0,
         proto: 0,
         daum: 0,
       },
@@ -1882,6 +1886,7 @@ export default function AdminProjects() {
         gmail_variant: facets.productType.gmailVariant,
         icloud: facets.productType.icloud,
         microsoft: facets.productType.microsoft,
+        microsoft_enterprise: facets.productType.microsoft_enterprise ?? 0,
         proto: facets.productType.proto,
         daum: facets.productType.daum,
       },

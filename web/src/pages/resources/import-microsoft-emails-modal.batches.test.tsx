@@ -44,12 +44,12 @@ import { ImportMicrosoftEmailsModal } from "./import-microsoft-emails-modal";
 const lines = ["first@outlook.com----  密码  ", "second@hotmail.com----next", "third@outlook.com----final"];
 const owners = [{ id: 7, email: "admin@example.com", nickname: "Admin", role: "admin" as const, groupName: "Admin", enabled: true }];
 
-function showImport(admin: boolean, content: string) {
+function showImport(admin: boolean, content: string, enterprise = false) {
   const onClose = vi.fn();
   const onImported = vi.fn();
   const view = render(admin
-    ? <ImportMicrosoftModal visible owners={owners} onCancel={onClose} onImported={onImported} />
-    : <ImportMicrosoftEmailsModal open onOpenChange={onClose} onSuccess={onImported} />);
+    ? <ImportMicrosoftModal enterprise={enterprise} visible owners={owners} onCancel={onClose} onImported={onImported} />
+    : <ImportMicrosoftEmailsModal enterprise={enterprise} open onOpenChange={onClose} onSuccess={onImported} />);
   fireEvent.click(screen.getByRole("button", { name: "TXT file" }));
   const file = Object.assign(new File([content], "accounts.txt", { type: "text/plain" }), {
     arrayBuffer: async () => new TextEncoder().encode(content).buffer,
@@ -83,6 +83,20 @@ describe("Microsoft batch import dialogs", () => {
     mocks.turnstile.mockImplementation(async () => `token-${++token}`);
   });
   afterEach(() => cleanup());
+
+  it.each([false, true])("imports enterprise accounts without lifetime or binding controls (admin=%s)", async (admin) => {
+    const view = showImport(admin, "u@tenant.onmicrosoft.com----p----c----r", true);
+    expect(screen.queryByRole("button", { name: "Long-lived" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Short-lived" })).not.toBeInTheDocument();
+    expect(screen.getByText("user@tenant.onmicrosoft.com----password----clientId----refreshToken")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    await waitFor(() => expect(view.onImported).toHaveBeenCalledOnce());
+    if (admin) expect(view.upload.mock.calls[0][0]).toMatchObject({ enterprise: true, longLived: false });
+    else {
+      expect(view.upload.mock.calls[0][1]).toBe(false);
+      expect(view.upload.mock.calls[0][5]).toBe(true);
+    }
+  });
 
   it.each([false, true])("uploads every whole-line batch with unchanged options (admin=%s)", async (admin) => {
     const content = lines.join("\n");

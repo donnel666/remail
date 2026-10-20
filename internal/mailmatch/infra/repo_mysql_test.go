@@ -1131,7 +1131,7 @@ VALUES
     (10, 'recipient', 'exact', TRUE),
     (10, 'sender', 'noreply@github\\.com', TRUE)`).Error)
 	repo := NewRepo(db, nil)
-	scopes, err := repo.ListHistoricalProjectScopes(context.Background())
+	scopes, err := repo.ListHistoricalProjectScopes(context.Background(), false)
 	require.NoError(t, err)
 	require.Len(t, scopes, 1)
 	require.Len(t, scopes[0].Rules, 2)
@@ -1140,7 +1140,7 @@ VALUES
 	var lockedRuleIDs []uint
 	require.NoError(t, locker.Raw("SELECT id FROM project_mail_rules WHERE project_id = ? FOR UPDATE", 10).Scan(&lockedRuleIDs).Error)
 	readCtx, cancelRead := context.WithTimeout(context.Background(), time.Second)
-	currentScopes, err := repo.ListHistoricalProjectScopes(readCtx)
+	currentScopes, err := repo.ListHistoricalProjectScopes(readCtx, false)
 	cancelRead()
 	require.NoError(t, err, "historical scope reads must not wait on project rule write locks")
 	require.Equal(t, scopes, currentScopes)
@@ -1153,7 +1153,7 @@ INSERT INTO microsoft_resource_project_matches(
     resource_id, project_id, first_matched_at, last_matched_at, evidence_count, last_scanned_at
 ) VALUES (100, 10, ?, ?, 1, ?)`, first, last, last).Error)
 	require.NoError(t, repo.WithTx(context.Background(), func(txCtx context.Context) error {
-		currentScopes, err := repo.ListHistoricalProjectScopes(txCtx)
+		currentScopes, err := repo.ListHistoricalProjectScopes(txCtx, false)
 		require.NoError(t, err)
 		require.Equal(t, scopes, currentScopes)
 		return repo.ClearLegacyMicrosoftProjectHistory(txCtx, 100, 10)

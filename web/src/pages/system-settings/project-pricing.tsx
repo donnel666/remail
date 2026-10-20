@@ -11,11 +11,17 @@ import { SettingsCardHeader, SettingsFormGrid, SettingsNumberField, SettingsSect
 
 const DEFAULTS = {
   default_project_microsoft_code_price: 8,
+  default_project_microsoft_enterprise_code_price: 8,
   default_project_microsoft_code_supplier_price: 5,
+  default_project_microsoft_enterprise_code_supplier_price: 5,
   default_project_microsoft_purchase_price: 10,
+  default_project_microsoft_enterprise_purchase_price: 10,
   default_project_microsoft_purchase_supplier_price: 7,
+  default_project_microsoft_enterprise_purchase_supplier_price: 7,
   default_project_microsoft_code_enabled: true,
+  default_project_microsoft_enterprise_code_enabled: true,
   default_project_microsoft_purchase_enabled: true,
+  default_project_microsoft_enterprise_purchase_enabled: true,
   default_project_domain_code_price: 80,
   default_project_domain_code_supplier_price: 40,
   default_project_domain_purchase_price: 0,
@@ -54,7 +60,7 @@ const DEFAULTS = {
   default_project_daum_purchase_enabled: true,
 };
 
-const PRODUCT_TYPES = ["microsoft", "domain", "gmail", "gmail_variant", "icloud", "proto", "daum"] as const;
+const PRODUCT_TYPES = ["microsoft", "microsoft_enterprise", "domain", "gmail", "gmail_variant", "icloud", "proto", "daum"] as const;
 
 export default function ProjectPricingSection({ options, onBulkSave }: SectionProps) {
   const { t } = useTranslation();
@@ -89,6 +95,15 @@ export default function ProjectPricingSection({ options, onBulkSave }: SectionPr
       {field("购买结算价", "default_project_microsoft_purchase_supplier_price")}
       {toggle("微软邮箱", "默认启用接码", "default_project_microsoft_code_enabled")}
       {toggle("微软邮箱", "默认启用购买", "default_project_microsoft_purchase_enabled")}
+    </SettingsFormGrid>
+    <div className="mt-5 text-sm font-medium text-[var(--semi-color-text-0)]">{t("Microsoft Enterprise Emails")}</div>
+    <SettingsFormGrid className="mt-3">
+      {field("接码价", "default_project_microsoft_enterprise_code_price")}
+      {field("接码结算价", "default_project_microsoft_enterprise_code_supplier_price")}
+      {field("购买价", "default_project_microsoft_enterprise_purchase_price")}
+      {field("购买结算价", "default_project_microsoft_enterprise_purchase_supplier_price")}
+      {toggle("微软企邮", "默认启用接码", "default_project_microsoft_enterprise_code_enabled")}
+      {toggle("微软企邮", "默认启用购买", "default_project_microsoft_enterprise_purchase_enabled")}
     </SettingsFormGrid>
     <div className="mt-5 text-sm font-medium text-[var(--semi-color-text-0)]">{t("域名邮箱")}</div>
     <SettingsFormGrid className="mt-3">

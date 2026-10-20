@@ -1812,7 +1812,7 @@ func setupCoreTestModuleWithImportMocks() (*CoreModule, *mockResourceRepo, *mock
 
 type mockTXTParser struct{}
 
-func (p *mockTXTParser) ParseMicrosoftImport(content string, strategy coredomain.ImportErrorStrategy) ([]coredomain.MicrosoftImportLine, []coredomain.ImportLineError, error) {
+func (p *mockTXTParser) ParseMicrosoftImport(content string, strategy coredomain.ImportErrorStrategy, _ bool) ([]coredomain.MicrosoftImportLine, []coredomain.ImportLineError, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil, nil, coredomain.ErrInvalidImportFormat
@@ -3809,17 +3809,28 @@ func TestCoreHandler_GetProjectsIncludesProductSummaries(t *testing.T) {
 	observedAt := time.Now().UTC()
 	previous := runtimeconfig.Snapshot()
 	previousValue, existed := previous[runtimeconfig.MicrosoftPriceMultiplierKey]
+	previousEnterpriseValue, enterpriseExisted := previous[runtimeconfig.MicrosoftEnterprisePriceMultiplierKey]
 	runtimeconfig.Set(runtimeconfig.MicrosoftPriceMultiplierKey, "0.8")
+	runtimeconfig.Set(runtimeconfig.MicrosoftEnterprisePriceMultiplierKey, "0.6")
 	t.Cleanup(func() {
 		if existed {
 			runtimeconfig.Set(runtimeconfig.MicrosoftPriceMultiplierKey, previousValue)
 		} else {
 			runtimeconfig.Delete(runtimeconfig.MicrosoftPriceMultiplierKey)
 		}
+		if enterpriseExisted {
+			runtimeconfig.Set(runtimeconfig.MicrosoftEnterprisePriceMultiplierKey, previousEnterpriseValue)
+		} else {
+			runtimeconfig.Delete(runtimeconfig.MicrosoftEnterprisePriceMultiplierKey)
+		}
 	})
 
 	repo := newMockProjectRepo()
 	detail := projectDetailForAPITest()
+	enterpriseProduct := detail.Products[0]
+	enterpriseProduct.ID++
+	enterpriseProduct.Type = coredomain.ProductTypeMicrosoftEnterprise
+	detail.Products = append(detail.Products, enterpriseProduct)
 	repo.summaries = []coreapp.ProjectSummary{
 		{
 			Project:           detail.Project,
@@ -3858,7 +3869,10 @@ func TestCoreHandler_GetProjectsIncludesProductSummaries(t *testing.T) {
 	require.Equal(t, true, item["supportsDotAlias"])
 	require.Equal(t, true, item["supportsPlusAlias"])
 	products := item["products"].([]any)
-	require.Len(t, products, 1)
+	require.Len(t, products, 2)
+	enterprise := products[1].(map[string]any)
+	require.Equal(t, "microsoft_enterprise", enterprise["type"])
+	require.Equal(t, "0.6", enterprise["priceMultiplier"])
 	product := products[0].(map[string]any)
 	require.NotContains(t, product, "id")
 	require.NotContains(t, product, "productId")
@@ -4394,7 +4408,8 @@ func TestCoreHandler_AdminProjectPriceDefaults(t *testing.T) {
 	require.Equal(t, "10", response.Defaults["default_project_daum_purchase_price"])
 	require.Equal(t, "7", response.Defaults["default_project_proto_purchase_supplier_price"])
 	require.Equal(t, "7", response.Defaults["default_project_daum_purchase_supplier_price"])
-	require.Len(t, response.Defaults, 28)
+	require.Len(t, response.Defaults, 32)
+	require.Equal(t, "8", response.Defaults["default_project_microsoft_enterprise_code_price"])
 	require.True(t, response.ServiceDefaults[serviceKey])
 	require.True(t, response.ServiceDefaults["default_project_microsoft_code_enabled"])
 	require.False(t, response.ServiceDefaults["default_project_domain_purchase_enabled"])
@@ -4402,7 +4417,7 @@ func TestCoreHandler_AdminProjectPriceDefaults(t *testing.T) {
 	require.True(t, response.ServiceDefaults["default_project_daum_code_enabled"])
 	require.True(t, response.ServiceDefaults["default_project_proto_purchase_enabled"])
 	require.True(t, response.ServiceDefaults["default_project_daum_purchase_enabled"])
-	require.Len(t, response.ServiceDefaults, 14)
+	require.Len(t, response.ServiceDefaults, 16)
 }
 
 func TestCoreHandler_AdminProjectsProductsLimitsRequestBody(t *testing.T) {

@@ -25,6 +25,7 @@ type CreateDomainRequest struct {
 
 // ResourceBulkFilterRequest describes the filter used by an "all matching" bulk command.
 type ResourceBulkFilterRequest struct {
+	Enterprise     bool       `json:"enterprise,omitempty"`
 	ResourceType   string     `json:"resourceType"`
 	Search         string     `json:"search,omitempty"`
 	Suffix         string     `json:"suffix,omitempty"`
@@ -390,14 +391,15 @@ type ProjectMatchFacetsResponse struct {
 }
 
 type ProjectProductTypeFacetsResponse struct {
-	All          int64 `json:"all"`
-	Microsoft    int64 `json:"microsoft"`
-	Domain       int64 `json:"domain"`
-	Gmail        int64 `json:"gmail"`
-	GmailVariant int64 `json:"gmailVariant"`
-	ICloud       int64 `json:"icloud"`
-	Proto        int64 `json:"proto"`
-	Daum         int64 `json:"daum"`
+	All                 int64 `json:"all"`
+	Microsoft           int64 `json:"microsoft"`
+	MicrosoftEnterprise int64 `json:"microsoft_enterprise"`
+	Domain              int64 `json:"domain"`
+	Gmail               int64 `json:"gmail"`
+	GmailVariant        int64 `json:"gmailVariant"`
+	ICloud              int64 `json:"icloud"`
+	Proto               int64 `json:"proto"`
+	Daum                int64 `json:"daum"`
 }
 
 // ProjectProductResponse is a product view under a project.

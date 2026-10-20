@@ -193,7 +193,7 @@ export function toWorkbenchProducts(
   inventory?: ProductInventoryTotal,
 ): WorkbenchProduct[] {
   const label =
-    product.type === "microsoft"
+    product.type === "microsoft_enterprise" ? "Microsoft Enterprise Emails" : product.type === "microsoft"
       ? "Microsoft"
       : product.type === "domain"
         ? "Domain"
@@ -223,7 +223,7 @@ export function toWorkbenchProducts(
     product.purchasePublicAvailable ??
     publicAvailable;
   const emailSuffix =
-    product.type === "microsoft"
+    product.type === "microsoft_enterprise" ? "microsoft_enterprise" : product.type === "microsoft"
       ? "outlook"
       : product.type === "domain"
         ? "domain"
@@ -260,7 +260,7 @@ export function toWorkbenchProducts(
     warrantyHours: Math.max(1, Math.ceil(product.warrantyMinutes / 60)),
   };
   const suffixProducts =
-    product.type === "microsoft" || product.type === "domain" || product.type === "proto" || product.type === "daum"
+    product.type === "microsoft" || product.type === "microsoft_enterprise" || product.type === "domain" || product.type === "proto" || product.type === "daum"
       ? toWorkbenchSuffixProducts(
           baseProduct,
           inventory?.suffixes ?? product.suffixes,
@@ -304,7 +304,7 @@ export function mergeProjectInventory(
           inventoryItem.purchasePublicAvailable ?? publicAvailable,
       };
       const suffixProducts =
-        product.productType === "microsoft" || product.productType === "domain" || product.productType === "proto" || product.productType === "daum"
+        product.productType === "microsoft" || product.productType === "microsoft_enterprise" || product.productType === "domain" || product.productType === "proto" || product.productType === "daum"
           ? toWorkbenchSuffixProducts(baseProduct, inventoryItem.suffixes)
           : [];
       return [baseProduct, ...suffixProducts];

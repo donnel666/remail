@@ -21,7 +21,7 @@ func TestProtoDashboardInventoryRequiresCurrentSessionWithoutChangingOtherProvid
 	for _, statement := range []string{
 		`CREATE TABLE users (id INTEGER PRIMARY KEY, status TEXT, role TEXT)`,
 		`CREATE TABLE email_resources (id INTEGER PRIMARY KEY, type TEXT, owner_user_id INTEGER)`,
-		`CREATE TABLE microsoft_resources (status TEXT, for_sale BOOLEAN, graph_available BOOLEAN)`,
+		`CREATE TABLE microsoft_resources (status TEXT, for_sale BOOLEAN, graph_available BOOLEAN, email_domain TEXT NOT NULL DEFAULT 'outlook.com')`,
 		`CREATE TABLE generated_mailboxes (status TEXT)`,
 		`CREATE TABLE gmail_resources (id INTEGER PRIMARY KEY, status TEXT, for_sale BOOLEAN)`,
 		`CREATE TABLE icloud_resources (id INTEGER PRIMARY KEY, status TEXT, for_sale BOOLEAN)`,
@@ -35,7 +35,8 @@ func TestProtoDashboardInventoryRequiresCurrentSessionWithoutChangingOtherProvid
 		`INSERT INTO email_resources VALUES (31, 'daum', 1), (32, 'daum', 1), (33, 'daum', 1), (34, 'daum', 2), (35, 'daum', 1)`,
 		`INSERT INTO daum_resources VALUES (31,1,'normal',1,'app'), (32,1,'normal',1,''), (33,1,'abnormal',1,'app'), (34,2,'normal',1,'app'), (35,1,'normal',0,'app')`,
 		`INSERT INTO email_resources VALUES (1, 'proto', 1), (2, 'proto', 1), (3, 'proto', 1), (10, 'gmail', 1), (11, 'gmail', 1)`,
-		`INSERT INTO microsoft_resources VALUES ('normal', TRUE, TRUE), ('normal', FALSE, TRUE), ('deleted', FALSE, FALSE)`,
+		`INSERT INTO microsoft_resources(status, for_sale, graph_available) VALUES ('normal', TRUE, TRUE), ('normal', FALSE, TRUE), ('deleted', FALSE, FALSE)`,
+		`INSERT INTO microsoft_resources VALUES ('normal', TRUE, TRUE, 'tenant.onmicrosoft.com'), ('normal', TRUE, FALSE, 'tenant.onmicrosoft.com'), ('normal', FALSE, TRUE, 'tenant.onmicrosoft.com'), ('abnormal', TRUE, FALSE, 'tenant.onmicrosoft.com'), ('deleted', TRUE, TRUE, 'tenant.onmicrosoft.com')`,
 		`INSERT INTO generated_mailboxes VALUES ('normal'), ('disabled'), ('retired')`,
 		`INSERT INTO gmail_resources VALUES (10, 'normal', TRUE), (11, 'normal', FALSE), (12, 'deleted', FALSE)`,
 		`INSERT INTO icloud_resources VALUES (20, 'normal', TRUE), (21, 'normal', FALSE), (22, 'deleted', FALSE)`,
@@ -58,6 +59,7 @@ func TestProtoDashboardInventoryRequiresCurrentSessionWithoutChangingOtherProvid
 	})
 	want := dashboardapp.InventorySnapshot{
 		MicrosoftTotal: 2, MicrosoftAvailable: 1,
+		MicrosoftEnterpriseTotal: 4, MicrosoftEnterpriseAvailable: 2,
 		DomainTotal: 2, DomainAvailable: 1,
 		GmailTotal: 2, GmailAvailable: 1,
 		ICloudTotal: 2, ICloudAvailable: 1,

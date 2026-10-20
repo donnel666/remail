@@ -605,7 +605,10 @@ func gmailSourceCandidateQuery(db *gorm.DB, projectID uint, buyerUserID uint, sc
 	return query.Where("gr.for_sale = TRUE AND owner.status = 'active' AND owner.role IN ('supplier', 'admin', 'super_admin')")
 }
 
-func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, buckets []uint16, limit int, emailSuffix string) ([]allocapp.MicrosoftCandidate, error) {
+func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, buckets []uint16, limit int, emailSuffix string, enterprise bool) ([]allocapp.MicrosoftCandidate, error) {
+	if enterprise && mailbox != domain.MicrosoftMailboxMain {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
 	if len(buckets) == 0 || len(buckets) > allocapp.MicrosoftExpansionBuckets || limit <= 0 {
 		return nil, domain.ErrInvalidAllocationRequest
 	}
@@ -639,8 +642,9 @@ func (r *Repo) ListMicrosoftSourceCandidates(ctx context.Context, projectID uint
 				"ms.status = 'normal'",
 				microsoftNotUnderBlockingMaintenanceCondition,
 				microsoftProjectUnmatchedCondition,
+				"(ms.email_domain LIKE ?) = ?",
 			}
-			args := []any{projectID}
+			args := []any{projectID, "%.onmicrosoft.com", enterprise}
 			switch scope {
 			case domain.SupplyScopeOwned:
 				where = append(where, "ms.for_sale = FALSE", "er.owner_user_id = ?")
@@ -689,13 +693,14 @@ LIMIT ?`
 			return nil, fmt.Errorf("list microsoft main source allocation candidates: %w", err)
 		}
 
-		aliasWhere, aliasArgs := base()
-		aliasWhere = append(aliasWhere, "ea.status = 'normal'")
-		if suffix != "" {
-			aliasWhere = append(aliasWhere, "ea.email_domain = ?")
-			aliasArgs = append(aliasArgs, suffix)
-		}
-		aliasWhere = append(aliasWhere, `NOT EXISTS (
+		if !enterprise {
+			aliasWhere, aliasArgs := base()
+			aliasWhere = append(aliasWhere, "ea.status = 'normal'")
+			if suffix != "" {
+				aliasWhere = append(aliasWhere, "ea.email_domain = ?")
+				aliasArgs = append(aliasArgs, suffix)
+			}
+			aliasWhere = append(aliasWhere, `NOT EXISTS (
             SELECT 1 FROM microsoft_allocations history_alias
             WHERE history_alias.explicit_alias_id = ea.id
               AND history_alias.project_id = ?
@@ -706,25 +711,26 @@ LIMIT ?`
               AND active_alias.project_id = ?
               AND active_alias.active_entity_id = ea.id
         )`)
-		aliasArgs = append(aliasArgs, projectID, projectID)
-		aliasFrom := mainFrom + " JOIN explicit_aliases ea ON ea.resource_id = ms.id"
-		if suffix != "" {
-			aliasWhere = append(aliasWhere, "ea.alloc_bucket IN ?")
-			aliasFrom = "explicit_aliases ea"
-			if scope != domain.SupplyScopeOwned {
-				aliasFrom += " FORCE INDEX (idx_explicit_aliases_suffix_bucket)"
+			aliasArgs = append(aliasArgs, projectID, projectID)
+			aliasFrom := mainFrom + " JOIN explicit_aliases ea ON ea.resource_id = ms.id"
+			if suffix != "" {
+				aliasWhere = append(aliasWhere, "ea.alloc_bucket IN ?")
+				aliasFrom = "explicit_aliases ea"
+				if scope != domain.SupplyScopeOwned {
+					aliasFrom += " FORCE INDEX (idx_explicit_aliases_suffix_bucket)"
+				}
+				aliasFrom += " JOIN microsoft_resources ms ON ms.id = ea.resource_id"
+			} else {
+				aliasWhere = append(aliasWhere, "ms.alloc_bucket IN ?")
 			}
-			aliasFrom += " JOIN microsoft_resources ms ON ms.id = ea.resource_id"
-		} else {
-			aliasWhere = append(aliasWhere, "ms.alloc_bucket IN ?")
-		}
-		aliasArgs = append(aliasArgs, buckets)
-		aliasRows, err := list(aliasFrom, true, aliasWhere, aliasArgs)
-		if err != nil {
-			return nil, fmt.Errorf("list microsoft explicit alias source allocation candidates: %w", err)
-		}
+			aliasArgs = append(aliasArgs, buckets)
+			aliasRows, err := list(aliasFrom, true, aliasWhere, aliasArgs)
+			if err != nil {
+				return nil, fmt.Errorf("list microsoft explicit alias source allocation candidates: %w", err)
+			}
 
-		rows = append(rows, aliasRows...)
+			rows = append(rows, aliasRows...)
+		}
 		sort.Slice(rows, func(i, j int) bool {
 			left, right := rows[i], rows[j]
 			if (left.LastAllocatedAt == nil) != (right.LastAllocatedAt == nil) {
@@ -755,11 +761,12 @@ LIMIT ?`
 		return result, nil
 	}
 
-	args := []any{projectID}
+	args := []any{projectID, "%.onmicrosoft.com", enterprise}
 	where := []string{
 		"ms.status = 'normal'",
 		microsoftNotUnderBlockingMaintenanceCondition,
 		microsoftProjectUnmatchedCondition,
+		"(ms.email_domain LIKE ?) = ?",
 	}
 	if suffix != "" {
 		where = append(where, "ms.email_domain = ?")
@@ -971,18 +978,29 @@ FOR UPDATE`
 	return row.ID != 0, nil
 }
 
-func (r *Repo) LockMicrosoftCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, emailSuffix string) (*allocapp.MicrosoftCandidate, error) {
+func (r *Repo) LockMicrosoftCandidate(ctx context.Context, resourceID uint, projectID uint, buyerUserID uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, emailSuffix string, enterprise bool) (*allocapp.MicrosoftCandidate, error) {
+	if enterprise && mailbox != domain.MicrosoftMailboxMain {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
 	// The SELECT projection comes before the WHERE clause, so its project key
 	// must be the first bound argument.
-	args := []any{projectID, resourceID, projectID}
+	args := []any{projectID, resourceID, projectID, "%.onmicrosoft.com", enterprise}
 	where := []string{
 		"ms.id = ?",
 		"ms.status = 'normal'",
 		microsoftNotUnderBlockingMaintenanceCondition,
 		microsoftProjectUnmatchedCondition,
+		"(ms.email_domain LIKE ?) = ?",
 	}
 	suffix := normalizeCandidateSuffix(emailSuffix)
-	if mailbox == domain.MicrosoftMailboxMain {
+	if enterprise {
+		where = append(where, microsoftUnusedMainCondition)
+		args = append(args, projectID, projectID)
+		if suffix != "" {
+			where = append(where, "ms.email_domain = ?")
+			args = append(args, suffix)
+		}
+	} else if mailbox == domain.MicrosoftMailboxMain {
 		condition, conditionArgs := microsoftMainCandidateCondition(projectID, suffix)
 		where = append(where, condition)
 		args = append(args, conditionArgs...)
@@ -2091,7 +2109,7 @@ func (r *Repo) ListInventoryProjects(ctx context.Context) ([]allocapp.InventoryP
 		Table("projects AS p").
 		Select("p.id, p.name").
 		Where("p.status = 'listed'").
-		Where("EXISTS (SELECT 1 FROM project_products pp WHERE pp.project_id = p.id AND pp.status = 'enabled' AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud', 'proto', 'daum'))").
+		Where("EXISTS (SELECT 1 FROM project_products pp WHERE pp.project_id = p.id AND pp.status = 'enabled' AND pp.type IN ('microsoft', 'microsoft_enterprise', 'domain', 'gmail', 'gmail_variant', 'icloud', 'proto', 'daum'))").
 		Order("p.id ASC").
 		Scan(&projects).Error; err != nil {
 		return nil, fmt.Errorf("list inventory projects: %w", err)
@@ -2121,7 +2139,7 @@ JOIN project_products pp ON pp.project_id = p.id
 	WHERE p.id = ?
 	  AND p.status = 'listed'
 	  AND pp.status = 'enabled'
-	  AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud', 'proto', 'daum')`, projectID).Scan(&productRows).Error; err != nil {
+	  AND pp.type IN ('microsoft', 'microsoft_enterprise', 'domain', 'gmail', 'gmail_variant', 'icloud', 'proto', 'daum')`, projectID).Scan(&productRows).Error; err != nil {
 		return nil, fmt.Errorf("load inventory project products: %w", err)
 	}
 	if len(productRows) == 0 {
@@ -2130,6 +2148,9 @@ JOIN project_products pp ON pp.project_id = p.id
 	today := time.Now().UTC().Format("2006-01-02")
 	for _, row := range productRows {
 		switch coredomain.ProductType(row.Type) {
+		case coredomain.ProductTypeMicrosoftEnterprise:
+			stats.MicrosoftEnterprise.Enabled = true
+			stats.MicrosoftEnterprise.MainEnabled = true
 		case coredomain.ProductTypeMicrosoft:
 			stats.Microsoft.Enabled = true
 			stats.Microsoft.MainEnabled = stats.Microsoft.MainEnabled || row.MainWeight > 0
@@ -2164,6 +2185,7 @@ JOIN project_products pp ON pp.project_id = p.id
 	}
 	if stats.Microsoft.Enabled {
 		microsoftScope, microsoftScopeArgs := microsoftProjectInventoryScopeSQL(projectID)
+		microsoftScope += " AND ms.email_domain NOT LIKE '%.onmicrosoft.com'"
 		microsoftAllowed, microsoftAllowedArgs := microsoftProjectSuffixAllowedCondition(projectID, "ms.email_domain")
 		microsoftAliasAllowed, microsoftAliasAllowedArgs := microsoftProjectSuffixAllowedCondition(projectID, "ea.email_domain")
 		var capacity struct {
@@ -2547,7 +2569,18 @@ WHERE pr.resource_type = 'proto'
 	if err := scan(&stats.ActiveDaumAllocations, `SELECT COUNT(*) FROM daum_allocations WHERE project_id = ? AND guard_type = 'daum' AND status = 'allocated'`, projectID); err != nil {
 		return nil, err
 	}
-	stats.TotalAvailable = stats.Daum.TotalAvailable + stats.Microsoft.TotalAvailable + stats.Domain.TotalAvailable + stats.Gmail.TotalAvailable + stats.ICloud.TotalAvailable + stats.Proto.TotalAvailable
+	if stats.MicrosoftEnterprise.Enabled {
+		scope, args := microsoftProjectInventoryScopeSQL(projectID)
+		totals, err := r.microsoftSuffixInventory(ctx, projectID, productInventoryRow{Type: string(coredomain.ProductTypeMicrosoftEnterprise), MainWeight: 1}, scope, args)
+		if err != nil {
+			return nil, err
+		}
+		for _, count := range totals {
+			stats.MicrosoftEnterprise.MainAvailable += count
+		}
+		stats.MicrosoftEnterprise.TotalAvailable = stats.MicrosoftEnterprise.MainAvailable
+	}
+	stats.TotalAvailable = stats.MicrosoftEnterprise.TotalAvailable + stats.Daum.TotalAvailable + stats.Microsoft.TotalAvailable + stats.Domain.TotalAvailable + stats.Gmail.TotalAvailable + stats.ICloud.TotalAvailable + stats.Proto.TotalAvailable
 	return stats, nil
 }
 
@@ -2593,7 +2626,7 @@ type productInventoryRow struct {
 
 func (r *Repo) ListProductSuffixInventory(ctx context.Context, config allocapp.ProductAllocationConfig, buyerUserID uint, supplyScope domain.SupplyScope) (map[string]int64, error) {
 	switch config.ProductType {
-	case coredomain.ProductTypeMicrosoft:
+	case coredomain.ProductTypeMicrosoft, coredomain.ProductTypeMicrosoftEnterprise:
 		row := productInventoryRow{
 			ProductID: config.ProductID, Type: string(config.ProductType),
 			MainWeight: config.MainWeight, DotWeight: config.DotWeight, PlusWeight: config.PlusWeight,
@@ -2634,7 +2667,7 @@ JOIN project_products pp ON pp.project_id = p.id
 	WHERE p.id = ?
 	  AND p.status = 'listed'
 	  AND pp.status = 'enabled'
-	  AND pp.type IN ('microsoft', 'domain', 'gmail', 'gmail_variant', 'icloud', 'proto', 'daum')
+	  AND pp.type IN ('microsoft', 'microsoft_enterprise', 'domain', 'gmail', 'gmail_variant', 'icloud', 'proto', 'daum')
 	ORDER BY pp.id ASC`, projectID).Scan(&productRows).Error; err != nil {
 		return nil, fmt.Errorf("load product inventory rows: %w", err)
 	}
@@ -2658,7 +2691,7 @@ JOIN project_products pp ON pp.project_id = p.id
 			PublicAvailable: productInventoryPublicTotalFromStats(row, stats),
 		}
 		switch coredomain.ProductType(row.Type) {
-		case coredomain.ProductTypeMicrosoft:
+		case coredomain.ProductTypeMicrosoft, coredomain.ProductTypeMicrosoftEnterprise:
 			item.Suffixes, err = r.microsoftProductInventorySuffixTotals(ctx, projectID, row)
 		case coredomain.ProductTypeDomain:
 			item.Suffixes, err = r.domainProductInventorySuffixTotals(ctx)
@@ -2703,6 +2736,8 @@ func productInventoryTotalFromStats(row productInventoryRow, stats *allocapp.Inv
 		return 0
 	}
 	switch coredomain.ProductType(row.Type) {
+	case coredomain.ProductTypeMicrosoftEnterprise:
+		return stats.MicrosoftEnterprise.MainAvailable
 	case coredomain.ProductTypeMicrosoft:
 		total := int64(0)
 		if row.MainWeight > 0 {
@@ -2765,6 +2800,13 @@ func (r *Repo) microsoftProductInventorySuffixTotals(ctx context.Context, projec
 }
 
 func (r *Repo) microsoftSuffixInventory(ctx context.Context, projectID uint, row productInventoryRow, scope string, scopeArgs []any) (map[string]int64, error) {
+	enterprise := coredomain.ProductType(row.Type) == coredomain.ProductTypeMicrosoftEnterprise
+	scope += " AND (ms.email_domain LIKE ?) = ?"
+	scopeArgs = append(append([]any{}, scopeArgs...), "%.onmicrosoft.com", enterprise)
+	if enterprise {
+		row.MainWeight, row.DotWeight, row.PlusWeight = 1, 0, 0
+	}
+
 	result := map[string]int64{}
 	allowedRoot, allowedRootArgs := microsoftProjectSuffixAllowedCondition(projectID, "ms.email_domain")
 	allowedAlias, allowedAliasArgs := microsoftProjectSuffixAllowedCondition(projectID, "ea.email_domain")
@@ -2818,6 +2860,9 @@ WHERE ms.status = 'normal'
 GROUP BY ms.email_domain`, append(append(append([]any{}, scopeArgs...), allowedRootArgs...), projectID, projectID)...)
 		if err != nil {
 			return nil, err
+		}
+		if enterprise {
+			return availableMain, nil
 		}
 		explicitAlias, err := r.microsoftSuffixCount(ctx, `
 SELECT ea.email_domain AS suffix, COUNT(*) AS count
@@ -2944,16 +2989,23 @@ func (r *Repo) domainProductInventorySuffixTotals(ctx context.Context) ([]alloca
 }
 
 func (r *Repo) ListPrivateMicrosoftInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]allocapp.PrivateProductInventoryTotal, error) {
-	row, err := r.enabledProductInventoryRow(ctx, projectID, coredomain.ProductTypeMicrosoft)
-	if err != nil || row == nil {
-		return nil, err
+	var result []allocapp.PrivateProductInventoryTotal
+	for _, productType := range []coredomain.ProductType{coredomain.ProductTypeMicrosoft, coredomain.ProductTypeMicrosoftEnterprise} {
+		row, err := r.enabledProductInventoryRow(ctx, projectID, productType)
+		if err != nil {
+			return nil, err
+		}
+		if row == nil {
+			continue
+		}
+		scope, args := microsoftPrivateProjectInventoryScopeSQL(projectID, buyerUserID)
+		totals, err := r.microsoftSuffixInventory(ctx, projectID, *row, scope, args)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, privateProductInventoryTotals(row.ProductID, totals)...)
 	}
-	scope, scopeArgs := microsoftPrivateProjectInventoryScopeSQL(projectID, buyerUserID)
-	totals, err := r.microsoftSuffixInventory(ctx, projectID, *row, scope, scopeArgs)
-	if err != nil {
-		return nil, err
-	}
-	return privateProductInventoryTotals(row.ProductID, totals), nil
+	return result, nil
 }
 
 func (r *Repo) ListPrivateDomainInventoryTotals(ctx context.Context, projectID uint, buyerUserID uint) ([]allocapp.PrivateProductInventoryTotal, error) {

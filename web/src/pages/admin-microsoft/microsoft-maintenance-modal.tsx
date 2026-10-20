@@ -1,3 +1,4 @@
+import { isMicrosoftEnterpriseEmail } from "../resources/microsoft-import-preprocess";
 import { useEffect, useMemo, useState } from "react";
 import { Modal, Spin, Tag, Toast } from "@douyinfe/semi-ui";
 import { AtSign, RefreshCcw, ScanSearch, ShieldCheck } from "lucide-react";
@@ -64,6 +65,7 @@ export function MicrosoftMaintenanceModal({
   onCompleted: () => void | Promise<void>;
   target: AdminMicrosoftResourceItem | null;
 }) {
+  const enterprise = isMicrosoftEnterpriseEmail(target?.emailAddress ?? "");
   const { t } = useTranslation();
   const [selected, setSelected] = useState<MaintenanceAction>("validate");
   const [tasks, setTasks] = useState<AdminMicrosoftAsyncTask[]>([]);
@@ -163,7 +165,8 @@ export function MicrosoftMaintenanceModal({
       updatedAt: latest.get("token")?.updatedAt,
     },
   ];
-  const selectedAction = actions.find((item) => item.key === selected) ?? actions[0];
+  const availableActions = actions.filter((action) => !enterprise || action.key !== "alias");
+  const selectedAction = availableActions.find((item) => item.key === selected) ?? availableActions[0];
 
   const submit = async () => {
     if (!selectedAction || selectedAction.disabled) return;
@@ -189,7 +192,7 @@ export function MicrosoftMaintenanceModal({
       okText={t("Submit maintenance task")}
       onCancel={onCancel}
       onOk={() => void submit()}
-      title={t("Microsoft resource maintenance")}
+      title={t(enterprise ? "Microsoft enterprise resource maintenance" : "Microsoft resource maintenance")}
       visible
       width={680}
     >
@@ -209,7 +212,7 @@ export function MicrosoftMaintenanceModal({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
-          {actions.map((item) => {
+          {availableActions.map((item) => {
             const Icon = item.icon;
             const active = selected === item.key;
             return (

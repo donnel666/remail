@@ -56,7 +56,7 @@ type MicrosoftResourceModel struct {
 	EmailDomain          string     `gorm:"type:varchar(255);not null;default:'';column:email_domain"`
 	Password             string     `gorm:"type:varchar(512);not null"`
 	ClientID             string     `gorm:"type:varchar(255);not null;default:'';column:client_id"`
-	RefreshToken         string     `gorm:"type:varchar(1024);not null;default:'';column:refresh_token"`
+	RefreshToken         string     `gorm:"type:varchar(8192);not null;default:'';column:refresh_token"`
 	CredentialRevision   uint64     `gorm:"not null;default:1;column:credential_revision"`
 	CredentialUpdatedAt  time.Time  `gorm:"not null;column:credential_updated_at"`
 	LongLived            bool       `gorm:"not null;default:false;column:long_lived"`
@@ -879,7 +879,7 @@ CREATE TEMPORARY TABLE ` + microsoftImportRestoreTempTable + ` (
 	email_domain VARCHAR(255) NOT NULL,
 	password VARCHAR(512) NOT NULL,
 	client_id VARCHAR(255) NOT NULL,
-	refresh_token VARCHAR(1024) NOT NULL,
+	refresh_token VARCHAR(8192) NOT NULL,
 	long_lived BOOLEAN NOT NULL,
 	graph_available BOOLEAN NOT NULL,
 	rt_expire_at DATETIME(3) NULL,
@@ -1096,6 +1096,7 @@ func (r *ResourceRepo) listQuery(ctx context.Context, ownerUserID uint, filter c
 	case domain.ResourceTypeMicrosoft:
 		q = q.Joins("JOIN microsoft_resources ms_filter ON ms_filter.id = email_resources.id AND ms_filter.status <> ?", string(domain.MicrosoftStatusDeleted)).
 			Where("email_resources.type = ?", string(domain.ResourceTypeMicrosoft))
+		q = q.Where("(ms_filter.email_domain LIKE ?) = ?", "%.onmicrosoft.com", filter.Enterprise)
 		if filter.Status != "" {
 			q = q.Where("ms_filter.status = ?", filter.Status)
 		}
@@ -2015,6 +2016,7 @@ func applyMicrosoftBulkFilter(db *gorm.DB, ownerUserID uint, filter coreapp.Reso
 			Joins("STRAIGHT_JOIN email_resources AS er ON er.id = ms.id")
 	}
 	q = q.Where("er.owner_user_id = ? AND er.type = ?", ownerUserID, string(domain.ResourceTypeMicrosoft)).
+		Where("(ms.email_domain LIKE ?) = ?", "%.onmicrosoft.com", filter.Enterprise).
 		Where("ms.for_sale = ? AND ms.status <> ?", false, string(domain.MicrosoftStatusDeleted))
 
 	if filter.Status != "" {

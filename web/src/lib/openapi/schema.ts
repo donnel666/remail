@@ -7478,12 +7478,12 @@ export interface components {
         };
         CreateOrderRequest: {
             projectId: number;
-            /** @description Product selector. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted. */
+            /** @description Product selector. microsoft_enterprise randomly selects an available tenant.onmicrosoft.com suffix from Microsoft enterprise inventory; an exact tenant.onmicrosoft.com suffix selects that tenant. Enterprise products allocate only the main mailbox. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted. */
             emailSuffix: string;
         };
         CreateOrderBatchRequest: {
             projectId: number;
-            /** @description Product selector. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted. */
+            /** @description Product selector. microsoft_enterprise randomly selects an available tenant.onmicrosoft.com suffix from Microsoft enterprise inventory; an exact tenant.onmicrosoft.com suffix selects that tenant. Enterprise products allocate only the main mailbox. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted. */
             emailSuffix: string;
             /** @description Number of independent orders to create. */
             quantity: number;
@@ -7556,7 +7556,7 @@ export interface components {
              * @description Product type snapshot. `random` is returned only for historical orders created before that product was retired.
              * @enum {string}
              */
-            productType: "microsoft" | "domain" | "random" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
+            productType: "microsoft" | "microsoft_enterprise" | "domain" | "random" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
             /** @enum {string} */
             serviceMode: "code" | "purchase";
             /** @enum {string} */
@@ -7638,6 +7638,8 @@ export interface components {
             purchase: number;
         };
         OrderProductTypeFacets: {
+            /** Format: int64 */
+            microsoft_enterprise?: number;
             /** Format: int64 */
             all: number;
             /** Format: int64 */
@@ -8104,6 +8106,20 @@ export interface components {
             microsoftPurchaseActivationSuccessRate: number;
             /** @description Global average seconds from receiveStartedAt to activatedAt for activated Microsoft purchase orders created in the selected range. */
             microsoftAveragePurchaseActivationSeconds: number;
+            microsoftEnterpriseTotalEmails: number;
+            microsoftEnterpriseAvailableEmails: number;
+            /** @description Successful deliveries for charged, non-history Microsoft enterprise code orders created in the selected range across all users. */
+            microsoftEnterpriseCodeReceipts: number;
+            /** @description Successful Microsoft enterprise code deliveries divided by charged, non-history Microsoft enterprise code orders created in the selected range across all users. */
+            microsoftEnterpriseCodeSuccessRate: number;
+            /** @description Global average seconds from receiveStartedAt to the first matched code message for successful Microsoft enterprise code orders created in the selected range. */
+            microsoftEnterpriseAverageCodeReceiptSeconds: number;
+            /** @description Successfully activated charged Microsoft enterprise purchase orders created in the selected range across all users. */
+            microsoftEnterprisePurchaseActivations: number;
+            /** @description Activated Microsoft enterprise purchases divided by charged Microsoft enterprise purchase orders created in the selected range across all users. */
+            microsoftEnterprisePurchaseActivationSuccessRate: number;
+            /** @description Global average seconds from receiveStartedAt to activatedAt for activated Microsoft enterprise purchase orders created in the selected range. */
+            microsoftEnterpriseAveragePurchaseActivationSeconds: number;
             /** @description Non-deleted local Gmail source accounts. */
             gmailTotalEmails: number;
             /** @description Healthy public Gmail source accounts owned by active supplier or administrator accounts. */
@@ -8177,6 +8193,11 @@ export interface components {
             microsoftReceivedCodes: number;
             microsoftCodeSuccessRate: number;
             microsoftAverageCodeReceiptSeconds: number;
+            microsoftEnterpriseTotalEmails: number;
+            microsoftEnterpriseAvailableEmails: number;
+            microsoftEnterpriseReceivedCodes: number;
+            microsoftEnterpriseCodeSuccessRate: number;
+            microsoftEnterpriseAverageCodeReceiptSeconds: number;
             gmailTotalEmails: number;
             gmailAvailableEmails: number;
             gmailReceivedCodes: number;
@@ -8938,7 +8959,7 @@ export interface components {
         BotProjectProduct: {
             projectId: number;
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
+            type: "microsoft" | "microsoft_enterprise" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
@@ -9385,7 +9406,7 @@ export interface components {
             accessType?: "public" | "private";
             looseMatch?: boolean;
             /** @enum {string} */
-            productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
+            productType?: "microsoft" | "microsoft_enterprise" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
             search?: string;
             targetPlatform?: string;
             /** Format: date-time */
@@ -9430,7 +9451,7 @@ export interface components {
         };
         ProjectProductRequest: {
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
+            type: "microsoft" | "microsoft_enterprise" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
             /**
              * @default enabled
              * @enum {string}
@@ -9487,6 +9508,8 @@ export interface components {
             strict: number;
         };
         ProjectProductTypeFacets: {
+            /** Format: int64 */
+            microsoft_enterprise?: number;
             all: number;
             microsoft: number;
             domain: number;
@@ -9525,7 +9548,7 @@ export interface components {
         };
         ProjectProductSummary: {
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
+            type: "microsoft" | "microsoft_enterprise" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
@@ -9572,7 +9595,7 @@ export interface components {
         ProjectProduct: {
             projectId: number;
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
+            type: "microsoft" | "microsoft_enterprise" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
             /** @enum {string} */
             status: "enabled" | "disabled";
             codeEnabled: boolean;
@@ -9684,6 +9707,8 @@ export interface components {
             filter: components["schemas"]["ResourceBulkFilter"];
         });
         ResourceBulkFilter: {
+            /** @description Select enterprise Microsoft resources; omitted means personal Microsoft resources. */
+            enterprise?: boolean;
             /** @enum {string} */
             resourceType: "microsoft" | "domain";
             /** @description Unified fuzzy search. Microsoft matches email and suffix; domain matches domain and TLD. */
@@ -9854,6 +9879,7 @@ export interface components {
         };
         ProjectInventoryResponse: {
             projectId: number;
+            microsoftEnterprise?: components["schemas"]["MicrosoftInventory"];
             microsoft: components["schemas"]["MicrosoftInventory"];
             domain: components["schemas"]["DomainInventory"];
             gmail: components["schemas"]["GmailInventory"];
@@ -9910,7 +9936,7 @@ export interface components {
         };
         ProjectProductInventoryTotal: {
             /** @enum {string} */
-            productType: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
+            productType: "microsoft" | "microsoft_enterprise" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
             totalAvailable: number;
             publicAvailable: number;
             /** Format: int64 */
@@ -10934,6 +10960,8 @@ export interface components {
             resource: components["schemas"]["AdminMicrosoftResourceDetail"];
         };
         AdminMicrosoftBulkFilter: {
+            /** @description Select enterprise Microsoft resources; omitted means personal Microsoft resources. */
+            enterprise?: boolean;
             /** @enum {string} */
             type: "microsoft";
             search?: string;
@@ -15766,7 +15794,7 @@ export interface operations {
                 status?: "reviewing" | "listed" | "delisted";
                 accessType?: "public" | "private";
                 looseMatch?: boolean;
-                productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
+                productType?: "microsoft" | "microsoft_enterprise" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
                 search?: string;
                 targetPlatform?: string;
                 createdFrom?: components["parameters"]["CreatedFromQuery"];
@@ -17077,7 +17105,7 @@ export interface operations {
                 status?: "reviewing" | "listed" | "delisted";
                 accessType?: "public" | "private";
                 looseMatch?: boolean;
-                productType?: "microsoft" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
+                productType?: "microsoft" | "microsoft_enterprise" | "domain" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
                 search?: string;
                 targetPlatform?: string;
                 createdFrom?: string;
@@ -18642,6 +18670,8 @@ export interface operations {
     getResources: {
         parameters: {
             query?: {
+                /** @description Select Microsoft enterprise mailboxes under tenant.onmicrosoft.com. Defaults to personal Microsoft mailboxes. */
+                enterprise?: boolean;
                 scope?: string;
                 type?: "all" | "microsoft" | "domain";
                 /** @description Unified fuzzy search. Microsoft matches email and suffix; domain matches domain and TLD. */
@@ -19035,6 +19065,11 @@ export interface operations {
         requestBody: {
             content: {
                 "multipart/form-data": {
+                    /**
+                     * @description Require email----password----clientId----refreshToken with a tenant.onmicrosoft.com address; validate receive access and project history without aliases or recovery binding.
+                     * @default false
+                     */
+                    enterprise?: boolean;
                     /** Format: binary */
                     file: string;
                     /** @description Whether every resource in this import batch is long-lived */
@@ -20169,7 +20204,7 @@ export interface operations {
                 scope?: "mine" | "all";
                 status?: "pending_payment" | "paid" | "active" | "completed" | "refunded" | "failed" | "closed";
                 serviceMode?: "purchase" | "code";
-                productType?: "microsoft" | "domain" | "random" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
+                productType?: "microsoft" | "microsoft_enterprise" | "domain" | "random" | "gmail" | "gmail_variant" | "icloud" | "proto" | "daum";
                 /** @description Prefix search by order number or delivery email; token-prefix search by user email/nickname or project name/platform; exact user/project ID search. */
                 search?: string;
                 /** @description Exact project filter used by the order project tabs. */
@@ -24547,6 +24582,8 @@ export interface operations {
     getAdminMicrosoftResources: {
         parameters: {
             query: {
+                /** @description Select Microsoft enterprise mailboxes under tenant.onmicrosoft.com. Defaults to personal Microsoft mailboxes. */
+                enterprise?: boolean;
                 /** @description This administrator query is limited to Microsoft resources. */
                 type: "microsoft";
                 /** @description Exact case-insensitive mailbox lookup across primary and alias inventories. A value without `@` is treated as a complete local-part across domains; a leading `@` matches the primary mailbox domain exactly. Owner display identity remains prefix-searchable, and an all-digit value matches resource or owner ID exactly. */
@@ -24609,6 +24646,11 @@ export interface operations {
         requestBody: {
             content: {
                 "multipart/form-data": {
+                    /**
+                     * @description Require email----password----clientId----refreshToken with a tenant.onmicrosoft.com address; validate receive access and project history without aliases or recovery binding.
+                     * @default false
+                     */
+                    enterprise?: boolean;
                     /**
                      * Format: binary
                      * @description UTF-8 TXT using one of the four documented `----`-delimited credential line formats.

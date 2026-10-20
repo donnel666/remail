@@ -1,3 +1,4 @@
+import { isMicrosoftEnterpriseEmail } from "../resources/microsoft-import-preprocess";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Input,
@@ -111,11 +112,13 @@ function OwnerSelect({
 }
 
 export function ImportMicrosoftModal({
+  enterprise = false,
   onCancel,
   onImported,
   owners,
   visible,
 }: {
+  enterprise?: boolean;
   onCancel: () => void;
   onImported: () => void | Promise<void>;
   owners: AdminMicrosoftOwner[];
@@ -238,7 +241,7 @@ export function ImportMicrosoftModal({
       const batches = batchesRef.current;
       await runMicrosoftImportBatches(batches, {
         upload: (chunk, _index, idempotencyKey) => importAdminMicrosoftResources({
-          content: chunk, errorStrategy, longLived, ownerId,
+          content: chunk, errorStrategy, longLived: !enterprise && longLived, ownerId, enterprise,
         }, controller.signal, idempotencyKey),
         idempotentUploads: true,
         poll: (id) => waitForAdminMicrosoftResourceImport(id, { signal: controller.signal }),
@@ -296,7 +299,7 @@ export function ImportMicrosoftModal({
       onOk={() => void submit()}
       okButtonProps={{ disabled: batchesRef.current?.failed || (mode === "paste" ? lines.length === 0 : !file) }}
       okText={t("Import")}
-      title={t("Import Microsoft Emails")}
+      title={t(enterprise ? "Import Microsoft Enterprise Emails" : "Import Microsoft Emails")}
       visible={visible}
       width="min(666px, calc(100vw - 32px))"
     >
@@ -347,6 +350,7 @@ export function ImportMicrosoftModal({
           {t("Large files are split into batches of up to 99 MB. Keep this dialog open until all batches are uploaded.")}
         </p>
 
+        {!enterprise && (
         <div className="grid grid-cols-2 gap-2">
           <button
             className={switchButtonClass(longLived)}
@@ -365,6 +369,7 @@ export function ImportMicrosoftModal({
             {t("Short-lived")}
           </button>
         </div>
+        )}
 
         <div className="grid grid-cols-2 gap-2">
           <button
@@ -388,7 +393,7 @@ export function ImportMicrosoftModal({
         {mode === "paste" ? (
           <label className="block">
             <span className="mb-1.5 flex items-center justify-between text-sm font-medium text-[var(--semi-color-text-0)]">
-              <span>{t("Microsoft resource entries")} *</span>
+              <span>{t(enterprise ? "Microsoft enterprise resource entries" : "Microsoft resource entries")} *</span>
               <Text size="small" type="tertiary">
                 {t("Parsed entries", { count: lines.length })}
               </Text>
@@ -397,7 +402,7 @@ export function ImportMicrosoftModal({
               className="font-mono"
               disabled={submitting}
               onChange={(value) => setContent(value)}
-              placeholder="email----password"
+              placeholder={enterprise ? "user@tenant.onmicrosoft.com----password----clientId----refreshToken" : "email----password"}
               rows={8}
               style={{ height: IMPORT_ENTRY_AREA_HEIGHT, resize: "none" }}
               value={content}
@@ -444,7 +449,7 @@ export function ImportMicrosoftModal({
             {t("Supported format")}
           </div>
           <pre className="font-mono text-xs leading-relaxed text-[var(--semi-color-text-2)]">
-            {MICROSOFT_EMAIL_FORMAT_HINT}
+            {enterprise ? "user@tenant.onmicrosoft.com----password----clientId----refreshToken" : MICROSOFT_EMAIL_FORMAT_HINT}
           </pre>
         </div>
 
@@ -469,6 +474,7 @@ export function EditMicrosoftModal({
   owners: AdminMicrosoftOwner[];
   target: AdminMicrosoftResourceItem | null;
 }) {
+  const enterprise = isMicrosoftEnterpriseEmail(target?.emailAddress ?? "");
   const { t } = useTranslation();
   const [emailAddress, setEmailAddress] = useState("");
   const [bindingAddress, setBindingAddress] = useState("");
@@ -508,7 +514,7 @@ export function EditMicrosoftModal({
         Toast.warning(t("Microsoft account password is required."));
         return;
       }
-      if (Boolean(clientId.trim()) !== Boolean(refreshToken.trim())) {
+      if (Boolean(clientId.trim()) !== Boolean(refreshToken.trim()) || enterprise && (!clientId.trim() || !refreshToken.trim())) {
         Toast.warning(t("OAuth client ID and refresh token must be configured together."));
         return;
       }
@@ -518,7 +524,7 @@ export function EditMicrosoftModal({
     const currentBindingAddress = target.bindingAddress?.trim() || null;
     try {
       await updateAdminMicrosoftResource(target.id, {
-        ...(nextBindingAddress !== currentBindingAddress
+        ...(!enterprise && nextBindingAddress !== currentBindingAddress
           ? { bindingAddress: nextBindingAddress }
           : {}),
         credentials: wantsCredentialChange
@@ -530,7 +536,7 @@ export function EditMicrosoftModal({
           : undefined,
         emailAddress: emailAddress.trim(),
         forSale,
-        longLived,
+        longLived: enterprise ? undefined : longLived,
         ownerId,
         qualityScore:
           qualityScore === "" || !Number.isFinite(Number(qualityScore))
@@ -564,7 +570,7 @@ export function EditMicrosoftModal({
       onCancel={onCancel}
       onOk={() => void submit()}
       okText={t("Save")}
-      title={t("Edit Microsoft resource")}
+      title={t(enterprise ? "Edit Microsoft enterprise resource" : "Edit Microsoft resource")}
       visible={Boolean(target)}
       width={580}
     >
@@ -578,10 +584,11 @@ export function EditMicrosoftModal({
               <Input
                 className="font-mono"
                 onChange={(value) => setEmailAddress(String(value))}
-                placeholder="name@outlook.com"
+                placeholder={enterprise ? "user@tenant.onmicrosoft.com" : "name@outlook.com"}
                 value={emailAddress}
               />
             </label>
+            {!enterprise && (
             <label className="block">
               <span className="mb-1.5 block text-sm font-medium text-[var(--semi-color-text-0)]">
                 {t("Auxiliary email")}
@@ -594,6 +601,7 @@ export function EditMicrosoftModal({
                 value={bindingAddress}
               />
             </label>
+            )}
           </div>
           <div className="text-xs text-[var(--semi-color-text-2)]">
             {t(
@@ -637,6 +645,7 @@ export function EditMicrosoftModal({
             </div>
             <Switch checked={forSale} onChange={setForSale} size="small" />
           </div>
+          {!enterprise && (
           <div className="flex items-center justify-between rounded-lg bg-[var(--semi-color-fill-0)] px-3 py-2.5">
             <div>
               <div className="text-sm font-medium text-[var(--semi-color-text-0)]">
@@ -648,6 +657,7 @@ export function EditMicrosoftModal({
             </div>
             <Switch checked={longLived} onChange={setLongLived} size="small" />
           </div>
+          )}
 
           <div className="rounded-lg border border-[var(--semi-color-border)] p-3">
             <div className="mb-1 text-sm font-medium text-[var(--semi-color-text-0)]">
@@ -714,6 +724,7 @@ export function ReplaceCredentialsModal({
   onSaved: (detail: AdminMicrosoftResourceDetail) => void | Promise<void>;
   target: AdminMicrosoftResourceItem | null;
 }) {
+  const enterprise = isMicrosoftEnterpriseEmail(target?.emailAddress ?? "");
   const { t } = useTranslation();
   const [password, setPassword] = useState("");
   const [clientId, setClientId] = useState("");
@@ -732,7 +743,7 @@ export function ReplaceCredentialsModal({
       Toast.warning(t("Microsoft account password is required."));
       return;
     }
-    if (Boolean(clientId.trim()) !== Boolean(refreshToken.trim())) {
+    if (Boolean(clientId.trim()) !== Boolean(refreshToken.trim()) || enterprise && (!clientId.trim() || !refreshToken.trim())) {
       Toast.warning(t("OAuth client ID and refresh token must be configured together."));
       return;
     }
@@ -775,7 +786,7 @@ export function ReplaceCredentialsModal({
       onOk={() => void submit()}
       okText={t("Replace credentials")}
       size="small"
-      title={t("Replace Microsoft credentials")}
+      title={t(enterprise ? "Replace Microsoft enterprise credentials" : "Replace Microsoft credentials")}
       visible={Boolean(target)}
     >
       {target ? (

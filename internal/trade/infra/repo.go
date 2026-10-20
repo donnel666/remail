@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"math/rand/v2"
 	"strconv"
 	"strings"
@@ -151,7 +152,7 @@ func (r *Repo) CreateHistoricalOrder(ctx context.Context, cmd tradeapp.CreateHis
 	requestFingerprint := fmt.Sprintf("%x", sha256.Sum256([]byte(orderNo)))
 	model := OrderModel{
 		OrderNo: orderNo, UserID: cmd.UserID, ProjectID: cmd.ProjectID, ProjectProductID: cmd.ProjectProductID,
-		ProductType: string(domain.ProductTypeMicrosoft), ServiceMode: string(domain.ServiceModePurchase),
+		ProductType: string(historicalMicrosoftProductType(deliveryEmail)), ServiceMode: string(domain.ServiceModePurchase),
 		SupplyPolicy: string(domain.SupplyPolicyPublicOnly), Status: string(domain.OrderStatusCompleted),
 		FailureCode: "", PayAmount: "0", RefundAmount: "0",
 		CodeWindowMinutes: cmd.CodeWindowMinutes, ActivationWindowMinutes: cmd.ActivationWindowMinutes,
@@ -869,20 +870,22 @@ func (r *Repo) OrderFacets(ctx context.Context, filter tradeapp.OrderListFilter)
 	productTypeBase := filter
 	productTypeBase.ProductType = ""
 	var productTypeRow struct {
-		All          int64 `gorm:"column:all_count"`
-		Microsoft    int64 `gorm:"column:microsoft_count"`
-		Domain       int64 `gorm:"column:domain_count"`
-		Random       int64 `gorm:"column:random_count"`
-		Gmail        int64 `gorm:"column:gmail_count"`
-		GmailVariant int64 `gorm:"column:gmail_variant_count"`
-		ICloud       int64 `gorm:"column:icloud_count"`
-		Proto        int64 `gorm:"column:proto_count"`
-		Daum         int64 `gorm:"column:daum_count"`
+		All                 int64 `gorm:"column:all_count"`
+		Microsoft           int64 `gorm:"column:microsoft_count"`
+		MicrosoftEnterprise int64 `gorm:"column:microsoft_enterprise_count"`
+		Domain              int64 `gorm:"column:domain_count"`
+		Random              int64 `gorm:"column:random_count"`
+		Gmail               int64 `gorm:"column:gmail_count"`
+		GmailVariant        int64 `gorm:"column:gmail_variant_count"`
+		ICloud              int64 `gorm:"column:icloud_count"`
+		Proto               int64 `gorm:"column:proto_count"`
+		Daum                int64 `gorm:"column:daum_count"`
 	}
 	if err := applyOrderFilter(r.dbFor(ctx).Model(&OrderModel{}), productTypeBase).
 		Select(
 			`COUNT(*) AS all_count,
 			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS microsoft_count,
+			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS microsoft_enterprise_count,
 			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS domain_count,
 			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS random_count,
 			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS gmail_count,
@@ -891,6 +894,7 @@ func (r *Repo) OrderFacets(ctx context.Context, filter tradeapp.OrderListFilter)
 			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS proto_count,
 			COALESCE(SUM(CASE WHEN product_type = ? THEN 1 ELSE 0 END), 0) AS daum_count`,
 			string(domain.ProductTypeMicrosoft),
+			string(domain.ProductTypeMicrosoftEnterprise),
 			string(domain.ProductTypeDomain),
 			string(domain.ProductTypeLegacyRandom),
 			string(domain.ProductTypeGmail),
@@ -903,15 +907,16 @@ func (r *Repo) OrderFacets(ctx context.Context, filter tradeapp.OrderListFilter)
 		return nil, fmt.Errorf("order product type facets: %w", err)
 	}
 	facets.ProductType = tradeapp.OrderProductTypeFacets{
-		All:          productTypeRow.All,
-		Microsoft:    productTypeRow.Microsoft,
-		Domain:       productTypeRow.Domain,
-		Random:       productTypeRow.Random,
-		Gmail:        productTypeRow.Gmail,
-		GmailVariant: productTypeRow.GmailVariant,
-		ICloud:       productTypeRow.ICloud,
-		Proto:        productTypeRow.Proto,
-		Daum:         productTypeRow.Daum,
+		All:                 productTypeRow.All,
+		Microsoft:           productTypeRow.Microsoft,
+		MicrosoftEnterprise: productTypeRow.MicrosoftEnterprise,
+		Domain:              productTypeRow.Domain,
+		Random:              productTypeRow.Random,
+		Gmail:               productTypeRow.Gmail,
+		GmailVariant:        productTypeRow.GmailVariant,
+		ICloud:              productTypeRow.ICloud,
+		Proto:               productTypeRow.Proto,
+		Daum:                productTypeRow.Daum,
 	}
 
 	projectBase := filter
@@ -1522,4 +1527,11 @@ func deadlockBackoff(attempt int) time.Duration {
 	base := time.Duration(10*(1<<attempt)) * time.Millisecond
 	jitter := time.Duration(rand.IntN(25+attempt*10)) * time.Millisecond
 	return base + jitter
+}
+
+func historicalMicrosoftProductType(email string) domain.ProductType {
+	if coredomain.IsMicrosoftEnterpriseEmail(email) {
+		return domain.ProductTypeMicrosoftEnterprise
+	}
+	return domain.ProductTypeMicrosoft
 }

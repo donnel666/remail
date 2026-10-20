@@ -125,14 +125,14 @@ describe("admin Microsoft runtime UI contract", () => {
       "getAdminMicrosoftBindingMessage",
     ]);
     expectContainsAll(modalSource, [
-      'title={t("Import Microsoft Emails")}',
-      'title={t("Edit Microsoft resource")}',
-      'title={t("Replace Microsoft credentials")}',
+      'title={t(enterprise ? "Import Microsoft Enterprise Emails" : "Import Microsoft Emails")}',
+      'title={t(enterprise ? "Edit Microsoft enterprise resource" : "Edit Microsoft resource")}',
+      'title={t(enterprise ? "Replace Microsoft enterprise credentials" : "Replace Microsoft credentials")}',
       "Credentials are accepted as write-only input. Passwords, client IDs and tokens are never returned by this page.",
       "Write-only. Leave blank to keep the current values; filling password replaces the whole credential set and re-queues validation.",
     ]);
     expectContainsAll(maintenanceSource, [
-      'title={t("Microsoft resource maintenance")}',
+      'title={t(enterprise ? "Microsoft enterprise resource maintenance" : "Microsoft resource maintenance")}',
       'label: "Validate resource"',
       'label: "Create alias"',
       'label: "Scan projects"',

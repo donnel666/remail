@@ -28,7 +28,7 @@ func (uc *UseCase) protoProtocolReady() bool {
 }
 
 func (uc *UseCase) protoFulfillmentReady(ctx context.Context, order domain.Order, allocation *AllocationResult) (bool, error) {
-	if order.ProductType == domain.ProductTypeMicrosoft || (allocation != nil && allocation.Type == domain.AllocationTypeMicrosoft) {
+	if (order.ProductType == domain.ProductTypeMicrosoft || order.ProductType == domain.ProductTypeMicrosoftEnterprise) || (allocation != nil && allocation.Type == domain.AllocationTypeMicrosoft) {
 		ready, ok := uc.allocation.(interface {
 			MicrosoftAllocationReady(context.Context, string, uint) (bool, error)
 		})
@@ -64,7 +64,7 @@ func (uc *UseCase) protoFulfillmentReady(ctx context.Context, order domain.Order
 }
 
 func (uc *UseCase) compensateUnreadyProtoPaid(ctx context.Context, order domain.Order) (*CheckoutResult, error) {
-	if order.ProductType == domain.ProductTypeMicrosoft {
+	if order.ProductType == domain.ProductTypeMicrosoft || order.ProductType == domain.ProductTypeMicrosoftEnterprise {
 		failed, err := uc.compensatePaidCheckout(ctx, order, domain.OrderFailureInsufficientInventory, "Microsoft mailbox is unavailable.")
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", domain.ErrOrderCompensationError, err)

@@ -110,7 +110,7 @@ function bulkOutcome(response: AdminMicrosoftBulkCommandResponse) {
   };
 }
 
-export default function AdminMicrosoftEmails() {
+export default function AdminMicrosoftEmails({ enterprise = false }: { enterprise?: boolean } = {}) {
   const { t } = useTranslation();
   const { currentUser } = useAuth();
   const isMobile = useIsMobile();
@@ -183,7 +183,7 @@ export default function AdminMicrosoftEmails() {
   );
 
   const statsFilter = useMemo<AdminMicrosoftListFilter>(() => {
-    const filter: AdminMicrosoftListFilter = {};
+    const filter: AdminMicrosoftListFilter = { enterprise };
     const search = debouncedSearchKeyword.trim();
     const createdFrom = createdFromISOString(createdAtRange);
     const createdTo = createdToISOString(createdAtRange);
@@ -197,6 +197,7 @@ export default function AdminMicrosoftEmails() {
     if (createdTo) filter.createdTo = createdTo;
     return filter;
   }, [
+    enterprise,
     createdAtRange,
     debouncedSearchKeyword,
     graphFilter,
@@ -837,7 +838,7 @@ export default function AdminMicrosoftEmails() {
 
   const columns = useMemo(
     () =>
-      [
+      ([
         {
           dataIndex: "suffix",
           key: "suffix",
@@ -956,8 +957,8 @@ export default function AdminMicrosoftEmails() {
           width: 360,
           render: (_: unknown, record: AdminMicrosoftResourceItem) => renderRowActions(record),
         },
-      ] as any[],
-    [renderRowActions, t]
+      ] as any[]).filter((column) => !enterprise || !["binding", "longLived", "graph"].includes(column.key)),
+    [enterprise, renderRowActions, t]
   );
 
   const tableColumns = useMemo(() => {
@@ -1134,6 +1135,7 @@ export default function AdminMicrosoftEmails() {
                 ))}
               </div>
 
+              {!enterprise && <>
               <div className="px-2 pb-1 text-xs font-medium text-[var(--semi-color-text-2)]">
                 {t("Long-lived")}
               </div>
@@ -1172,6 +1174,8 @@ export default function AdminMicrosoftEmails() {
                 ))}
               </div>
 
+
+              </>}
               <div className="px-2 pb-1 text-xs font-medium text-[var(--semi-color-text-2)]">
                 {t("Refresh token")}
               </div>
@@ -1317,6 +1321,7 @@ export default function AdminMicrosoftEmails() {
       </CardPro>
 
       <ImportMicrosoftModal
+        enterprise={enterprise}
         onCancel={() => setImportOpen(false)}
         onImported={async () => {
           setActivePage(1);
@@ -1360,6 +1365,7 @@ export default function AdminMicrosoftEmails() {
       />
 
       <MicrosoftBulkMaintenanceModal
+        enterprise={enterprise}
         onCancel={() => setBulkMaintenanceTarget(null)}
         onCompleted={async () => {
           setSelectedKeys([]);

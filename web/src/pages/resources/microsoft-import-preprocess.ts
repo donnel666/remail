@@ -2,7 +2,7 @@ import type { ImportErrorStrategy } from "@/lib/resources-api";
 
 export interface MicrosoftImportPreprocessFailure {
   line: number;
-  category: "invalid_format" | "duplicate_email" | "non_microsoft_domain";
+  category: "invalid_format" | "duplicate_email" | "non_microsoft_domain" | "invalid_enterprise_domain";
   email?: string;
   firstLine?: number;
 }
@@ -27,13 +27,14 @@ interface MicrosoftImportEntry {
 const MICROSOFT_IMPORT_EMAIL_MAX_LENGTH = 255;
 const MICROSOFT_IMPORT_PASSWORD_MAX_LENGTH = 512;
 const MICROSOFT_IMPORT_CLIENT_ID_MAX_LENGTH = 255;
-const MICROSOFT_IMPORT_REFRESH_TOKEN_MAX_LENGTH = 1024;
+const MICROSOFT_IMPORT_REFRESH_TOKEN_MAX_LENGTH = 8192;
 const MICROSOFT_IMPORT_BINDING_ADDRESS_MAX_LENGTH = 320;
 const MICROSOFT_IMPORT_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+$/;
 
 export function preprocessMicrosoftImportContent(
   content: string,
-  strategy: ImportErrorStrategy
+  strategy: ImportErrorStrategy,
+  enterprise = false
 ): MicrosoftImportPreprocessResult {
   if (content.trim().length === 0) {
     return {
@@ -54,7 +55,7 @@ export function preprocessMicrosoftImportContent(
     const rawLine = (rawLines[index] ?? "").replace(/\r$/, "");
     if (rawLine.trim().length === 0) continue;
 
-    const parsed = parseMicrosoftImportLine(rawLine);
+    const parsed = parseMicrosoftImportLine(rawLine, enterprise);
     if (!parsed) {
       const failure: MicrosoftImportPreprocessFailure = {
         line: lineNumber,
@@ -96,10 +97,10 @@ export function preprocessMicrosoftImportContent(
 
     // Whitelist: only Microsoft consumer mailboxes may be imported. The binding
     // address is a recovery mailbox and stays free of this check.
-    if (!isMicrosoftEmailDomain(parsed.email)) {
+    if (enterprise ? !isMicrosoftEnterpriseEmail(parsed.email) : !isMicrosoftEmailDomain(parsed.email)) {
       const failure: MicrosoftImportPreprocessFailure = {
         line: lineNumber,
-        category: "non_microsoft_domain",
+        category: enterprise ? "invalid_enterprise_domain" : "non_microsoft_domain",
         email: parsed.email,
       };
       if (strategy === "abort") {
@@ -125,8 +126,9 @@ export function preprocessMicrosoftImportContent(
   };
 }
 
-function parseMicrosoftImportLine(line: string): MicrosoftImportEntry | null {
+function parseMicrosoftImportLine(line: string, enterprise: boolean): MicrosoftImportEntry | null {
   const parts = line.split("----");
+  if (enterprise && parts.length !== 4) return null;
   if (![2, 3, 4, 5].includes(parts.length)) return null;
 
   const email = parts[0]?.trim() ?? "";
@@ -283,4 +285,8 @@ function serializeMicrosoftImportEntry(entry: MicrosoftImportEntry) {
 
 function getPotentialEmail(line: string) {
   return line.split("----")[0]?.trim();
+}
+
+export function isMicrosoftEnterpriseEmail(email: string) {
+  return /^[^\s@]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.onmicrosoft\.com$/i.test(email.trim());
 }

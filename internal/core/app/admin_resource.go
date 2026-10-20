@@ -142,6 +142,7 @@ type TaskQueryPort interface {
 }
 
 type AdminMicrosoftListFilter struct {
+	Enterprise     bool
 	Search         string
 	Suffix         string
 	Status         domain.MicrosoftResourceStatus
@@ -668,6 +669,9 @@ func adminTokenRemaining(expireAt *time.Time, now time.Time) *int64 {
 }
 
 func adminMicrosoftACLRequestedScopesFor(record AdminMicrosoftRecord) []string {
+	if domain.IsMicrosoftEnterpriseEmail(record.EmailAddress) {
+		return []string{}
+	}
 	if !record.ClientIDConfigured || !record.RefreshTokenConfigured {
 		return []string{}
 	}
@@ -974,6 +978,16 @@ func (s *AdminResourceCommandService) edit(ctx context.Context, command AdminMic
 		}
 		if resource.Status == domain.MicrosoftStatusDeleted {
 			return domain.ErrResourceNotFound
+		}
+		enterprise := domain.IsMicrosoftEnterpriseEmail(resource.EmailAddress)
+		if normalizedEmail != nil && domain.IsMicrosoftEnterpriseEmail(*normalizedEmail) != enterprise {
+			return domain.ErrInvalidResourceCommand
+		}
+		if enterprise && (command.BindingAddressSet || command.LongLived != nil && *command.LongLived) {
+			return domain.ErrInvalidResourceCommand
+		}
+		if enterprise && command.Credentials != nil && (strings.TrimSpace(command.Credentials.ClientID) == "" || strings.TrimSpace(command.Credentials.RefreshToken) == "") {
+			return domain.ErrInvalidResourceCommand
 		}
 		bindingAddressChanged := false
 		if command.BindingAddressSet {
@@ -1531,6 +1545,7 @@ func (s *AdminResourceCommandService) SubmitValidationBatch(
 	if selection.Mode == AdminResourceBulkFilter {
 		batch.Filter = ResourceBulkFilter{
 			ResourceType: domain.ResourceTypeMicrosoft,
+			Enterprise:   selection.Filter.Enterprise,
 			Search:       selection.Filter.Search, Suffix: selection.Filter.Suffix, Status: string(selection.Filter.Status),
 			ForSale: selection.Filter.ForSale, LongLived: selection.Filter.LongLived, GraphAvailable: selection.Filter.GraphAvailable,
 			TokenHealth: selection.Filter.TokenHealth, OwnerIDs: selection.Filter.OwnerIDs, AdminSearch: true,
@@ -1580,7 +1595,7 @@ func normalizeAdminMicrosoftEmail(value string, requireMicrosoft bool) (string, 
 	}
 	// The primary account must be a Microsoft mailbox; a recovery/binding
 	// address may live on any provider, so the whitelist is caller-controlled.
-	if requireMicrosoft && !domain.IsMicrosoftEmailDomain(value) {
+	if requireMicrosoft && !domain.IsMicrosoftEmailDomain(value) && !domain.IsMicrosoftEnterpriseEmail(value) {
 		return "", domain.ErrInvalidResourceCommand
 	}
 	return value, nil

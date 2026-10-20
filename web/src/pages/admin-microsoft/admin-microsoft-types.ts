@@ -112,6 +112,7 @@ export type AdminMicrosoftImportErrorStrategy =
   AdminMicrosoftImportMultipart["errorStrategy"];
 
 export interface ImportAdminMicrosoftResourcesRequest {
+  enterprise?: boolean;
   content: string;
   ownerId: AdminMicrosoftImportMultipart["ownerId"];
   longLived: AdminMicrosoftImportMultipart["longLived"];

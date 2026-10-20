@@ -17,7 +17,7 @@ user3@hotmail.com----pass3----client3----refresh3
 user4@outlook.fr----pass4----client4----refresh4----aux4@example.net
 `
 
-	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategyAbort)
+	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategyAbort, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -37,7 +37,7 @@ user4@outlook.fr----pass4----client4----refresh4----aux4@example.net
 func TestTXTParser_ParseMicrosoftImport_EmptyReturnsError(t *testing.T) {
 	parser := NewTXTParser()
 
-	_, _, err := parser.ParseMicrosoftImport("", domain.ImportErrorStrategyAbort)
+	_, _, err := parser.ParseMicrosoftImport("", domain.ImportErrorStrategyAbort, false)
 	if !errors.Is(err, domain.ErrInvalidImportFormat) {
 		t.Errorf("expected ErrInvalidImportFormat, got %v", err)
 	}
@@ -47,7 +47,7 @@ func TestTXTParser_ParseMicrosoftImport_Blanks(t *testing.T) {
 	parser := NewTXTParser()
 	content := "\n\nuser@outlook.com----pass123\n\n"
 
-	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategyAbort)
+	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategyAbort, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestTXTParser_ParseMicrosoftImport_PreservesPasswordWhitespace(t *testing.T
 	parser := NewTXTParser()
 	content := "user@outlook.com----  pass with spaces  \r\nuser2@outlook.com---- leading-and-trailing ----aux@example.net"
 
-	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategyAbort)
+	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategyAbort, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestTXTParser_ParseMicrosoftImport_PreservesPasswordWhitespace(t *testing.T
 func TestTXTParser_ParseMicrosoftImport_AllCommentsReturnsError(t *testing.T) {
 	parser := NewTXTParser()
 
-	_, _, err := parser.ParseMicrosoftImport("# comment 1\n# comment 2\n\n", domain.ImportErrorStrategyAbort)
+	_, _, err := parser.ParseMicrosoftImport("# comment 1\n# comment 2\n\n", domain.ImportErrorStrategyAbort, false)
 	if !errors.Is(err, domain.ErrInvalidImportFormat) {
 		t.Errorf("expected ErrInvalidImportFormat, got %v", err)
 	}
@@ -103,7 +103,7 @@ func TestTXTParser_ParseMicrosoftImport_InvalidLineReturnsError(t *testing.T) {
 
 	for _, content := range cases {
 		t.Run(content, func(t *testing.T) {
-			_, _, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategyAbort)
+			_, _, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategyAbort, false)
 			if !errors.Is(err, domain.ErrInvalidImportFormat) {
 				t.Errorf("expected ErrInvalidImportFormat, got %v", err)
 			}
@@ -122,7 +122,7 @@ func TestTXTParser_ParseMicrosoftImport_RejectsNonMicrosoftPrimary(t *testing.T)
 		"drop4@live.com----pw",                          // live.com excluded by policy
 	}, "\n")
 
-	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategySkip)
+	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategySkip, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestTXTParser_ParseMicrosoftImport_RejectsNonMicrosoftPrimary(t *testing.T)
 func TestTXTParser_ParseMicrosoftImport_AbortRejectsNonMicrosoftPrimary(t *testing.T) {
 	parser := NewTXTParser()
 
-	_, _, err := parser.ParseMicrosoftImport("nope@icloud.com----pw", domain.ImportErrorStrategyAbort)
+	_, _, err := parser.ParseMicrosoftImport("nope@icloud.com----pw", domain.ImportErrorStrategyAbort, false)
 	if !errors.Is(err, domain.ErrInvalidImportFormat) {
 		t.Fatalf("expected ErrInvalidImportFormat, got %v", err)
 	}
@@ -154,7 +154,7 @@ func TestTXTParser_ParseMicrosoftImport_TrimsNonPasswordWhitespace(t *testing.T)
 	parser := NewTXTParser()
 	content := "  user@outlook.com ---- pass123 ---- aux@example.net  \n\tuser2@hotmail.com----pass456\n"
 
-	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategyAbort)
+	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategyAbort, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -177,7 +177,7 @@ email@outlook.com----password----
 user2@hotmail.com----pass456
 `
 
-	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategySkip)
+	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategySkip, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestTXTParser_ParseMicrosoftImport_SkipRejectsPseudoBindingFields(t *testin
 		"valid2@outlook.com----pass3",
 	}, "\n")
 
-	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategySkip)
+	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategySkip, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestTXTParser_ParseMicrosoftImport_AbortRejectsPseudoBindingField(t *testin
 	parser := NewTXTParser()
 	content := "invalid@outlook.com----password-prefix----password-suffix----00000000-0000-0000-0000-000000000000----" + strings.Repeat("r", 404)
 
-	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategyAbort)
+	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategyAbort, false)
 	if !errors.Is(err, domain.ErrInvalidImportFormat) {
 		t.Fatalf("expected ErrInvalidImportFormat, got %v", err)
 	}
@@ -239,12 +239,12 @@ func TestTXTParser_ParseMicrosoftImport_SkipRejectsValuesThatCannotFitPersistenc
 		"invalid-email----password",
 		"password-too-long@outlook.com----" + strings.Repeat("p", 513),
 		"client-too-long@outlook.com----password----" + strings.Repeat("c", 256) + "----refresh",
-		"refresh-too-long@outlook.com----password----client----" + strings.Repeat("r", 1025),
+		"refresh-too-long@outlook.com----password----client----" + strings.Repeat("r", 8193),
 		"binding-too-long@outlook.com----password----" + strings.Repeat("a", 310) + "@example.com",
 		"valid@outlook.com----password",
 	}, "\n")
 
-	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategySkip)
+	result, failures, err := parser.ParseMicrosoftImport(content, domain.ImportErrorStrategySkip, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

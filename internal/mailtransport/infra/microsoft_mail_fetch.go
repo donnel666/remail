@@ -373,7 +373,8 @@ func (c *MicrosoftMailFetchClient) fetchGraphAll(ctx context.Context, req Micros
 	var tokenResult MicrosoftOAuthResult
 	if accessToken == "" {
 		var err error
-		tokenResult, err = exchangeMicrosoftAccessToken(ctx, req.ClientID, req.RefreshToken, defaultMicrosoftScopes, microsoftTokenURL, req.ProxyURL, timeout)
+		endpoint, scopes := microsoftOAuthEndpoint(req.EmailAddress, false)
+		tokenResult, err = exchangeMicrosoftAccessToken(ctx, req.ClientID, req.RefreshToken, scopes, endpoint, req.ProxyURL, timeout)
 		if err != nil && strings.TrimSpace(tokenResult.Category) == "" {
 			tokenResult = microsoftOAuthFailure("request", "Microsoft mail service is temporarily unavailable.", msacl.IsProxyTransportError(err))
 		}
@@ -653,7 +654,8 @@ func (c *MicrosoftMailFetchClient) exchangeIMAPAccessToken(ctx context.Context, 
 	if c != nil && c.exchangeIMAPToken != nil {
 		return c.exchangeIMAPToken(ctx, req)
 	}
-	result, err := exchangeMicrosoftAccessToken(ctx, req.ClientID, req.RefreshToken, "", microsoftIMAPTokenURL, req.ProxyURL, c.requestTimeout())
+	endpoint, scopes := microsoftOAuthEndpoint(req.EmailAddress, true)
+	result, err := exchangeMicrosoftAccessToken(ctx, req.ClientID, req.RefreshToken, scopes, endpoint, req.ProxyURL, c.requestTimeout())
 	if err != nil {
 		return "", "", microsoftMailFetchFailure("request", "Microsoft mail service is temporarily unavailable.", result.ProxyFailure), err
 	}

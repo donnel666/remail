@@ -91,6 +91,7 @@ type ProductTypeFilter = "all" | OrderProductType;
 
 const PRODUCT_TYPE_VALUES: OrderProductType[] = [
   "microsoft",
+  "microsoft_enterprise",
   "domain",
   "gmail",
   "gmail_variant",
@@ -278,6 +279,7 @@ export default function AdminOrders() {
         gmailVariant: 0,
         icloud: 0,
         microsoft: 0,
+        microsoft_enterprise: 0,
         random: 0,
         proto: 0,
         daum: 0,

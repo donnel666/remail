@@ -303,7 +303,7 @@ func (uc *UseCase) Allocate(ctx context.Context, cmd AllocateCommand) (result *d
 				attemptCmd.SupplyScope = scope
 				for _, productType := range productTypes {
 					switch productType {
-					case coredomain.ProductTypeMicrosoft:
+					case coredomain.ProductTypeMicrosoft, coredomain.ProductTypeMicrosoftEnterprise:
 						result, err = uc.allocateMicrosoft(txCtx, attemptCmd, *config, microsoftProbes)
 					case coredomain.ProductTypeDomain:
 						result, err = uc.allocateDomain(txCtx, attemptCmd, *config)
@@ -406,11 +406,13 @@ func containsSupplyScope(scopes []domain.SupplyScope, want domain.SupplyScope) b
 }
 
 func isRandomSuffixSelector(value string) bool {
-	return value == coredomain.RandomMicrosoftSuffixSelector || value == coredomain.RandomDomainSuffixSelector || value == coredomain.RandomProtoSuffixSelector || value == coredomain.RandomDaumSuffixSelector
+	return value == coredomain.RandomMicrosoftSuffixSelector || value == coredomain.RandomMicrosoftEnterpriseSuffixSelector || value == coredomain.RandomDomainSuffixSelector || value == coredomain.RandomProtoSuffixSelector || value == coredomain.RandomDaumSuffixSelector
 }
 
 func randomSuffixMatchesProduct(selector string, productType coredomain.ProductType, suffix string) bool {
 	switch selector {
+	case coredomain.RandomMicrosoftEnterpriseSuffixSelector:
+		return productType == coredomain.ProductTypeMicrosoftEnterprise && coredomain.IsMicrosoftEnterpriseEmail("selector@"+suffix)
 	case coredomain.RandomMicrosoftSuffixSelector:
 		return productType == coredomain.ProductTypeMicrosoft && coredomain.IsMicrosoftEmailDomain("selector@"+suffix)
 	case coredomain.RandomDomainSuffixSelector:
@@ -480,7 +482,9 @@ func (uc *UseCase) SelectRandomInventorySuffix(ctx context.Context, req ProductS
 
 func (uc *UseCase) selectRandomInventorySuffix(ctx context.Context, config ProductAllocationConfig, buyerUserID uint, scopes []domain.SupplyScope, selector string) (string, error) {
 	wantType := coredomain.ProductTypeMicrosoft
-	if selector == coredomain.RandomDomainSuffixSelector {
+	if selector == coredomain.RandomMicrosoftEnterpriseSuffixSelector {
+		wantType = coredomain.ProductTypeMicrosoftEnterprise
+	} else if selector == coredomain.RandomDomainSuffixSelector {
 		wantType = coredomain.ProductTypeDomain
 	} else if selector == coredomain.RandomProtoSuffixSelector {
 		wantType = coredomain.ProductTypeProto
@@ -991,7 +995,7 @@ func (uc *UseCase) GetInventoryStats(ctx context.Context, projectID uint) (resul
 		}
 		// Legacy placeholders predate Cold and have neither source enabled;
 		// authoritative stats always enable at least one configured product type.
-		if !stats.Microsoft.Enabled && !stats.Domain.Enabled && !stats.Gmail.Enabled && !stats.ICloud.Enabled && !stats.Proto.Enabled && !stats.Daum.Enabled {
+		if !stats.Microsoft.Enabled && !stats.MicrosoftEnterprise.Enabled && !stats.Domain.Enabled && !stats.Gmail.Enabled && !stats.ICloud.Enabled && !stats.Proto.Enabled && !stats.Daum.Enabled {
 			_ = uc.ScheduleInventoryRefresh(ctx)
 			return nil, domain.ErrInventoryRefreshInProgress
 		}
@@ -1103,7 +1107,7 @@ func mergePrivateProductInventory(result *ProjectProductInventoryTotals, invento
 			}
 		}
 		if itemIndex < 0 {
-			result.Items = append(result.Items, ProductInventoryTotal{ProductID: private.ProductID, ProductType: productType})
+			result.Items = append(result.Items, ProductInventoryTotal{ProductID: private.ProductID, ProductType: privateProductType(productType, private.Suffix)})
 			itemIndex = len(result.Items) - 1
 		}
 		item := &result.Items[itemIndex]
@@ -1379,7 +1383,7 @@ func productInventoryAvailable(totals *ProjectProductInventoryTotals, req Produc
 			}
 			return suffix.TotalAvailable > 0, true
 		}
-		if item.ProductType == coredomain.ProductTypeMicrosoft || item.ProductType == coredomain.ProductTypeDaum {
+		if item.ProductType == coredomain.ProductTypeMicrosoft || item.ProductType == coredomain.ProductTypeMicrosoftEnterprise || item.ProductType == coredomain.ProductTypeDaum {
 			return false, false
 		}
 		return false, true
@@ -2038,7 +2042,7 @@ func (uc *UseCase) tryMicrosoftBuckets(ctx context.Context, cmd AllocateCommand,
 	if len(buckets) > 1 {
 		limit = globalCandidateWindowValue()
 	}
-	candidates, err := uc.repo.ListMicrosoftSourceCandidates(ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, mailbox, buckets, limit, cmd.EmailSuffix)
+	candidates, err := uc.repo.ListMicrosoftSourceCandidates(ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, mailbox, buckets, limit, cmd.EmailSuffix, config.ProductType == coredomain.ProductTypeMicrosoftEnterprise)
 	if err != nil {
 		return nil, false, err
 	}
@@ -2076,7 +2080,7 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 		return nil, errResourceRootBusy
 	}
 
-	lockedCandidate, err := uc.repo.LockMicrosoftCandidate(ctx, candidate.ResourceID, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, mailbox, cmd.EmailSuffix)
+	lockedCandidate, err := uc.repo.LockMicrosoftCandidate(ctx, candidate.ResourceID, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, mailbox, cmd.EmailSuffix, config.ProductType == coredomain.ProductTypeMicrosoftEnterprise)
 	if err != nil {
 		return nil, err
 	}
@@ -2095,6 +2099,9 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 		_, candidateSuffix, validEmail := splitEmail(candidate.EmailAddress)
 		if (cmd.EmailSuffix == "" || validEmail && candidateSuffix == cmd.EmailSuffix) && !matched && !candidate.MainAllocated {
 			return uc.createMicrosoftAllocation(ctx, cmd, config, candidate.ResourceID, domain.MicrosoftMailboxMain, nil, nil, nil, candidate.EmailAddress, now, nil)
+		}
+		if config.ProductType == coredomain.ProductTypeMicrosoftEnterprise {
+			return nil, errCandidateUnavailable
 		}
 		alias, aliasErr := uc.repo.FindReusableExplicitAlias(ctx, config.ProjectID, candidate.ResourceID, cmd.EmailSuffix)
 		if aliasErr != nil {
@@ -2526,6 +2533,9 @@ func (uc *UseCase) createDomainAllocation(ctx context.Context, cmd AllocateComma
 }
 
 func microsoftMailboxPreferences(orderNo string, config ProductAllocationConfig) []domain.MicrosoftMailbox {
+	if config.ProductType == coredomain.ProductTypeMicrosoftEnterprise {
+		return []domain.MicrosoftMailbox{domain.MicrosoftMailboxMain}
+	}
 	type weightedMailbox struct {
 		mailbox domain.MicrosoftMailbox
 		weight  int
@@ -2868,4 +2878,11 @@ func normalizeResourceIDs(ids []uint) []uint {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
 	return result
+}
+
+func privateProductType(productType coredomain.ProductType, suffix string) coredomain.ProductType {
+	if productType == coredomain.ProductTypeMicrosoft && coredomain.IsMicrosoftEnterpriseEmail("inventory@"+suffix) {
+		return coredomain.ProductTypeMicrosoftEnterprise
+	}
+	return productType
 }

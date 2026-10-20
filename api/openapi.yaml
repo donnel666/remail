@@ -2461,7 +2461,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [microsoft, domain, gmail, gmail_variant, icloud, proto, daum]
+            enum: [microsoft, microsoft_enterprise, domain, gmail, gmail_variant, icloud, proto, daum]
         - name: search
           in: query
           schema:
@@ -3629,7 +3629,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [microsoft, domain, gmail, gmail_variant, icloud, proto, daum]
+            enum: [microsoft, microsoft_enterprise, domain, gmail, gmail_variant, icloud, proto, daum]
         - name: search
           in: query
           schema:
@@ -4883,6 +4883,12 @@ paths:
       security:
         - cookieAuth: []
       parameters:
+        - name: enterprise
+          in: query
+          description: Select Microsoft enterprise mailboxes under tenant.onmicrosoft.com. Defaults to personal Microsoft mailboxes.
+          schema:
+            type: boolean
+            default: false
         - name: scope
           in: query
           schema:
@@ -5269,6 +5275,10 @@ paths:
                 - file
                 - longLived
               properties:
+                enterprise:
+                  type: boolean
+                  default: false
+                  description: Require email----password----clientId----refreshToken with a tenant.onmicrosoft.com address; validate receive access and project history without aliases or recovery binding.
                 file:
                   type: string
                   format: binary
@@ -6337,7 +6347,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [microsoft, domain, random, gmail, gmail_variant, icloud, proto, daum]
+            enum: [microsoft, microsoft_enterprise, domain, random, gmail, gmail_variant, icloud, proto, daum]
         - name: search
           in: query
           schema:
@@ -10143,6 +10153,12 @@ paths:
       security:
         - cookieAuth: []
       parameters:
+        - name: enterprise
+          in: query
+          description: Select Microsoft enterprise mailboxes under tenant.onmicrosoft.com. Defaults to personal Microsoft mailboxes.
+          schema:
+            type: boolean
+            default: false
         - name: type
           in: query
           required: true
@@ -10268,6 +10284,10 @@ paths:
                 - longLived
                 - errorStrategy
               properties:
+                enterprise:
+                  type: boolean
+                  default: false
+                  description: Require email----password----clientId----refreshToken with a tenant.onmicrosoft.com address; validate receive access and project history without aliases or recovery binding.
                 file:
                   type: string
                   format: binary
@@ -18188,7 +18208,7 @@ components:
           type: integer
         emailSuffix:
           type: string
-          description: Product selector. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted.
+          description: Product selector. microsoft_enterprise randomly selects an available tenant.onmicrosoft.com suffix from Microsoft enterprise inventory; an exact tenant.onmicrosoft.com suffix selects that tenant. Enterprise products allocate only the main mailbox. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock; an owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted.
       additionalProperties: false
 
     CreateOrderBatchRequest:
@@ -18202,7 +18222,7 @@ components:
           type: integer
         emailSuffix:
           type: string
-          description: Product selector. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted.
+          description: Product selector. microsoft_enterprise randomly selects an available tenant.onmicrosoft.com suffix from Microsoft enterprise inventory; an exact tenant.onmicrosoft.com suffix selects that tenant. Enterprise products allocate only the main mailbox. daum.net, hanmail.net and hanmail2.net select the exact Daum suffix; daum randomly selects an available Daum suffix weighted by inventory. gmail.com selects the original local Gmail primary address. gmail_variant selects the local Gmail variant product and allocates an equivalent @googlemail.com address or a dot/plus alias on @gmail.com or @googlemail.com. icloud.com selects iCloud. proton.me and protonmail.com select the exact Proto suffix; proto randomly selects an in-stock Proto suffix weighted by available inventory. A configured Microsoft mailbox domain such as outlook.com selects that exact Microsoft suffix, and a public suffix such as com or com.cn selects that exact domain-email suffix. The special value outlook randomly selects an in-stock configured Microsoft suffix, and domain randomly selects an in-stock domain suffix; these choices are also weighted by available inventory. With private_first, random weighting uses owned inventory first and falls back to public inventory only when no owned suffix is in stock. A batch resolves the special value once, uses that suffix for every item, and does not select another suffix after that inventory is exhausted. An owned full domain such as mydomain.com selects only that private domain. Exact suffix selections never fall back to a different suffix. Full mailbox addresses are not accepted.
         quantity:
           type: integer
           minimum: 2
@@ -18406,7 +18426,7 @@ components:
           description: Current display logo URL of the ordered project; omitted when the project no longer exists or has no logo.
         productType:
           type: string
-          enum: [microsoft, domain, random, gmail, gmail_variant, icloud, proto, daum]
+          enum: [microsoft, microsoft_enterprise, domain, random, gmail, gmail_variant, icloud, proto, daum]
           description: Product type snapshot. `random` is returned only for historical orders created before that product was retired.
         serviceMode:
           type: string
@@ -18575,6 +18595,9 @@ components:
       type: object
       required: [all, microsoft, domain, random, gmail, gmailVariant, icloud, proto, daum]
       properties:
+        microsoft_enterprise:
+          type: integer
+          format: int64
         all:
           type: integer
           format: int64
@@ -19777,6 +19800,14 @@ components:
         - microsoftPurchaseActivations
         - microsoftPurchaseActivationSuccessRate
         - microsoftAveragePurchaseActivationSeconds
+        - microsoftEnterpriseTotalEmails
+        - microsoftEnterpriseAvailableEmails
+        - microsoftEnterpriseCodeReceipts
+        - microsoftEnterpriseCodeSuccessRate
+        - microsoftEnterpriseAverageCodeReceiptSeconds
+        - microsoftEnterprisePurchaseActivations
+        - microsoftEnterprisePurchaseActivationSuccessRate
+        - microsoftEnterpriseAveragePurchaseActivationSeconds
         - gmailTotalEmails
         - gmailAvailableEmails
         - gmailCodeReceipts
@@ -19865,6 +19896,28 @@ components:
         microsoftAveragePurchaseActivationSeconds:
           type: integer
           description: Global average seconds from receiveStartedAt to activatedAt for activated Microsoft purchase orders created in the selected range.
+        microsoftEnterpriseTotalEmails:
+          type: integer
+        microsoftEnterpriseAvailableEmails:
+          type: integer
+        microsoftEnterpriseCodeReceipts:
+          type: integer
+          description: Successful deliveries for charged, non-history Microsoft enterprise code orders created in the selected range across all users.
+        microsoftEnterpriseCodeSuccessRate:
+          type: number
+          description: Successful Microsoft enterprise code deliveries divided by charged, non-history Microsoft enterprise code orders created in the selected range across all users.
+        microsoftEnterpriseAverageCodeReceiptSeconds:
+          type: integer
+          description: Global average seconds from receiveStartedAt to the first matched code message for successful Microsoft enterprise code orders created in the selected range.
+        microsoftEnterprisePurchaseActivations:
+          type: integer
+          description: Successfully activated charged Microsoft enterprise purchase orders created in the selected range across all users.
+        microsoftEnterprisePurchaseActivationSuccessRate:
+          type: number
+          description: Activated Microsoft enterprise purchases divided by charged Microsoft enterprise purchase orders created in the selected range across all users.
+        microsoftEnterpriseAveragePurchaseActivationSeconds:
+          type: integer
+          description: Global average seconds from receiveStartedAt to activatedAt for activated Microsoft enterprise purchase orders created in the selected range.
         gmailTotalEmails:
           type: integer
           description: Non-deleted local Gmail source accounts.
@@ -19986,6 +20039,11 @@ components:
         - microsoftReceivedCodes
         - microsoftCodeSuccessRate
         - microsoftAverageCodeReceiptSeconds
+        - microsoftEnterpriseTotalEmails
+        - microsoftEnterpriseAvailableEmails
+        - microsoftEnterpriseReceivedCodes
+        - microsoftEnterpriseCodeSuccessRate
+        - microsoftEnterpriseAverageCodeReceiptSeconds
         - gmailTotalEmails
         - gmailAvailableEmails
         - gmailReceivedCodes
@@ -20048,6 +20106,16 @@ components:
         microsoftCodeSuccessRate:
           type: number
         microsoftAverageCodeReceiptSeconds:
+          type: integer
+        microsoftEnterpriseTotalEmails:
+          type: integer
+        microsoftEnterpriseAvailableEmails:
+          type: integer
+        microsoftEnterpriseReceivedCodes:
+          type: integer
+        microsoftEnterpriseCodeSuccessRate:
+          type: number
+        microsoftEnterpriseAverageCodeReceiptSeconds:
           type: integer
         gmailTotalEmails:
           type: integer
@@ -21889,7 +21957,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto, daum]
+          enum: [microsoft, microsoft_enterprise, domain, gmail, gmail_variant, icloud, proto, daum]
         status:
           type: string
           enum: [enabled, disabled]
@@ -22973,7 +23041,7 @@ components:
           type: boolean
         productType:
           type: string
-          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto, daum]
+          enum: [microsoft, microsoft_enterprise, domain, gmail, gmail_variant, icloud, proto, daum]
         search:
           type: string
         targetPlatform:
@@ -23109,7 +23177,7 @@ components:
       properties:
         type:
           type: string
-          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto, daum]
+          enum: [microsoft, microsoft_enterprise, domain, gmail, gmail_variant, icloud, proto, daum]
         status:
           type: string
           enum: [enabled, disabled]
@@ -23246,6 +23314,9 @@ components:
       type: object
       required: [all, microsoft, domain, gmail, gmailVariant, icloud, proto, daum]
       properties:
+        microsoft_enterprise:
+          type: integer
+          format: int64
         all:
           type: integer
         microsoft:
@@ -23345,7 +23416,7 @@ components:
       properties:
         type:
           type: string
-          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto, daum]
+          enum: [microsoft, microsoft_enterprise, domain, gmail, gmail_variant, icloud, proto, daum]
         status:
           type: string
           enum: [enabled, disabled]
@@ -23439,7 +23510,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto, daum]
+          enum: [microsoft, microsoft_enterprise, domain, gmail, gmail_variant, icloud, proto, daum]
         status:
           type: string
           enum: [enabled, disabled]
@@ -23705,6 +23776,9 @@ components:
       required:
         - resourceType
       properties:
+        enterprise:
+          type: boolean
+          description: Select enterprise Microsoft resources; omitted means personal Microsoft resources.
         resourceType:
           type: string
           enum: [microsoft, domain]
@@ -24126,6 +24200,8 @@ components:
       properties:
         projectId:
           type: integer
+        microsoftEnterprise:
+          $ref: "#/components/schemas/MicrosoftInventory"
         microsoft:
           $ref: "#/components/schemas/MicrosoftInventory"
         domain:
@@ -24270,7 +24346,7 @@ components:
       properties:
         productType:
           type: string
-          enum: [microsoft, domain, gmail, gmail_variant, icloud, proto, daum]
+          enum: [microsoft, microsoft_enterprise, domain, gmail, gmail_variant, icloud, proto, daum]
         totalAvailable:
           type: integer
         publicAvailable:
@@ -26659,6 +26735,9 @@ components:
       required:
         - type
       properties:
+        enterprise:
+          type: boolean
+          description: Select enterprise Microsoft resources; omitted means personal Microsoft resources.
         type:
           type: string
           enum: [microsoft]

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/mailtransport/infra/msacl"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 )
@@ -64,7 +65,22 @@ func (c *MicrosoftOAuthClient) RefreshToken(ctx context.Context, req MicrosoftOA
 	if c != nil && c.timeout > 0 {
 		timeout = c.timeout
 	}
-	return exchangeMicrosoftAccessToken(ctx, clientID, refreshToken, defaultMicrosoftScopes, microsoftTokenURL, req.ProxyURL, runtimeconfig.Duration("oauth_validation_timeout_seconds", timeout, time.Second, 1))
+	endpoint, scopes := microsoftOAuthEndpoint(req.EmailAddress, false)
+	return exchangeMicrosoftAccessToken(ctx, clientID, refreshToken, scopes, endpoint, req.ProxyURL, runtimeconfig.Duration("oauth_validation_timeout_seconds", timeout, time.Second, 1))
+}
+
+func microsoftOAuthEndpoint(email string, imap bool) (string, string) {
+	if coredomain.IsMicrosoftEnterpriseEmail(email) {
+		if imap {
+			return "https://login.microsoftonline.com/organizations/oauth2/v2.0/token", "https://outlook.office.com/IMAP.AccessAsUser.All offline_access"
+		}
+		// Keep the consented permissions; enterprise imports do not request Mail.Send.
+		return "https://login.microsoftonline.com/organizations/oauth2/v2.0/token", ""
+	}
+	if imap {
+		return microsoftIMAPTokenURL, ""
+	}
+	return microsoftTokenURL, defaultMicrosoftScopes
 }
 
 func (c *MicrosoftOAuthClient) AcquireToken(ctx context.Context, req MicrosoftOAuthRequest) (MicrosoftOAuthResult, error) {

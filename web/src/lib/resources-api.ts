@@ -37,6 +37,7 @@ export type ResourceListResponse =
   components["schemas"]["ResourceListResponse"];
 
 export interface ResourceListFilter {
+  enterprise?: boolean;
   createdFrom?: string;
   createdTo?: string;
   forSale?: boolean;
@@ -107,11 +108,13 @@ export async function importMicrosoftResources(
   longLived: boolean,
   turnstileToken: string,
   errorStrategy: ImportErrorStrategy = "skip",
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  enterprise = false
 ) {
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("longLived", String(longLived));
+  formData.append("longLived", String(enterprise ? false : longLived));
+  formData.append("enterprise", String(enterprise));
   formData.append("errorStrategy", errorStrategy);
 
   return unwrap<ImportResponse>(

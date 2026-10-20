@@ -29,12 +29,14 @@ const ENTRY_AREA_HEIGHT = 208;
 const SKIPPED_IMPORT_ENTRIES_PATTERN = /^Skipped (\d+) import entr(?:y|ies)\.$/;
 
 interface ImportMicrosoftEmailsModalProps {
+  enterprise?: boolean;
   open: boolean;
   onOpenChange: (value: boolean) => void;
   onSuccess: () => void | Promise<void>;
 }
 
 export function ImportMicrosoftEmailsModal({
+  enterprise = false,
   open,
   onOpenChange,
   onSuccess,
@@ -129,7 +131,7 @@ export function ImportMicrosoftEmailsModal({
             return;
           }
         }
-        const prepared = preprocessMicrosoftImportContent(sourceText, errorStrategy);
+        const prepared = preprocessMicrosoftImportContent(sourceText, errorStrategy, enterprise);
         if (prepared.firstFailure) {
           Toast.error(getImportPreprocessFailureMessage(t, prepared.firstFailure));
           return;
@@ -158,7 +160,7 @@ export function ImportMicrosoftEmailsModal({
           const name = batches.chunks.length === 1 ? sourceName : `${sourceName}.part-${index + 1}.txt`;
           return importMicrosoftResources(
             new File([chunk], name, { type: "text/plain" }),
-            lifetimeType === "long_lived", token, errorStrategy, controller.signal
+            !enterprise && lifetimeType === "long_lived", token, errorStrategy, controller.signal, enterprise
           );
         },
         poll: (id) => waitForResourceImport(id, { signal: controller.signal }),
@@ -221,7 +223,7 @@ export function ImportMicrosoftEmailsModal({
         </Space>
       }
       onCancel={close}
-      title={t("Import Microsoft Emails")}
+      title={t(enterprise ? "Import Microsoft Enterprise Emails" : "Import Microsoft Emails")}
       visible={open}
       width="min(666px, calc(100vw - 32px))"
     >
@@ -253,6 +255,7 @@ export function ImportMicrosoftEmailsModal({
           </button>
         </div>
 
+        {!enterprise && (
         <div className="grid grid-cols-2 gap-2">
           <button
             className={switchButtonClass(lifetimeType === "long_lived")}
@@ -271,6 +274,7 @@ export function ImportMicrosoftEmailsModal({
             {t("Short-lived")}
           </button>
         </div>
+        )}
 
         <div className="grid grid-cols-2 gap-2">
           <button
@@ -297,7 +301,7 @@ export function ImportMicrosoftEmailsModal({
               className="font-mono"
               disabled={busy}
               onChange={(value) => setText(value)}
-              placeholder="email----password"
+              placeholder={enterprise ? "user@tenant.onmicrosoft.com----password----clientId----refreshToken" : "email----password"}
               rows={8}
               style={{ height: ENTRY_AREA_HEIGHT, resize: "none" }}
               value={text}
@@ -355,7 +359,7 @@ export function ImportMicrosoftEmailsModal({
             {t("Supported format")}
           </div>
           <pre className="font-mono text-xs leading-relaxed text-[var(--semi-color-text-2)]">
-            {MICROSOFT_EMAIL_FORMAT_HINT}
+            {enterprise ? "user@tenant.onmicrosoft.com----password----clientId----refreshToken" : MICROSOFT_EMAIL_FORMAT_HINT}
           </pre>
         </div>
       </div>
@@ -385,6 +389,7 @@ function getImportPreprocessFailureMessage(
       firstLine: failure.firstLine,
     });
   }
+  if (failure.category === "invalid_enterprise_domain") return t("Microsoft enterprise email must use @tenant.onmicrosoft.com.");
   if (failure.category === "non_microsoft_domain") {
     return t("Import non-microsoft line", { line: failure.line });
   }

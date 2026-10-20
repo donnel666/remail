@@ -323,6 +323,7 @@ SELECT
 FROM microsoft_resources AS mr
 LEFT JOIN microsoft_alias_schedules AS schedule ON schedule.resource_id = mr.id
 WHERE mr.status = 'normal'
+  AND mr.email_domain NOT LIKE '%.onmicrosoft.com'
   AND schedule.resource_id IS NULL
 ORDER BY mr.id
 LIMIT ?`, now, now, now, microsoftAliasScheduleEnsureBatch)
@@ -348,7 +349,7 @@ INSERT IGNORE INTO microsoft_alias_schedules (
 )
 SELECT id, 'pending', ?, 0, '', ?, ?
 FROM microsoft_resources
-WHERE id = ? AND status = 'normal'`, now, now, now, resourceID)
+WHERE id = ? AND status = 'normal' AND email_domain NOT LIKE '%.onmicrosoft.com'`, now, now, now, resourceID)
 		if inserted.Error != nil {
 			return fmt.Errorf("ensure validated microsoft alias schedule: %w", inserted.Error)
 		}
@@ -631,6 +632,9 @@ SHA2(CONCAT_WS(
 }
 
 func microsoftAliasDispatchIneligibleMessage(state microsoftAliasDispatchEligibility) string {
+	if coredomain.IsMicrosoftEnterpriseEmail(state.ResourceEmail) {
+		return "Microsoft enterprise mailboxes do not support aliases."
+	}
 	if state.ResourceStatus != "normal" {
 		return mailapp.MicrosoftAliasResourceNotNormalMessage
 	}

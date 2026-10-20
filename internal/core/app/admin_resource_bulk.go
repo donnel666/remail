@@ -37,6 +37,7 @@ const (
 )
 
 type AdminResourceBulkFilterValue struct {
+	Enterprise     bool                           `json:"enterprise,omitempty"`
 	Search         string                         `json:"search,omitempty"`
 	Suffix         string                         `json:"suffix,omitempty"`
 	Status         domain.MicrosoftResourceStatus `json:"status,omitempty"`
@@ -51,7 +52,7 @@ type AdminResourceBulkFilterValue struct {
 
 func (f AdminResourceBulkFilterValue) ListFilter() AdminMicrosoftListFilter {
 	return AdminMicrosoftListFilter{
-		Search: f.Search, Suffix: f.Suffix, Status: f.Status, ForSale: f.ForSale,
+		Search: f.Search, Suffix: f.Suffix, Enterprise: f.Enterprise, Status: f.Status, ForSale: f.ForSale,
 		LongLived: f.LongLived, GraphAvailable: f.GraphAvailable, TokenHealth: f.TokenHealth,
 		CreatedFrom: f.CreatedFrom, CreatedTo: f.CreatedTo, OwnerIDs: append([]uint(nil), f.OwnerIDs...),
 	}
@@ -576,7 +577,7 @@ func normalizeAdminBulkSelection(selection AdminResourceBulkSelection) (AdminRes
 		}
 		selection.ResourceIDs = nil
 		selection.Filter = AdminResourceBulkFilterValue{
-			Search: filter.Search, Suffix: filter.Suffix, Status: filter.Status,
+			Search: filter.Search, Suffix: filter.Suffix, Status: filter.Status, Enterprise: filter.Enterprise,
 			ForSale: filter.ForSale, LongLived: filter.LongLived, GraphAvailable: filter.GraphAvailable,
 			TokenHealth: filter.TokenHealth, CreatedFrom: filter.CreatedFrom, CreatedTo: filter.CreatedTo,
 		}

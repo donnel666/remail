@@ -75,6 +75,7 @@ func TestBotWebSocketDBEventsExposeOnlyPublicProjection(t *testing.T) {
 		{"16", "bulk", "system_settings.bulk_upsert", "system_setting"},
 		{"17", "7", "core.project.create", "project"},
 		{"18", "8", "core.project.approve", "project"},
+		{"19", "product_price_multiplier_microsoft_enterprise", "system_settings.upsert", "system_setting"},
 	}
 	for _, log := range logs {
 		if err := db.Exec(`INSERT INTO operation_logs(id, operation_type, resource_type, resource_id, result, created_at) VALUES (?, ?, ?, ?, 'success', ?)`,
@@ -116,8 +117,8 @@ func TestBotWebSocketDBEventsExposeOnlyPublicProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list events: %v", err)
 	}
-	if len(events) != 7 {
-		t.Fatalf("events = %d, want 7: %+v", len(events), events)
+	if len(events) != 8 {
+		t.Fatalf("events = %d, want 8: %+v", len(events), events)
 	}
 	for i := 1; i < len(events); i++ {
 		if !botWebSocketCursorBefore(events[i-1].Cursor, events[i].Cursor) {

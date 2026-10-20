@@ -415,7 +415,7 @@ func (s *botWebSocketDBEventSource) listSystemSettingEvents(ctx context.Context,
 	if selected[botWebSocketTopicEmailDiscountUpdated] {
 		topics = append(topics, botWebSocketTopicEmailDiscountUpdated)
 		resourceIDs = append(resourceIDs,
-			runtimeconfig.MicrosoftPriceMultiplierKey, runtimeconfig.GmailPriceMultiplierKey,
+			runtimeconfig.MicrosoftPriceMultiplierKey, runtimeconfig.MicrosoftEnterprisePriceMultiplierKey, runtimeconfig.GmailPriceMultiplierKey,
 			runtimeconfig.ICloudPriceMultiplierKey, runtimeconfig.DomainPriceMultiplierKey,
 		)
 	}
@@ -479,7 +479,7 @@ func botSystemSettingLogTopics(resourceID string, selected map[string]bool) []st
 	if selected[botWebSocketTopicSystemAnnouncementUpdated] && (resourceID == "announcements" || resourceID == "announcement_enabled") {
 		topics = append(topics, botWebSocketTopicSystemAnnouncementUpdated)
 	}
-	if selected[botWebSocketTopicEmailDiscountUpdated] && (resourceID == runtimeconfig.MicrosoftPriceMultiplierKey || resourceID == runtimeconfig.GmailPriceMultiplierKey || resourceID == runtimeconfig.ICloudPriceMultiplierKey || resourceID == runtimeconfig.DomainPriceMultiplierKey) {
+	if selected[botWebSocketTopicEmailDiscountUpdated] && (resourceID == runtimeconfig.MicrosoftPriceMultiplierKey || resourceID == runtimeconfig.MicrosoftEnterprisePriceMultiplierKey || resourceID == runtimeconfig.GmailPriceMultiplierKey || resourceID == runtimeconfig.ICloudPriceMultiplierKey || resourceID == runtimeconfig.DomainPriceMultiplierKey) {
 		topics = append(topics, botWebSocketTopicEmailDiscountUpdated)
 	}
 	return topics

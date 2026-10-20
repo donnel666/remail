@@ -317,7 +317,12 @@ func (h *CoreHandler) PostResourceImport(c *gin.Context) {
 		return
 	}
 
-	result, err := h.module.ImportUseCase.AcceptMicrosoftTXTFile(c.Request.Context(), userID, header.Filename, content, longLived, errorStrategy, middleware.GetRequestID(c))
+	enterprise, err := strconv.ParseBool(c.DefaultPostForm("enterprise", "false"))
+	if err != nil {
+		writeCoreError(c, coredomain.ErrInvalidImportFormat)
+		return
+	}
+	result, err := h.module.ImportUseCase.AcceptMicrosoftTXTFile(c.Request.Context(), userID, header.Filename, content, longLived, enterprise, errorStrategy, middleware.GetRequestID(c))
 	if err != nil {
 		writeCoreError(c, err)
 		return
@@ -1328,6 +1333,11 @@ func resourceListFilterFromQuery(c *gin.Context) (coreapp.ResourceListFilter, bo
 		Purpose:      c.Query("purpose"),
 	}
 	var ok bool
+	enterprise, ok := parseOptionalBoolQuery(c, "enterprise")
+	if !ok {
+		return filter, false
+	}
+	filter.Enterprise = enterprise != nil && *enterprise
 	filter.ForSale, ok = parseOptionalBoolQuery(c, "forSale")
 	if !ok {
 		return filter, false
@@ -1639,14 +1649,15 @@ func toProjectListFacetsResponse(facets *coreapp.ProjectListFacets) *ProjectList
 			Strict: facets.Match.Strict,
 		},
 		ProductType: ProjectProductTypeFacetsResponse{
-			All:          facets.ProductType.All,
-			Microsoft:    facets.ProductType.Microsoft,
-			Domain:       facets.ProductType.Domain,
-			Gmail:        facets.ProductType.Gmail,
-			GmailVariant: facets.ProductType.GmailVariant,
-			ICloud:       facets.ProductType.ICloud,
-			Proto:        facets.ProductType.Proto,
-			Daum:         facets.ProductType.Daum,
+			All:                 facets.ProductType.All,
+			Microsoft:           facets.ProductType.Microsoft,
+			MicrosoftEnterprise: facets.ProductType.MicrosoftEnterprise,
+			Domain:              facets.ProductType.Domain,
+			Gmail:               facets.ProductType.Gmail,
+			GmailVariant:        facets.ProductType.GmailVariant,
+			ICloud:              facets.ProductType.ICloud,
+			Proto:               facets.ProductType.Proto,
+			Daum:                facets.ProductType.Daum,
 		},
 	}
 }
@@ -2056,6 +2067,7 @@ func toAppBulkSelection(selection ResourceBulkSelectionRequest) coreapp.Resource
 		ResourceIDs: selection.ResourceIDs,
 		Filter: coreapp.ResourceBulkFilter{
 			ResourceType:   coredomain.ResourceType(selection.Filter.ResourceType),
+			Enterprise:     selection.Filter.Enterprise,
 			Search:         selection.Filter.Search,
 			Suffix:         selection.Filter.Suffix,
 			TLD:            selection.Filter.TLD,

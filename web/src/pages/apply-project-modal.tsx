@@ -45,6 +45,7 @@ export const initialApplyForm: ApplyFormState = {
 };
 
 export function productTypeLabel(type: string, t: (key: string) => string) {
+  if (type === "microsoft_enterprise") return t("Microsoft Enterprise Emails");
   if (type === "microsoft") return t("Microsoft email");
   if (type === "domain") return t("Domain email");
   if (type === "gmail") return t("Gmail email");
@@ -276,6 +277,7 @@ export function ApplyProjectModal({
             value={form.emailTypes}
           >
             <Select.Option value="microsoft">{t("Microsoft email")}</Select.Option>
+            <Select.Option value="microsoft_enterprise">{t("Microsoft Enterprise Emails")}</Select.Option>
             <Select.Option value="domain">{t("Domain email")}</Select.Option>
             <Select.Option value="gmail">{t("Gmail email")}</Select.Option>
             <Select.Option value="gmail_variant">{t("Gmail variant")}</Select.Option>

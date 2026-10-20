@@ -91,6 +91,7 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 	require.Equal(t, "true", keys["default_project_proto_purchase_enabled"])
 	require.Equal(t, "true", keys["default_project_daum_purchase_enabled"])
 	require.Equal(t, "1", keys[MicrosoftPriceMultiplierKey])
+	require.Equal(t, "1", keys[MicrosoftEnterprisePriceMultiplierKey])
 	require.Equal(t, "1", keys[GmailPriceMultiplierKey])
 	require.Equal(t, "1", keys[ICloudPriceMultiplierKey])
 	require.Equal(t, "1", keys[DomainPriceMultiplierKey])

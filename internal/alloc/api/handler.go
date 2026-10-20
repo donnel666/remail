@@ -130,6 +130,7 @@ func (h *Handler) GetProjectInventory(c *gin.Context) {
 	c.JSON(http.StatusOK, ProjectInventoryResponse{
 		ProjectID:                  stats.ProjectID,
 		Microsoft:                  microsoftInventoryResponse(stats.Microsoft),
+		MicrosoftEnterprise:        microsoftInventoryResponse(stats.MicrosoftEnterprise),
 		Domain:                     domainInventoryResponse(stats.Domain),
 		Gmail:                      gmailInventoryResponse(stats.Gmail),
 		ICloud:                     icloudInventoryResponse(stats.ICloud),

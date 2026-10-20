@@ -42,6 +42,33 @@ func TestApplyOrderingDiscountUsesLowerMultiplierAtLedgerPrecision(t *testing.T)
 	require.Error(t, applyOrderingDiscount(groupPromotion, "1.01"))
 }
 
+func TestApplyOrderingDiscountKeepsMicrosoftEnterpriseIndependent(t *testing.T) {
+	runtimeconfig.Replace([]settingsdomain.Setting{
+		{Key: runtimeconfig.MicrosoftPriceMultiplierKey, Value: "0.8"},
+		{Key: runtimeconfig.MicrosoftEnterprisePriceMultiplierKey, Value: "0.6"},
+	})
+	t.Cleanup(func() { runtimeconfig.Replace(nil) })
+	for _, tc := range []struct {
+		productType               domain.ProductType
+		payAmount, supplierAmount string
+	}{
+		{domain.ProductTypeMicrosoft, "8.00", "4.80"},
+		{domain.ProductTypeMicrosoftEnterprise, "6.00", "3.60"},
+	} {
+		t.Run(string(tc.productType), func(t *testing.T) {
+			quote := &tradeapp.OrderingQuote{ProductType: tc.productType, PayAmount: "10.00", SupplierAmount: "6.00"}
+			require.NoError(t, applyOrderingDiscount(quote, "0.90"))
+			require.Equal(t, tc.payAmount, quote.PayAmount)
+			require.Equal(t, tc.supplierAmount, quote.SupplierAmount)
+
+			groupPromotion := &tradeapp.OrderingQuote{ProductType: tc.productType, PayAmount: "10.00", SupplierAmount: "6.00"}
+			require.NoError(t, applyOrderingDiscount(groupPromotion, "0.50"))
+			require.Equal(t, "5.00", groupPromotion.PayAmount)
+			require.Equal(t, "3.00", groupPromotion.SupplierAmount)
+		})
+	}
+}
+
 func TestOrderingSharedDiscountPreservesPrecisionAndZeroPrice(t *testing.T) {
 	runtimeconfig.Replace(nil)
 	t.Cleanup(func() { runtimeconfig.Replace(nil) })

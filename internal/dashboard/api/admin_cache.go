@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	adminDashboardCachePrefix = "dashboard:admin:v6:"
+	adminDashboardCachePrefix = "dashboard:admin:v7:"
 	adminDashboardActiveKey   = "dashboard:admin:active"
 	adminDashboardCacheTTL    = 24 * time.Hour
 )

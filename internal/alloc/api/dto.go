@@ -54,6 +54,7 @@ type AdminAllocationListResponse struct {
 type ProjectInventoryResponse struct {
 	ProjectID                  uint                       `json:"projectId"`
 	Microsoft                  MicrosoftInventoryResponse `json:"microsoft"`
+	MicrosoftEnterprise        MicrosoftInventoryResponse `json:"microsoftEnterprise"`
 	Domain                     DomainInventoryResponse    `json:"domain"`
 	Gmail                      GmailInventoryResponse     `json:"gmail"`
 	ICloud                     ICloudInventoryResponse    `json:"icloud"`

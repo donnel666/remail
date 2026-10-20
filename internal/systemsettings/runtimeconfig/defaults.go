@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	DefaultSettingsCount                         = 310
+	DefaultSettingsCount                         = 317
 	ICloudDeviceBaseURLKey                       = "icloud_device_base_url"
 	ICloudDeviceAPIKey                           = "icloud_device_api_key"
 	ICloudDeviceSMSBaseURLKey                    = "icloud_device_sms_base_url"
@@ -15,6 +15,7 @@ const (
 	NodeLocCallbackURL                           = "https://remail.aishop6.com/oauth/nodeloc"
 	RechargeTimeoutMinutesKey                    = "recharge_timeout_minutes"
 	MicrosoftPriceMultiplierKey                  = "product_price_multiplier_microsoft"
+	MicrosoftEnterprisePriceMultiplierKey        = "product_price_multiplier_microsoft_enterprise"
 	GmailPriceMultiplierKey                      = "product_price_multiplier_gmail"
 	ICloudPriceMultiplierKey                     = "product_price_multiplier_icloud"
 	DomainPriceMultiplierKey                     = "product_price_multiplier_domain"
@@ -148,11 +149,17 @@ var defaultSettings = []domain.Setting{
 	{Key: "recharge_timeout_minutes", Value: "10"},
 	{Key: "async_check_request_timeout_seconds", Value: "5"},
 	{Key: "default_project_microsoft_code_price", Value: "8"},
+	{Key: "default_project_microsoft_enterprise_code_price", Value: "8"},
 	{Key: "default_project_microsoft_code_supplier_price", Value: "5"},
+	{Key: "default_project_microsoft_enterprise_code_supplier_price", Value: "5"},
 	{Key: "default_project_microsoft_purchase_price", Value: "10"},
+	{Key: "default_project_microsoft_enterprise_purchase_price", Value: "10"},
 	{Key: "default_project_microsoft_purchase_supplier_price", Value: "7"},
+	{Key: "default_project_microsoft_enterprise_purchase_supplier_price", Value: "7"},
 	{Key: "default_project_microsoft_code_enabled", Value: "true"},
+	{Key: "default_project_microsoft_enterprise_code_enabled", Value: "true"},
 	{Key: "default_project_microsoft_purchase_enabled", Value: "true"},
+	{Key: "default_project_microsoft_enterprise_purchase_enabled", Value: "true"},
 	{Key: "default_project_domain_code_price", Value: "80"},
 	{Key: "default_project_domain_code_supplier_price", Value: "40"},
 	{Key: "default_project_domain_purchase_price", Value: "0"},
@@ -190,6 +197,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "default_project_proto_purchase_enabled", Value: "true"},
 	{Key: "default_project_daum_purchase_enabled", Value: "true"},
 	{Key: "product_price_multiplier_microsoft", Value: "1"},
+	{Key: "product_price_multiplier_microsoft_enterprise", Value: "1"},
 	{Key: "product_price_multiplier_gmail", Value: "1"},
 	{Key: "product_price_multiplier_icloud", Value: "1"},
 	{Key: "product_price_multiplier_domain", Value: "1"},

@@ -619,7 +619,7 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, task 
 	// Alias scheduling is its own durable concern. A transient failure here
 	// must not turn an already-committed validation success back into a retry;
 	// the daily alias scan remains the recovery path.
-	if uc.aliasTrigger != nil {
+	if uc.aliasTrigger != nil && !domain.IsMicrosoftEnterpriseEmail(ms.EmailAddress) {
 		if triggerErr := uc.aliasTrigger.EnsureForValidatedMicrosoftResource(ctx, task.ResourceID); triggerErr != nil {
 			slog.Warn(
 				"microsoft alias schedule trigger deferred after validation",

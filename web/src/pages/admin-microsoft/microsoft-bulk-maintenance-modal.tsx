@@ -19,10 +19,12 @@ export type MicrosoftBulkMaintenanceTarget =
   | { count: number; filter: AdminMicrosoftListFilter; mode: "filter" };
 
 export function MicrosoftBulkMaintenanceModal({
+  enterprise = false,
   onCancel,
   onCompleted,
   target,
 }: {
+  enterprise?: boolean;
   onCancel: () => void;
   onCompleted: () => void | Promise<void>;
   target: MicrosoftBulkMaintenanceTarget | null;
@@ -73,7 +75,8 @@ export function MicrosoftBulkMaintenanceModal({
       success: "RT update batch submitted.",
     },
   ];
-  const selectedAction = actions.find((item) => item.key === selected) ?? actions[0];
+  const availableActions = actions.filter((action) => !enterprise || action.key !== "alias");
+  const selectedAction = availableActions.find((item) => item.key === selected) ?? availableActions[0];
 
   const submit = async () => {
     if (!selectedAction) return;
@@ -101,7 +104,7 @@ export function MicrosoftBulkMaintenanceModal({
       okText={t("Submit maintenance task")}
       onCancel={onCancel}
       onOk={() => void submit()}
-      title={t("Microsoft resource maintenance")}
+      title={t(enterprise ? "Microsoft enterprise resource maintenance" : "Microsoft resource maintenance")}
       visible
       width={680}
     >
@@ -125,7 +128,7 @@ export function MicrosoftBulkMaintenanceModal({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
-          {actions.map((item) => {
+          {availableActions.map((item) => {
             const Icon = item.icon;
             const active = selected === item.key;
             return (

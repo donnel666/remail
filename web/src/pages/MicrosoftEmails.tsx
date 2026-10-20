@@ -89,7 +89,7 @@ function isEmailResource(item: EmailResource | null): item is EmailResource {
   return item !== null;
 }
 
-export default function MicrosoftEmails() {
+export default function MicrosoftEmails({ enterprise = false }: { enterprise?: boolean } = {}) {
   const { t } = useTranslation();
   const { currentUser, refreshCurrentUser } = useAuth();
   const isMobile = useIsMobile();
@@ -134,7 +134,7 @@ export default function MicrosoftEmails() {
     useDebouncedValue(searchKeyword);
 
   const microsoftStatsFilter = useMemo<ResourceListFilter>(() => {
-    const filter: ResourceListFilter = {};
+    const filter: ResourceListFilter = { enterprise };
     const search = debouncedSearchKeyword.trim();
     const createdFrom = createdFromISOString(createdAtRange);
     const createdTo = createdToISOString(createdAtRange);
@@ -151,6 +151,7 @@ export default function MicrosoftEmails() {
     if (createdTo) filter.createdTo = createdTo;
     return filter;
   }, [
+    enterprise,
     createdAtRange,
     debouncedSearchKeyword,
     graphFilter,
@@ -684,7 +685,7 @@ export default function MicrosoftEmails() {
 
   const columns = useMemo(
     () =>
-      [
+      ([
         {
           key: "suffix",
           title: t("Suffix"),
@@ -785,8 +786,8 @@ export default function MicrosoftEmails() {
             </Space>
           ),
         },
-      ] as any[],
-    [
+      ] as any[]).filter((column) => !enterprise || !["binding", "longLived", "graph"].includes(column.key)),
+    [enterprise,
       deletingResourceID,
       handleCheckResource,
       handleSellResource,
@@ -1014,6 +1015,7 @@ export default function MicrosoftEmails() {
                 />
               </div>
 
+              {!enterprise && <>
               <div className="px-2 pb-1 text-xs font-medium text-[var(--semi-color-text-2)]">
                 {t("Long-lived")}
               </div>
@@ -1067,6 +1069,8 @@ export default function MicrosoftEmails() {
                   value="no"
                 />
               </div>
+              </>}
+
             </div>
           }
         >
@@ -1185,6 +1189,7 @@ export default function MicrosoftEmails() {
       </CardPro>
 
       <ImportMicrosoftEmailsModal
+        enterprise={enterprise}
         open={importOpen}
         onOpenChange={setImportOpen}
         onSuccess={handleImportSuccess}

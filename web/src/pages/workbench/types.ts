@@ -12,6 +12,7 @@ export type OrderStatus =
   | "closed";
 export type ProductType =
   | "microsoft"
+  | "microsoft_enterprise"
   | "domain"
   | "gmail"
   | "gmail_variant"

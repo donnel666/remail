@@ -14,7 +14,7 @@ const (
 	microsoftImportEmailMaxLength          = 255
 	microsoftImportPasswordMaxLength       = 512
 	microsoftImportClientIDMaxLength       = 255
-	microsoftImportRefreshTokenMaxLength   = 1024
+	microsoftImportRefreshTokenMaxLength   = 8192
 	microsoftImportBindingAddressMaxLength = 320
 )
 
@@ -35,7 +35,7 @@ func NewTXTParser() *TXTParser {
 //	email----password----clientId----refreshToken----bindingAddress
 //
 // Empty lines are skipped. Password bytes between delimiters are preserved.
-func (p *TXTParser) ParseMicrosoftImport(content string, strategy domain.ImportErrorStrategy) ([]domain.MicrosoftImportLine, []domain.ImportLineError, error) {
+func (p *TXTParser) ParseMicrosoftImport(content string, strategy domain.ImportErrorStrategy, enterprise bool) ([]domain.MicrosoftImportLine, []domain.ImportLineError, error) {
 	if strings.TrimSpace(content) == "" {
 		return nil, nil, domain.ErrInvalidImportFormat
 	}
@@ -53,7 +53,7 @@ func (p *TXTParser) ParseMicrosoftImport(content string, strategy domain.ImportE
 			continue
 		}
 
-		parsed, lineErr := parseMicrosoftImportLine(lineNumber, line)
+		parsed, lineErr := parseMicrosoftImportLine(lineNumber, line, enterprise)
 		if lineErr != nil {
 			if strategy == domain.ImportErrorStrategyAbort {
 				return nil, nil, lineErr
@@ -72,8 +72,11 @@ func (p *TXTParser) ParseMicrosoftImport(content string, strategy domain.ImportE
 	return result, failures, nil
 }
 
-func parseMicrosoftImportLine(lineNumber int, line string) (*domain.MicrosoftImportLine, *domain.ImportLineError) {
+func parseMicrosoftImportLine(lineNumber int, line string, enterprise bool) (*domain.MicrosoftImportLine, *domain.ImportLineError) {
 	parts := strings.Split(line, "----")
+	if enterprise && len(parts) != 4 {
+		return nil, importLineError(lineNumber, parts)
+	}
 	if len(parts) != 2 && len(parts) != 3 && len(parts) != 4 && len(parts) != 5 {
 		return nil, importLineError(lineNumber, parts)
 	}
@@ -87,7 +90,10 @@ func parseMicrosoftImportLine(lineNumber int, line string) (*domain.MicrosoftImp
 	}
 	// Whitelist: only Microsoft consumer mailboxes belong in a Microsoft import.
 	// The binding address below is a recovery mailbox and may be any provider.
-	if !domain.IsMicrosoftEmailDomain(email) {
+	if enterprise && !domain.IsMicrosoftEnterpriseEmail(email) {
+		return nil, &domain.ImportLineError{Line: lineNumber, Email: email, Category: "invalid_enterprise_domain", SafeMessage: "Microsoft enterprise email must use @tenant.onmicrosoft.com."}
+	}
+	if !enterprise && !domain.IsMicrosoftEmailDomain(email) {
 		return nil, nonMicrosoftDomainError(lineNumber, email)
 	}
 

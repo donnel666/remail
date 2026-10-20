@@ -396,6 +396,24 @@ func TestMutationAndSafeAuditShareTransaction(t *testing.T) {
 	}
 }
 
+func TestBulkUpsertMicrosoftEnterpriseMultiplierCreatesDiscountEvent(t *testing.T) {
+	repo := &persistedSnapshotRepository{
+		fakeRepository: &fakeRepository{},
+		persisted:      []domain.Setting{{Key: runtimeconfig.MicrosoftEnterprisePriceMultiplierKey, Value: "1"}},
+	}
+	logs := &fakeOperationLogs{}
+	uc := NewSystemSettingsUseCase(repo, logs)
+	t.Cleanup(func() { runtimeconfig.Delete(runtimeconfig.MicrosoftEnterprisePriceMultiplierKey) })
+	_, err := uc.BulkUpsert(context.Background(), []domain.Setting{
+		{Key: runtimeconfig.MicrosoftEnterprisePriceMultiplierKey, Value: "0.6"},
+	}, MutationMeta{})
+	require.NoError(t, err)
+	require.Equal(t, "0.6", runtimeconfig.ProductPriceMultiplier("microsoft_enterprise"))
+	require.Len(t, logs.items, 2)
+	require.Equal(t, "system_settings.upsert", logs.items[0].OperationType)
+	require.Equal(t, runtimeconfig.MicrosoftEnterprisePriceMultiplierKey, logs.items[0].ResourceID)
+}
+
 func TestAllMutationsWriteValueFreeAuditLogs(t *testing.T) {
 	repo := &fakeRepository{}
 	logs := &fakeOperationLogs{}

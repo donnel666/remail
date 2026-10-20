@@ -196,8 +196,8 @@ func (r *AdminResourceRepo) MaxMicrosoftResourceID(ctx context.Context) (uint, e
 	return maxID, nil
 }
 
-func (r *AdminResourceRepo) FindNextMicrosoft(ctx context.Context, afterID, maxID uint) (*domain.MicrosoftResource, error) {
-	if maxID == 0 || afterID >= maxID {
+func (r *AdminResourceRepo) FindNextMicrosoft(ctx context.Context, afterID, maxID, projectID uint) (*domain.MicrosoftResource, error) {
+	if projectID == 0 || maxID == 0 || afterID >= maxID {
 		return nil, nil
 	}
 	var resource MicrosoftResourceModel
@@ -205,6 +205,14 @@ func (r *AdminResourceRepo) FindNextMicrosoft(ctx context.Context, afterID, maxI
 		Table("microsoft_resources AS mr").
 		Select("mr.id, mr.status, mr.email_address, mr.client_id, mr.refresh_token, mr.graph_available, mr.credential_revision").
 		Where("mr.id > ? AND mr.id <= ? AND mr.status <> ?", afterID, maxID, domain.MicrosoftStatusDeleted).
+		Where(`EXISTS (
+            SELECT 1 FROM project_products pp
+            JOIN projects p ON p.id = pp.project_id
+            WHERE pp.project_id = ? AND p.status IN ?
+              AND EXISTS (SELECT 1 FROM project_mail_rules pmr WHERE pmr.project_id = p.id AND pmr.enabled = TRUE)
+              AND pp.type = CASE WHEN mr.email_domain LIKE ? THEN ? ELSE ? END
+        )`, projectID, []string{string(domain.ProjectStatusListed), string(domain.ProjectStatusDelisted)},
+			"%.onmicrosoft.com", string(domain.ProductTypeMicrosoftEnterprise), string(domain.ProductTypeMicrosoft)).
 		Order("mr.id ASC").
 		Limit(1).
 		Scan(&resource)
@@ -694,6 +702,7 @@ func adminMicrosoftFacetNeedsRoot(filter coreapp.AdminMicrosoftListFilter) bool 
 }
 
 func applyAdminMicrosoftFilters(query *gorm.DB, filter coreapp.AdminMicrosoftListFilter, now time.Time, ignore, idColumn, ownerColumn, createdAtColumn string) *gorm.DB {
+	query = query.Where("(mr.email_domain LIKE ?) = ?", "%.onmicrosoft.com", filter.Enterprise)
 	if ignore != "status" {
 		if filter.Status != "" {
 			query = query.Where("mr.status = ?", string(filter.Status))

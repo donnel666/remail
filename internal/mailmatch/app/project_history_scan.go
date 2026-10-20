@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"strings"
 	"time"
 
@@ -59,8 +60,8 @@ type ProjectHistoryScanRepository interface {
 
 type ProjectHistoryMatchRepository interface {
 	WithTx(ctx context.Context, fn func(context.Context) error) error
-	ListHistoricalProjectScopes(ctx context.Context) ([]HistoricalProjectScope, error)
-	FindHistoricalProjectScope(ctx context.Context, projectID uint) (*HistoricalProjectScope, error)
+	ListHistoricalProjectScopes(ctx context.Context, enterprise bool) ([]HistoricalProjectScope, error)
+	FindHistoricalProjectScope(ctx context.Context, projectID uint, enterprise bool) (*HistoricalProjectScope, error)
 	ClearLegacyMicrosoftProjectHistory(ctx context.Context, resourceID uint, projectID uint) error
 }
 
@@ -237,7 +238,7 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 	if strings.TrimSpace(resource.EmailAddress) == "" || strings.TrimSpace(resource.ClientID) == "" || strings.TrimSpace(resource.RefreshToken) == "" {
 		return domain.ErrInvalidRequest
 	}
-	scopes, err := uc.matches.ListHistoricalProjectScopes(ctx)
+	scopes, err := uc.matches.ListHistoricalProjectScopes(ctx, coredomain.IsMicrosoftEnterpriseEmail(resource.EmailAddress))
 	if err != nil {
 		return err
 	}
@@ -285,7 +286,7 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 	}
 	err = uc.matches.WithTx(ctx, func(txCtx context.Context) error {
 		if fetchErr == nil {
-			currentScopes, err := uc.matches.ListHistoricalProjectScopes(txCtx)
+			currentScopes, err := uc.matches.ListHistoricalProjectScopes(txCtx, coredomain.IsMicrosoftEnterpriseEmail(resource.EmailAddress))
 			if err != nil {
 				return err
 			}
@@ -330,20 +331,14 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 
 func (uc *ProjectHistoryScanUseCase) scanProjectHistoryPage(ctx context.Context, task ProjectHistoryScanTask) (done bool, next ProjectHistoryScanTask, resultErr error) {
 	next = task
-	scope, err := uc.matches.FindHistoricalProjectScope(ctx, task.ProjectID)
-	if err != nil {
-		return false, next, fmt.Errorf("%w: load project history scope: %v", errProjectHistoryInfrastructure, err)
-	}
-	if scope == nil {
-		return true, next, nil
-	}
+	var err error
 	if next.MaxResourceID == 0 {
 		next.MaxResourceID, err = uc.credentials.MaxMicrosoftResourceID(ctx)
 		if err != nil {
 			return false, next, fmt.Errorf("%w: read microsoft resource high-water mark: %v", errProjectHistoryInfrastructure, err)
 		}
 	}
-	resource, err := uc.credentials.FindNextMicrosoftCredentialScope(ctx, next.AfterResourceID, next.MaxResourceID)
+	resource, err := uc.credentials.FindNextMicrosoftCredentialScope(ctx, next.AfterResourceID, next.MaxResourceID, task.ProjectID)
 	if err != nil {
 		return false, next, fmt.Errorf("%w: find next microsoft resource: %v", errProjectHistoryInfrastructure, err)
 	}
@@ -353,6 +348,14 @@ func (uc *ProjectHistoryScanUseCase) scanProjectHistoryPage(ctx context.Context,
 	next.AfterResourceID = resource.ResourceID
 	next.ScannedCount++
 	if strings.TrimSpace(resource.EmailAddress) == "" || strings.TrimSpace(resource.ClientID) == "" || strings.TrimSpace(resource.RefreshToken) == "" {
+		next.SkippedCount++
+		return false, next, nil
+	}
+	scope, err := uc.matches.FindHistoricalProjectScope(ctx, task.ProjectID, coredomain.IsMicrosoftEnterpriseEmail(resource.EmailAddress))
+	if err != nil {
+		return false, next, fmt.Errorf("%w: load project history scope: %v", errProjectHistoryInfrastructure, err)
+	}
+	if scope == nil {
 		next.SkippedCount++
 		return false, next, nil
 	}
@@ -425,7 +428,7 @@ func (uc *ProjectHistoryScanUseCase) scanProjectHistoryResource(
 		if err := uc.jobs.AssertProjectHistoryFence(txCtx, task.ProjectID, task.Generation); err != nil {
 			return err
 		}
-		currentScope, err := uc.matches.FindHistoricalProjectScope(txCtx, task.ProjectID)
+		currentScope, err := uc.matches.FindHistoricalProjectScope(txCtx, task.ProjectID, coredomain.IsMicrosoftEnterpriseEmail(resource.EmailAddress))
 		if err != nil {
 			return err
 		}

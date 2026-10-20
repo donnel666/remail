@@ -122,13 +122,16 @@ func historicalMessageMatchesProject(message HistoricalProjectMessage, mainEmail
 
 func historicalRecipientCandidates(recipients []string) []string {
 	candidates := normalizeRecipientCandidates(recipients)
-	if len(candidates) != 1 || !coredomain.IsMicrosoftEmailDomain(candidates[0]) {
+	if len(candidates) != 1 || (!coredomain.IsMicrosoftEmailDomain(candidates[0]) && !coredomain.IsMicrosoftEnterpriseEmail(candidates[0])) {
 		return nil
 	}
 	return candidates
 }
 
 func historicalRecipientMatchesProject(message HistoricalProjectMessage, mainEmail, recipient string, scope HistoricalProjectScope) bool {
+	if coredomain.IsMicrosoftEnterpriseEmail(mainEmail) != coredomain.IsMicrosoftEnterpriseEmail(recipient) || coredomain.IsMicrosoftEnterpriseEmail(mainEmail) && normalizeEmail(mainEmail) != normalizeEmail(recipient) {
+		return false
+	}
 	fetched := FetchedMessage{
 		ResourceType:      domain.ResourceTypeMicrosoft,
 		Recipient:         recipient,

@@ -424,15 +424,16 @@ type OrderServiceModeFacets struct {
 }
 
 type OrderProductTypeFacets struct {
-	All          int64
-	Microsoft    int64
-	Domain       int64
-	Random       int64
-	Gmail        int64
-	GmailVariant int64
-	ICloud       int64
-	Proto        int64
-	Daum         int64
+	All                 int64
+	Microsoft           int64
+	MicrosoftEnterprise int64
+	Domain              int64
+	Random              int64
+	Gmail               int64
+	GmailVariant        int64
+	ICloud              int64
+	Proto               int64
+	Daum                int64
 }
 
 type OrderProjectFacet struct {
@@ -953,6 +954,13 @@ func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.P
 			return domain.ErrInvalidOrderRequest
 		}
 		switch productType {
+		case domain.ProductTypeMicrosoftEnterprise:
+			if prepared.selectedBySuffix {
+				prepared.emailSuffix = prepared.selectorSuffix
+			}
+			if prepared.emailSuffix != "" && prepared.emailSuffix != coredomain.RandomMicrosoftEnterpriseSuffixSelector && !coredomain.IsMicrosoftEnterpriseEmail("selector@"+prepared.emailSuffix) {
+				return domain.ErrInvalidOrderRequest
+			}
 		case domain.ProductTypeMicrosoft:
 			if prepared.selectorSuffix == coredomain.RandomDomainSuffixSelector {
 				return domain.ErrInvalidOrderRequest
@@ -1004,6 +1012,13 @@ func finalizeCheckoutProduct(prepared *checkoutPreparation, productType domain.P
 	}
 
 	switch productType {
+	case domain.ProductTypeMicrosoftEnterprise:
+		if prepared.selectedBySuffix {
+			prepared.emailSuffix = prepared.selectorSuffix
+		}
+		if prepared.emailSuffix != "" && prepared.emailSuffix != coredomain.RandomMicrosoftEnterpriseSuffixSelector && !coredomain.IsMicrosoftEnterpriseEmail("selector@"+prepared.emailSuffix) {
+			return domain.ErrInvalidOrderRequest
+		}
 	case domain.ProductTypeMicrosoft:
 		if prepared.emailSuffix == coredomain.RandomDomainSuffixSelector {
 			return domain.ErrInvalidOrderRequest
@@ -1554,7 +1569,7 @@ func (uc *UseCase) resolveRandomCheckoutSuffixes(ctx context.Context, prepared [
 	for i := range prepared {
 		item := &prepared[i]
 		if item.prepareErr != nil || item.existing != nil || item.quote == nil ||
-			(item.emailSuffix != coredomain.RandomMicrosoftSuffixSelector && item.emailSuffix != coredomain.RandomDomainSuffixSelector && item.emailSuffix != coredomain.RandomProtoSuffixSelector && item.emailSuffix != coredomain.RandomDaumSuffixSelector) {
+			(item.emailSuffix != coredomain.RandomMicrosoftSuffixSelector && item.emailSuffix != coredomain.RandomMicrosoftEnterpriseSuffixSelector && item.emailSuffix != coredomain.RandomDomainSuffixSelector && item.emailSuffix != coredomain.RandomProtoSuffixSelector && item.emailSuffix != coredomain.RandomDaumSuffixSelector) {
 			continue
 		}
 		key := selectionKey{
@@ -3220,7 +3235,7 @@ func normalizeCheckoutProductSuffix(value string) (string, error) {
 	if value == "" || strings.Contains(value, "@") || strings.HasPrefix(value, ".") {
 		return "", domain.ErrInvalidOrderRequest
 	}
-	if value == "gmail_variant" {
+	if value == "gmail_variant" || value == coredomain.RandomMicrosoftEnterpriseSuffixSelector {
 		return value, nil
 	}
 	normalized, err := coredomain.NormalizeDomainSuffix(value)
@@ -3253,6 +3268,8 @@ func checkoutProductTypeForSuffix(suffix string) (domain.ProductType, error) {
 		return domain.ProductTypeProto, nil
 	case coredomain.RandomDaumSuffixSelector:
 		return domain.ProductTypeDaum, nil
+	case coredomain.RandomMicrosoftEnterpriseSuffixSelector:
+		return domain.ProductTypeMicrosoftEnterprise, nil
 	case coredomain.RandomMicrosoftSuffixSelector:
 		return domain.ProductTypeMicrosoft, nil
 	case coredomain.RandomDomainSuffixSelector:
@@ -3263,6 +3280,9 @@ func checkoutProductTypeForSuffix(suffix string) (domain.ProductType, error) {
 	}
 	if coredomain.IsProtoEmailSuffix(suffix) {
 		return domain.ProductTypeProto, nil
+	}
+	if coredomain.IsMicrosoftEnterpriseEmail("selector@" + suffix) {
+		return domain.ProductTypeMicrosoftEnterprise, nil
 	}
 	if coredomain.IsMicrosoftEmailDomain("selector@" + suffix) {
 		return domain.ProductTypeMicrosoft, nil

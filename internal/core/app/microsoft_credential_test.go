@@ -172,7 +172,7 @@ func (r *microsoftCredentialRepositoryStub) MaxMicrosoftResourceID(context.Conte
 	return r.resource.ID, nil
 }
 
-func (r *microsoftCredentialRepositoryStub) FindNextMicrosoft(_ context.Context, afterID, maxID uint) (*domain.MicrosoftResource, error) {
+func (r *microsoftCredentialRepositoryStub) FindNextMicrosoft(_ context.Context, afterID, maxID uint, _ uint) (*domain.MicrosoftResource, error) {
 	if r.resource.ID <= afterID || r.resource.ID > maxID {
 		return nil, nil
 	}

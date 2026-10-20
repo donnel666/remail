@@ -14,118 +14,131 @@ type AdminDashboardResponse struct {
 }
 
 type AdminDashboardStats struct {
+	RechargeAmount                                      float64 `json:"rechargeAmount"`
+	SpendAmount                                         float64 `json:"spendAmount"`
+	RefundAmount                                        float64 `json:"refundAmount"`
+	WithdrawAmount                                      float64 `json:"withdrawAmount"`
+	PlatformRevenue                                     float64 `json:"platformRevenue"`
+	TotalOrders                                         int     `json:"totalOrders"`
+	SuccessfulCodeReceipts                              int     `json:"successfulCodeReceipts"`
+	TotalUsers                                          int     `json:"totalUsers"`
+	ActiveUsers                                         int     `json:"activeUsers"`
+	NewUsers                                            int     `json:"newUsers"`
+	MicrosoftTotalEmails                                int     `json:"microsoftTotalEmails"`
+	MicrosoftAvailableEmails                            int     `json:"microsoftAvailableEmails"`
+	MicrosoftCodeReceipts                               int     `json:"microsoftCodeReceipts"`
+	MicrosoftCodeSuccessRate                            float64 `json:"microsoftCodeSuccessRate"`
+	MicrosoftAverageCodeReceiptSeconds                  int     `json:"microsoftAverageCodeReceiptSeconds"`
+	MicrosoftPurchaseActivations                        int     `json:"microsoftPurchaseActivations"`
+	MicrosoftPurchaseActivationSuccessRate              float64 `json:"microsoftPurchaseActivationSuccessRate"`
+	MicrosoftAveragePurchaseActivationSeconds           int     `json:"microsoftAveragePurchaseActivationSeconds"`
+	MicrosoftEnterpriseTotalEmails                      int     `json:"microsoftEnterpriseTotalEmails"`
+	MicrosoftEnterpriseAvailableEmails                  int     `json:"microsoftEnterpriseAvailableEmails"`
+	MicrosoftEnterpriseCodeReceipts                     int     `json:"microsoftEnterpriseCodeReceipts"`
+	MicrosoftEnterpriseCodeSuccessRate                  float64 `json:"microsoftEnterpriseCodeSuccessRate"`
+	MicrosoftEnterpriseAverageCodeReceiptSeconds        int     `json:"microsoftEnterpriseAverageCodeReceiptSeconds"`
+	MicrosoftEnterprisePurchaseActivations              int     `json:"microsoftEnterprisePurchaseActivations"`
+	MicrosoftEnterprisePurchaseActivationSuccessRate    float64 `json:"microsoftEnterprisePurchaseActivationSuccessRate"`
+	MicrosoftEnterpriseAveragePurchaseActivationSeconds int     `json:"microsoftEnterpriseAveragePurchaseActivationSeconds"`
+	GmailTotalEmails                                    int     `json:"gmailTotalEmails"`
+	GmailAvailableEmails                                int     `json:"gmailAvailableEmails"`
+	GmailCodeReceipts                                   int     `json:"gmailCodeReceipts"`
+	GmailCodeSuccessRate                                float64 `json:"gmailCodeSuccessRate"`
+	GmailAverageCodeReceiptSeconds                      int     `json:"gmailAverageCodeReceiptSeconds"`
+	GmailPurchaseActivations                            int     `json:"gmailPurchaseActivations"`
+	GmailPurchaseActivationSuccessRate                  float64 `json:"gmailPurchaseActivationSuccessRate"`
+	GmailAveragePurchaseActivationSeconds               int     `json:"gmailAveragePurchaseActivationSeconds"`
+	GmailVariantTotalEmails                             int     `json:"gmailVariantTotalEmails"`
+	GmailVariantAvailableEmails                         int     `json:"gmailVariantAvailableEmails"`
+	GmailVariantCodeReceipts                            int     `json:"gmailVariantCodeReceipts"`
+	GmailVariantCodeSuccessRate                         float64 `json:"gmailVariantCodeSuccessRate"`
+	GmailVariantAverageCodeReceiptSeconds               int     `json:"gmailVariantAverageCodeReceiptSeconds"`
+	GmailVariantPurchaseActivations                     int     `json:"gmailVariantPurchaseActivations"`
+	GmailVariantPurchaseActivationSuccessRate           float64 `json:"gmailVariantPurchaseActivationSuccessRate"`
+	GmailVariantAveragePurchaseActivationSeconds        int     `json:"gmailVariantAveragePurchaseActivationSeconds"`
+	ICloudTotalEmails                                   int     `json:"icloudTotalEmails"`
+	ICloudAvailableEmails                               int     `json:"icloudAvailableEmails"`
+	ICloudCodeReceipts                                  int     `json:"icloudCodeReceipts"`
+	ICloudCodeSuccessRate                               float64 `json:"icloudCodeSuccessRate"`
+	ICloudAverageCodeReceiptSeconds                     int     `json:"icloudAverageCodeReceiptSeconds"`
+	ICloudPurchaseActivations                           int     `json:"icloudPurchaseActivations"`
+	ICloudPurchaseActivationSuccessRate                 float64 `json:"icloudPurchaseActivationSuccessRate"`
+	ICloudAveragePurchaseActivationSeconds              int     `json:"icloudAveragePurchaseActivationSeconds"`
+	ProtoTotalEmails                                    int     `json:"protoTotalEmails"`
+	DaumTotalEmails                                     int     `json:"daumTotalEmails"`
+	ProtoAvailableEmails                                int     `json:"protoAvailableEmails"`
+	DaumAvailableEmails                                 int     `json:"daumAvailableEmails"`
+	ProtoCodeReceipts                                   int     `json:"protoCodeReceipts"`
+	DaumCodeReceipts                                    int     `json:"daumCodeReceipts"`
+	ProtoCodeSuccessRate                                float64 `json:"protoCodeSuccessRate"`
+	DaumCodeSuccessRate                                 float64 `json:"daumCodeSuccessRate"`
+	ProtoAverageCodeReceiptSeconds                      int     `json:"protoAverageCodeReceiptSeconds"`
+	DaumAverageCodeReceiptSeconds                       int     `json:"daumAverageCodeReceiptSeconds"`
+	ProtoPurchaseActivations                            int     `json:"protoPurchaseActivations"`
+	DaumPurchaseActivations                             int     `json:"daumPurchaseActivations"`
+	ProtoPurchaseActivationSuccessRate                  float64 `json:"protoPurchaseActivationSuccessRate"`
+	DaumPurchaseActivationSuccessRate                   float64 `json:"daumPurchaseActivationSuccessRate"`
+	ProtoAveragePurchaseActivationSeconds               int     `json:"protoAveragePurchaseActivationSeconds"`
+	DaumAveragePurchaseActivationSeconds                int     `json:"daumAveragePurchaseActivationSeconds"`
+	DomainTotalMailboxes                                int     `json:"domainTotalMailboxes"`
+	DomainAvailableMailboxes                            int     `json:"domainAvailableMailboxes"`
+	DomainCodeReceipts                                  int     `json:"domainCodeReceipts"`
+	DomainCodeSuccessRate                               float64 `json:"domainCodeSuccessRate"`
+	DomainAverageCodeReceiptSeconds                     int     `json:"domainAverageCodeReceiptSeconds"`
+}
+
+type AdminDashboardTrendPoint struct {
+	Label                                        string  `json:"label"`
 	RechargeAmount                               float64 `json:"rechargeAmount"`
 	SpendAmount                                  float64 `json:"spendAmount"`
 	RefundAmount                                 float64 `json:"refundAmount"`
 	WithdrawAmount                               float64 `json:"withdrawAmount"`
 	PlatformRevenue                              float64 `json:"platformRevenue"`
-	TotalOrders                                  int     `json:"totalOrders"`
+	Orders                                       int     `json:"orders"`
 	SuccessfulCodeReceipts                       int     `json:"successfulCodeReceipts"`
 	TotalUsers                                   int     `json:"totalUsers"`
 	ActiveUsers                                  int     `json:"activeUsers"`
 	NewUsers                                     int     `json:"newUsers"`
 	MicrosoftTotalEmails                         int     `json:"microsoftTotalEmails"`
 	MicrosoftAvailableEmails                     int     `json:"microsoftAvailableEmails"`
-	MicrosoftCodeReceipts                        int     `json:"microsoftCodeReceipts"`
+	MicrosoftReceivedCodes                       int     `json:"microsoftReceivedCodes"`
 	MicrosoftCodeSuccessRate                     float64 `json:"microsoftCodeSuccessRate"`
 	MicrosoftAverageCodeReceiptSeconds           int     `json:"microsoftAverageCodeReceiptSeconds"`
-	MicrosoftPurchaseActivations                 int     `json:"microsoftPurchaseActivations"`
-	MicrosoftPurchaseActivationSuccessRate       float64 `json:"microsoftPurchaseActivationSuccessRate"`
-	MicrosoftAveragePurchaseActivationSeconds    int     `json:"microsoftAveragePurchaseActivationSeconds"`
+	MicrosoftEnterpriseTotalEmails               int     `json:"microsoftEnterpriseTotalEmails"`
+	MicrosoftEnterpriseAvailableEmails           int     `json:"microsoftEnterpriseAvailableEmails"`
+	MicrosoftEnterpriseReceivedCodes             int     `json:"microsoftEnterpriseReceivedCodes"`
+	MicrosoftEnterpriseCodeSuccessRate           float64 `json:"microsoftEnterpriseCodeSuccessRate"`
+	MicrosoftEnterpriseAverageCodeReceiptSeconds int     `json:"microsoftEnterpriseAverageCodeReceiptSeconds"`
 	GmailTotalEmails                             int     `json:"gmailTotalEmails"`
 	GmailAvailableEmails                         int     `json:"gmailAvailableEmails"`
-	GmailCodeReceipts                            int     `json:"gmailCodeReceipts"`
+	GmailReceivedCodes                           int     `json:"gmailReceivedCodes"`
 	GmailCodeSuccessRate                         float64 `json:"gmailCodeSuccessRate"`
 	GmailAverageCodeReceiptSeconds               int     `json:"gmailAverageCodeReceiptSeconds"`
-	GmailPurchaseActivations                     int     `json:"gmailPurchaseActivations"`
-	GmailPurchaseActivationSuccessRate           float64 `json:"gmailPurchaseActivationSuccessRate"`
-	GmailAveragePurchaseActivationSeconds        int     `json:"gmailAveragePurchaseActivationSeconds"`
 	GmailVariantTotalEmails                      int     `json:"gmailVariantTotalEmails"`
 	GmailVariantAvailableEmails                  int     `json:"gmailVariantAvailableEmails"`
-	GmailVariantCodeReceipts                     int     `json:"gmailVariantCodeReceipts"`
+	GmailVariantReceivedCodes                    int     `json:"gmailVariantReceivedCodes"`
 	GmailVariantCodeSuccessRate                  float64 `json:"gmailVariantCodeSuccessRate"`
 	GmailVariantAverageCodeReceiptSeconds        int     `json:"gmailVariantAverageCodeReceiptSeconds"`
-	GmailVariantPurchaseActivations              int     `json:"gmailVariantPurchaseActivations"`
-	GmailVariantPurchaseActivationSuccessRate    float64 `json:"gmailVariantPurchaseActivationSuccessRate"`
-	GmailVariantAveragePurchaseActivationSeconds int     `json:"gmailVariantAveragePurchaseActivationSeconds"`
 	ICloudTotalEmails                            int     `json:"icloudTotalEmails"`
 	ICloudAvailableEmails                        int     `json:"icloudAvailableEmails"`
-	ICloudCodeReceipts                           int     `json:"icloudCodeReceipts"`
+	ICloudReceivedCodes                          int     `json:"icloudReceivedCodes"`
 	ICloudCodeSuccessRate                        float64 `json:"icloudCodeSuccessRate"`
 	ICloudAverageCodeReceiptSeconds              int     `json:"icloudAverageCodeReceiptSeconds"`
-	ICloudPurchaseActivations                    int     `json:"icloudPurchaseActivations"`
-	ICloudPurchaseActivationSuccessRate          float64 `json:"icloudPurchaseActivationSuccessRate"`
-	ICloudAveragePurchaseActivationSeconds       int     `json:"icloudAveragePurchaseActivationSeconds"`
 	ProtoTotalEmails                             int     `json:"protoTotalEmails"`
 	DaumTotalEmails                              int     `json:"daumTotalEmails"`
 	ProtoAvailableEmails                         int     `json:"protoAvailableEmails"`
 	DaumAvailableEmails                          int     `json:"daumAvailableEmails"`
-	ProtoCodeReceipts                            int     `json:"protoCodeReceipts"`
-	DaumCodeReceipts                             int     `json:"daumCodeReceipts"`
+	ProtoReceivedCodes                           int     `json:"protoReceivedCodes"`
+	DaumReceivedCodes                            int     `json:"daumReceivedCodes"`
 	ProtoCodeSuccessRate                         float64 `json:"protoCodeSuccessRate"`
 	DaumCodeSuccessRate                          float64 `json:"daumCodeSuccessRate"`
 	ProtoAverageCodeReceiptSeconds               int     `json:"protoAverageCodeReceiptSeconds"`
 	DaumAverageCodeReceiptSeconds                int     `json:"daumAverageCodeReceiptSeconds"`
-	ProtoPurchaseActivations                     int     `json:"protoPurchaseActivations"`
-	DaumPurchaseActivations                      int     `json:"daumPurchaseActivations"`
-	ProtoPurchaseActivationSuccessRate           float64 `json:"protoPurchaseActivationSuccessRate"`
-	DaumPurchaseActivationSuccessRate            float64 `json:"daumPurchaseActivationSuccessRate"`
-	ProtoAveragePurchaseActivationSeconds        int     `json:"protoAveragePurchaseActivationSeconds"`
-	DaumAveragePurchaseActivationSeconds         int     `json:"daumAveragePurchaseActivationSeconds"`
 	DomainTotalMailboxes                         int     `json:"domainTotalMailboxes"`
 	DomainAvailableMailboxes                     int     `json:"domainAvailableMailboxes"`
-	DomainCodeReceipts                           int     `json:"domainCodeReceipts"`
+	DomainReceivedCodes                          int     `json:"domainReceivedCodes"`
 	DomainCodeSuccessRate                        float64 `json:"domainCodeSuccessRate"`
 	DomainAverageCodeReceiptSeconds              int     `json:"domainAverageCodeReceiptSeconds"`
-}
-
-type AdminDashboardTrendPoint struct {
-	Label                                 string  `json:"label"`
-	RechargeAmount                        float64 `json:"rechargeAmount"`
-	SpendAmount                           float64 `json:"spendAmount"`
-	RefundAmount                          float64 `json:"refundAmount"`
-	WithdrawAmount                        float64 `json:"withdrawAmount"`
-	PlatformRevenue                       float64 `json:"platformRevenue"`
-	Orders                                int     `json:"orders"`
-	SuccessfulCodeReceipts                int     `json:"successfulCodeReceipts"`
-	TotalUsers                            int     `json:"totalUsers"`
-	ActiveUsers                           int     `json:"activeUsers"`
-	NewUsers                              int     `json:"newUsers"`
-	MicrosoftTotalEmails                  int     `json:"microsoftTotalEmails"`
-	MicrosoftAvailableEmails              int     `json:"microsoftAvailableEmails"`
-	MicrosoftReceivedCodes                int     `json:"microsoftReceivedCodes"`
-	MicrosoftCodeSuccessRate              float64 `json:"microsoftCodeSuccessRate"`
-	MicrosoftAverageCodeReceiptSeconds    int     `json:"microsoftAverageCodeReceiptSeconds"`
-	GmailTotalEmails                      int     `json:"gmailTotalEmails"`
-	GmailAvailableEmails                  int     `json:"gmailAvailableEmails"`
-	GmailReceivedCodes                    int     `json:"gmailReceivedCodes"`
-	GmailCodeSuccessRate                  float64 `json:"gmailCodeSuccessRate"`
-	GmailAverageCodeReceiptSeconds        int     `json:"gmailAverageCodeReceiptSeconds"`
-	GmailVariantTotalEmails               int     `json:"gmailVariantTotalEmails"`
-	GmailVariantAvailableEmails           int     `json:"gmailVariantAvailableEmails"`
-	GmailVariantReceivedCodes             int     `json:"gmailVariantReceivedCodes"`
-	GmailVariantCodeSuccessRate           float64 `json:"gmailVariantCodeSuccessRate"`
-	GmailVariantAverageCodeReceiptSeconds int     `json:"gmailVariantAverageCodeReceiptSeconds"`
-	ICloudTotalEmails                     int     `json:"icloudTotalEmails"`
-	ICloudAvailableEmails                 int     `json:"icloudAvailableEmails"`
-	ICloudReceivedCodes                   int     `json:"icloudReceivedCodes"`
-	ICloudCodeSuccessRate                 float64 `json:"icloudCodeSuccessRate"`
-	ICloudAverageCodeReceiptSeconds       int     `json:"icloudAverageCodeReceiptSeconds"`
-	ProtoTotalEmails                      int     `json:"protoTotalEmails"`
-	DaumTotalEmails                       int     `json:"daumTotalEmails"`
-	ProtoAvailableEmails                  int     `json:"protoAvailableEmails"`
-	DaumAvailableEmails                   int     `json:"daumAvailableEmails"`
-	ProtoReceivedCodes                    int     `json:"protoReceivedCodes"`
-	DaumReceivedCodes                     int     `json:"daumReceivedCodes"`
-	ProtoCodeSuccessRate                  float64 `json:"protoCodeSuccessRate"`
-	DaumCodeSuccessRate                   float64 `json:"daumCodeSuccessRate"`
-	ProtoAverageCodeReceiptSeconds        int     `json:"protoAverageCodeReceiptSeconds"`
-	DaumAverageCodeReceiptSeconds         int     `json:"daumAverageCodeReceiptSeconds"`
-	DomainTotalMailboxes                  int     `json:"domainTotalMailboxes"`
-	DomainAvailableMailboxes              int     `json:"domainAvailableMailboxes"`
-	DomainReceivedCodes                   int     `json:"domainReceivedCodes"`
-	DomainCodeSuccessRate                 float64 `json:"domainCodeSuccessRate"`
-	DomainAverageCodeReceiptSeconds       int     `json:"domainAverageCodeReceiptSeconds"`
 }
 
 type AdminDashboardRankItem struct {

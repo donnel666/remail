@@ -156,7 +156,7 @@ func (r *allocationLockRepo) ListProductSuffixInventory(context.Context, Product
 	return r.suffixInventory, nil
 }
 
-func (r *allocationLockRepo) ListMicrosoftSourceCandidates(_ context.Context, _ uint, _ uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, buckets []uint16, _ int, emailSuffix string) ([]MicrosoftCandidate, error) {
+func (r *allocationLockRepo) ListMicrosoftSourceCandidates(_ context.Context, _ uint, _ uint, scope domain.SupplyScope, mailbox domain.MicrosoftMailbox, buckets []uint16, _ int, emailSuffix string, _ bool) ([]MicrosoftCandidate, error) {
 	r.lists++
 	r.listedSuffixes = append(r.listedSuffixes, emailSuffix)
 	r.listedBatchSizes = append(r.listedBatchSizes, len(buckets))
@@ -444,7 +444,7 @@ func (r *allocationLockRepo) TryLockResourceRoot(_ context.Context, resourceID u
 	return !r.rootUnavailable[resourceID], nil
 }
 
-func (r *allocationLockRepo) LockMicrosoftCandidate(_ context.Context, resourceID uint, _ uint, _ uint, _ domain.SupplyScope, _ domain.MicrosoftMailbox, _ string) (*MicrosoftCandidate, error) {
+func (r *allocationLockRepo) LockMicrosoftCandidate(_ context.Context, resourceID uint, _ uint, _ uint, _ domain.SupplyScope, _ domain.MicrosoftMailbox, _ string, _ bool) (*MicrosoftCandidate, error) {
 	if r.candidateUnavailable[resourceID] {
 		return nil, nil
 	}

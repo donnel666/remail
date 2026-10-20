@@ -158,6 +158,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
 
     if (view === "codes") {
       const microsoftLabel = t("Microsoft code receipts");
+      const microsoftEnterpriseLabel = t("Microsoft enterprise code receipts");
       const domainLabel = t("Domain code receipts");
       const gmailLabel = t("Gmail code receipts");
       const gmailVariantLabel = t("Gmail variant code receipts");
@@ -166,6 +167,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
       const daumLabel = t("Daum code receipts");
       const values = (data?.trend ?? []).flatMap((point) => [
         { Count: point.microsoftReceivedCodes, Metric: microsoftLabel, Time: point.label },
+        { Count: point.microsoftEnterpriseReceivedCodes, Metric: microsoftEnterpriseLabel, Time: point.label },
         { Count: point.domainReceivedCodes, Metric: domainLabel, Time: point.label },
         { Count: point.gmailReceivedCodes, Metric: gmailLabel, Time: point.label },
         {
@@ -186,6 +188,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
             [gmailVariantLabel]: "#f59e0b",
             [iCloudLabel]: "#06b6d4",
             [microsoftLabel]: "#3b82f6",
+            [microsoftEnterpriseLabel]: "#6366f1",
             [protoLabel]: "#14b8a6",
             [daumLabel]: "#f59e0b",
           },
@@ -205,6 +208,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
 
     if (view === "successRate") {
       const microsoftLabel = t("Microsoft code success rate");
+      const microsoftEnterpriseLabel = t("Microsoft enterprise code success rate");
       const domainLabel = t("Domain code success rate");
       const gmailLabel = t("Gmail code success rate");
       const gmailVariantLabel = t("Gmail variant code success rate");
@@ -213,6 +217,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
       const daumLabel = t("Daum code success rate");
       const values = (data?.trend ?? []).flatMap((point) => [
         { Metric: microsoftLabel, Rate: point.microsoftCodeSuccessRate, Time: point.label },
+        { Metric: microsoftEnterpriseLabel, Rate: point.microsoftEnterpriseCodeSuccessRate, Time: point.label },
         { Metric: domainLabel, Rate: point.domainCodeSuccessRate, Time: point.label },
         { Metric: gmailLabel, Rate: point.gmailCodeSuccessRate, Time: point.label },
         {
@@ -239,6 +244,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
             [gmailVariantLabel]: "#f59e0b",
             [iCloudLabel]: "#06b6d4",
             [microsoftLabel]: "#22a06b",
+            [microsoftEnterpriseLabel]: "#6366f1",
             [protoLabel]: "#14b8a6",
             [daumLabel]: "#f59e0b",
           },
@@ -248,7 +254,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
         seriesField: "Metric",
         title: chartTitle(
           t("Code success rate"),
-          `${microsoftLabel}：${(data?.stats.microsoftCodeSuccessRate ?? 0).toFixed(1)}% / ${domainLabel}：${(data?.stats.domainCodeSuccessRate ?? 0).toFixed(1)}%`,
+          `${microsoftLabel}：${(data?.stats.microsoftCodeSuccessRate ?? 0).toFixed(1)}% / ${microsoftEnterpriseLabel}：${(data?.stats.microsoftEnterpriseCodeSuccessRate ?? 0).toFixed(1)}% / ${domainLabel}：${(data?.stats.domainCodeSuccessRate ?? 0).toFixed(1)}%`,
         ),
         type: "line",
         xField: "Time",
@@ -265,9 +271,13 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
       daumTotal: t("Total Daum emails"),
       microsoftAvailable: t("Available Microsoft emails"),
       microsoftTotal: t("Total Microsoft emails"),
+      microsoftEnterpriseTotal: t("Total Microsoft enterprise emails"),
+      microsoftEnterpriseAvailable: t("Available Microsoft enterprise emails"),
     };
     const values = (data?.trend ?? []).flatMap((point) => [
       { Count: point.microsoftTotalEmails, Metric: labels.microsoftTotal, Time: point.label },
+      { Count: point.microsoftEnterpriseTotalEmails, Metric: labels.microsoftEnterpriseTotal, Time: point.label },
+      { Count: point.microsoftEnterpriseAvailableEmails, Metric: labels.microsoftEnterpriseAvailable, Time: point.label },
       {
         Count: point.microsoftAvailableEmails,
         Metric: labels.microsoftAvailable,
@@ -290,6 +300,8 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
         specified: {
           [labels.microsoftTotal]: "#3b82f6",
           [labels.microsoftAvailable]: "#06b6d4",
+          [labels.microsoftEnterpriseTotal]: "#6366f1",
+          [labels.microsoftEnterpriseAvailable]: "#a5b4fc",
           [labels.domainTotal]: "#8b5cf6",
           [labels.domainAvailable]: "#ec4899",
           [labels.protoTotal]: "#14b8a6",
@@ -303,7 +315,7 @@ function useAnalysisSpec(data: AdminDashboardData | null, view: AdminAnalysisVie
       seriesField: "Metric",
       title: chartTitle(
         t("Inventory trend"),
-          `${labels.microsoftAvailable}：${(data?.stats.microsoftAvailableEmails ?? 0).toLocaleString("zh-CN")} / ${labels.domainAvailable}：${(data?.stats.domainAvailableMailboxes ?? 0).toLocaleString("zh-CN")} / ${labels.protoAvailable}：${(data?.stats.protoAvailableEmails ?? 0).toLocaleString("zh-CN")}`,
+          `${labels.microsoftAvailable}：${(data?.stats.microsoftAvailableEmails ?? 0).toLocaleString("zh-CN")} / ${labels.microsoftEnterpriseAvailable}：${(data?.stats.microsoftEnterpriseAvailableEmails ?? 0).toLocaleString("zh-CN")} / ${labels.domainAvailable}：${(data?.stats.domainAvailableMailboxes ?? 0).toLocaleString("zh-CN")} / ${labels.protoAvailable}：${(data?.stats.protoAvailableEmails ?? 0).toLocaleString("zh-CN")}`,
       ),
       type: "line",
       xField: "Time",

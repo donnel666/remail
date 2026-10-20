@@ -442,7 +442,7 @@ func changedPushSettingKeys(persisted, updates []domain.Setting) []string {
 func pushSettingKey(key string) bool {
 	switch key {
 	case "global_notice", "announcements", "announcement_enabled",
-		runtimeconfig.MicrosoftPriceMultiplierKey, runtimeconfig.GmailPriceMultiplierKey,
+		runtimeconfig.MicrosoftPriceMultiplierKey, runtimeconfig.MicrosoftEnterprisePriceMultiplierKey, runtimeconfig.GmailPriceMultiplierKey,
 		runtimeconfig.ICloudPriceMultiplierKey, runtimeconfig.DomainPriceMultiplierKey, runtimeconfig.ProtoPriceMultiplierKey, runtimeconfig.DaumPriceMultiplierKey:
 		return true
 	default:

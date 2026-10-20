@@ -155,8 +155,10 @@ func (r *AdminViewRepo) InventorySnapshot(ctx context.Context) (dashboardapp.Inv
 		table string
 		where string
 	}{
-		{&snap.MicrosoftTotal, "microsoft_resources", "status <> 'deleted'"},
-		{&snap.MicrosoftAvailable, "microsoft_resources", "status = 'normal' AND for_sale = TRUE AND graph_available = TRUE"},
+		{&snap.MicrosoftTotal, "microsoft_resources", "status <> 'deleted' AND email_domain NOT LIKE '%.onmicrosoft.com'"},
+		{&snap.MicrosoftAvailable, "microsoft_resources", "status = 'normal' AND for_sale = TRUE AND graph_available = TRUE AND email_domain NOT LIKE '%.onmicrosoft.com'"},
+		{&snap.MicrosoftEnterpriseTotal, "microsoft_resources", "status <> 'deleted' AND email_domain LIKE '%.onmicrosoft.com'"},
+		{&snap.MicrosoftEnterpriseAvailable, "microsoft_resources", "status = 'normal' AND for_sale = TRUE AND email_domain LIKE '%.onmicrosoft.com'"},
 		{&snap.DomainTotal, "generated_mailboxes", "status <> 'retired'"},
 		{&snap.DomainAvailable, "generated_mailboxes", "status = 'normal'"},
 		{&snap.GmailTotal, "gmail_resources", "status <> 'deleted'"},

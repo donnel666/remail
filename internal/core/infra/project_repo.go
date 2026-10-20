@@ -748,6 +748,8 @@ func (r *ProjectRepo) Facets(ctx context.Context, filter coreapp.ProjectListFilt
 	}
 	for _, row := range productRows {
 		switch domain.ProductType(row.Value) {
+		case domain.ProductTypeMicrosoftEnterprise:
+			facets.ProductType.MicrosoftEnterprise = row.Count
 		case domain.ProductTypeMicrosoft:
 			facets.ProductType.Microsoft = row.Count
 		case domain.ProductTypeDomain:
@@ -1320,6 +1322,7 @@ func (r *ProjectRepo) listProductsByProjectIDs(ctx context.Context, projectIDs [
 func activeProjectProductTypes() []string {
 	return []string{
 		string(domain.ProductTypeMicrosoft),
+		string(domain.ProductTypeMicrosoftEnterprise),
 		string(domain.ProductTypeDomain),
 		string(domain.ProductTypeGmail),
 		string(domain.ProductTypeGmailVariant),

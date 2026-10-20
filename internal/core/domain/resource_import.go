@@ -41,6 +41,7 @@ type ResourceImport struct {
 	OperatorUserID   uint
 	ResourceType     ResourceType
 	LongLived        bool
+	Enterprise       bool
 	ErrorStrategy    ImportErrorStrategy
 	SourceObjectKey  string
 	FailureObjectKey string

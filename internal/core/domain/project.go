@@ -36,20 +36,22 @@ const (
 type ProductType string
 
 const (
-	ProductTypeMicrosoft    ProductType = "microsoft"
-	ProductTypeDomain       ProductType = "domain"
-	ProductTypeGmail        ProductType = "gmail"
-	ProductTypeGmailVariant ProductType = "gmail_variant"
-	ProductTypeICloud       ProductType = "icloud"
-	ProductTypeProto        ProductType = "proto"
-	ProductTypeDaum         ProductType = "daum"
+	ProductTypeMicrosoft           ProductType = "microsoft"
+	ProductTypeMicrosoftEnterprise ProductType = "microsoft_enterprise"
+	ProductTypeDomain              ProductType = "domain"
+	ProductTypeGmail               ProductType = "gmail"
+	ProductTypeGmailVariant        ProductType = "gmail_variant"
+	ProductTypeICloud              ProductType = "icloud"
+	ProductTypeProto               ProductType = "proto"
+	ProductTypeDaum                ProductType = "daum"
 )
 
 const (
-	RandomMicrosoftSuffixSelector = "outlook"
-	RandomDomainSuffixSelector    = "domain"
-	RandomProtoSuffixSelector     = "proto"
-	RandomDaumSuffixSelector      = "daum"
+	RandomMicrosoftSuffixSelector           = "outlook"
+	RandomMicrosoftEnterpriseSuffixSelector = "microsoft_enterprise"
+	RandomDomainSuffixSelector              = "domain"
+	RandomProtoSuffixSelector               = "proto"
+	RandomDaumSuffixSelector                = "daum"
 )
 
 // MailRuleType identifies which part of a message a rule matches.
@@ -159,7 +161,7 @@ func IsValidProductStatus(status ProductStatus) bool {
 
 func IsValidProductType(productType ProductType) bool {
 	switch productType {
-	case ProductTypeMicrosoft, ProductTypeDomain, ProductTypeGmail, ProductTypeGmailVariant, ProductTypeICloud, ProductTypeProto, ProductTypeDaum:
+	case ProductTypeMicrosoft, ProductTypeMicrosoftEnterprise, ProductTypeDomain, ProductTypeGmail, ProductTypeGmailVariant, ProductTypeICloud, ProductTypeProto, ProductTypeDaum:
 		return true
 	default:
 		return false
@@ -217,6 +219,8 @@ func NormalizeProductStatus(status string) (ProductStatus, bool) {
 
 func NormalizeProductType(productType string) (ProductType, bool) {
 	switch ProductType(strings.ToLower(strings.TrimSpace(productType))) {
+	case ProductTypeMicrosoftEnterprise:
+		return ProductTypeMicrosoftEnterprise, true
 	case ProductTypeMicrosoft:
 		return ProductTypeMicrosoft, true
 	case ProductTypeDomain:

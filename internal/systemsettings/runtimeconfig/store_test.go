@@ -30,6 +30,7 @@ func TestProductPriceMultiplier(t *testing.T) {
 	t.Cleanup(func() { Replace(nil) })
 
 	require.Equal(t, "0.8", ProductPriceMultiplier("MICROSOFT"))
+	require.Equal(t, "1", ProductPriceMultiplier("MICROSOFT_ENTERPRISE"))
 	require.Equal(t, "0.7", ProductPriceMultiplier("gmail"))
 	require.Equal(t, "0.7", ProductPriceMultiplier("gmail_variant"))
 	require.Equal(t, "0.6", ProductPriceMultiplier("proto"))
@@ -37,6 +38,23 @@ func TestProductPriceMultiplier(t *testing.T) {
 	require.ErrorIs(t, Validate(ProtoPriceMultiplierKey, "1.01"), domain.ErrInvalidValue)
 	require.Equal(t, "1", ProductPriceMultiplier("retired"))
 	require.Equal(t, "1", ProductPriceMultiplier("icloud"))
+}
+
+func TestMicrosoftEnterprisePriceMultiplierIsIndependent(t *testing.T) {
+	Replace([]domain.Setting{
+		{Key: MicrosoftPriceMultiplierKey, Value: "0.8"},
+		{Key: MicrosoftEnterprisePriceMultiplierKey, Value: "0.6"},
+	})
+	t.Cleanup(func() { Replace(nil) })
+	require.Equal(t, "0.8", ProductPriceMultiplier("microsoft"))
+	require.Equal(t, "0.6", ProductPriceMultiplier("microsoft_enterprise"))
+
+	for _, value := range []string{"0", "0.6", "1"} {
+		require.NoError(t, Validate(MicrosoftEnterprisePriceMultiplierKey, value))
+	}
+	for _, value := range []string{"-0.1", "1.01", "0.1234567", "invalid"} {
+		require.ErrorIs(t, Validate(MicrosoftEnterprisePriceMultiplierKey, value), domain.ErrInvalidValue)
+	}
 }
 
 func TestSnapshotKeepsRelatedValuesFromOneVersion(t *testing.T) {

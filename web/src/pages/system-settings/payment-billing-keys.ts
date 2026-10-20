@@ -47,9 +47,13 @@ export const RECHARGE_CHECK_KEYS = [
 
 export const PROJECT_PRICE_KEYS = [
   "default_project_microsoft_code_price",
+  "default_project_microsoft_enterprise_code_price",
   "default_project_microsoft_code_supplier_price",
+  "default_project_microsoft_enterprise_code_supplier_price",
   "default_project_microsoft_purchase_price",
+  "default_project_microsoft_enterprise_purchase_price",
   "default_project_microsoft_purchase_supplier_price",
+  "default_project_microsoft_enterprise_purchase_supplier_price",
   "default_project_domain_code_price",
   "default_project_domain_code_supplier_price",
   "default_project_domain_purchase_price",
@@ -78,7 +82,9 @@ export const PROJECT_PRICE_KEYS = [
 
 export const PROJECT_SERVICE_KEYS = [
   "default_project_microsoft_code_enabled",
+  "default_project_microsoft_enterprise_code_enabled",
   "default_project_microsoft_purchase_enabled",
+  "default_project_microsoft_enterprise_purchase_enabled",
   "default_project_domain_code_enabled",
   "default_project_domain_purchase_enabled",
   "default_project_gmail_code_enabled",
@@ -100,6 +106,7 @@ export const PRODUCT_PRICE_MULTIPLIER_KEYS = [
   "product_price_multiplier_domain",
   "product_price_multiplier_proto",
   "product_price_multiplier_daum",
+  "product_price_multiplier_microsoft_enterprise",
 ] as const;
 
 export const PAYMENT_BILLING_KEYS = [

@@ -104,6 +104,7 @@ export function inventoryScopeLabel(
 }
 
 export function productTypeLabel(type: OrderProductType, t: (key: string) => string) {
+  if (type === "microsoft_enterprise") return t("Microsoft Enterprise Emails");
   if (type === "microsoft") return t("Microsoft email");
   if (type === "domain") return t("Domain email");
   if (type === "gmail") return t("Gmail email");

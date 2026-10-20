@@ -9,6 +9,7 @@ import (
 	"time"
 
 	coreapp "github.com/donnel666/remail/internal/core/app"
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	mailapp "github.com/donnel666/remail/internal/mailtransport/app"
 	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	mailinfra "github.com/donnel666/remail/internal/mailtransport/infra"
@@ -334,6 +335,9 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 			SafeMessage: "Microsoft mail service is temporarily unavailable.",
 		}, nil
 	}
+	if coredomain.IsMicrosoftEnterpriseEmail(req.EmailAddress) {
+		return a.validateMicrosoftEnterprise(ctx, req)
+	}
 	ctx = msacl.WithRecoveryLeaseScope(ctx, req.ResourceID, "")
 	ctx = msacl.WithConcreteRecoveryLeaseKeys(ctx)
 	if a.hardReauthorize != nil {
@@ -587,6 +591,66 @@ func (a *ResourceValidationAdapter) ValidateMicrosoft(ctx context.Context, req c
 	last.RecoveredBinding = recoveredBinding
 	if recoveredBinding != nil {
 		last.BindingObservation = nil
+	}
+	return last, nil
+}
+
+func (a *ResourceValidationAdapter) validateMicrosoftEnterprise(ctx context.Context, req coreapp.MicrosoftValidationRequest) (coreapp.MicrosoftValidationResult, error) {
+	if !microsoftRequestHasRefreshToken(req) {
+		return coreapp.MicrosoftValidationResult{Category: "missing_token", SafeMessage: "Microsoft enterprise Client ID and refresh token are required."}, nil
+	}
+	var last coreapp.MicrosoftValidationResult
+	var avoidServerIDs []uint
+	authoritative := false
+	for attempt := 0; attempt <= microsoftProxyAttemptLimit(); attempt++ {
+		proxyConfig, err := a.acquireProxy(ctx, req, attempt, avoidServerIDs)
+		if err != nil {
+			last.Valid, last.Category, last.SafeMessage = false, "request", "Microsoft mail service is temporarily unavailable."
+			return last, nil
+		}
+		proxyURL, proxyID := "", uint(0)
+		if proxyConfig != nil && !proxyConfig.Direct {
+			proxyURL, proxyID = proxyConfig.URL, proxyConfig.ID
+		}
+		raw, err := a.microsoft.RefreshToken(ctx, mailinfra.MicrosoftOAuthRequest{
+			EmailAddress: req.EmailAddress, ClientID: req.ClientID, RefreshToken: req.RefreshToken, ProxyURL: proxyURL,
+		})
+		if err != nil {
+			raw = normalizeMicrosoftOAuthErrorResult(raw, err, "Microsoft mail service is temporarily unavailable.")
+		}
+		refreshed := raw.Valid
+		if refreshed {
+			authoritative = true
+			raw, _ = a.fetchMicrosoftValidation(ctx, req.EmailAddress, proxyURL, raw)
+		}
+		if refreshed {
+			if raw.ClientID != "" {
+				req.ClientID = raw.ClientID
+			}
+			if raw.RefreshToken != "" {
+				req.RefreshToken = raw.RefreshToken
+			}
+		}
+		if authoritative {
+			raw.ClientID, raw.RefreshToken = req.ClientID, req.RefreshToken
+		}
+		last = toCoreMicrosoftResult(raw)
+		last.CredentialsAuthoritative = authoritative
+		if raw.Valid {
+			last.SafeMessage = "Microsoft enterprise token refresh and mailbox receive succeeded."
+			_ = a.reportProxySuccess(ctx, proxyID)
+			return last, nil
+		}
+		if isMicrosoftRateLimitedCategory(raw.Category) {
+			_ = a.reportProxyRateLimited(ctx, proxyID)
+			return last, nil
+		}
+		if raw.ProxyFailure {
+			avoidServerIDs = proxyapp.AppendAvoidProxyServerID(avoidServerIDs, proxyConfig)
+			_ = a.reportProxyFailure(ctx, proxyID, raw.SafeMessage)
+			continue
+		}
+		return last, nil
 	}
 	return last, nil
 }

@@ -4,7 +4,52 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
+
+func TestAdminDashboardSeparatesEnterpriseMetricsAndKeepsTrendTotals(t *testing.T) {
+	from := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(time.Hour)
+	key := bucketStart(from, granularity(from, to)).Format(bucketLayout(granularity(from, to)))
+	for _, includePersonal := range []bool{false, true} {
+		view := &fakeAdminView{
+			codeOrder: []TypeCountBucket{{Bucket: key, ProductType: "microsoft_enterprise", Count: 4}},
+			receipts:  []TypeReceiptBucket{{Bucket: key, ProductType: "microsoft_enterprise", Received: 3, AvgSeconds: 40, TotalSeconds: 120, Timed: 3}},
+			purchases: []TypePurchaseSummary{{ProductType: "microsoft_enterprise", PurchaseSummary: PurchaseSummary{Orders: 4, Activated: 2, TotalSeconds: 60, Timed: 2}}},
+			snapshot:  InventorySnapshot{MicrosoftTotal: 10, MicrosoftAvailable: 8, MicrosoftEnterpriseTotal: 5, MicrosoftEnterpriseAvailable: 3},
+		}
+		if includePersonal {
+			view.codeOrder = append(view.codeOrder, TypeCountBucket{Bucket: key, ProductType: "microsoft", Count: 2})
+			view.receipts = append(view.receipts, TypeReceiptBucket{Bucket: key, ProductType: "microsoft", Received: 1, AvgSeconds: 20, TotalSeconds: 20, Timed: 1})
+		}
+		got, err := NewAdminQueryService(view, fakeFinance{}, fakeInventory{}).AdminDashboard(context.Background(), &from, &to)
+		require.NoError(t, err)
+		require.Equal(t, 5, got.Stats.MicrosoftEnterpriseTotalEmails)
+		require.Equal(t, 3, got.Stats.MicrosoftEnterpriseAvailableEmails)
+		require.Equal(t, 3, got.Stats.MicrosoftEnterpriseCodeReceipts)
+		require.Equal(t, 75.0, got.Stats.MicrosoftEnterpriseCodeSuccessRate)
+		require.Equal(t, 40, got.Stats.MicrosoftEnterpriseAverageCodeReceiptSeconds)
+		require.Equal(t, 2, got.Stats.MicrosoftEnterprisePurchaseActivations)
+		require.Equal(t, 50.0, got.Stats.MicrosoftEnterprisePurchaseActivationSuccessRate)
+		require.Equal(t, 30, got.Stats.MicrosoftEnterpriseAveragePurchaseActivationSeconds)
+		personalReceipts := 0
+		if includePersonal {
+			personalReceipts = 1
+		}
+		require.Equal(t, personalReceipts, got.Stats.MicrosoftCodeReceipts)
+		require.Equal(t, personalReceipts+3, got.Stats.SuccessfulCodeReceipts)
+		trendTotal, enterpriseTotal := 0, 0
+		for _, point := range got.Trend {
+			trendTotal += point.SuccessfulCodeReceipts
+			enterpriseTotal += point.MicrosoftEnterpriseReceivedCodes
+			require.Equal(t, 5, point.MicrosoftEnterpriseTotalEmails)
+			require.Equal(t, 10, point.MicrosoftTotalEmails)
+		}
+		require.Equal(t, got.Stats.SuccessfulCodeReceipts, trendTotal)
+		require.Equal(t, got.Stats.MicrosoftEnterpriseCodeReceipts, enterpriseTotal)
+	}
+}
 
 type fakeAdminView struct {
 	orders     []CountBucket

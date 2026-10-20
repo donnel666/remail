@@ -191,7 +191,9 @@ function parseEmailTypes(value?: string) {
   for (const part of (value ?? "").split(/[,，/]/)) {
     const normalized = part.trim().toLowerCase();
     if (!normalized) continue;
-    if (normalized.includes("microsoft") || normalized.includes("微软")) {
+    if (normalized.includes("microsoft enterprise") || normalized.includes("microsoft_enterprise") || normalized.includes("企邮")) {
+      types.add("microsoft_enterprise");
+    } else if (normalized.includes("microsoft") || normalized.includes("微软")) {
       types.add("microsoft");
     }
     if (normalized.includes("domain") || normalized.includes("域名")) {
@@ -799,6 +801,11 @@ function ProjectSquareSidebar({
             label: t("Microsoft email"),
             value: "microsoft",
           },
+          {
+            count: productTypeCounts.microsoft_enterprise,
+            label: t("Microsoft Enterprise Emails"),
+            value: "microsoft_enterprise",
+          },
           { count: productTypeCounts.domain, label: t("Domain email"), value: "domain" },
           { count: productTypeCounts.gmail, label: t("Gmail email"), value: "gmail" },
           {
@@ -1146,6 +1153,7 @@ export default function Projects() {
     gmail_variant: 0,
     icloud: 0,
     microsoft: 0,
+        microsoft_enterprise: 0,
     proto: 0,
     daum: 0,
   });
@@ -1199,6 +1207,7 @@ export default function Projects() {
         gmail_variant: facets?.productType.gmailVariant ?? 0,
         icloud: facets?.productType.icloud ?? 0,
         microsoft: facets?.productType.microsoft ?? 0,
+        microsoft_enterprise: facets?.productType.microsoft_enterprise ?? 0,
         proto: facets?.productType.proto ?? 0,
         daum: facets?.productType.daum ?? 0,
       });

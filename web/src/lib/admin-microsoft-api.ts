@@ -52,6 +52,7 @@ function normalizeFilter(filter: AdminMicrosoftListFilter) {
   const suffix = filter.suffix?.trim();
   return {
     search: filter.search?.trim() || undefined,
+    enterprise: filter.enterprise,
     status: filter.status === "all" ? undefined : filter.status,
     forSale: filter.forSale,
     longLived: filter.longLived,
@@ -183,7 +184,8 @@ export async function importAdminMicrosoftResources(
   });
   formData.append("file", file);
   formData.append("ownerId", String(payload.ownerId));
-  formData.append("longLived", String(payload.longLived));
+  formData.append("longLived", String(payload.enterprise ? false : payload.longLived));
+  formData.append("enterprise", String(payload.enterprise ?? false));
   formData.append("errorStrategy", payload.errorStrategy);
 
   return unwrap<AdminMicrosoftImportResponse>(

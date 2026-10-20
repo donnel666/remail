@@ -199,7 +199,7 @@ type GeneratedMailboxRepository interface {
 
 // TXTParser parses resource import TXT files.
 type TXTParser interface {
-	ParseMicrosoftImport(content string, strategy domain.ImportErrorStrategy) ([]domain.MicrosoftImportLine, []domain.ImportLineError, error)
+	ParseMicrosoftImport(content string, strategy domain.ImportErrorStrategy, enterprise bool) ([]domain.MicrosoftImportLine, []domain.ImportLineError, error)
 }
 
 // ImportUseCase handles supplier resource import operations.
@@ -231,7 +231,7 @@ func NewImportUseCase(resources EmailResourceRepository, imports ResourceImportR
 }
 
 // AcceptMicrosoftTXTFile stores the TXT artifact and enqueues asynchronous import processing.
-func (uc *ImportUseCase) AcceptMicrosoftTXTFile(ctx context.Context, ownerUserID uint, fileName string, content []byte, longLived bool, errorStrategy domain.ImportErrorStrategy, requestID string) (*ImportResult, error) {
+func (uc *ImportUseCase) AcceptMicrosoftTXTFile(ctx context.Context, ownerUserID uint, fileName string, content []byte, longLived, enterprise bool, errorStrategy domain.ImportErrorStrategy, requestID string) (*ImportResult, error) {
 	if len(content) == 0 {
 		return nil, domain.ErrInvalidImportFormat
 	}
@@ -260,7 +260,8 @@ func (uc *ImportUseCase) AcceptMicrosoftTXTFile(ctx context.Context, ownerUserID
 	importRecord := &domain.ResourceImport{
 		OwnerUserID:     ownerUserID,
 		ResourceType:    domain.ResourceTypeMicrosoft,
-		LongLived:       longLived,
+		LongLived:       longLived && !enterprise,
+		Enterprise:      enterprise,
 		ErrorStrategy:   errorStrategy,
 		SourceObjectKey: storedSource.ObjectKey,
 		Status:          domain.ResourceImportProcessing,
@@ -285,7 +286,7 @@ func (uc *ImportUseCase) AcceptAdminMicrosoftTXTFile(
 	ownerUserID uint,
 	fileName string,
 	content []byte,
-	longLived bool,
+	longLived, enterprise bool,
 	errorStrategy domain.ImportErrorStrategy,
 	idempotencyKey string,
 	requestID string,
@@ -306,7 +307,7 @@ func (uc *ImportUseCase) AcceptAdminMicrosoftTXTFile(
 	if idempotencyKey == "" || len(idempotencyKey) > 128 {
 		return nil, domain.ErrInvalidResourceCommand
 	}
-	fingerprint := adminImportFingerprint(ownerUserID, longLived, normalizedStrategy, content)
+	fingerprint := adminImportFingerprint(ownerUserID, longLived, enterprise, normalizedStrategy, content)
 	existing, existingFingerprint, err := adminImports.FindAdminByIdempotency(ctx, operatorUserID, idempotencyKey)
 	if err != nil {
 		return nil, err
@@ -328,11 +329,11 @@ func (uc *ImportUseCase) AcceptAdminMicrosoftTXTFile(
 		return nil, domain.ErrFileStorageUnavailable
 	}
 	importRecord := &domain.ResourceImport{
-		OwnerUserID: ownerUserID, ResourceType: domain.ResourceTypeMicrosoft,
+		OwnerUserID: ownerUserID, ResourceType: domain.ResourceTypeMicrosoft, Enterprise: enterprise,
 		SourceObjectKey: storedSource.ObjectKey, Status: domain.ResourceImportProcessing,
 	}
 	stored, created, err := adminImports.CreateAdminWithLog(ctx, importRecord, AdminResourceImportMetadata{
-		OperatorUserID: operatorUserID, LongLived: longLived, ErrorStrategy: normalizedStrategy,
+		OperatorUserID: operatorUserID, LongLived: longLived && !enterprise, ErrorStrategy: normalizedStrategy,
 		RequestID: strings.TrimSpace(requestID), Path: strings.TrimSpace(pathValue),
 		IdempotencyKey: idempotencyKey, RequestFingerprint: fingerprint,
 	}, &governancedomain.OperationLog{
@@ -486,7 +487,7 @@ func (uc *ImportUseCase) processMicrosoftImport(ctx context.Context, task Micros
 		return nil, domain.ErrFileStorageUnavailable
 	}
 
-	lines, parseFailures, err := uc.parser.ParseMicrosoftImport(string(source.ContentBytes), errorStrategy)
+	lines, parseFailures, err := uc.parser.ParseMicrosoftImport(string(source.ContentBytes), errorStrategy, importRecord.Enterprise)
 	if err != nil {
 		return &MicrosoftImportProcessResult{}, uc.failImport(ctx, task.ImportID, task.ClaimToken, task.OwnerUserID, now, importID, importFailureFromError(err))
 	}
@@ -571,7 +572,7 @@ func (uc *ImportUseCase) processMicrosoftImport(ctx context.Context, task Micros
 			Password:     line.Password,
 			ClientID:     line.ClientID,
 			RefreshToken: line.RefreshToken,
-			LongLived:    task.LongLived,
+			LongLived:    task.LongLived && !importRecord.Enterprise,
 			ForSale:      false,
 			Status:       domain.MicrosoftStatusPending,
 			CreatedAt:    now,
@@ -939,9 +940,12 @@ func importObjectKey(kind string, ownerUserID uint, now time.Time, importID stri
 	)
 }
 
-func adminImportFingerprint(ownerUserID uint, longLived bool, strategy domain.ImportErrorStrategy, content []byte) string {
+func adminImportFingerprint(ownerUserID uint, longLived, enterprise bool, strategy domain.ImportErrorStrategy, content []byte) string {
 	contentSum := sha256.Sum256(content)
 	payload := fmt.Sprintf("%d\x00%t\x00%s\x00%s", ownerUserID, longLived, strategy, hex.EncodeToString(contentSum[:]))
+	if enterprise {
+		payload += "\x00enterprise"
+	}
 	sum := sha256.Sum256([]byte(payload))
 	return hex.EncodeToString(sum[:])
 }
@@ -1122,6 +1126,7 @@ type ResourceBulkSelection struct {
 // "all matching" bulk commands.
 type ResourceListFilter struct {
 	ResourceType domain.ResourceType `json:"resourceType"`
+	Enterprise   bool                `json:"enterprise,omitempty"`
 	Search       string              `json:"search,omitempty"`
 	Suffix       string              `json:"suffix,omitempty"`
 	TLD          string              `json:"tld,omitempty"`
