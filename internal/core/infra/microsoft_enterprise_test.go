@@ -35,8 +35,9 @@ func TestMicrosoftEnterpriseImportFormat(t *testing.T) {
 func TestMicrosoftEnterpriseResourcesAndFiltersMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	require.NoError(t, db.Exec("INSERT INTO users(id,email,password_hash,role,status) VALUES(1,'enterprise-owner@test.local','hash','supplier','active')").Error)
-	require.NoError(t, db.Exec("INSERT INTO email_resources(id,type,owner_user_id) VALUES(101,'microsoft',1),(102,'microsoft',1)").Error)
-	require.NoError(t, db.Exec("INSERT INTO microsoft_resources(id,email_address,email_domain,password,client_id,refresh_token,status) VALUES(101,'user@tenant.onmicrosoft.com','tenant.onmicrosoft.com','password','client',?,'normal'),(102,'user@outlook.com','outlook.com','password','client','rt','normal')", strings.Repeat("r", 1800)).Error)
+	require.NoError(t, db.Exec("INSERT INTO email_resources(id,type,owner_user_id) VALUES(101,'microsoft_enterprise',1),(102,'microsoft',1)").Error)
+	require.NoError(t, db.Exec("INSERT INTO microsoft_enterprise_resources(id,email_address,email_domain,password,client_id,refresh_token,status) VALUES(101,'user@tenant.onmicrosoft.com','tenant.onmicrosoft.com','password','client',?,'normal')", strings.Repeat("r", 1800)).Error)
+	require.NoError(t, db.Exec("INSERT INTO microsoft_resources(id,email_address,email_domain,password,client_id,refresh_token,status) VALUES(102,'user@outlook.com','outlook.com','password','client','rt','normal')").Error)
 	for _, enterprise := range []bool{false, true} {
 		filter := coreapp.ResourceListFilter{ResourceType: domain.ResourceTypeMicrosoft, Enterprise: enterprise}
 		var ids []uint

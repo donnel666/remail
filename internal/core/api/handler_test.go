@@ -1100,7 +1100,7 @@ func (r *mockResourceRepo) filteredPrivateIDs(ownerUserID uint, filter coreapp.R
 	return ids
 }
 
-func (r *mockResourceRepo) ListMicrosoftStatus(_ context.Context, ids []uint) ([]coreapp.MicrosoftStatusResult, error) {
+func (r *mockResourceRepo) ListMicrosoftStatus(_ context.Context, ids []uint, _ coredomain.ResourceType) ([]coreapp.MicrosoftStatusResult, error) {
 	var result []coreapp.MicrosoftStatusResult
 	for _, id := range ids {
 		if ms, ok := r.microsoft[id]; ok {
@@ -1286,7 +1286,7 @@ func (r *mockImportRepo) MarkFailed(_ context.Context, id uint, failureObjectKey
 	return nil
 }
 
-func (r *mockImportRepo) ClaimAdminImportDispatchable(_ context.Context, limit int, _ time.Time, _ time.Time) ([]coreapp.AdminResourceImportDispatchItem, error) {
+func (r *mockImportRepo) ClaimAdminImportDispatchable(_ context.Context, limit int, _ time.Time, _ time.Time, _ bool) ([]coreapp.AdminResourceImportDispatchItem, error) {
 	items := make([]coreapp.AdminResourceImportDispatchItem, 0)
 	for id := uint(1); id <= r.seq && len(items) < limit; id++ {
 		item := r.imports[id]
@@ -2097,20 +2097,20 @@ func TestImportDispatcherChangesStateOnlyAfterAcceptedEnqueue(t *testing.T) {
 	queue := &mockImportQueue{err: errors.New("redis unavailable")}
 	useCase := coreapp.NewImportUseCase(resources, imports, nil, nil, queue)
 
-	queued, err := useCase.DispatchAdminImports(context.Background(), 10)
+	queued, err := useCase.DispatchAdminImports(context.Background(), 10, false)
 	require.Error(t, err)
 	require.Zero(t, queued)
 	require.Equal(t, "pending", imports.imports[item.ID].DispatchStatus)
 
 	queue.err = nil
 	queue.duplicate = true
-	queued, err = useCase.DispatchAdminImports(context.Background(), 10)
+	queued, err = useCase.DispatchAdminImports(context.Background(), 10, false)
 	require.NoError(t, err)
 	require.Zero(t, queued)
 	require.Equal(t, "pending", imports.imports[item.ID].DispatchStatus)
 
 	queue.duplicate = false
-	queued, err = useCase.DispatchAdminImports(context.Background(), 10)
+	queued, err = useCase.DispatchAdminImports(context.Background(), 10, false)
 	require.NoError(t, err)
 	require.Equal(t, 1, queued)
 	require.Equal(t, "queued", imports.imports[item.ID].DispatchStatus)
@@ -2243,7 +2243,7 @@ func TestCoreHandler_ImportInvalidFormatAbortFails(t *testing.T) {
 		if attempt < 3 {
 			require.Equal(t, coredomain.ResourceImportProcessing, importRepo.imports[task.ImportID].Status)
 			require.Equal(t, "pending", importRepo.imports[task.ImportID].DispatchStatus)
-			_, err = mod.ImportUseCase.DispatchAdminImports(context.Background(), 10)
+			_, err = mod.ImportUseCase.DispatchAdminImports(context.Background(), 10, false)
 			require.NoError(t, err)
 		}
 	}

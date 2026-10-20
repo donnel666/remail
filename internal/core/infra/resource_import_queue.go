@@ -39,11 +39,15 @@ func (q *ResourceImportQueue) EnqueueMicrosoftImport(ctx context.Context, task c
 		return false, fmt.Errorf("marshal microsoft import task: %w", err)
 	}
 
+	queue := importQueueName
+	if task.Enterprise {
+		queue = platform.QueueMicrosoftEnterprise
+	}
 	asynqTask := asynq.NewTask(TypeMicrosoftImport, payload)
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynqTask,
-		asynq.Queue(importQueueName),
+		asynq.Queue(queue),
 		asynq.Unique(importTaskTimeout+importActivationDelay),
 		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(importTaskTimeout),

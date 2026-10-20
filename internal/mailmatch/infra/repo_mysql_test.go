@@ -1156,7 +1156,7 @@ INSERT INTO microsoft_resource_project_matches(
 		currentScopes, err := repo.ListHistoricalProjectScopes(txCtx, false)
 		require.NoError(t, err)
 		require.Equal(t, scopes, currentScopes)
-		return repo.ClearLegacyMicrosoftProjectHistory(txCtx, 100, 10)
+		return repo.ClearLegacyMicrosoftProjectHistory(txCtx, 100, 10, false)
 	}))
 
 	var legacyCount int64

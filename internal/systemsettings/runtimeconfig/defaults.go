@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	DefaultSettingsCount                         = 319
+	DefaultSettingsCount                         = 327
 	ICloudDeviceBaseURLKey                       = "icloud_device_base_url"
 	ICloudDeviceAPIKey                           = "icloud_device_api_key"
 	ICloudDeviceSMSBaseURLKey                    = "icloud_device_sms_base_url"
@@ -257,6 +257,14 @@ var defaultSettings = []domain.Setting{
 	{Key: "fetch_dispatcher_timeout_seconds", Value: "300"},
 	{Key: "resource_fetch_dispatch_limit", Value: "10000"},
 	{Key: "project_history_concurrency", Value: "4"},
+	{Key: "microsoft_enterprise_history_concurrency", Value: "4"},
+	{Key: "microsoft_enterprise_history_dispatch_limit", Value: "4"},
+	{Key: "microsoft_enterprise_token_dispatch_limit", Value: "32"},
+	{Key: "microsoft_enterprise_token_refresh_hour", Value: "3"},
+	{Key: "microsoft_enterprise_token_refresh_lookahead_days", Value: "30"},
+	{Key: "microsoft_enterprise_token_refresh_scan_limit", Value: "2000"},
+	{Key: "asynq_queue_microsoft_enterprise_weight", Value: "1"},
+
 	{Key: "gmail_validation_concurrency", Value: "2"},
 	{Key: "gmail_history_concurrency", Value: "4"},
 	{Key: "project_history_dispatch_limit", Value: "4"},
@@ -367,6 +375,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "retention_daily_run_hour", Value: "4"},
 	{Key: "idempotency_key_retain_days", Value: "30"},
 	{Key: "mailmatch_ms_retain_days", Value: "3"},
+	{Key: "mailmatch_microsoft_enterprise_retain_days", Value: "3"},
 	{Key: "mailmatch_domain_retain_days", Value: "30"},
 	{Key: "gmail_code_retain_days", Value: "3"},
 	{Key: "daily_usage_retain_days", Value: "14"},

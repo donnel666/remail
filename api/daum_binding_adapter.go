@@ -70,7 +70,7 @@ func (r daumBindingResolver) Resolve(ctx context.Context, input dauminfra.Bindin
 			return result, nil
 		}
 		tables := map[mailmatchdomain.ResourceType]string{
-			mailmatchdomain.ResourceTypeMicrosoft: "microsoft_resources", mailmatchdomain.ResourceTypeDomain: "domain_resources", mailmatchdomain.ResourceTypeGmail: "gmail_resources", mailmatchdomain.ResourceTypeICloud: "icloud_resources", mailmatchdomain.ResourceTypeProto: "proto_resources", mailmatchdomain.ResourceTypeDaum: "daum_resources",
+			mailmatchdomain.ResourceTypeMicrosoft: "microsoft_resources", mailmatchdomain.ResourceTypeMicrosoftEnterprise: "microsoft_enterprise_resources", mailmatchdomain.ResourceTypeDomain: "domain_resources", mailmatchdomain.ResourceTypeGmail: "gmail_resources", mailmatchdomain.ResourceTypeICloud: "icloud_resources", mailmatchdomain.ResourceTypeProto: "proto_resources", mailmatchdomain.ResourceTypeDaum: "daum_resources",
 		}
 		table, supported := tables[scope.AllocationType]
 		if !supported {

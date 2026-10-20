@@ -338,7 +338,7 @@ func (*adminResourceFetchRepoStub) FindResourceFetch(context.Context, uint, uint
 	return nil, nil
 }
 
-func (*adminResourceFetchRepoStub) ListPendingResourceFetches(context.Context, int) ([]mailmatchdomain.ResourceFetchJob, error) {
+func (*adminResourceFetchRepoStub) ListPendingResourceFetches(context.Context, int, bool) ([]mailmatchdomain.ResourceFetchJob, error) {
 	return nil, nil
 }
 
@@ -407,11 +407,11 @@ func (adminResourceFetchQueueStub) EnqueueResourceHistory(context.Context, mailm
 	return true, nil
 }
 
-func (adminResourceFetchQueueStub) EnqueueAdminResourceFetchDispatcher(context.Context, time.Duration) error {
+func (adminResourceFetchQueueStub) EnqueueAdminResourceFetchDispatcher(context.Context, time.Duration, bool) error {
 	return nil
 }
 
-func (adminResourceFetchQueueStub) EnqueueResourceHistoryDispatcher(context.Context, time.Duration) error {
+func (adminResourceFetchQueueStub) EnqueueResourceHistoryDispatcher(context.Context, time.Duration, bool) error {
 	return nil
 }
 

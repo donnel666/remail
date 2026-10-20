@@ -11,13 +11,18 @@ import (
 type ResourceType string
 
 const (
-	ResourceTypeMicrosoft ResourceType = "microsoft"
-	ResourceTypeDomain    ResourceType = "domain"
-	ResourceTypeGmail     ResourceType = "gmail"
-	ResourceTypeICloud    ResourceType = "icloud"
-	ResourceTypeProto     ResourceType = "proto"
-	ResourceTypeDaum      ResourceType = "daum"
+	ResourceTypeMicrosoft           ResourceType = "microsoft"
+	ResourceTypeMicrosoftEnterprise ResourceType = "microsoft_enterprise"
+	ResourceTypeDomain              ResourceType = "domain"
+	ResourceTypeGmail               ResourceType = "gmail"
+	ResourceTypeICloud              ResourceType = "icloud"
+	ResourceTypeProto               ResourceType = "proto"
+	ResourceTypeDaum                ResourceType = "daum"
 )
+
+func IsMicrosoftResourceType(value ResourceType) bool {
+	return value == ResourceTypeMicrosoft || value == ResourceTypeMicrosoftEnterprise
+}
 
 type MessageStatus string
 

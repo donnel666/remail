@@ -588,7 +588,7 @@ export function RelatedOrdersTable({
   t,
 }: {
   resourceId: number;
-  resourceType?: "microsoft" | "gmail" | "icloud" | "daum";
+  resourceType?: "microsoft" | "microsoft_enterprise" | "gmail" | "icloud" | "daum";
   t: TFunction;
 }) {
   const pageState = useAdminMicrosoftAllocationPage(resourceId, resourceType);
@@ -928,7 +928,7 @@ function TaskDiagnostics({
     {
       key: "fetch",
       label: "Mail fetch",
-      action: fetchAdminMicrosoftMail,
+      action: (resourceId: number) => isMicrosoftEnterpriseEmail(detail.emailAddress) ? fetchAdminMicrosoftMail(resourceId, "microsoft_enterprise") : fetchAdminMicrosoftMail(resourceId),
       successKey: "Mail fetch submitted.",
     },
   ];
@@ -1009,7 +1009,7 @@ export function ResourceMailsPanel({
   hideMailboxMeta?: boolean;
   onRefresh?: () => void | Promise<void>;
   resourceId: number;
-  resourceType?: "microsoft" | "gmail" | "icloud" | "daum";
+  resourceType?: "microsoft" | "microsoft_enterprise" | "gmail" | "icloud" | "daum";
   t: TFunction;
 }) {
   const [search, setSearch] = useState("");
@@ -1634,7 +1634,7 @@ export function MicrosoftDetailSheet({
                 <CredentialDiagnostics detail={detail} onReplace={onReplaceCredentials} t={t} />
               </div>
             ) : null}
-            {activeTab === "orders" ? <RelatedOrdersTable resourceId={detail.id} t={t} /> : null}
+            {activeTab === "orders" ? <RelatedOrdersTable resourceId={detail.id} resourceType={enterprise ? "microsoft_enterprise" : "microsoft"} t={t} /> : null}
             {!enterprise && activeTab === "explicit" ? <AliasPanel kind="explicit" resourceId={detail.id} t={t} /> : null}
             {!enterprise && activeTab === "other" ? <AliasPanel kind="other" resourceId={detail.id} t={t} /> : null}
             {activeTab === "tasks" ? (
@@ -1643,6 +1643,7 @@ export function MicrosoftDetailSheet({
             {activeTab === "mails" ? (
               <ResourceMailsPanel
                 fetchDisabled={detail.status === "deleted"}
+                resourceType={enterprise ? "microsoft_enterprise" : "microsoft"}
                 hideMailboxMeta
                 onRefresh={onRefresh}
                 resourceId={detail.id}

@@ -85,8 +85,12 @@ func (r *AdminResourceRepo) WithTx(ctx context.Context, fn func(context.Context)
 		txCtx := context.WithValue(platform.WithGormTx(ctx, tx), microsoftFacetsInvalidationKey{}, invalidation)
 		return fn(txCtx)
 	})
-	if err == nil && invalidation.dirty {
-		invalidateMicrosoftFacets()
+	if err == nil {
+		for i, dirty := range invalidation.dirty {
+			if dirty {
+				invalidateMicrosoftFacets(domain.MicrosoftResourceType(i == 1))
+			}
+		}
 	}
 	return err
 }
@@ -160,7 +164,7 @@ func (r *AdminResourceRepo) LockAdminMicrosoft(ctx context.Context, resourceID u
 	db := r.dbFor(ctx)
 	var root EmailResourceModel
 	err := db.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ? AND type = ?", resourceID, string(domain.ResourceTypeMicrosoft)).
+		Where("id = ? AND type IN ?", resourceID, []domain.ResourceType{domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise}).
 		First(&root).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil, domain.ErrResourceNotFound
@@ -169,7 +173,7 @@ func (r *AdminResourceRepo) LockAdminMicrosoft(ctx context.Context, resourceID u
 		return nil, nil, fmt.Errorf("lock admin microsoft resource root: %w", err)
 	}
 	var resource MicrosoftResourceModel
-	err = db.Clauses(clause.Locking{Strength: "UPDATE"}).
+	err = db.Table(microsoftResourceTable(domain.ResourceType(root.Type))).Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("id = ?", resourceID).
 		First(&resource).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -181,48 +185,43 @@ func (r *AdminResourceRepo) LockAdminMicrosoft(ctx context.Context, resourceID u
 	return root.toDomain(), resource.toDomain(), nil
 }
 
-func (r *AdminResourceRepo) MaxMicrosoftResourceID(ctx context.Context) (uint, error) {
-	var maxID uint
-	result := r.dbFor(ctx).
-		Table("microsoft_resources").
-		Select("id").
-		Where("status <> ?", domain.MicrosoftStatusDeleted).
-		Order("id DESC").
-		Limit(1).
-		Scan(&maxID)
-	if result.Error != nil {
-		return 0, fmt.Errorf("find maximum microsoft resource id: %w", result.Error)
+func (r *AdminResourceRepo) MaxMicrosoftResourceID(ctx context.Context, enterprise bool) (uint, error) {
+	var id uint
+	err := r.dbFor(ctx).Table(microsoftResourceTable(domain.MicrosoftResourceType(enterprise))).Select("id").Where("status <> ?", domain.MicrosoftStatusDeleted).Order("id DESC").Limit(1).Scan(&id).Error
+	if err != nil {
+		return 0, fmt.Errorf("find maximum Microsoft resource id: %w", err)
 	}
-	return maxID, nil
+	return id, nil
 }
 
-func (r *AdminResourceRepo) FindNextMicrosoft(ctx context.Context, afterID, maxID, projectID uint) (*domain.MicrosoftResource, error) {
+func (r *AdminResourceRepo) FindNextMicrosoft(ctx context.Context, afterID, maxID, projectID uint, enterprise bool) (*domain.MicrosoftResource, error) {
 	if projectID == 0 || maxID == 0 || afterID >= maxID {
 		return nil, nil
 	}
-	var resource MicrosoftResourceModel
-	result := r.dbFor(ctx).
-		Table("microsoft_resources AS mr").
-		Select("mr.id, mr.status, mr.email_address, mr.client_id, mr.refresh_token, mr.graph_available, mr.credential_revision").
-		Where("mr.id > ? AND mr.id <= ? AND mr.status <> ?", afterID, maxID, domain.MicrosoftStatusDeleted).
-		Where(`EXISTS (
-            SELECT 1 FROM project_products pp
-            JOIN projects p ON p.id = pp.project_id
-            WHERE pp.project_id = ? AND p.status IN ?
-              AND EXISTS (SELECT 1 FROM project_mail_rules pmr WHERE pmr.project_id = p.id AND pmr.enabled = TRUE)
-              AND pp.type = CASE WHEN mr.email_domain LIKE ? THEN ? ELSE ? END
-        )`, projectID, []string{string(domain.ProjectStatusListed), string(domain.ProjectStatusDelisted)},
-			"%.onmicrosoft.com", string(domain.ProductTypeMicrosoftEnterprise), string(domain.ProductTypeMicrosoft)).
-		Order("mr.id ASC").
-		Limit(1).
-		Scan(&resource)
-	if result.Error != nil {
-		return nil, fmt.Errorf("find next microsoft resource: %w", result.Error)
+	var types []string
+	if err := r.dbFor(ctx).Table("project_products pp").Select("DISTINCT pp.type").
+		Joins("JOIN projects p ON p.id=pp.project_id").
+		Where("pp.project_id=? AND p.status IN ? AND pp.type IN ?", projectID,
+			[]string{"listed", "delisted"}, []string{string(domain.MicrosoftResourceType(enterprise))}).
+		Where("EXISTS (SELECT 1 FROM project_mail_rules pmr WHERE pmr.project_id=p.id AND pmr.enabled=TRUE)").
+		Pluck("pp.type", &types).Error; err != nil {
+		return nil, err
 	}
-	if result.RowsAffected == 0 {
-		return nil, nil
+	var next *domain.MicrosoftResource
+	for _, kind := range types {
+		var resource MicrosoftResourceModel
+		result := r.dbFor(ctx).Table(microsoftResourceTable(domain.ResourceType(kind))).
+			Select("id,resource_type,status,email_address,client_id,refresh_token,graph_available,credential_revision").
+			Where("id>? AND id<=? AND status<>?", afterID, maxID, domain.MicrosoftStatusDeleted).
+			Order("id ASC").Limit(1).Scan(&resource)
+		if result.Error != nil {
+			return nil, fmt.Errorf("find next Microsoft resource: %w", result.Error)
+		}
+		if result.RowsAffected > 0 && (next == nil || resource.ID < next.ID) {
+			next = resource.toDomain()
+		}
 	}
-	return resource.toDomain(), nil
+	return next, nil
 }
 
 func (r *AdminResourceRepo) SaveAdminMicrosoft(ctx context.Context, root *domain.EmailResource, resource *domain.MicrosoftResource, expectedVersion uint64) error {
@@ -232,7 +231,7 @@ func (r *AdminResourceRepo) SaveAdminMicrosoft(ctx context.Context, root *domain
 	db := r.dbFor(ctx)
 	now := time.Now().UTC()
 	rootUpdate := db.Model(&EmailResourceModel{}).
-		Where("id = ? AND type = ? AND version = ?", root.ID, string(domain.ResourceTypeMicrosoft), expectedVersion).
+		Where("id = ? AND type = ? AND version = ?", root.ID, string(root.Type), expectedVersion).
 		Updates(map[string]any{
 			"owner_user_id": root.OwnerUserID,
 			"version":       expectedVersion + 1,
@@ -244,7 +243,7 @@ func (r *AdminResourceRepo) SaveAdminMicrosoft(ctx context.Context, root *domain
 	if rootUpdate.RowsAffected == 0 {
 		return domain.ErrResourceVersionConflict
 	}
-	resourceUpdate := db.Model(&MicrosoftResourceModel{}).
+	resourceUpdate := db.Model(&MicrosoftResourceModel{}).Table(microsoftResourceTable(root.Type)).
 		Where("id = ?", resource.ID).
 		Updates(map[string]any{
 			"email_address":           strings.ToLower(strings.TrimSpace(resource.EmailAddress)),
@@ -280,7 +279,7 @@ func (r *AdminResourceRepo) SaveAdminMicrosoft(ctx context.Context, root *domain
 	root.Version = expectedVersion + 1
 	root.UpdatedAt = now
 	resource.UpdatedAt = now
-	markMicrosoftFacetsDirty(ctx)
+	markMicrosoftFacetsDirty(ctx, root.Type)
 	return nil
 }
 
@@ -371,11 +370,22 @@ func (r *AdminResourceRepo) FindAdminMicrosoft(ctx context.Context, resourceID u
 	if resourceID == 0 {
 		return nil, nil
 	}
+	resourceType, err := microsoftResourceTypeByID(ctx, r.dbFor(ctx), resourceID)
+	if errors.Is(err, domain.ErrResourceNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	var row adminMicrosoftRow
-	err := r.dbFor(ctx).
+	selectSQL := adminMicrosoftDetailSelect
+	if resourceType == domain.ResourceTypeMicrosoftEnterprise {
+		selectSQL = adminMicrosoftListSelect
+	}
+	err = r.dbFor(ctx).
 		Table("email_resources AS er").
-		Joins("JOIN microsoft_resources AS mr ON mr.id = er.id AND er.type = 'microsoft'").
-		Select(adminMicrosoftDetailSelect).
+		Joins("JOIN "+microsoftResourceTable(resourceType)+" AS mr ON mr.id = er.id AND er.type = ?", resourceType).
+		Select(selectSQL).
 		Where("er.id = ?", resourceID).
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -677,14 +687,14 @@ func adminMicrosoftFacetPredicate(filter coreapp.AdminMicrosoftListFilter, ignor
 func (r *AdminResourceRepo) adminMicrosoftFilterQuery(ctx context.Context, filter coreapp.AdminMicrosoftListFilter, now time.Time, ignore string) *gorm.DB {
 	return applyAdminMicrosoftFilters(r.dbFor(ctx).
 		Table("email_resources AS er").
-		Joins("JOIN microsoft_resources AS mr ON mr.id = er.id AND er.type = 'microsoft'"),
+		Joins("JOIN "+microsoftResourceTable(domain.MicrosoftResourceType(filter.Enterprise))+" AS mr ON mr.id = er.id AND er.type = ?", domain.MicrosoftResourceType(filter.Enterprise)),
 		filter, now, ignore, "er.id", "er.owner_user_id", "er.created_at")
 }
 
 func (r *AdminResourceRepo) adminMicrosoftFacetQuery(ctx context.Context, filter coreapp.AdminMicrosoftListFilter, now time.Time) *gorm.DB {
-	query := r.dbFor(ctx).Table("microsoft_resources AS mr")
+	query := r.dbFor(ctx).Table(microsoftResourceTable(domain.MicrosoftResourceType(filter.Enterprise)) + " AS mr")
 	if adminMicrosoftFacetNeedsRoot(filter) {
-		query = query.Joins("JOIN email_resources AS er ON er.id = mr.id AND er.type = 'microsoft'")
+		query = query.Joins("JOIN email_resources AS er ON er.id = mr.id AND er.type = ?", domain.MicrosoftResourceType(filter.Enterprise))
 	}
 	base := filter
 	base.Status = ""
@@ -702,7 +712,6 @@ func adminMicrosoftFacetNeedsRoot(filter coreapp.AdminMicrosoftListFilter) bool 
 }
 
 func applyAdminMicrosoftFilters(query *gorm.DB, filter coreapp.AdminMicrosoftListFilter, now time.Time, ignore, idColumn, ownerColumn, createdAtColumn string) *gorm.DB {
-	query = query.Where("(mr.email_domain LIKE ?) = ?", "%.onmicrosoft.com", filter.Enterprise)
 	if ignore != "status" {
 		if filter.Status != "" {
 			query = query.Where("mr.status = ?", string(filter.Status))
@@ -777,6 +786,13 @@ func applyAdminMicrosoftSearch(query *gorm.DB, filter coreapp.AdminMicrosoftList
 		comparison = " LIKE ? ESCAPE '\\\\'"
 		value = escapeAdminLike(search) + "@%"
 	}
+	if filter.Enterprise {
+		condition := "mr.email_address" + comparison
+		if len(filter.OwnerIDs) > 0 {
+			return query.Where("("+condition+" OR "+ownerColumn+" IN ?)", value, filter.OwnerIDs)
+		}
+		return query.Where(condition, value)
+	}
 	parts := []string{
 		"SELECT id AS resource_id FROM microsoft_resources WHERE email_address" + comparison,
 		"SELECT resource_id FROM explicit_aliases WHERE email" + comparison,
@@ -820,7 +836,8 @@ func adminMicrosoftFacetsCacheKey(filter coreapp.AdminMicrosoftListFilter) strin
 	for i, ownerID := range filter.OwnerIDs {
 		ownerIDs[i] = strconv.FormatUint(uint64(ownerID), 10)
 	}
-	return fmt.Sprintf("search=%q|suffix=%q|status=%q|sale=%s|long=%s|graph=%s|token=%q|from=%s|to=%s|owners=%s",
+	return fmt.Sprintf("enterprise=%t|search=%q|suffix=%q|status=%q|sale=%s|long=%s|graph=%s|token=%q|from=%s|to=%s|owners=%s",
+		filter.Enterprise,
 		strings.ToLower(strings.TrimSpace(filter.Search)), strings.ToLower(strings.TrimSpace(filter.Suffix)), filter.Status,
 		resourceBoolPtrKey(filter.ForSale), resourceBoolPtrKey(filter.LongLived), resourceBoolPtrKey(filter.GraphAvailable), filter.TokenHealth,
 		resourceTimePtrKey(filter.CreatedFrom), resourceTimePtrKey(filter.CreatedTo), strings.Join(ownerIDs, ","))

@@ -551,6 +551,9 @@ func makeValidationAssignmentsReady(t *testing.T, db *gorm.DB) {
 	require.NoError(t, db.Model(&MicrosoftResourceModel{}).
 		Where("status = ?", string(domain.MicrosoftStatusPending)).
 		Update("updated_at", readyAt).Error)
+	require.NoError(t, db.Table("microsoft_enterprise_resources").
+		Where("status = ?", string(domain.MicrosoftStatusPending)).
+		Update("updated_at", readyAt).Error)
 	require.NoError(t, db.Model(&DomainResourceModel{}).
 		Where("status = ?", string(domain.DomainStatusPending)).
 		Update("updated_at", readyAt).Error)

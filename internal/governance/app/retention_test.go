@@ -21,6 +21,8 @@ func TestNextRetentionRunAtUsesRuntimeHour(t *testing.T) {
 }
 
 func TestRetentionRunOnceDeletesInboundObjectsAndOrphans(t *testing.T) {
+	runtimeconfig.Set("mailmatch_microsoft_enterprise_retain_days", "5")
+	t.Cleanup(func() { runtimeconfig.Delete("mailmatch_microsoft_enterprise_retain_days") })
 	ctx := context.Background()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	oldRecordedKey := "mailtransport/inbound/2026/03/01/recorded.eml"
@@ -83,6 +85,7 @@ func TestRetentionRunOnceDeletesInboundObjectsAndOrphans(t *testing.T) {
 	require.Contains(t, files.objects, oldSharedKey)
 	require.Contains(t, files.objects, recentOrphanKey)
 	require.Empty(t, repo.inboundRows)
+	require.Equal(t, now.AddDate(0, 0, -5), repo.messageCutoffs["microsoft_enterprise"])
 	require.Equal(t, now.AddDate(0, 0, -3), repo.messageCutoffs["microsoft"])
 	require.Equal(t, now.AddDate(0, 0, -30), repo.messageCutoffs["domain"])
 	require.Equal(t, now.AddDate(0, 0, -3), repo.gmailCutoff)

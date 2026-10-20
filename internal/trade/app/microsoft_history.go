@@ -26,7 +26,7 @@ func sameHistoricalMicrosoftOrder(
 		order.FailureCode != "" || order.PayAmount != "0.00" || order.RefundAmount != "0.00" ||
 		order.LegacyRandomMicrosoftPayAmount != "" || order.LegacyRandomDomainPayAmount != "" ||
 		order.DebitTxID == nil || *order.DebitTxID == 0 || order.RefundTxID != nil ||
-		order.AllocationType == nil || *order.AllocationType != domain.AllocationTypeMicrosoft ||
+		order.AllocationType == nil || *order.AllocationType != allocation.Type ||
 		!strings.EqualFold(order.DeliveryEmail, allocation.Email) || order.ClientChannel != domain.ClientChannelConsole ||
 		order.APIKeyID != nil || order.IdempotencyKey != "history:"+order.OrderNo ||
 		order.RequestFingerprint != requestFingerprint || order.ServiceCleanupStatus != "succeeded" ||

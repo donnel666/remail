@@ -52,6 +52,7 @@ func (m *EmailResourceModel) toDomain() *domain.EmailResource {
 // MicrosoftResourceModel is the GORM model for the microsoft_resources table.
 type MicrosoftResourceModel struct {
 	ID                   uint       `gorm:"primaryKey"`
+	ResourceType         string     `gorm:"column:resource_type;not null;default:microsoft"`
 	EmailAddress         string     `gorm:"type:varchar(255);not null;uniqueIndex;column:email_address"`
 	EmailDomain          string     `gorm:"type:varchar(255);not null;default:'';column:email_domain"`
 	Password             string     `gorm:"type:varchar(512);not null"`
@@ -84,6 +85,7 @@ func (MicrosoftResourceModel) TableName() string {
 func (m *MicrosoftResourceModel) toDomain() *domain.MicrosoftResource {
 	return &domain.MicrosoftResource{
 		ID:                   m.ID,
+		ResourceType:         domain.ResourceType(m.ResourceType),
 		EmailAddress:         m.EmailAddress,
 		Password:             m.Password,
 		ClientID:             m.ClientID,
@@ -123,6 +125,7 @@ func fromMicrosoftDomain(ms *domain.MicrosoftResource) *MicrosoftResourceModel {
 	}
 	return &MicrosoftResourceModel{
 		ID:                   ms.ID,
+		ResourceType:         string(domain.MicrosoftResourceType(domain.IsMicrosoftEnterpriseEmail(ms.EmailAddress))),
 		EmailAddress:         ms.EmailAddress,
 		EmailDomain:          microsoftEmailDomain(ms.EmailAddress),
 		Password:             ms.Password,
@@ -306,22 +309,24 @@ func findMicrosoftResourceModelsByEmails(db *gorm.DB, emails []string, includeDe
 	}
 
 	models := make([]MicrosoftResourceModel, 0)
-	for start := 0; start < len(uniqueEmails); start += resourceImportLookupChunkSize {
-		end := start + resourceImportLookupChunkSize
-		if end > len(uniqueEmails) {
-			end = len(uniqueEmails)
-		}
+	for resourceType, uniqueEmails := range microsoftEmailsByType(uniqueEmails) {
+		for start := 0; start < len(uniqueEmails); start += resourceImportLookupChunkSize {
+			end := start + resourceImportLookupChunkSize
+			if end > len(uniqueEmails) {
+				end = len(uniqueEmails)
+			}
 
-		query := db.Model(&MicrosoftResourceModel{}).Where("email_address IN ?", uniqueEmails[start:end])
-		if !includeDeleted {
-			query = query.Where("status <> ?", string(domain.MicrosoftStatusDeleted))
-		}
+			query := db.Model(&MicrosoftResourceModel{}).Table(microsoftResourceTable(resourceType)).Where("email_address IN ?", uniqueEmails[start:end])
+			if !includeDeleted {
+				query = query.Where("status <> ?", string(domain.MicrosoftStatusDeleted))
+			}
 
-		var chunk []MicrosoftResourceModel
-		if err := query.Find(&chunk).Error; err != nil {
-			return nil, err
+			var chunk []MicrosoftResourceModel
+			if err := query.Find(&chunk).Error; err != nil {
+				return nil, err
+			}
+			models = append(models, chunk...)
 		}
-		models = append(models, chunk...)
 	}
 	return models, nil
 }
@@ -333,24 +338,28 @@ func findMicrosoftEmailAddressesByEmails(db *gorm.DB, emails []string) ([]string
 	}
 
 	found := make([]string, 0)
-	for start := 0; start < len(uniqueEmails); start += resourceImportLookupChunkSize {
-		end := start + resourceImportLookupChunkSize
-		if end > len(uniqueEmails) {
-			end = len(uniqueEmails)
-		}
+	for resourceType, uniqueEmails := range microsoftEmailsByType(uniqueEmails) {
+		for start := 0; start < len(uniqueEmails); start += resourceImportLookupChunkSize {
+			end := start + resourceImportLookupChunkSize
+			if end > len(uniqueEmails) {
+				end = len(uniqueEmails)
+			}
 
-		var chunk []string
-		if err := db.Model(&MicrosoftResourceModel{}).
-			Where("email_address IN ? AND status <> ?", uniqueEmails[start:end], string(domain.MicrosoftStatusDeleted)).
-			Pluck("email_address", &chunk).Error; err != nil {
-			return nil, err
+			var chunk []string
+			if err := db.Model(&MicrosoftResourceModel{}).Table(microsoftResourceTable(resourceType)).
+				Where("email_address IN ? AND status <> ?", uniqueEmails[start:end], string(domain.MicrosoftStatusDeleted)).
+				Pluck("email_address", &chunk).Error; err != nil {
+				return nil, err
+			}
+			found = append(found, chunk...)
 		}
-		found = append(found, chunk...)
 	}
 	return found, nil
 }
 
 func (r *ResourceRepo) CreateMicrosoft(ctx context.Context, resource *domain.EmailResource, ms *domain.MicrosoftResource) error {
+	resource.Type = domain.MicrosoftResourceType(domain.IsMicrosoftEnterpriseEmail(ms.EmailAddress))
+	ms.ResourceType = resource.Type
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		root := &EmailResourceModel{
 			Type:        string(resource.Type),
@@ -363,7 +372,7 @@ func (r *ResourceRepo) CreateMicrosoft(ctx context.Context, resource *domain.Ema
 		msModel := fromMicrosoftDomain(ms)
 		msModel.ID = root.ID
 		msModel.AllocBucket = domain.MicrosoftAllocationBucket(root.ID)
-		if err := tx.Create(msModel).Error; err != nil {
+		if err := tx.Table(microsoftResourceTable(resource.Type)).Create(msModel).Error; err != nil {
 			return fmt.Errorf("create microsoft resource: %w", err)
 		}
 
@@ -379,7 +388,7 @@ func (r *ResourceRepo) CreateMicrosoft(ctx context.Context, resource *domain.Ema
 		return nil
 	})
 	if err == nil {
-		invalidateMicrosoftFacets()
+		invalidateMicrosoftFacets(resource.Type)
 	}
 	return err
 }
@@ -691,6 +700,14 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 	if len(resources) == 0 {
 		return map[string]struct{}{}, nil
 	}
+	resourceType := domain.MicrosoftResourceType(domain.IsMicrosoftEnterpriseEmail(ms[0].EmailAddress))
+	for i := range resources {
+		if domain.MicrosoftResourceType(domain.IsMicrosoftEnterpriseEmail(ms[i].EmailAddress)) != resourceType {
+			return nil, domain.ErrInvalidImportFormat
+		}
+		resources[i].Type = resourceType
+		ms[i].ResourceType = resourceType
+	}
 
 	seenEmails := make(map[string]struct{}, len(ms))
 	emails := make([]string, 0, len(ms))
@@ -718,7 +735,7 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 	if len(candidateIDs) > 0 {
 		var roots []EmailResourceModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id IN ? AND type = ?", candidateIDs, string(domain.ResourceTypeMicrosoft)).
+			Where("id IN ? AND type = ?", candidateIDs, string(resourceType)).
 			Order("id ASC").
 			Find(&roots).Error; err != nil {
 			return nil, fmt.Errorf("lock deleted microsoft resource roots: %w", err)
@@ -729,7 +746,7 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 		for _, root := range roots {
 			rootVersions[root.ID] = root.Version
 		}
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		if err := tx.Table(microsoftResourceTable(resourceType)).Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id IN ?", candidateIDs).
 			Order("id ASC").
 			Find(&existingModels).Error; err != nil {
@@ -823,7 +840,7 @@ func createMicrosoftBatchTx(tx *gorm.DB, resources []domain.EmailResource, ms []
 		msModels[i].ID = rootModels[i].ID
 		msModels[i].AllocBucket = domain.MicrosoftAllocationBucket(rootModels[i].ID)
 	}
-	if err := tx.CreateInBatches(&msModels, resourceImportInsertBatchSize).Error; err != nil {
+	if err := tx.Table(microsoftResourceTable(resourceType)).CreateInBatches(&msModels, resourceImportInsertBatchSize).Error; err != nil {
 		if isDuplicateKeyError(err) {
 			return nil, domain.ErrDuplicateEmail
 		}
@@ -865,6 +882,7 @@ func restoreDeletedMicrosoftBatchTx(tx *gorm.DB, rows []microsoftImportRestoreRo
 	if len(rows) == 0 {
 		return nil
 	}
+	resourceType := domain.MicrosoftResourceType(domain.IsMicrosoftEnterpriseEmail(rows[0].EmailAddress))
 
 	if err := tx.Exec("DROP TEMPORARY TABLE IF EXISTS " + microsoftImportRestoreTempTable).Error; err != nil {
 		return fmt.Errorf("drop microsoft import restore temp table: %w", err)
@@ -901,7 +919,7 @@ JOIN `+microsoftImportRestoreTempTable+` ir ON ir.id = er.id
 SET er.owner_user_id = ir.owner_user_id,
 	er.version = er.version + 1,
 	er.updated_at = ir.updated_at
-WHERE er.type = ?`, string(domain.ResourceTypeMicrosoft))
+WHERE er.type = ?`, string(resourceType))
 	if rootResult.Error != nil {
 		return fmt.Errorf("restore deleted email resources: %w", rootResult.Error)
 	}
@@ -910,7 +928,7 @@ WHERE er.type = ?`, string(domain.ResourceTypeMicrosoft))
 	}
 
 	microsoftResult := tx.Exec(`
-UPDATE microsoft_resources mr
+UPDATE `+microsoftResourceTable(resourceType)+` mr
 JOIN `+microsoftImportRestoreTempTable+` ir ON ir.id = mr.id
 SET mr.email_address = ir.email_address,
 	mr.email_domain = ir.email_domain,
@@ -956,8 +974,15 @@ func (r *ResourceRepo) FindByID(ctx context.Context, id uint) (*domain.EmailReso
 }
 
 func (r *ResourceRepo) FindMicrosoftByID(ctx context.Context, resourceID uint) (*domain.MicrosoftResource, error) {
+	resourceType, err := microsoftResourceTypeByID(ctx, r.db, resourceID)
+	if errors.Is(err, domain.ErrResourceNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	var model MicrosoftResourceModel
-	err := r.db.WithContext(ctx).First(&model, resourceID).Error
+	err = r.db.WithContext(ctx).Table(microsoftResourceTable(resourceType)).First(&model, resourceID).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -1003,13 +1028,13 @@ type MicrosoftAutoRefreshCandidate struct {
 // ListMicrosoftAutoRefreshCandidates returns Microsoft resources that hold a
 // refresh token whose expiry (rt_expire_at) falls on or before `before` (e.g.
 // now + 30 days), so a proactive refresh can renew the token before it lapses.
-func (r *ResourceRepo) ListMicrosoftAutoRefreshCandidates(ctx context.Context, before time.Time, limit int) ([]MicrosoftAutoRefreshCandidate, error) {
+func (r *ResourceRepo) ListMicrosoftAutoRefreshCandidates(ctx context.Context, before time.Time, limit int, enterprise bool) ([]MicrosoftAutoRefreshCandidate, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
 	var rows []MicrosoftAutoRefreshCandidate
 	err := r.db.WithContext(ctx).
-		Table("microsoft_resources AS mr").
+		Table(microsoftResourceTable(domain.MicrosoftResourceType(enterprise))+" AS mr").
 		Select("mr.id AS resource_id, er.owner_user_id AS owner_user_id").
 		Joins("JOIN email_resources er ON er.id = mr.id").
 		Where("mr.refresh_token <> '' AND mr.client_id <> '' AND mr.rt_expire_at IS NOT NULL AND mr.rt_expire_at <= ? AND mr.status <> ?",
@@ -1037,7 +1062,7 @@ func (r *ResourceRepo) FindDomainByID(ctx context.Context, resourceID uint) (*do
 
 func (r *ResourceRepo) FindMicrosoftByEmail(ctx context.Context, email string) (*domain.MicrosoftResource, error) {
 	var model MicrosoftResourceModel
-	err := r.db.WithContext(ctx).Where("email_address = ?", email).First(&model).Error
+	err := r.db.WithContext(ctx).Table(microsoftResourceTable(domain.MicrosoftResourceType(domain.IsMicrosoftEnterpriseEmail(email)))).Where("email_address = ?", email).First(&model).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -1066,18 +1091,22 @@ func (r *ResourceRepo) listQuery(ctx context.Context, ownerUserID uint, filter c
 	}
 	switch filter.ResourceType {
 	case "":
-		q = q.Where("email_resources.type IN ?", []string{string(domain.ResourceTypeMicrosoft), string(domain.ResourceTypeDomain)}).
+		q = q.Where("email_resources.type IN ?", []string{string(domain.ResourceTypeMicrosoft), string(domain.ResourceTypeMicrosoftEnterprise), string(domain.ResourceTypeDomain)}).
 			Joins("LEFT JOIN microsoft_resources ms_filter ON ms_filter.id = email_resources.id").
+			Joins("LEFT JOIN microsoft_enterprise_resources mse_filter ON mse_filter.id = email_resources.id").
 			Joins("LEFT JOIN domain_resources dr_filter ON dr_filter.id = email_resources.id").
 			Where("email_resources.type <> ? OR ms_filter.status <> ?", string(domain.ResourceTypeMicrosoft), string(domain.MicrosoftStatusDeleted)).
+			Where("email_resources.type <> ? OR mse_filter.status <> ?", string(domain.ResourceTypeMicrosoftEnterprise), string(domain.MicrosoftStatusDeleted)).
 			Where("email_resources.type <> ? OR dr_filter.status <> ?", string(domain.ResourceTypeDomain), string(domain.DomainStatusDeleted))
 		if filter.ExcludeBinding {
 			q = q.Where("email_resources.type <> ? OR dr_filter.purpose <> ?", string(domain.ResourceTypeDomain), string(domain.PurposeBinding))
 		}
 		if filter.Status != "" {
 			q = q.Where(
-				"(email_resources.type = ? AND ms_filter.status = ?) OR (email_resources.type = ? AND dr_filter.status = ?)",
+				"(email_resources.type = ? AND ms_filter.status = ?) OR (email_resources.type = ? AND mse_filter.status = ?) OR (email_resources.type = ? AND dr_filter.status = ?)",
 				string(domain.ResourceTypeMicrosoft),
+				filter.Status,
+				string(domain.ResourceTypeMicrosoftEnterprise),
 				filter.Status,
 				string(domain.ResourceTypeDomain),
 				filter.Status,
@@ -1086,17 +1115,19 @@ func (r *ResourceRepo) listQuery(ctx context.Context, ownerUserID uint, filter c
 		if filter.Search != "" {
 			prefix := filter.Search + "%"
 			q = q.Where(
-				"(ms_filter.email_address LIKE ? OR ms_filter.email_domain LIKE ? OR dr_filter.domain LIKE ? OR dr_filter.domain_tld LIKE ?)",
+				"(ms_filter.email_address LIKE ? OR ms_filter.email_domain LIKE ? OR mse_filter.email_address LIKE ? OR mse_filter.email_domain LIKE ? OR dr_filter.domain LIKE ? OR dr_filter.domain_tld LIKE ?)",
+				prefix,
+				prefix,
 				prefix,
 				prefix,
 				prefix,
 				prefix,
 			)
 		}
-	case domain.ResourceTypeMicrosoft:
-		q = q.Joins("JOIN microsoft_resources ms_filter ON ms_filter.id = email_resources.id AND ms_filter.status <> ?", string(domain.MicrosoftStatusDeleted)).
-			Where("email_resources.type = ?", string(domain.ResourceTypeMicrosoft))
-		q = q.Where("(ms_filter.email_domain LIKE ?) = ?", "%.onmicrosoft.com", filter.Enterprise)
+	case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
+		resourceType := domain.MicrosoftResourceType(filter.Enterprise || filter.ResourceType == domain.ResourceTypeMicrosoftEnterprise)
+		q = q.Joins("JOIN "+microsoftResourceTable(resourceType)+" ms_filter ON ms_filter.id = email_resources.id AND ms_filter.status <> ?", string(domain.MicrosoftStatusDeleted)).
+			Where("email_resources.type = ?", string(resourceType))
 		if filter.Status != "" {
 			q = q.Where("ms_filter.status = ?", filter.Status)
 		}
@@ -1197,7 +1228,7 @@ func (r *ResourceRepo) Facets(ctx context.Context, ownerUserID uint, filter core
 	if cached, ok := r.facetsCache.Get(cacheKey); ok {
 		return cloneResourceListFacets(&cached), nil
 	}
-	if filter.ResourceType == domain.ResourceTypeMicrosoft {
+	if domain.IsMicrosoftResourceType(filter.ResourceType) {
 		return r.microsoftResourceFacets(ctx, ownerUserID, filter, cacheKey)
 	}
 
@@ -1443,12 +1474,12 @@ func (r *ResourceRepo) resourceStatusFacets(ctx context.Context, ownerUserID uin
 
 func resourceStatusExpression(resourceType domain.ResourceType) string {
 	switch resourceType {
-	case domain.ResourceTypeMicrosoft:
+	case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
 		return "ms_filter.status"
 	case domain.ResourceTypeDomain:
 		return "dr_filter.status"
 	default:
-		return "CASE WHEN email_resources.type = 'microsoft' THEN ms_filter.status WHEN email_resources.type = 'domain' THEN dr_filter.status ELSE '' END"
+		return "COALESCE(ms_filter.status, mse_filter.status, dr_filter.status, '')"
 	}
 }
 
@@ -1477,7 +1508,12 @@ func (r *ResourceRepo) resourceDomainPrivateFacets(ctx context.Context, ownerUse
 
 func resourceFacetsCacheKey(ownerUserID uint, filter coreapp.ResourceListFilter) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "generation=%d|", currentMicrosoftFacetsGeneration())
+	fmt.Fprintf(&b, "enterprise=%t|", filter.Enterprise || filter.ResourceType == domain.ResourceTypeMicrosoftEnterprise)
+	kind := filter.ResourceType
+	if domain.IsMicrosoftResourceType(kind) {
+		kind = domain.MicrosoftResourceType(filter.Enterprise || kind == domain.ResourceTypeMicrosoftEnterprise)
+	}
+	fmt.Fprintf(&b, "generation=%d|", currentMicrosoftFacetsGeneration(kind))
 	fmt.Fprintf(&b, "owner=%d", ownerUserID)
 	b.WriteString("|type=")
 	b.WriteString(string(filter.ResourceType))
@@ -1563,9 +1599,10 @@ func (r *ResourceRepo) resourceFacetGroups(ctx context.Context, ownerUserID uint
 }
 
 // ListMicrosoftStatus returns API-safe status for a batch of Microsoft resources.
-func (r *ResourceRepo) ListMicrosoftStatus(ctx context.Context, ids []uint) ([]coreapp.MicrosoftStatusResult, error) {
+func (r *ResourceRepo) ListMicrosoftStatus(ctx context.Context, ids []uint, resourceType domain.ResourceType) ([]coreapp.MicrosoftStatusResult, error) {
 	var models []MicrosoftResourceModel
 	err := r.db.WithContext(ctx).
+		Table(microsoftResourceTable(resourceType)).
 		Where("id IN ?", ids).
 		Find(&models).Error
 	if err != nil {
@@ -1649,7 +1686,7 @@ func (r *ResourceRepo) UpdateMicrosoftWithLog(ctx context.Context, resource *dom
 			"last_allocated_at": resource.LastAllocatedAt,
 			"updated_at":        time.Now(),
 		}
-		if err := tx.Model(&MicrosoftResourceModel{}).Where("id = ?", resource.ID).Updates(updates).Error; err != nil {
+		if err := tx.Model(&MicrosoftResourceModel{}).Table(microsoftResourceTable(resource.ResourceType)).Where("id = ?", resource.ID).Updates(updates).Error; err != nil {
 			return fmt.Errorf("update microsoft resource: %w", err)
 		}
 		if err := r.operationLogs.CreateInTx(ctx, tx, log); err != nil {
@@ -1658,7 +1695,7 @@ func (r *ResourceRepo) UpdateMicrosoftWithLog(ctx context.Context, resource *dom
 		return nil
 	})
 	if err == nil {
-		invalidateMicrosoftFacets()
+		invalidateMicrosoftFacets(resource.ResourceType)
 	}
 	return err
 }
@@ -1671,10 +1708,11 @@ func (r *ResourceRepo) PublishMicrosoftWithLog(ctx context.Context, ownerUserID 
 	}
 
 	published := false
+	var changedType domain.ResourceType
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var root EmailResourceModel
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ? AND owner_user_id = ? AND type = ?", resourceID, ownerUserID, string(domain.ResourceTypeMicrosoft)).
+			Where("id = ? AND owner_user_id = ? AND type IN ?", resourceID, ownerUserID, []domain.ResourceType{domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise}).
 			First(&root).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1683,8 +1721,9 @@ func (r *ResourceRepo) PublishMicrosoftWithLog(ctx context.Context, ownerUserID 
 			return fmt.Errorf("lock owned microsoft resource: %w", err)
 		}
 
+		changedType = domain.ResourceType(root.Type)
 		var ms MicrosoftResourceModel
-		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		err = tx.Table(microsoftResourceTable(domain.ResourceType(root.Type))).Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ?", resourceID).
 			First(&ms).Error
 		if err != nil {
@@ -1700,7 +1739,7 @@ func (r *ResourceRepo) PublishMicrosoftWithLog(ctx context.Context, ownerUserID 
 			return nil
 		}
 
-		result := tx.Model(&MicrosoftResourceModel{}).
+		result := tx.Model(&MicrosoftResourceModel{}).Table(microsoftResourceTable(domain.ResourceType(root.Type))).
 			Where("id = ? AND for_sale = ? AND status <> ?", resourceID, false, string(domain.MicrosoftStatusDeleted)).
 			Updates(map[string]interface{}{
 				"for_sale":   true,
@@ -1726,7 +1765,7 @@ func (r *ResourceRepo) PublishMicrosoftWithLog(ctx context.Context, ownerUserID 
 		return false, err
 	}
 	if published {
-		invalidateMicrosoftFacets()
+		invalidateMicrosoftFacets(changedType)
 	}
 	return published, nil
 }
@@ -1740,6 +1779,7 @@ func (r *ResourceRepo) PublishResourcesBatchWithLog(ctx context.Context, ownerUs
 	}
 
 	publishedIDs := make([]uint, 0, len(resourceIDs))
+	changedTypes := make(map[domain.ResourceType]bool)
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var roots []EmailResourceModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -1752,12 +1792,13 @@ func (r *ResourceRepo) PublishResourcesBatchWithLog(ctx context.Context, ownerUs
 			return domain.ErrForbiddenResource
 		}
 
-		microsoftIDs := make([]uint, 0, len(roots))
+		microsoftGroups := make(map[domain.ResourceType][]uint)
 		domainIDs := make([]uint, 0, len(roots))
 		for _, root := range roots {
 			switch domain.ResourceType(root.Type) {
-			case domain.ResourceTypeMicrosoft:
-				microsoftIDs = append(microsoftIDs, root.ID)
+			case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
+				kind := domain.ResourceType(root.Type)
+				microsoftGroups[kind] = append(microsoftGroups[kind], root.ID)
 			case domain.ResourceTypeDomain:
 				domainIDs = append(domainIDs, root.ID)
 			default:
@@ -1765,10 +1806,13 @@ func (r *ResourceRepo) PublishResourcesBatchWithLog(ctx context.Context, ownerUs
 			}
 		}
 
-		if len(microsoftIDs) > 0 {
-			ids, err := publishLockedMicrosoftRows(ctx, tx, microsoftIDs, microsoftLog, r.operationLogs)
+		for resourceType, microsoftIDs := range microsoftGroups {
+			ids, err := publishLockedMicrosoftRows(ctx, tx, microsoftIDs, microsoftLog, r.operationLogs, resourceType)
 			if err != nil {
 				return err
+			}
+			if len(ids) > 0 {
+				changedTypes[resourceType] = true
 			}
 			publishedIDs = append(publishedIDs, ids...)
 		}
@@ -1786,14 +1830,16 @@ func (r *ResourceRepo) PublishResourcesBatchWithLog(ctx context.Context, ownerUs
 		return nil, err
 	}
 	if len(publishedIDs) > 0 {
-		invalidateMicrosoftFacets()
+		for kind := range changedTypes {
+			invalidateMicrosoftFacets(kind)
+		}
 	}
 	return publishedIDs, nil
 }
 
-func publishLockedMicrosoftRows(ctx context.Context, tx *gorm.DB, resourceIDs []uint, baseLog governancedomain.OperationLog, operationLogs *governanceinfra.OperationLogRepo) ([]uint, error) {
+func publishLockedMicrosoftRows(ctx context.Context, tx *gorm.DB, resourceIDs []uint, baseLog governancedomain.OperationLog, operationLogs *governanceinfra.OperationLogRepo, resourceType domain.ResourceType) ([]uint, error) {
 	var rows []MicrosoftResourceModel
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+	if err := tx.Table(microsoftResourceTable(resourceType)).Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("id IN ?", resourceIDs).
 		Order("id ASC").
 		Find(&rows).Error; err != nil {
@@ -1816,7 +1862,7 @@ func publishLockedMicrosoftRows(ctx context.Context, tx *gorm.DB, resourceIDs []
 		return nil, nil
 	}
 
-	result := tx.Model(&MicrosoftResourceModel{}).
+	result := tx.Model(&MicrosoftResourceModel{}).Table(microsoftResourceTable(resourceType)).
 		Where("id IN ? AND for_sale = ? AND status <> ?", idsToPublish, false, string(domain.MicrosoftStatusDeleted)).
 		Updates(map[string]interface{}{
 			"for_sale":   true,
@@ -1906,7 +1952,7 @@ func publishLockedDomainRows(ctx context.Context, tx *gorm.DB, resourceIDs []uin
 // do not build huge HTTP payloads or single massive IN clauses.
 func (r *ResourceRepo) PublishResourcesByFilterWithLog(ctx context.Context, ownerUserID uint, filter coreapp.ResourceBulkFilter, microsoftLog governancedomain.OperationLog, domainLog governancedomain.OperationLog) (int, error) {
 	switch filter.ResourceType {
-	case domain.ResourceTypeMicrosoft:
+	case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
 		return r.publishMicrosoftByFilterWithLog(ctx, ownerUserID, filter, microsoftLog)
 	case domain.ResourceTypeDomain:
 		return r.publishDomainByFilterWithLog(ctx, ownerUserID, filter, domainLog)
@@ -1930,7 +1976,7 @@ func (r *ResourceRepo) publishMicrosoftByFilterWithLog(ctx context.Context, owne
 				return nil
 			}
 
-			publishedIDs, err := publishLockedMicrosoftRows(ctx, tx, ids, log, r.operationLogs)
+			publishedIDs, err := publishLockedMicrosoftRows(ctx, tx, ids, log, r.operationLogs, domain.MicrosoftResourceType(filter.Enterprise || filter.ResourceType == domain.ResourceTypeMicrosoftEnterprise))
 			if err != nil {
 				return err
 			}
@@ -1944,7 +1990,7 @@ func (r *ResourceRepo) publishMicrosoftByFilterWithLog(ctx context.Context, owne
 			return published, nil
 		}
 		if chunkPublished > 0 {
-			invalidateMicrosoftFacets()
+			invalidateMicrosoftFacets(domain.MicrosoftResourceType(filter.Enterprise || filter.ResourceType == domain.ResourceTypeMicrosoftEnterprise))
 		}
 		published += chunkPublished
 	}
@@ -2009,14 +2055,15 @@ func selectDomainBulkIDs(ctx context.Context, tx *gorm.DB, ownerUserID uint, fil
 }
 
 func applyMicrosoftBulkFilter(db *gorm.DB, ownerUserID uint, filter coreapp.ResourceBulkFilter) *gorm.DB {
+	resourceType := domain.MicrosoftResourceType(filter.Enterprise || filter.ResourceType == domain.ResourceTypeMicrosoftEnterprise)
+	table := microsoftResourceTable(resourceType)
 	q := db.Table("email_resources AS er").
-		Joins("JOIN microsoft_resources ms ON ms.id = er.id")
+		Joins("JOIN " + table + " ms ON ms.id = er.id")
 	if strings.TrimSpace(filter.Suffix) != "" {
-		q = db.Table("microsoft_resources AS ms").
+		q = db.Table(table + " AS ms").
 			Joins("STRAIGHT_JOIN email_resources AS er ON er.id = ms.id")
 	}
-	q = q.Where("er.owner_user_id = ? AND er.type = ?", ownerUserID, string(domain.ResourceTypeMicrosoft)).
-		Where("(ms.email_domain LIKE ?) = ?", "%.onmicrosoft.com", filter.Enterprise).
+	q = q.Where("er.owner_user_id = ? AND er.type = ?", ownerUserID, string(resourceType)).
 		Where("ms.for_sale = ? AND ms.status <> ?", false, string(domain.MicrosoftStatusDeleted))
 
 	if filter.Status != "" {
@@ -2204,10 +2251,11 @@ func (r *ResourceRepo) DeletePrivateMicrosoftWithLog(ctx context.Context, ownerU
 		return domain.ErrResourceNotFound
 	}
 
+	var changedType domain.ResourceType
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var root EmailResourceModel
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ? AND owner_user_id = ? AND type = ?", resourceID, ownerUserID, string(domain.ResourceTypeMicrosoft)).
+			Where("id = ? AND owner_user_id = ? AND type IN ?", resourceID, ownerUserID, []domain.ResourceType{domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise}).
 			First(&root).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -2216,8 +2264,9 @@ func (r *ResourceRepo) DeletePrivateMicrosoftWithLog(ctx context.Context, ownerU
 			return fmt.Errorf("lock owned microsoft resource: %w", err)
 		}
 
+		changedType = domain.ResourceType(root.Type)
 		var ms MicrosoftResourceModel
-		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		err = tx.Table(microsoftResourceTable(domain.ResourceType(root.Type))).Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ?", resourceID).
 			First(&ms).Error
 		if err != nil {
@@ -2237,7 +2286,7 @@ func (r *ResourceRepo) DeletePrivateMicrosoftWithLog(ctx context.Context, ownerU
 			return err
 		}
 
-		result := tx.Model(&MicrosoftResourceModel{}).
+		result := tx.Model(&MicrosoftResourceModel{}).Table(microsoftResourceTable(domain.ResourceType(root.Type))).
 			Where("id = ? AND for_sale = ? AND status <> ?", resourceID, false, string(domain.MicrosoftStatusDeleted)).
 			Updates(map[string]interface{}{
 				"status":            string(msDomain.Status),
@@ -2261,7 +2310,7 @@ func (r *ResourceRepo) DeletePrivateMicrosoftWithLog(ctx context.Context, ownerU
 		return nil
 	})
 	if err == nil {
-		invalidateMicrosoftFacets()
+		invalidateMicrosoftFacets(changedType)
 	}
 	return err
 }
@@ -2337,6 +2386,7 @@ func (r *ResourceRepo) DeleteResourcesBatchWithLog(ctx context.Context, ownerUse
 	}
 
 	deletedIDs := make([]uint, 0, len(resourceIDs))
+	changedTypes := make(map[domain.ResourceType]bool)
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var roots []EmailResourceModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -2349,12 +2399,13 @@ func (r *ResourceRepo) DeleteResourcesBatchWithLog(ctx context.Context, ownerUse
 			return domain.ErrForbiddenResource
 		}
 
-		microsoftIDs := make([]uint, 0, len(roots))
+		microsoftGroups := make(map[domain.ResourceType][]uint)
 		domainIDs := make([]uint, 0, len(roots))
 		for _, root := range roots {
 			switch domain.ResourceType(root.Type) {
-			case domain.ResourceTypeMicrosoft:
-				microsoftIDs = append(microsoftIDs, root.ID)
+			case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
+				kind := domain.ResourceType(root.Type)
+				microsoftGroups[kind] = append(microsoftGroups[kind], root.ID)
 			case domain.ResourceTypeDomain:
 				domainIDs = append(domainIDs, root.ID)
 			default:
@@ -2362,10 +2413,13 @@ func (r *ResourceRepo) DeleteResourcesBatchWithLog(ctx context.Context, ownerUse
 			}
 		}
 
-		if len(microsoftIDs) > 0 {
-			ids, err := deleteLockedMicrosoftRows(ctx, tx, microsoftIDs, microsoftLog, r.operationLogs)
+		for resourceType, microsoftIDs := range microsoftGroups {
+			ids, err := deleteLockedMicrosoftRows(ctx, tx, microsoftIDs, microsoftLog, r.operationLogs, resourceType)
 			if err != nil {
 				return err
+			}
+			if len(ids) > 0 {
+				changedTypes[resourceType] = true
 			}
 			deletedIDs = append(deletedIDs, ids...)
 		}
@@ -2383,7 +2437,9 @@ func (r *ResourceRepo) DeleteResourcesBatchWithLog(ctx context.Context, ownerUse
 		return nil, err
 	}
 	if len(deletedIDs) > 0 {
-		invalidateMicrosoftFacets()
+		for kind := range changedTypes {
+			invalidateMicrosoftFacets(kind)
+		}
 	}
 	return deletedIDs, nil
 }
@@ -2392,7 +2448,7 @@ func (r *ResourceRepo) DeleteResourcesBatchWithLog(ctx context.Context, ownerUse
 // matching a server-side filter with one set-based update.
 func (r *ResourceRepo) DeleteResourcesByFilterWithLog(ctx context.Context, ownerUserID uint, filter coreapp.ResourceBulkFilter, microsoftLog governancedomain.OperationLog, domainLog governancedomain.OperationLog) (int, error) {
 	switch filter.ResourceType {
-	case domain.ResourceTypeMicrosoft:
+	case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
 		return r.deleteMicrosoftByFilterWithLog(ctx, ownerUserID, filter, microsoftLog)
 	case domain.ResourceTypeDomain:
 		return r.deleteDomainByFilterWithLog(ctx, ownerUserID, filter, domainLog)
@@ -2416,7 +2472,7 @@ func (r *ResourceRepo) deleteMicrosoftByFilterWithLog(ctx context.Context, owner
 				return nil
 			}
 
-			result := tx.Model(&MicrosoftResourceModel{}).
+			result := tx.Model(&MicrosoftResourceModel{}).Table(microsoftResourceTable(domain.MicrosoftResourceType(filter.Enterprise || filter.ResourceType == domain.ResourceTypeMicrosoftEnterprise))).
 				Where("id IN ? AND for_sale = ? AND status <> ?", ids, false, string(domain.MicrosoftStatusDeleted)).
 				Updates(map[string]interface{}{
 					"status":            string(domain.MicrosoftStatusDeleted),
@@ -2440,7 +2496,7 @@ func (r *ResourceRepo) deleteMicrosoftByFilterWithLog(ctx context.Context, owner
 			return deleted, nil
 		}
 		if chunkDeleted > 0 {
-			invalidateMicrosoftFacets()
+			invalidateMicrosoftFacets(domain.MicrosoftResourceType(filter.Enterprise || filter.ResourceType == domain.ResourceTypeMicrosoftEnterprise))
 		}
 		deleted += chunkDeleted
 	}
@@ -2506,9 +2562,9 @@ func bulkMutationSummary(base string, affected int64) string {
 	return fmt.Sprintf("%s. Count: %d.", base, affected)
 }
 
-func deleteLockedMicrosoftRows(ctx context.Context, tx *gorm.DB, resourceIDs []uint, baseLog governancedomain.OperationLog, operationLogs *governanceinfra.OperationLogRepo) ([]uint, error) {
+func deleteLockedMicrosoftRows(ctx context.Context, tx *gorm.DB, resourceIDs []uint, baseLog governancedomain.OperationLog, operationLogs *governanceinfra.OperationLogRepo, resourceType domain.ResourceType) ([]uint, error) {
 	var rows []MicrosoftResourceModel
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+	if err := tx.Table(microsoftResourceTable(resourceType)).Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("id IN ?", resourceIDs).
 		Order("id ASC").
 		Find(&rows).Error; err != nil {
@@ -2533,7 +2589,7 @@ func deleteLockedMicrosoftRows(ctx context.Context, tx *gorm.DB, resourceIDs []u
 		return nil, nil
 	}
 
-	result := tx.Model(&MicrosoftResourceModel{}).
+	result := tx.Model(&MicrosoftResourceModel{}).Table(microsoftResourceTable(resourceType)).
 		Where("id IN ? AND for_sale = ? AND status <> ?", idsToDelete, false, string(domain.MicrosoftStatusDeleted)).
 		Updates(map[string]interface{}{
 			"status":            string(domain.MicrosoftStatusDeleted),

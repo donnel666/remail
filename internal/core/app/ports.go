@@ -83,7 +83,7 @@ type EmailResourceRepository interface {
 	DeleteResourcesByFilterWithLog(ctx context.Context, ownerUserID uint, filter ResourceBulkFilter, microsoftLog governancedomain.OperationLog, domainLog governancedomain.OperationLog) (int, error)
 
 	// ListMicrosoftStatus returns API-safe status for a batch of Microsoft resources.
-	ListMicrosoftStatus(ctx context.Context, ids []uint) ([]MicrosoftStatusResult, error)
+	ListMicrosoftStatus(ctx context.Context, ids []uint, resourceType domain.ResourceType) ([]MicrosoftStatusResult, error)
 
 	// ListDomainStatus returns API-safe status for a batch of domain resources.
 	ListDomainStatus(ctx context.Context, ids []uint) ([]DomainStatusResult, error)
@@ -124,6 +124,7 @@ type AdminResourceImportSkippedItem struct {
 }
 
 type AdminResourceImportDispatchItem struct {
+	Enterprise    bool
 	ImportID      uint
 	OwnerUserID   uint
 	LongLived     bool
@@ -133,7 +134,7 @@ type AdminResourceImportDispatchItem struct {
 }
 
 type AdminResourceImportDispatchRepository interface {
-	ClaimAdminImportDispatchable(ctx context.Context, limit int, runningStaleBefore, queuedDispatchStaleBefore time.Time) ([]AdminResourceImportDispatchItem, error)
+	ClaimAdminImportDispatchable(ctx context.Context, limit int, runningStaleBefore, queuedDispatchStaleBefore time.Time, enterprise bool) ([]AdminResourceImportDispatchItem, error)
 	MarkAdminImportDispatched(ctx context.Context, importID uint, generation uint64) (activated bool, err error)
 	MarkAdminImportRunning(ctx context.Context, importID uint, generation uint64) (claimToken string, claimed bool, err error)
 	MarkAdminImportPending(ctx context.Context, importID uint, generation uint64, safeError string) error
@@ -163,6 +164,7 @@ type MicrosoftBindingInput struct {
 // workers resolve it from ResourceImport after dequeueing, so private storage
 // paths can never be serialized into Redis/Asynq.
 type MicrosoftImportTask struct {
+	Enterprise      bool                       `json:"enterprise,omitempty"`
 	ImportID        uint                       `json:"importId"`
 	OwnerUserID     uint                       `json:"ownerUserId"`
 	SourceObjectKey string                     `json:"-"`
@@ -175,6 +177,7 @@ type MicrosoftImportTask struct {
 
 // MicrosoftImportProcessResult reports resources created or restored by one import task.
 type MicrosoftImportProcessResult struct {
+	Enterprise          bool
 	ImportedResourceIDs []uint
 	Imported            int
 }
@@ -275,7 +278,7 @@ func (uc *ImportUseCase) AcceptMicrosoftTXTFile(ctx context.Context, ownerUserID
 	// The import row is the durable queue. A transient Redis failure must not
 	// turn an accepted import into a terminal failure; the periodic dispatcher
 	// will claim it again from MySQL.
-	_, _ = uc.DispatchAdminImports(ctx, 100)
+	_, _ = uc.DispatchAdminImports(ctx, 100, enterprise)
 
 	return &ImportResult{ImportID: importRecord.ID, Imported: 0}, nil
 }
@@ -352,11 +355,11 @@ func (uc *ImportUseCase) AcceptAdminMicrosoftTXTFile(
 	// The database row is the durable source of truth. Claiming and enqueueing
 	// use a fenced dispatcher token, so a transient Redis failure or a worker
 	// racing the HTTP response cannot create an unfenced import execution.
-	_, _ = uc.DispatchAdminImports(ctx, 100)
+	_, _ = uc.DispatchAdminImports(ctx, 100, enterprise)
 	return &ImportResult{ImportID: stored.ID}, nil
 }
 
-func (uc *ImportUseCase) DispatchAdminImports(ctx context.Context, limit int) (int, error) {
+func (uc *ImportUseCase) DispatchAdminImports(ctx context.Context, limit int, enterprise bool) (int, error) {
 	dispatch, ok := uc.imports.(AdminResourceImportDispatchRepository)
 	if !ok || uc.queue == nil {
 		return 0, domain.ErrResourceDependency
@@ -365,7 +368,7 @@ func (uc *ImportUseCase) DispatchAdminImports(ctx context.Context, limit int) (i
 		limit = 100
 	}
 	items, err := dispatch.ClaimAdminImportDispatchable(
-		ctx, limit, time.Time{}, time.Time{},
+		ctx, limit, time.Time{}, time.Time{}, enterprise,
 	)
 	if err != nil {
 		return 0, err
@@ -374,7 +377,7 @@ func (uc *ImportUseCase) DispatchAdminImports(ctx context.Context, limit int) (i
 	var result error
 	for _, item := range items {
 		accepted, err := uc.queue.EnqueueMicrosoftImport(ctx, MicrosoftImportTask{
-			ImportID: item.ImportID, OwnerUserID: item.OwnerUserID,
+			Enterprise: item.Enterprise, ImportID: item.ImportID, OwnerUserID: item.OwnerUserID,
 			LongLived: item.LongLived, ErrorStrategy: item.ErrorStrategy, RequestID: item.RequestID,
 			Generation: item.Generation,
 		})
@@ -562,7 +565,7 @@ func (uc *ImportUseCase) processMicrosoftImport(ctx context.Context, task Micros
 
 	for _, line := range lines {
 		resources = append(resources, domain.EmailResource{
-			Type:        domain.ResourceTypeMicrosoft,
+			Type:        domain.MicrosoftResourceType(importRecord.Enterprise),
 			OwnerUserID: task.OwnerUserID,
 			CreatedAt:   now,
 			UpdatedAt:   now,
@@ -642,8 +645,8 @@ func (uc *ImportUseCase) processMicrosoftImport(ctx context.Context, task Micros
 	}
 
 	return &MicrosoftImportProcessResult{
-		ImportedResourceIDs: importedResourceIDs,
-		Imported:            len(importedResourceIDs),
+		Enterprise: importRecord.Enterprise, ImportedResourceIDs: importedResourceIDs,
+		Imported: len(importedResourceIDs),
 	}, nil
 }
 
@@ -1233,7 +1236,7 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 			return nil, err
 		}
 	}
-	if facets != nil && filter.ResourceType == domain.ResourceTypeMicrosoft && !filter.SkipTotal {
+	if facets != nil && domain.IsMicrosoftResourceType(filter.ResourceType) && !filter.SkipTotal {
 		total = reconcileCachedListTotal(facets.Matched, offset, limit, afterID, len(resources))
 	} else if !filter.SkipTotal && scope == "all" {
 		total, err = uc.resources.CountAll(ctx, filter)
@@ -1248,19 +1251,24 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 	}
 
 	// Batch-fetch sub-table status info to avoid N+1
-	var msIDs, domainIDs []uint
+	var msIDs, enterpriseIDs, domainIDs []uint
 	for _, r := range resources {
 		switch r.Type {
 		case domain.ResourceTypeMicrosoft:
 			msIDs = append(msIDs, r.ID)
+		case domain.ResourceTypeMicrosoftEnterprise:
+			enterpriseIDs = append(enterpriseIDs, r.ID)
 		case domain.ResourceTypeDomain:
 			domainIDs = append(domainIDs, r.ID)
 		}
 	}
 
 	msStatusMap := make(map[uint]*MicrosoftStatusResult)
-	if len(msIDs) > 0 {
-		msStatuses, err := uc.resources.ListMicrosoftStatus(ctx, msIDs)
+	for resourceType, ids := range map[domain.ResourceType][]uint{domain.ResourceTypeMicrosoft: msIDs, domain.ResourceTypeMicrosoftEnterprise: enterpriseIDs} {
+		if len(ids) == 0 {
+			continue
+		}
+		msStatuses, err := uc.resources.ListMicrosoftStatus(ctx, ids, resourceType)
 		if err != nil {
 			return nil, err
 		}
@@ -1290,7 +1298,7 @@ func (uc *ResourceUseCase) List(ctx context.Context, ownerUserID uint, scope str
 			UpdatedAt: r.UpdatedAt,
 		}
 		switch r.Type {
-		case domain.ResourceTypeMicrosoft:
+		case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
 			if s, ok := msStatusMap[r.ID]; ok {
 				item.Status = s.Status
 				item.Email = s.EmailAddress
@@ -1353,7 +1361,7 @@ func (uc *ResourceUseCase) GetDetail(ctx context.Context, resourceID, userID uin
 	}
 
 	switch resource.Type {
-	case domain.ResourceTypeMicrosoft:
+	case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
 		ms, err := uc.resources.FindMicrosoftByID(ctx, resourceID)
 		if err != nil {
 			return nil, err
@@ -1423,7 +1431,7 @@ func (uc *ResourceUseCase) PublishMicrosoftForSale(ctx context.Context, resource
 	if resource.OwnerUserID != userID {
 		return nil, domain.ErrForbiddenResource
 	}
-	if resource.Type != domain.ResourceTypeMicrosoft {
+	if !domain.IsMicrosoftResourceType(resource.Type) {
 		return nil, domain.ErrInvalidResourceType
 	}
 
@@ -1482,7 +1490,7 @@ func (uc *ResourceUseCase) PublishResourceForSale(ctx context.Context, resourceI
 	}
 
 	switch resource.Type {
-	case domain.ResourceTypeMicrosoft:
+	case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
 		return uc.PublishMicrosoftForSale(ctx, resourceID, userID, requestID, path)
 	case domain.ResourceTypeDomain:
 		return uc.PublishDomainForSale(ctx, resourceID, userID, requestID, path)
@@ -1600,7 +1608,7 @@ func (uc *ResourceUseCase) DeletePrivateMicrosoft(ctx context.Context, resourceI
 	if resource.OwnerUserID != userID {
 		return domain.ErrForbiddenResource
 	}
-	if resource.Type != domain.ResourceTypeMicrosoft {
+	if !domain.IsMicrosoftResourceType(resource.Type) {
 		return domain.ErrInvalidResourceType
 	}
 
@@ -1644,7 +1652,7 @@ func (uc *ResourceUseCase) DeletePrivateResource(ctx context.Context, resourceID
 	}
 
 	switch resource.Type {
-	case domain.ResourceTypeMicrosoft:
+	case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
 		return uc.DeletePrivateMicrosoft(ctx, resourceID, userID, requestID, path)
 	case domain.ResourceTypeDomain:
 		return uc.DeletePrivateDomain(ctx, resourceID, userID, requestID, path)
@@ -1772,6 +1780,12 @@ func deleteBatchLogs(userID uint, requestID, path string) (governancedomain.Oper
 }
 
 func normalizeResourceListFilter(filter ResourceListFilter) (ResourceListFilter, error) {
+	if filter.ResourceType == domain.ResourceTypeMicrosoft && filter.Enterprise {
+		filter.ResourceType = domain.ResourceTypeMicrosoftEnterprise
+	}
+	if filter.ResourceType == domain.ResourceTypeMicrosoftEnterprise {
+		filter.Enterprise = true
+	}
 	filter.Search = strings.ToLower(strings.TrimSpace(filter.Search))
 	filter.Suffix = strings.ToLower(strings.TrimSpace(filter.Suffix))
 	filter.TLD = strings.ToLower(strings.TrimSpace(filter.TLD))
@@ -1801,7 +1815,7 @@ func normalizeResourceListFilter(filter ResourceListFilter) (ResourceListFilter,
 		if filter.Status == string(domain.MicrosoftStatusDeleted) || filter.Status == string(domain.DomainStatusDeleted) {
 			return ResourceListFilter{}, domain.ErrInvalidResourceStatus
 		}
-	case domain.ResourceTypeMicrosoft:
+	case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
 		filter.Purpose = ""
 		filter.TLD = ""
 		filter.MailServerID = 0

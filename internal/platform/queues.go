@@ -61,7 +61,8 @@ const (
 	// QueueMailtransport carries foreground outbound mail delivery.
 	QueueMailtransport = "mailtransport"
 	// QueueDefault carries assorted foreground work (imports, allocation, proxy checks).
-	QueueDefault = "default"
+	QueueDefault             = "default"
+	QueueMicrosoftEnterprise = "microsoft_enterprise"
 	// QueueBackgroundValidation carries temporary Microsoft validation tasks.
 	// Existing deployments use it for Microsoft validation, so the name remains
 	// stable while domain validation gets its own queue below.
@@ -104,6 +105,7 @@ var AllQueueNames = []string{
 	QueuePaymentReconcile,
 	QueueMailtransport,
 	QueueDefault,
+	QueueMicrosoftEnterprise,
 	QueueBackgroundValidation,
 	QueueBackgroundMicrosoftEnterpriseValidation,
 	QueueBackgroundMicrosoftEnterpriseHistory,

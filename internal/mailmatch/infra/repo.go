@@ -467,7 +467,7 @@ SELECT
     o.service_mode,
     o.status AS order_status,
     o.allocation_type,
-    COALESCE(ma.id, da.id, ga.id, ia.id, pa.id, dau.id, 0) AS allocation_id,
+    COALESCE(ma.id, mea.id, da.id, ga.id, ia.id, pa.id, dau.id, 0) AS allocation_id,
     CASE
       WHEN o.allocation_type = 'microsoft' AND ma.mailbox IN ('dot', 'plus') THEN ma.mailbox
 	      WHEN o.allocation_type = 'gmail' AND ga.mailbox IN ('dot', 'plus') THEN ga.mailbox
@@ -475,6 +475,7 @@ SELECT
     END AS recipient_kind,
     CASE
       WHEN o.allocation_type = 'microsoft' THEN ma.resource_id
+      WHEN o.allocation_type = 'microsoft_enterprise' THEN mea.resource_id
 	      WHEN o.allocation_type = 'domain' THEN da.resource_id
 	      WHEN o.allocation_type = 'proto' THEN pa.resource_id
 	      WHEN o.allocation_type = 'daum' THEN dau.resource_id
@@ -483,6 +484,7 @@ SELECT
     END AS email_resource_id,
     CASE
       WHEN o.allocation_type = 'microsoft' THEN ma.email
+      WHEN o.allocation_type = 'microsoft_enterprise' THEN mea.email
 	      WHEN o.allocation_type = 'domain' THEN da.email
 	      WHEN o.allocation_type = 'proto' THEN pa.email
 	      WHEN o.allocation_type = 'daum' THEN dau.email
@@ -494,15 +496,17 @@ SELECT
     o.activated_at,
     o.after_sale_until,
     p.loose_match,
-    COALESCE(mr.email_address, '') AS microsoft_email,
-    COALESCE(mr.client_id, '') AS microsoft_client_id,
-    COALESCE(mr.refresh_token, '') AS microsoft_rt,
-    COALESCE(mr.graph_available, FALSE) AS microsoft_graph_available,
-    COALESCE(mr.credential_revision, pr.credential_revision, dar.credential_revision, 0) AS credential_revision
+    COALESCE(mr.email_address, mer.email_address, '') AS microsoft_email,
+    COALESCE(mr.client_id, mer.client_id, '') AS microsoft_client_id,
+    COALESCE(mr.refresh_token, mer.refresh_token, '') AS microsoft_rt,
+    COALESCE(mr.graph_available, mer.graph_available, FALSE) AS microsoft_graph_available,
+    COALESCE(mr.credential_revision, mer.credential_revision, pr.credential_revision, dar.credential_revision, 0) AS credential_revision
 FROM orders o
 JOIN projects p ON p.id = o.project_id
 LEFT JOIN microsoft_allocations ma ON ma.order_no = o.order_no AND o.allocation_type = 'microsoft'
 LEFT JOIN microsoft_resources mr ON mr.id = ma.resource_id
+LEFT JOIN microsoft_enterprise_allocations mea ON mea.order_no=o.order_no AND o.allocation_type='microsoft_enterprise'
+LEFT JOIN microsoft_enterprise_resources mer ON mer.id=mea.resource_id
 LEFT JOIN domain_allocations da ON da.order_no = o.order_no AND o.allocation_type = 'domain'
 LEFT JOIN gmail_allocations ga ON ga.order_no = o.order_no AND o.allocation_type = 'gmail'
 LEFT JOIN icloud_allocations ia ON ia.order_no = o.order_no AND o.allocation_type = 'icloud'
@@ -513,6 +517,7 @@ LEFT JOIN daum_resources dar ON dar.id = dau.resource_id AND dar.resource_type =
 WHERE o.order_no = ?
   AND (
     (o.allocation_type = 'microsoft' AND ma.order_no = ?)
+    OR (o.allocation_type='microsoft_enterprise' AND mea.order_no=o.order_no AND mea.status='allocated')
     OR (o.allocation_type = 'domain' AND da.order_no = ?)
 	    OR (o.allocation_type = 'gmail' AND ga.order_no = o.order_no AND ga.resource_id IS NOT NULL)
 	    OR (o.allocation_type = 'icloud' AND ia.order_no = o.order_no AND ia.status = 'allocated')
@@ -531,7 +536,7 @@ SELECT
     o.service_mode,
     o.status AS order_status,
     o.allocation_type,
-    COALESCE(ma.id, da.id, ga.id, ia.id, pa.id, dau.id, 0) AS allocation_id,
+    COALESCE(ma.id, mea.id, da.id, ga.id, ia.id, pa.id, dau.id, 0) AS allocation_id,
     CASE
       WHEN o.allocation_type = 'microsoft' AND ma.mailbox IN ('dot', 'plus') THEN ma.mailbox
 	      WHEN o.allocation_type = 'gmail' AND ga.mailbox IN ('dot', 'plus') THEN ga.mailbox
@@ -539,6 +544,7 @@ SELECT
     END AS recipient_kind,
     CASE
       WHEN o.allocation_type = 'microsoft' THEN ma.resource_id
+      WHEN o.allocation_type = 'microsoft_enterprise' THEN mea.resource_id
 	      WHEN o.allocation_type = 'domain' THEN da.resource_id
 	      WHEN o.allocation_type = 'proto' THEN pa.resource_id
 	      WHEN o.allocation_type = 'daum' THEN dau.resource_id
@@ -547,6 +553,7 @@ SELECT
     END AS email_resource_id,
     CASE
       WHEN o.allocation_type = 'microsoft' THEN ma.email
+      WHEN o.allocation_type = 'microsoft_enterprise' THEN mea.email
 	      WHEN o.allocation_type = 'domain' THEN da.email
 	      WHEN o.allocation_type = 'proto' THEN pa.email
 	      WHEN o.allocation_type = 'daum' THEN dau.email
@@ -568,6 +575,8 @@ JOIN projects p ON p.id = o.project_id
 LEFT JOIN microsoft_allocations ma
   ON ma.order_no = o.order_no
  AND o.allocation_type = 'microsoft'
+LEFT JOIN microsoft_enterprise_allocations mea ON mea.order_no=o.order_no AND o.allocation_type='microsoft_enterprise'
+LEFT JOIN microsoft_enterprise_resources mer ON mer.id=mea.resource_id
 LEFT JOIN domain_allocations da
   ON da.order_no = o.order_no
  AND o.allocation_type = 'domain'
@@ -585,7 +594,7 @@ WHERE t.token_plain = ?
   AND t.enabled = 1
   AND (t.expire_at IS NULL OR t.expire_at > UTC_TIMESTAMP())
   AND (
-    (o.allocation_type = 'microsoft' AND ma.order_no = o.order_no AND ma.email = ?)
+    (o.allocation_type IN ('microsoft','microsoft_enterprise') AND COALESCE(ma.order_no,mea.order_no)=o.order_no AND COALESCE(ma.email,mea.email)=? AND (o.allocation_type<>'microsoft_enterprise' OR mea.status='allocated'))
     OR
     (o.allocation_type = 'domain' AND da.order_no = o.order_no AND da.email = ?)
     OR
@@ -607,7 +616,7 @@ SELECT
     o.service_mode,
     o.status AS order_status,
     o.allocation_type,
-    COALESCE(ma.id, da.id, ga.id, ia.id, pa.id, dau.id, 0) AS allocation_id,
+    COALESCE(ma.id, mea.id, da.id, ga.id, ia.id, pa.id, dau.id, 0) AS allocation_id,
     CASE
       WHEN o.allocation_type = 'microsoft' AND ma.mailbox IN ('dot', 'plus') THEN ma.mailbox
 	      WHEN o.allocation_type = 'gmail' AND ga.mailbox IN ('dot', 'plus') THEN ga.mailbox
@@ -615,6 +624,7 @@ SELECT
     END AS recipient_kind,
     CASE
       WHEN o.allocation_type = 'microsoft' THEN ma.resource_id
+      WHEN o.allocation_type = 'microsoft_enterprise' THEN mea.resource_id
 	      WHEN o.allocation_type = 'domain' THEN da.resource_id
 	      WHEN o.allocation_type = 'proto' THEN pa.resource_id
 	      WHEN o.allocation_type = 'daum' THEN dau.resource_id
@@ -623,6 +633,7 @@ SELECT
     END AS email_resource_id,
     CASE
       WHEN o.allocation_type = 'microsoft' THEN ma.email
+      WHEN o.allocation_type = 'microsoft_enterprise' THEN mea.email
 	      WHEN o.allocation_type = 'domain' THEN da.email
 	      WHEN o.allocation_type = 'proto' THEN pa.email
 	      WHEN o.allocation_type = 'daum' THEN dau.email
@@ -637,7 +648,7 @@ SELECT
     '' AS microsoft_email,
     '' AS microsoft_client_id,
     '' AS microsoft_rt,
-    COALESCE(mr.credential_revision, pr.credential_revision, dar.credential_revision, 0) AS credential_revision
+    COALESCE(mr.credential_revision, mer.credential_revision, pr.credential_revision, dar.credential_revision, 0) AS credential_revision
 FROM order_tokens t
 JOIN orders o ON o.order_no = t.order_no
 JOIN projects p ON p.id = o.project_id
@@ -645,6 +656,8 @@ LEFT JOIN microsoft_allocations ma
   ON ma.order_no = o.order_no
  AND o.allocation_type = 'microsoft'
 LEFT JOIN microsoft_resources mr ON mr.id = ma.resource_id
+LEFT JOIN microsoft_enterprise_allocations mea ON mea.order_no=o.order_no AND o.allocation_type='microsoft_enterprise'
+LEFT JOIN microsoft_enterprise_resources mer ON mer.id=mea.resource_id
 LEFT JOIN domain_allocations da
   ON da.order_no = o.order_no
  AND o.allocation_type = 'domain'
@@ -663,7 +676,8 @@ WHERE t.token_plain IN ?
   AND (t.expire_at IS NULL OR t.expire_at > UTC_TIMESTAMP())
 	AND (o.allocation_type NOT IN ('gmail', 'icloud') OR ga.resource_id IS NOT NULL OR ia.status = 'allocated')
 	AND (o.allocation_type <> 'proto' OR (pa.status = 'allocated' AND pr.status <> 'deleted'))
-	AND (o.allocation_type <> 'daum' OR (dau.status = 'allocated' AND dar.status <> 'deleted'))`
+	AND (o.allocation_type <> 'daum' OR (dau.status = 'allocated' AND dar.status <> 'deleted'))
+    AND (o.allocation_type <> 'microsoft_enterprise' OR (mea.status='allocated' AND mer.status<>'deleted'))`
 
 const microsoftMatchingScopesSQL = `
 SELECT
@@ -712,6 +726,24 @@ WHERE ma.resource_id = ?
     OR
     (o.service_mode = 'purchase' AND o.status IN ('active', 'completed'))
   )
+ORDER BY o.created_at ASC, o.id ASC`
+
+const microsoftEnterpriseMatchingScopesSQL = `
+SELECT o.id AS order_id, o.order_no, o.user_id, o.project_id,
+       o.project_product_id AS product_id, o.service_mode, o.status AS order_status,
+       o.allocation_type, ma.id AS allocation_id, 'exact' AS recipient_kind,
+       ma.resource_id AS email_resource_id, ma.email AS recipient,
+       o.receive_started_at, o.receive_until, o.activated_at, o.after_sale_until,
+       p.loose_match, mr.email_address AS microsoft_email, mr.client_id AS microsoft_client_id,
+       mr.refresh_token AS microsoft_rt, mr.credential_revision
+FROM microsoft_enterprise_allocations ma
+JOIN orders o ON o.order_no=ma.order_no AND o.allocation_type='microsoft_enterprise'
+JOIN projects p ON p.id=o.project_id
+JOIN microsoft_enterprise_resources mr ON mr.id=ma.resource_id
+WHERE ma.resource_id=? AND ma.email=? AND ma.status='allocated'
+  AND (o.receive_started_at IS NULL OR ? >= DATE_SUB(o.receive_started_at, INTERVAL 2 MINUTE))
+  AND ((o.service_mode='code' AND o.status='active' AND (o.receive_until IS NULL OR ? <= o.receive_until))
+       OR (o.service_mode='purchase' AND o.status IN ('active','completed')))
 ORDER BY o.created_at ASC, o.id ASC`
 
 const gmailMatchingScopesSQL = `
@@ -1038,6 +1070,8 @@ func (r *Repo) ListMatchingScopesByRecipient(ctx context.Context, resourceType d
 		err = r.dbFor(ctx).Raw(protoMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt).Scan(&rows).Error
 	case domain.ResourceTypeDaum:
 		err = r.dbFor(ctx).Raw(daumMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt).Scan(&rows).Error
+	case domain.ResourceTypeMicrosoftEnterprise:
+		err = r.dbFor(ctx).Raw(microsoftEnterpriseMatchingScopesSQL, emailResourceID, recipient, receivedAt, receivedAt).Scan(&rows).Error
 	case domain.ResourceTypeMicrosoft:
 		_, _, canonical, ok := domain.RecipientAliasForms(recipient)
 		if !ok {

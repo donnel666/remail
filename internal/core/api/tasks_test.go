@@ -164,7 +164,7 @@ type deadlineBlockingImportRepo struct {
 	calls atomic.Int32
 }
 
-func (r *deadlineBlockingImportRepo) ClaimAdminImportDispatchable(ctx context.Context, _ int, _, _ time.Time) ([]coreapp.AdminResourceImportDispatchItem, error) {
+func (r *deadlineBlockingImportRepo) ClaimAdminImportDispatchable(ctx context.Context, _ int, _, _ time.Time, _ bool) ([]coreapp.AdminResourceImportDispatchItem, error) {
 	r.calls.Add(1)
 	<-ctx.Done()
 	return nil, ctx.Err()

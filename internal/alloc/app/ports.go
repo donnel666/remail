@@ -481,7 +481,7 @@ type Repository interface {
 	LockGeneratedMailboxCandidate(ctx context.Context, mailboxID uint, resourceID uint, projectID uint) (*GeneratedMailboxCandidate, error)
 	AssertNoActiveAllocations(ctx context.Context, resourceIDs []uint) error
 
-	IsMicrosoftMailboxHistoricallyMatched(ctx context.Context, projectID uint, mailbox domain.MicrosoftMailbox, mailboxID uint) (bool, error)
+	IsMicrosoftMailboxHistoricallyMatched(ctx context.Context, projectID uint, mailbox domain.MicrosoftMailbox, mailboxID uint, enterprise bool) (bool, error)
 	CountGmailDotHistory(ctx context.Context, resourceID uint, projectID uint) (uint64, error)
 	ListUnavailableGmailMailboxEmails(ctx context.Context, projectID uint, mailbox domain.GmailMailbox, emails []string) (map[string]struct{}, error)
 	IsGmailMailboxAvailable(ctx context.Context, resourceID uint, projectID uint, mailbox domain.GmailMailbox, email string) (bool, error)
@@ -503,7 +503,7 @@ type Repository interface {
 	CreateGmailAllocation(ctx context.Context, allocation *domain.GmailAllocation) error
 	CreateICloudAllocation(ctx context.Context, allocation *domain.ICloudAllocation) error
 	CreateDomainAllocation(ctx context.Context, allocation *domain.GeneratedMailboxAllocation) error
-	TouchMicrosoftAllocated(ctx context.Context, resourceID uint, allocatedAt time.Time) error
+	TouchMicrosoftAllocated(ctx context.Context, resourceID uint, allocatedAt time.Time, enterprise bool) error
 	TouchGmailAllocated(ctx context.Context, resourceID uint, allocatedAt time.Time) error
 	TouchICloudAllocated(ctx context.Context, resourceID uint, aliasID uint, allocatedAt time.Time) error
 	TouchDomainAllocated(ctx context.Context, resourceID uint, mailboxID uint, allocatedAt time.Time) error

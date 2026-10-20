@@ -5,12 +5,13 @@ import "time"
 type AllocationType string
 
 const (
-	AllocationTypeMicrosoft AllocationType = "microsoft"
-	AllocationTypeDomain    AllocationType = "domain"
-	AllocationTypeGmail     AllocationType = "gmail"
-	AllocationTypeICloud    AllocationType = "icloud"
-	AllocationTypeProto     AllocationType = "proto"
-	AllocationTypeDaum      AllocationType = "daum"
+	AllocationTypeMicrosoft           AllocationType = "microsoft"
+	AllocationTypeMicrosoftEnterprise AllocationType = "microsoft_enterprise"
+	AllocationTypeDomain              AllocationType = "domain"
+	AllocationTypeGmail               AllocationType = "gmail"
+	AllocationTypeICloud              AllocationType = "icloud"
+	AllocationTypeProto               AllocationType = "proto"
+	AllocationTypeDaum                AllocationType = "daum"
 )
 
 type AllocationStatus string
@@ -73,6 +74,7 @@ type OrderGuard struct {
 }
 
 type MicrosoftAllocation struct {
+	Enterprise      bool
 	ID              uint
 	OrderNo         string
 	ProjectID       uint
@@ -171,7 +173,7 @@ type UnifiedAllocation struct {
 }
 
 func IsValidAllocationType(value AllocationType) bool {
-	return value == AllocationTypeMicrosoft || value == AllocationTypeDomain || value == AllocationTypeGmail || value == AllocationTypeICloud || value == AllocationTypeProto || value == AllocationTypeDaum
+	return value == AllocationTypeMicrosoft || value == AllocationTypeMicrosoftEnterprise || value == AllocationTypeDomain || value == AllocationTypeGmail || value == AllocationTypeICloud || value == AllocationTypeProto || value == AllocationTypeDaum
 }
 
 func IsValidGmailMailbox(value GmailMailbox) bool {

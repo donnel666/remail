@@ -36,31 +36,33 @@ type RetentionInboundMailObject struct {
 }
 
 type retentionSettings struct {
-	batchSize           int
-	batchSleep          time.Duration
-	idempotencyDays     int
-	mailmatchMSDays     int
-	mailmatchDomainDays int
-	gmailCodeDays       int
-	dailyUsageDays      int
-	outboundMailDays    int
-	inboundMailDays     int
-	systemLogDays       int
+	batchSize               int
+	batchSleep              time.Duration
+	idempotencyDays         int
+	mailmatchMSDays         int
+	mailmatchEnterpriseDays int
+	mailmatchDomainDays     int
+	gmailCodeDays           int
+	dailyUsageDays          int
+	outboundMailDays        int
+	inboundMailDays         int
+	systemLogDays           int
 }
 
 func currentRetentionSettings() retentionSettings {
 	settings := runtimeconfig.Snapshot()
 	return retentionSettings{
-		batchSize:           min(settings.Int("retention_batch_size", retentionBatchSize, 1), 100000),
-		batchSleep:          settings.Duration("retention_batch_sleep_ms", retentionBatchSleep, time.Millisecond, 0),
-		idempotencyDays:     settings.Int("idempotency_key_retain_days", 30, 1),
-		mailmatchMSDays:     settings.Int("mailmatch_ms_retain_days", 3, 1),
-		mailmatchDomainDays: settings.Int("mailmatch_domain_retain_days", 30, 1),
-		gmailCodeDays:       settings.Int("gmail_code_retain_days", 3, 1),
-		dailyUsageDays:      settings.Int("daily_usage_retain_days", 14, 1),
-		outboundMailDays:    settings.Int("outbound_mail_retain_days", 30, 1),
-		inboundMailDays:     settings.Int("inbound_mail_retain_days", 30, 1),
-		systemLogDays:       settings.Int("system_log_retain_days", 30, 1),
+		batchSize:               min(settings.Int("retention_batch_size", retentionBatchSize, 1), 100000),
+		batchSleep:              settings.Duration("retention_batch_sleep_ms", retentionBatchSleep, time.Millisecond, 0),
+		idempotencyDays:         settings.Int("idempotency_key_retain_days", 30, 1),
+		mailmatchMSDays:         settings.Int("mailmatch_ms_retain_days", 3, 1),
+		mailmatchEnterpriseDays: settings.Int("mailmatch_microsoft_enterprise_retain_days", 3, 1),
+		mailmatchDomainDays:     settings.Int("mailmatch_domain_retain_days", 30, 1),
+		gmailCodeDays:           settings.Int("gmail_code_retain_days", 3, 1),
+		dailyUsageDays:          settings.Int("daily_usage_retain_days", 14, 1),
+		outboundMailDays:        settings.Int("outbound_mail_retain_days", 30, 1),
+		inboundMailDays:         settings.Int("inbound_mail_retain_days", 30, 1),
+		systemLogDays:           settings.Int("system_log_retain_days", 30, 1),
 	}
 }
 
@@ -140,6 +142,9 @@ func (s *RetentionService) RunOnce(ctx context.Context) {
 	}))
 	summary = append(summary, s.deleteLoop(ctx, "mailmatch_messages_microsoft", now.AddDate(0, 0, -settings.mailmatchMSDays), settings, func(ctx context.Context, before time.Time) (int64, error) {
 		return s.repo.DeleteMailmatchMessagesBefore(ctx, before, "microsoft", settings.batchSize)
+	}))
+	summary = append(summary, s.deleteLoop(ctx, "mailmatch_messages_microsoft_enterprise", now.AddDate(0, 0, -settings.mailmatchEnterpriseDays), settings, func(ctx context.Context, before time.Time) (int64, error) {
+		return s.repo.DeleteMailmatchMessagesBefore(ctx, before, "microsoft_enterprise", settings.batchSize)
 	}))
 	summary = append(summary, s.deleteLoop(ctx, "mailmatch_messages_domain", now.AddDate(0, 0, -settings.mailmatchDomainDays), settings, func(ctx context.Context, before time.Time) (int64, error) {
 		return s.repo.DeleteMailmatchMessagesBefore(ctx, before, "domain", settings.batchSize)

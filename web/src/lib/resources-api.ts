@@ -63,7 +63,7 @@ export async function listOwnedMicrosoftResources(
   afterId?: number,
   options: ResourceListOptions = {}
 ) {
-  return listOwnedResources("microsoft", filter, offset, limit, afterId, options);
+  return listOwnedResources(filter.enterprise ? "microsoft_enterprise" : "microsoft", filter, offset, limit, afterId, options);
 }
 
 export async function listOwnedDomainResources(
@@ -77,7 +77,7 @@ export async function listOwnedDomainResources(
 }
 
 async function listOwnedResources(
-  resourceType: "microsoft" | "domain",
+  resourceType: "microsoft" | "microsoft_enterprise" | "domain",
   filter: ResourceListFilter,
   offset: number,
   limit: number,

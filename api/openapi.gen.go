@@ -137,12 +137,13 @@ func (e AdminAllocationItemSupplyScope) Valid() bool {
 
 // Defines values for AdminAllocationItemType.
 const (
-	AdminAllocationItemTypeDaum      AdminAllocationItemType = "daum"
-	AdminAllocationItemTypeDomain    AdminAllocationItemType = "domain"
-	AdminAllocationItemTypeGmail     AdminAllocationItemType = "gmail"
-	AdminAllocationItemTypeIcloud    AdminAllocationItemType = "icloud"
-	AdminAllocationItemTypeMicrosoft AdminAllocationItemType = "microsoft"
-	AdminAllocationItemTypeProto     AdminAllocationItemType = "proto"
+	AdminAllocationItemTypeDaum                AdminAllocationItemType = "daum"
+	AdminAllocationItemTypeDomain              AdminAllocationItemType = "domain"
+	AdminAllocationItemTypeGmail               AdminAllocationItemType = "gmail"
+	AdminAllocationItemTypeIcloud              AdminAllocationItemType = "icloud"
+	AdminAllocationItemTypeMicrosoft           AdminAllocationItemType = "microsoft"
+	AdminAllocationItemTypeMicrosoftEnterprise AdminAllocationItemType = "microsoft_enterprise"
+	AdminAllocationItemTypeProto               AdminAllocationItemType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the AdminAllocationItemType enum.
@@ -157,6 +158,8 @@ func (e AdminAllocationItemType) Valid() bool {
 	case AdminAllocationItemTypeIcloud:
 		return true
 	case AdminAllocationItemTypeMicrosoft:
+		return true
+	case AdminAllocationItemTypeMicrosoftEnterprise:
 		return true
 	case AdminAllocationItemTypeProto:
 		return true
@@ -1337,13 +1340,16 @@ func (e AdminMicrosoftAliasItemKind) Valid() bool {
 
 // Defines values for AdminMicrosoftBulkFilterType.
 const (
-	AdminMicrosoftBulkFilterTypeMicrosoft AdminMicrosoftBulkFilterType = "microsoft"
+	AdminMicrosoftBulkFilterTypeMicrosoft           AdminMicrosoftBulkFilterType = "microsoft"
+	AdminMicrosoftBulkFilterTypeMicrosoftEnterprise AdminMicrosoftBulkFilterType = "microsoft_enterprise"
 )
 
 // Valid indicates whether the value is a known member of the AdminMicrosoftBulkFilterType enum.
 func (e AdminMicrosoftBulkFilterType) Valid() bool {
 	switch e {
 	case AdminMicrosoftBulkFilterTypeMicrosoft:
+		return true
+	case AdminMicrosoftBulkFilterTypeMicrosoftEnterprise:
 		return true
 	default:
 		return false
@@ -1472,13 +1478,16 @@ func (e AdminMicrosoftResourceDetailMailProtocol) Valid() bool {
 
 // Defines values for AdminMicrosoftResourceDetailType.
 const (
-	AdminMicrosoftResourceDetailTypeMicrosoft AdminMicrosoftResourceDetailType = "microsoft"
+	AdminMicrosoftResourceDetailTypeMicrosoft           AdminMicrosoftResourceDetailType = "microsoft"
+	AdminMicrosoftResourceDetailTypeMicrosoftEnterprise AdminMicrosoftResourceDetailType = "microsoft_enterprise"
 )
 
 // Valid indicates whether the value is a known member of the AdminMicrosoftResourceDetailType enum.
 func (e AdminMicrosoftResourceDetailType) Valid() bool {
 	switch e {
 	case AdminMicrosoftResourceDetailTypeMicrosoft:
+		return true
+	case AdminMicrosoftResourceDetailTypeMicrosoftEnterprise:
 		return true
 	default:
 		return false
@@ -1508,13 +1517,16 @@ func (e AdminMicrosoftResourceItemMailProtocol) Valid() bool {
 
 // Defines values for AdminMicrosoftResourceItemType.
 const (
-	AdminMicrosoftResourceItemTypeMicrosoft AdminMicrosoftResourceItemType = "microsoft"
+	AdminMicrosoftResourceItemTypeMicrosoft           AdminMicrosoftResourceItemType = "microsoft"
+	AdminMicrosoftResourceItemTypeMicrosoftEnterprise AdminMicrosoftResourceItemType = "microsoft_enterprise"
 )
 
 // Valid indicates whether the value is a known member of the AdminMicrosoftResourceItemType enum.
 func (e AdminMicrosoftResourceItemType) Valid() bool {
 	switch e {
 	case AdminMicrosoftResourceItemTypeMicrosoft:
+		return true
+	case AdminMicrosoftResourceItemTypeMicrosoftEnterprise:
 		return true
 	default:
 		return false
@@ -2057,12 +2069,13 @@ func (e AllocationItemSupplyScope) Valid() bool {
 
 // Defines values for AllocationItemType.
 const (
-	AllocationItemTypeDaum      AllocationItemType = "daum"
-	AllocationItemTypeDomain    AllocationItemType = "domain"
-	AllocationItemTypeGmail     AllocationItemType = "gmail"
-	AllocationItemTypeIcloud    AllocationItemType = "icloud"
-	AllocationItemTypeMicrosoft AllocationItemType = "microsoft"
-	AllocationItemTypeProto     AllocationItemType = "proto"
+	AllocationItemTypeDaum                AllocationItemType = "daum"
+	AllocationItemTypeDomain              AllocationItemType = "domain"
+	AllocationItemTypeGmail               AllocationItemType = "gmail"
+	AllocationItemTypeIcloud              AllocationItemType = "icloud"
+	AllocationItemTypeMicrosoft           AllocationItemType = "microsoft"
+	AllocationItemTypeMicrosoftEnterprise AllocationItemType = "microsoft_enterprise"
+	AllocationItemTypeProto               AllocationItemType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the AllocationItemType enum.
@@ -2077,6 +2090,8 @@ func (e AllocationItemType) Valid() bool {
 	case AllocationItemTypeIcloud:
 		return true
 	case AllocationItemTypeMicrosoft:
+		return true
+	case AllocationItemTypeMicrosoftEnterprise:
 		return true
 	case AllocationItemTypeProto:
 		return true
@@ -3347,13 +3362,16 @@ func (e LotteryType) Valid() bool {
 
 // Defines values for MicrosoftResourceDetailType.
 const (
-	MicrosoftResourceDetailTypeMicrosoft MicrosoftResourceDetailType = "microsoft"
+	MicrosoftResourceDetailTypeMicrosoft           MicrosoftResourceDetailType = "microsoft"
+	MicrosoftResourceDetailTypeMicrosoftEnterprise MicrosoftResourceDetailType = "microsoft_enterprise"
 )
 
 // Valid indicates whether the value is a known member of the MicrosoftResourceDetailType enum.
 func (e MicrosoftResourceDetailType) Valid() bool {
 	switch e {
 	case MicrosoftResourceDetailTypeMicrosoft:
+		return true
+	case MicrosoftResourceDetailTypeMicrosoftEnterprise:
 		return true
 	default:
 		return false
@@ -3470,12 +3488,13 @@ func (e OrderEventResponseOperatorType) Valid() bool {
 
 // Defines values for OrderResponseAllocationType.
 const (
-	OrderResponseAllocationTypeDaum      OrderResponseAllocationType = "daum"
-	OrderResponseAllocationTypeDomain    OrderResponseAllocationType = "domain"
-	OrderResponseAllocationTypeGmail     OrderResponseAllocationType = "gmail"
-	OrderResponseAllocationTypeIcloud    OrderResponseAllocationType = "icloud"
-	OrderResponseAllocationTypeMicrosoft OrderResponseAllocationType = "microsoft"
-	OrderResponseAllocationTypeProto     OrderResponseAllocationType = "proto"
+	OrderResponseAllocationTypeDaum                OrderResponseAllocationType = "daum"
+	OrderResponseAllocationTypeDomain              OrderResponseAllocationType = "domain"
+	OrderResponseAllocationTypeGmail               OrderResponseAllocationType = "gmail"
+	OrderResponseAllocationTypeIcloud              OrderResponseAllocationType = "icloud"
+	OrderResponseAllocationTypeMicrosoft           OrderResponseAllocationType = "microsoft"
+	OrderResponseAllocationTypeMicrosoftEnterprise OrderResponseAllocationType = "microsoft_enterprise"
+	OrderResponseAllocationTypeProto               OrderResponseAllocationType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the OrderResponseAllocationType enum.
@@ -3490,6 +3509,8 @@ func (e OrderResponseAllocationType) Valid() bool {
 	case OrderResponseAllocationTypeIcloud:
 		return true
 	case OrderResponseAllocationTypeMicrosoft:
+		return true
+	case OrderResponseAllocationTypeMicrosoftEnterprise:
 		return true
 	case OrderResponseAllocationTypeProto:
 		return true
@@ -4871,8 +4892,9 @@ func (e ResourceBulkFilterPurpose) Valid() bool {
 
 // Defines values for ResourceBulkFilterResourceType.
 const (
-	ResourceBulkFilterResourceTypeDomain    ResourceBulkFilterResourceType = "domain"
-	ResourceBulkFilterResourceTypeMicrosoft ResourceBulkFilterResourceType = "microsoft"
+	ResourceBulkFilterResourceTypeDomain              ResourceBulkFilterResourceType = "domain"
+	ResourceBulkFilterResourceTypeMicrosoft           ResourceBulkFilterResourceType = "microsoft"
+	ResourceBulkFilterResourceTypeMicrosoftEnterprise ResourceBulkFilterResourceType = "microsoft_enterprise"
 )
 
 // Valid indicates whether the value is a known member of the ResourceBulkFilterResourceType enum.
@@ -4881,6 +4903,8 @@ func (e ResourceBulkFilterResourceType) Valid() bool {
 	case ResourceBulkFilterResourceTypeDomain:
 		return true
 	case ResourceBulkFilterResourceTypeMicrosoft:
+		return true
+	case ResourceBulkFilterResourceTypeMicrosoftEnterprise:
 		return true
 	default:
 		return false
@@ -5324,12 +5348,13 @@ func (e HealthzParamsReady) Valid() bool {
 
 // Defines values for GetAdminAllocationsParamsType.
 const (
-	GetAdminAllocationsParamsTypeDaum      GetAdminAllocationsParamsType = "daum"
-	GetAdminAllocationsParamsTypeDomain    GetAdminAllocationsParamsType = "domain"
-	GetAdminAllocationsParamsTypeGmail     GetAdminAllocationsParamsType = "gmail"
-	GetAdminAllocationsParamsTypeIcloud    GetAdminAllocationsParamsType = "icloud"
-	GetAdminAllocationsParamsTypeMicrosoft GetAdminAllocationsParamsType = "microsoft"
-	GetAdminAllocationsParamsTypeProto     GetAdminAllocationsParamsType = "proto"
+	GetAdminAllocationsParamsTypeDaum                GetAdminAllocationsParamsType = "daum"
+	GetAdminAllocationsParamsTypeDomain              GetAdminAllocationsParamsType = "domain"
+	GetAdminAllocationsParamsTypeGmail               GetAdminAllocationsParamsType = "gmail"
+	GetAdminAllocationsParamsTypeIcloud              GetAdminAllocationsParamsType = "icloud"
+	GetAdminAllocationsParamsTypeMicrosoft           GetAdminAllocationsParamsType = "microsoft"
+	GetAdminAllocationsParamsTypeMicrosoftEnterprise GetAdminAllocationsParamsType = "microsoft_enterprise"
+	GetAdminAllocationsParamsTypeProto               GetAdminAllocationsParamsType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminAllocationsParamsType enum.
@@ -5344,6 +5369,8 @@ func (e GetAdminAllocationsParamsType) Valid() bool {
 	case GetAdminAllocationsParamsTypeIcloud:
 		return true
 	case GetAdminAllocationsParamsTypeMicrosoft:
+		return true
+	case GetAdminAllocationsParamsTypeMicrosoftEnterprise:
 		return true
 	case GetAdminAllocationsParamsTypeProto:
 		return true
@@ -5399,12 +5426,13 @@ func (e GetAdminAllocationsParamsMailbox) Valid() bool {
 
 // Defines values for GetAdminAllocationParamsType.
 const (
-	GetAdminAllocationParamsTypeDaum      GetAdminAllocationParamsType = "daum"
-	GetAdminAllocationParamsTypeDomain    GetAdminAllocationParamsType = "domain"
-	GetAdminAllocationParamsTypeGmail     GetAdminAllocationParamsType = "gmail"
-	GetAdminAllocationParamsTypeIcloud    GetAdminAllocationParamsType = "icloud"
-	GetAdminAllocationParamsTypeMicrosoft GetAdminAllocationParamsType = "microsoft"
-	GetAdminAllocationParamsTypeProto     GetAdminAllocationParamsType = "proto"
+	GetAdminAllocationParamsTypeDaum                GetAdminAllocationParamsType = "daum"
+	GetAdminAllocationParamsTypeDomain              GetAdminAllocationParamsType = "domain"
+	GetAdminAllocationParamsTypeGmail               GetAdminAllocationParamsType = "gmail"
+	GetAdminAllocationParamsTypeIcloud              GetAdminAllocationParamsType = "icloud"
+	GetAdminAllocationParamsTypeMicrosoft           GetAdminAllocationParamsType = "microsoft"
+	GetAdminAllocationParamsTypeMicrosoftEnterprise GetAdminAllocationParamsType = "microsoft_enterprise"
+	GetAdminAllocationParamsTypeProto               GetAdminAllocationParamsType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminAllocationParamsType enum.
@@ -5419,6 +5447,8 @@ func (e GetAdminAllocationParamsType) Valid() bool {
 	case GetAdminAllocationParamsTypeIcloud:
 		return true
 	case GetAdminAllocationParamsTypeMicrosoft:
+		return true
+	case GetAdminAllocationParamsTypeMicrosoftEnterprise:
 		return true
 	case GetAdminAllocationParamsTypeProto:
 		return true
@@ -5822,12 +5852,13 @@ func (e GetAdminLotteriesParamsStatus) Valid() bool {
 
 // Defines values for GetAdminMessagesParamsType.
 const (
-	GetAdminMessagesParamsTypeDaum      GetAdminMessagesParamsType = "daum"
-	GetAdminMessagesParamsTypeDomain    GetAdminMessagesParamsType = "domain"
-	GetAdminMessagesParamsTypeGmail     GetAdminMessagesParamsType = "gmail"
-	GetAdminMessagesParamsTypeIcloud    GetAdminMessagesParamsType = "icloud"
-	GetAdminMessagesParamsTypeMicrosoft GetAdminMessagesParamsType = "microsoft"
-	GetAdminMessagesParamsTypeProto     GetAdminMessagesParamsType = "proto"
+	GetAdminMessagesParamsTypeDaum                GetAdminMessagesParamsType = "daum"
+	GetAdminMessagesParamsTypeDomain              GetAdminMessagesParamsType = "domain"
+	GetAdminMessagesParamsTypeGmail               GetAdminMessagesParamsType = "gmail"
+	GetAdminMessagesParamsTypeIcloud              GetAdminMessagesParamsType = "icloud"
+	GetAdminMessagesParamsTypeMicrosoft           GetAdminMessagesParamsType = "microsoft"
+	GetAdminMessagesParamsTypeMicrosoftEnterprise GetAdminMessagesParamsType = "microsoft_enterprise"
+	GetAdminMessagesParamsTypeProto               GetAdminMessagesParamsType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminMessagesParamsType enum.
@@ -5843,6 +5874,8 @@ func (e GetAdminMessagesParamsType) Valid() bool {
 		return true
 	case GetAdminMessagesParamsTypeMicrosoft:
 		return true
+	case GetAdminMessagesParamsTypeMicrosoftEnterprise:
+		return true
 	case GetAdminMessagesParamsTypeProto:
 		return true
 	default:
@@ -5852,12 +5885,13 @@ func (e GetAdminMessagesParamsType) Valid() bool {
 
 // Defines values for GetAdminMessageParamsType.
 const (
-	GetAdminMessageParamsTypeDaum      GetAdminMessageParamsType = "daum"
-	GetAdminMessageParamsTypeDomain    GetAdminMessageParamsType = "domain"
-	GetAdminMessageParamsTypeGmail     GetAdminMessageParamsType = "gmail"
-	GetAdminMessageParamsTypeIcloud    GetAdminMessageParamsType = "icloud"
-	GetAdminMessageParamsTypeMicrosoft GetAdminMessageParamsType = "microsoft"
-	GetAdminMessageParamsTypeProto     GetAdminMessageParamsType = "proto"
+	GetAdminMessageParamsTypeDaum                GetAdminMessageParamsType = "daum"
+	GetAdminMessageParamsTypeDomain              GetAdminMessageParamsType = "domain"
+	GetAdminMessageParamsTypeGmail               GetAdminMessageParamsType = "gmail"
+	GetAdminMessageParamsTypeIcloud              GetAdminMessageParamsType = "icloud"
+	GetAdminMessageParamsTypeMicrosoft           GetAdminMessageParamsType = "microsoft"
+	GetAdminMessageParamsTypeMicrosoftEnterprise GetAdminMessageParamsType = "microsoft_enterprise"
+	GetAdminMessageParamsTypeProto               GetAdminMessageParamsType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminMessageParamsType enum.
@@ -5872,6 +5906,8 @@ func (e GetAdminMessageParamsType) Valid() bool {
 	case GetAdminMessageParamsTypeIcloud:
 		return true
 	case GetAdminMessageParamsTypeMicrosoft:
+		return true
+	case GetAdminMessageParamsTypeMicrosoftEnterprise:
 		return true
 	case GetAdminMessageParamsTypeProto:
 		return true
@@ -6185,13 +6221,16 @@ func (e GetAdminProxyStatsParamsStatus) Valid() bool {
 
 // Defines values for GetAdminMicrosoftResourcesParamsType.
 const (
-	GetAdminMicrosoftResourcesParamsTypeMicrosoft GetAdminMicrosoftResourcesParamsType = "microsoft"
+	GetAdminMicrosoftResourcesParamsTypeMicrosoft           GetAdminMicrosoftResourcesParamsType = "microsoft"
+	GetAdminMicrosoftResourcesParamsTypeMicrosoftEnterprise GetAdminMicrosoftResourcesParamsType = "microsoft_enterprise"
 )
 
 // Valid indicates whether the value is a known member of the GetAdminMicrosoftResourcesParamsType enum.
 func (e GetAdminMicrosoftResourcesParamsType) Valid() bool {
 	switch e {
 	case GetAdminMicrosoftResourcesParamsTypeMicrosoft:
+		return true
+	case GetAdminMicrosoftResourcesParamsTypeMicrosoftEnterprise:
 		return true
 	default:
 		return false
@@ -6236,11 +6275,12 @@ func (e GetAdminMicrosoftResourceAliasesParamsKind) Valid() bool {
 
 // Defines values for PostAdminMicrosoftResourceMessagesFetchParamsType.
 const (
-	PostAdminMicrosoftResourceMessagesFetchParamsTypeDaum      PostAdminMicrosoftResourceMessagesFetchParamsType = "daum"
-	PostAdminMicrosoftResourceMessagesFetchParamsTypeGmail     PostAdminMicrosoftResourceMessagesFetchParamsType = "gmail"
-	PostAdminMicrosoftResourceMessagesFetchParamsTypeIcloud    PostAdminMicrosoftResourceMessagesFetchParamsType = "icloud"
-	PostAdminMicrosoftResourceMessagesFetchParamsTypeMicrosoft PostAdminMicrosoftResourceMessagesFetchParamsType = "microsoft"
-	PostAdminMicrosoftResourceMessagesFetchParamsTypeProto     PostAdminMicrosoftResourceMessagesFetchParamsType = "proto"
+	PostAdminMicrosoftResourceMessagesFetchParamsTypeDaum                PostAdminMicrosoftResourceMessagesFetchParamsType = "daum"
+	PostAdminMicrosoftResourceMessagesFetchParamsTypeGmail               PostAdminMicrosoftResourceMessagesFetchParamsType = "gmail"
+	PostAdminMicrosoftResourceMessagesFetchParamsTypeIcloud              PostAdminMicrosoftResourceMessagesFetchParamsType = "icloud"
+	PostAdminMicrosoftResourceMessagesFetchParamsTypeMicrosoft           PostAdminMicrosoftResourceMessagesFetchParamsType = "microsoft"
+	PostAdminMicrosoftResourceMessagesFetchParamsTypeMicrosoftEnterprise PostAdminMicrosoftResourceMessagesFetchParamsType = "microsoft_enterprise"
+	PostAdminMicrosoftResourceMessagesFetchParamsTypeProto               PostAdminMicrosoftResourceMessagesFetchParamsType = "proto"
 )
 
 // Valid indicates whether the value is a known member of the PostAdminMicrosoftResourceMessagesFetchParamsType enum.
@@ -6253,6 +6293,8 @@ func (e PostAdminMicrosoftResourceMessagesFetchParamsType) Valid() bool {
 	case PostAdminMicrosoftResourceMessagesFetchParamsTypeIcloud:
 		return true
 	case PostAdminMicrosoftResourceMessagesFetchParamsTypeMicrosoft:
+		return true
+	case PostAdminMicrosoftResourceMessagesFetchParamsTypeMicrosoftEnterprise:
 		return true
 	case PostAdminMicrosoftResourceMessagesFetchParamsTypeProto:
 		return true
@@ -7646,9 +7688,10 @@ func (e GetRechargesParamsStatus) Valid() bool {
 
 // Defines values for GetResourcesParamsType.
 const (
-	All       GetResourcesParamsType = "all"
-	Domain    GetResourcesParamsType = "domain"
-	Microsoft GetResourcesParamsType = "microsoft"
+	All                 GetResourcesParamsType = "all"
+	Domain              GetResourcesParamsType = "domain"
+	Microsoft           GetResourcesParamsType = "microsoft"
+	MicrosoftEnterprise GetResourcesParamsType = "microsoft_enterprise"
 )
 
 // Valid indicates whether the value is a known member of the GetResourcesParamsType enum.
@@ -7659,6 +7702,8 @@ func (e GetResourcesParamsType) Valid() bool {
 	case Domain:
 		return true
 	case Microsoft:
+		return true
+	case MicrosoftEnterprise:
 		return true
 	default:
 		return false

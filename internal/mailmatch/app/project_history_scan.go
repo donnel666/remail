@@ -33,6 +33,7 @@ type ProjectHistoryScanState struct {
 }
 
 type ProjectHistoryScanTask struct {
+	Enterprise      bool   `json:"enterprise,omitempty"`
 	ProjectID       uint   `json:"projectId"`
 	Generation      uint64 `json:"generation"`
 	RequestID       string `json:"requestId,omitempty"`
@@ -63,7 +64,7 @@ type ProjectHistoryMatchRepository interface {
 	WithTx(ctx context.Context, fn func(context.Context) error) error
 	ListHistoricalProjectScopes(ctx context.Context, enterprise bool) ([]HistoricalProjectScope, error)
 	FindHistoricalProjectScope(ctx context.Context, projectID uint, enterprise bool) (*HistoricalProjectScope, error)
-	ClearLegacyMicrosoftProjectHistory(ctx context.Context, resourceID uint, projectID uint) error
+	ClearLegacyMicrosoftProjectHistory(ctx context.Context, resourceID uint, projectID uint, enterprise bool) error
 }
 
 type HistoricalMicrosoftUsagePort interface {
@@ -73,10 +74,11 @@ type HistoricalMicrosoftUsagePort interface {
 type ProjectHistoryScanQueue interface {
 	EnqueueProjectHistoryScan(ctx context.Context, task ProjectHistoryScanTask) (bool, error)
 	EnqueueValidatedMicrosoftHistoryScan(ctx context.Context, task ValidatedMicrosoftHistoryScanTask) error
-	EnqueueProjectHistoryDispatcher(ctx context.Context, delay time.Duration) error
+	EnqueueProjectHistoryDispatcher(ctx context.Context, delay time.Duration, enterprise bool) error
 }
 
 type ProjectHistoryScanUseCase struct {
+	enterprise  bool
 	jobs        ProjectHistoryScanRepository
 	matches     ProjectHistoryMatchRepository
 	queue       ProjectHistoryScanQueue
@@ -91,6 +93,12 @@ func NewProjectHistoryScanUseCase(jobs ProjectHistoryScanRepository, matches Pro
 		jobs: jobs, matches: matches, queue: queue, transport: transport,
 		now: func() time.Time { return time.Now().UTC() },
 	}
+}
+
+func NewMicrosoftEnterpriseProjectHistoryScanUseCase(jobs ProjectHistoryScanRepository, matches ProjectHistoryMatchRepository, queue ProjectHistoryScanQueue, transport MailTransportFetchPort) *ProjectHistoryScanUseCase {
+	uc := NewProjectHistoryScanUseCase(jobs, matches, queue, transport)
+	uc.enterprise = true
+	return uc
 }
 
 func (uc *ProjectHistoryScanUseCase) SetMicrosoftCredentialPort(credentials coreapp.MicrosoftCredentialPort) {
@@ -142,7 +150,7 @@ func (uc *ProjectHistoryScanUseCase) DispatchPending(ctx context.Context, limit 
 	var result error
 	for _, state := range states {
 		accepted, enqueueErr := uc.queue.EnqueueProjectHistoryScan(ctx, ProjectHistoryScanTask{
-			ProjectID: state.ProjectID, Generation: state.Generation, RequestID: state.RequestID,
+			Enterprise: uc.enterprise, ProjectID: state.ProjectID, Generation: state.Generation, RequestID: state.RequestID,
 		})
 		if enqueueErr != nil {
 			result = errors.Join(result, enqueueErr)
@@ -246,7 +254,7 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 	}
 	if len(scopes) == 0 {
 		return uc.matches.WithTx(ctx, func(txCtx context.Context) error {
-			if err := uc.matches.ClearLegacyMicrosoftProjectHistory(txCtx, resource.ResourceID, 0); err != nil {
+			if err := uc.matches.ClearLegacyMicrosoftProjectHistory(txCtx, resource.ResourceID, 0, coredomain.IsMicrosoftEnterpriseEmail(resource.EmailAddress)); err != nil {
 				return err
 			}
 			return uc.credentials.ApplyMicrosoftHistoryScanResult(txCtx, coreapp.MicrosoftHistoryScanResult{
@@ -262,7 +270,7 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 	fetchCtx, cancelFetch := context.WithTimeout(ctx, boundedRuntimeDuration("imap_full_history_timeout_minutes", projectHistoryMailboxTimeout, time.Minute, maxProjectHistoryMailboxTimeout))
 	fetched, fetchErr := uc.transport.FetchMicrosoftMessages(fetchCtx, FetchMessagesRequest{
 		Scope: OrderScope{
-			OrderNo: "validated-microsoft-history", AllocationType: domain.ResourceTypeMicrosoft,
+			OrderNo: "validated-microsoft-history", AllocationType: domain.ResourceType(coredomain.MicrosoftResourceType(coredomain.IsMicrosoftEnterpriseEmail(resource.EmailAddress))),
 			EmailResourceID: resource.ResourceID, Recipient: resource.EmailAddress,
 			MicrosoftEmail: resource.EmailAddress, MicrosoftClientID: resource.ClientID, MicrosoftRT: resource.RefreshToken,
 			MicrosoftGraphAvailable: resource.GraphAvailable,
@@ -311,7 +319,7 @@ func (uc *ProjectHistoryScanUseCase) scanValidatedMicrosoftHistory(ctx context.C
 				return err
 			}
 		}
-		if err := uc.matches.ClearLegacyMicrosoftProjectHistory(txCtx, resource.ResourceID, 0); err != nil {
+		if err := uc.matches.ClearLegacyMicrosoftProjectHistory(txCtx, resource.ResourceID, 0, coredomain.IsMicrosoftEnterpriseEmail(resource.EmailAddress)); err != nil {
 			return err
 		}
 		return uc.credentials.ApplyMicrosoftHistoryScanResult(txCtx, coreapp.MicrosoftHistoryScanResult{
@@ -335,12 +343,12 @@ func (uc *ProjectHistoryScanUseCase) scanProjectHistoryPage(ctx context.Context,
 	next = task
 	var err error
 	if next.MaxResourceID == 0 {
-		next.MaxResourceID, err = uc.credentials.MaxMicrosoftResourceID(ctx)
+		next.MaxResourceID, err = uc.credentials.MaxMicrosoftResourceID(ctx, uc.enterprise)
 		if err != nil {
 			return false, next, fmt.Errorf("%w: read microsoft resource high-water mark: %v", errProjectHistoryInfrastructure, err)
 		}
 	}
-	resource, err := uc.credentials.FindNextMicrosoftCredentialScope(ctx, next.AfterResourceID, next.MaxResourceID, task.ProjectID)
+	resource, err := uc.credentials.FindNextMicrosoftCredentialScope(ctx, next.AfterResourceID, next.MaxResourceID, task.ProjectID, uc.enterprise)
 	if err != nil {
 		return false, next, fmt.Errorf("%w: find next microsoft resource: %v", errProjectHistoryInfrastructure, err)
 	}
@@ -387,7 +395,7 @@ func (uc *ProjectHistoryScanUseCase) scanProjectHistoryResource(
 	fetchCtx, cancelFetch := context.WithTimeout(ctx, boundedRuntimeDuration("imap_full_history_timeout_minutes", projectHistoryMailboxTimeout, time.Minute, maxProjectHistoryMailboxTimeout))
 	fetched, fetchErr := uc.transport.FetchMicrosoftMessages(fetchCtx, FetchMessagesRequest{
 		Scope: OrderScope{
-			OrderNo: "project-history", AllocationType: domain.ResourceTypeMicrosoft,
+			OrderNo: "project-history", AllocationType: domain.ResourceType(coredomain.MicrosoftResourceType(coredomain.IsMicrosoftEnterpriseEmail(resource.EmailAddress))),
 			EmailResourceID: resource.ResourceID, Recipient: resource.EmailAddress,
 			MicrosoftEmail: resource.EmailAddress, MicrosoftClientID: resource.ClientID, MicrosoftRT: resource.RefreshToken,
 			MicrosoftGraphAvailable: resource.GraphAvailable,
@@ -451,7 +459,7 @@ func (uc *ProjectHistoryScanUseCase) scanProjectHistoryResource(
 		}); err != nil {
 			return err
 		}
-		return uc.matches.ClearLegacyMicrosoftProjectHistory(txCtx, resource.ResourceID, task.ProjectID)
+		return uc.matches.ClearLegacyMicrosoftProjectHistory(txCtx, resource.ResourceID, task.ProjectID, coredomain.IsMicrosoftEnterpriseEmail(resource.EmailAddress))
 	})
 	if errors.Is(err, errProjectHistoryScopeChanged) {
 		return false, false, err
@@ -498,7 +506,7 @@ func (uc *ProjectHistoryScanUseCase) ReleaseDispatch(ctx context.Context, task P
 
 func (uc *ProjectHistoryScanUseCase) ScheduleDispatcher(ctx context.Context, delay time.Duration) {
 	if uc != nil && uc.queue != nil {
-		_ = uc.queue.EnqueueProjectHistoryDispatcher(ctx, delay)
+		_ = uc.queue.EnqueueProjectHistoryDispatcher(ctx, delay, uc.enterprise)
 	}
 }
 

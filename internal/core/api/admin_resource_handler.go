@@ -310,7 +310,8 @@ func (h *CoreHandler) GetAdminMicrosoftResources(c *gin.Context) {
 		writeAdminResourceError(c, domain.ErrResourceDependency)
 		return
 	}
-	if strings.TrimSpace(c.Query("type")) != string(domain.ResourceTypeMicrosoft) {
+	resourceType := domain.ResourceType(strings.TrimSpace(c.Query("type")))
+	if !domain.IsMicrosoftResourceType(resourceType) {
 		writeAdminResourceError(c, domain.ErrInvalidResourceFilter)
 		return
 	}
@@ -330,6 +331,7 @@ func (h *CoreHandler) GetAdminMicrosoftResources(c *gin.Context) {
 	if !ok {
 		return
 	}
+	filter.Enterprise = filter.Enterprise || resourceType == domain.ResourceTypeMicrosoftEnterprise
 	result, err := h.module.AdminResourceQuery.List(c.Request.Context(), filter, offset, limit, afterID)
 	if err != nil {
 		writeAdminResourceError(c, err)
@@ -849,7 +851,7 @@ func toAdminMicrosoftListResponse(result *coreapp.AdminMicrosoftListResult, incl
 
 func toAdminMicrosoftItemResponse(item coreapp.AdminMicrosoftResourceItem) adminMicrosoftResourceItemResponse {
 	return adminMicrosoftResourceItemResponse{
-		ID: item.ID, Type: "microsoft", Version: item.Version, EmailAddress: item.EmailAddress, Suffix: item.Suffix,
+		ID: item.ID, Type: string(domain.MicrosoftResourceType(domain.IsMicrosoftEnterpriseEmail(item.EmailAddress))), Version: item.Version, EmailAddress: item.EmailAddress, Suffix: item.Suffix,
 		BindingAddress: item.BindingAddress,
 		Owner:          adminMicrosoftOwnerResponse{ID: item.Owner.ID, Email: item.Owner.Email, Nickname: item.Owner.Nickname, GroupName: item.Owner.GroupName, Role: item.Owner.Role, Enabled: item.Owner.Enabled},
 		Status:         item.Status, ForSale: item.ForSale, LongLived: item.LongLived, GraphAvailable: item.GraphAvailable,
@@ -966,14 +968,14 @@ func toAdminBulkSelection(c *gin.Context, request adminMicrosoftBulkSelectionReq
 		}
 		return coreapp.AdminResourceBulkSelection{Mode: coreapp.AdminResourceBulkIDs, ResourceIDs: request.ResourceIDs}, true
 	case "filter":
-		if request.Filter == nil || request.Filter.Type != "microsoft" || len(request.ResourceIDs) != 0 {
+		if request.Filter == nil || !domain.IsMicrosoftResourceType(domain.ResourceType(request.Filter.Type)) || len(request.ResourceIDs) != 0 {
 			writeAdminResourceError(c, domain.ErrInvalidResourceCommand)
 			return coreapp.AdminResourceBulkSelection{}, false
 		}
 		return coreapp.AdminResourceBulkSelection{
 			Mode: coreapp.AdminResourceBulkFilter,
 			Filter: coreapp.AdminResourceBulkFilterValue{
-				Search: request.Filter.Search, Suffix: request.Filter.Suffix, Enterprise: request.Filter.Enterprise,
+				Search: request.Filter.Search, Suffix: request.Filter.Suffix, Enterprise: request.Filter.Enterprise || request.Filter.Type == "microsoft_enterprise",
 				Status:  domain.MicrosoftResourceStatus(request.Filter.Status),
 				ForSale: request.Filter.ForSale, LongLived: request.Filter.LongLived,
 				GraphAvailable: request.Filter.GraphAvailable, TokenHealth: request.Filter.TokenHealth,

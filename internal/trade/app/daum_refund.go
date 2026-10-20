@@ -9,6 +9,7 @@ import (
 )
 
 type ResourceFailureProof struct {
+	ResourceType         string
 	OrderNo              string
 	ResourceID           uint
 	CredentialRevision   uint64

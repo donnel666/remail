@@ -75,7 +75,7 @@ func (s *projectHistoryMatchesStub) ListHistoricalProjectScopes(context.Context,
 func (s *projectHistoryMatchesStub) FindHistoricalProjectScope(context.Context, uint, bool) (*HistoricalProjectScope, error) {
 	return s.scope, nil
 }
-func (s *projectHistoryMatchesStub) ClearLegacyMicrosoftProjectHistory(_ context.Context, resourceID uint, projectID uint) error {
+func (s *projectHistoryMatchesStub) ClearLegacyMicrosoftProjectHistory(_ context.Context, resourceID uint, projectID uint, _ bool) error {
 	s.cleared, s.clearProject = resourceID, projectID
 	return nil
 }
@@ -108,7 +108,7 @@ func (q *projectHistoryQueueStub) EnqueueValidatedMicrosoftHistoryScan(_ context
 	q.validated = append(q.validated, task)
 	return nil
 }
-func (q *projectHistoryQueueStub) EnqueueProjectHistoryDispatcher(context.Context, time.Duration) error {
+func (q *projectHistoryQueueStub) EnqueueProjectHistoryDispatcher(context.Context, time.Duration, bool) error {
 	q.dispatches++
 	return nil
 }
@@ -131,10 +131,10 @@ func (s *projectHistoryCredentialsStub) LockMicrosoftCredentialScope(_ context.C
 	}
 	return nil, coreapp.ErrMicrosoftCredentialNotFound
 }
-func (s *projectHistoryCredentialsStub) MaxMicrosoftResourceID(context.Context) (uint, error) {
+func (s *projectHistoryCredentialsStub) MaxMicrosoftResourceID(context.Context, bool) (uint, error) {
 	return s.maxID, nil
 }
-func (s *projectHistoryCredentialsStub) FindNextMicrosoftCredentialScope(_ context.Context, afterID, maxID, projectID uint) (*coreapp.MicrosoftCredentialScope, error) {
+func (s *projectHistoryCredentialsStub) FindNextMicrosoftCredentialScope(_ context.Context, afterID, maxID, projectID uint, _ bool) (*coreapp.MicrosoftCredentialScope, error) {
 	s.cursorProjectID = projectID
 	for _, resource := range s.resources {
 		if resource.ResourceID > afterID && resource.ResourceID <= maxID {

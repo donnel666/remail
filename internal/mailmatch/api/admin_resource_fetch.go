@@ -99,7 +99,7 @@ func (h *Handler) postAdminMicrosoftResourceFetch(c *gin.Context, kind domain.Re
 	if resourceType == "" {
 		resourceType = domain.ResourceTypeMicrosoft
 	}
-	if resourceType != domain.ResourceTypeMicrosoft && resourceType != domain.ResourceTypeGmail && resourceType != domain.ResourceTypeICloud && resourceType != domain.ResourceTypeProto && resourceType != domain.ResourceTypeDaum {
+	if !domain.IsMicrosoftResourceType(resourceType) && resourceType != domain.ResourceTypeGmail && resourceType != domain.ResourceTypeICloud && resourceType != domain.ResourceTypeProto && resourceType != domain.ResourceTypeDaum {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"message":   "Invalid request parameters.",
 			"requestId": middleware.GetRequestID(c),
@@ -109,7 +109,7 @@ func (h *Handler) postAdminMicrosoftResourceFetch(c *gin.Context, kind domain.Re
 	if !requireProtoManagementRole(c, resourceType) {
 		return
 	}
-	if kind == domain.ResourceFetchJobHistory && resourceType != domain.ResourceTypeMicrosoft {
+	if kind == domain.ResourceFetchJobHistory && !domain.IsMicrosoftResourceType(resourceType) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request parameters.", "requestId": middleware.GetRequestID(c)})
 		return
 	}

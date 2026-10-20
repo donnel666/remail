@@ -17,6 +17,49 @@ import (
 	"gorm.io/gorm"
 )
 
+func TestMicrosoftEnterpriseTokenRefreshUsesOwnStateMySQL(t *testing.T) {
+	db := newMailTransportMySQLTestDB(t)
+	createMicrosoftTokenRefreshTestResource(t, db, 9250, "normal", 1)
+	require.NoError(t, db.Exec("INSERT INTO email_resources(id,type,owner_user_id) VALUES(9251,'microsoft_enterprise',9250)").Error)
+	require.NoError(t, db.Exec("INSERT INTO microsoft_enterprise_resources(id,email_address,email_domain,client_id,refresh_token,status,credential_revision) VALUES(9251,'refresh@tenant.onmicrosoft.com','tenant.onmicrosoft.com','client','enterprise-original','normal',4)").Error)
+	repo := newMicrosoftTokenRefreshTestRepo(db)
+	ctx := context.Background()
+	_, _, err := repo.Request(ctx, microsoftTokenRefreshTestCommand(9250, "personal-pending"), nil)
+	require.NoError(t, err)
+	command := microsoftTokenRefreshTestCommand(9251, "enterprise-refresh")
+	command.OperatorUserID = 9250
+	state, _, err := repo.Request(ctx, command, nil)
+	require.NoError(t, err)
+	require.True(t, state.Enterprise)
+	pending, err := repo.ListPending(ctx, 1, true)
+	require.NoError(t, err)
+	require.Len(t, pending, 1, "personal work cannot consume the enterprise dispatch allowance")
+	require.True(t, pending[0].Enterprise)
+	requireTokenRefreshProcessing(t, repo, state)
+	task := mailapp.MicrosoftTokenRefreshTask{ResourceID: state.ResourceID, Generation: state.Generation, ExpectedCredentialRevision: state.ExpectedCredentialRevision, Enterprise: true}
+	execution, current, err := repo.LoadExecution(ctx, task)
+	require.NoError(t, err)
+	require.True(t, current)
+	require.Equal(t, "enterprise-original", execution.RefreshToken)
+	require.NoError(t, repo.ApplyResult(ctx, task, mailapp.MicrosoftTokenRefreshProtocolResult{Valid: true, ClientID: "client", RefreshToken: "enterprise-rotated"}))
+	var stored struct {
+		RefreshToken       string
+		CredentialRevision uint64
+		TokenRefreshStatus string
+	}
+	require.NoError(t, db.Table("microsoft_enterprise_resources").Where("id=9251").Scan(&stored).Error)
+	require.Equal(t, "enterprise-rotated", stored.RefreshToken)
+	require.EqualValues(t, 5, stored.CredentialRevision)
+	require.Equal(t, "normal", stored.TokenRefreshStatus)
+	var personal struct {
+		RefreshToken       string
+		TokenRefreshStatus string
+	}
+	require.NoError(t, db.Table("microsoft_resources").Where("id=9250").Scan(&personal).Error)
+	require.Equal(t, "refresh-token-9250", personal.RefreshToken)
+	require.Equal(t, "pending", personal.TokenRefreshStatus)
+}
+
 func TestMicrosoftTokenRefreshRequestUsesResourceStateMySQL(t *testing.T) {
 	db := newMailTransportMySQLTestDB(t)
 	createMicrosoftTokenRefreshTestResource(t, db, 9250, "normal", 1)
@@ -123,7 +166,7 @@ func TestMicrosoftTokenRefreshEnqueueActivationAndFailureStateMachineMySQL(t *te
 	state, _, err := repo.Request(context.Background(), command, microsoftTokenRefreshTestOperationLog(command))
 	require.NoError(t, err)
 
-	pending, err := repo.ListPending(context.Background(), 10)
+	pending, err := repo.ListPending(context.Background(), 10, false)
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	assert.Equal(t, state.Generation, pending[0].Generation)

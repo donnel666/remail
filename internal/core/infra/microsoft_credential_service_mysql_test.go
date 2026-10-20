@@ -33,7 +33,7 @@ INSERT INTO microsoft_resources(
 
 	service := coreapp.NewMicrosoftCredentialService(NewAdminResourceRepo(db))
 	forcedRollback := errors.New("forced rollback")
-	generation := currentMicrosoftFacetsGeneration()
+	generation := currentMicrosoftFacetsGeneration("microsoft")
 	err := db.WithContext(context.Background()).Transaction(func(tx *gorm.DB) error {
 		txCtx := platform.WithGormTx(context.Background(), tx)
 		require.NoError(t, service.ApplyMicrosoftFetchRefreshToken(txCtx, coreapp.MicrosoftFetchRefreshTokenRotation{
@@ -43,7 +43,7 @@ INSERT INTO microsoft_resources(
 		return forcedRollback
 	})
 	require.ErrorIs(t, err, forcedRollback)
-	require.Equal(t, generation, currentMicrosoftFacetsGeneration(), "rolled-back caller transactions must keep facet caches hot")
+	require.Equal(t, generation, currentMicrosoftFacetsGeneration("microsoft"), "rolled-back caller transactions must keep facet caches hot")
 
 	var rolledBack struct {
 		RefreshToken       string `gorm:"column:refresh_token"`

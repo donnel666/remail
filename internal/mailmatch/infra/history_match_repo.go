@@ -72,11 +72,15 @@ func (r *Repo) listHistoricalProjectScopes(ctx context.Context, projectID uint, 
 	return scopes, nil
 }
 
-func (r *Repo) ClearLegacyMicrosoftProjectHistory(ctx context.Context, resourceID uint, projectID uint) error {
+func (r *Repo) ClearLegacyMicrosoftProjectHistory(ctx context.Context, resourceID uint, projectID uint, enterprise bool) error {
 	if r == nil || resourceID == 0 {
 		return fmt.Errorf("clear legacy microsoft project history: invalid resource")
 	}
-	deleteSQL := "DELETE FROM microsoft_resource_project_matches WHERE resource_id = ?"
+	table := "microsoft_resource_project_matches"
+	if enterprise {
+		table = "microsoft_enterprise_project_matches"
+	}
+	deleteSQL := "DELETE FROM " + table + " WHERE resource_id = ?"
 	args := []any{resourceID}
 	if projectID > 0 {
 		deleteSQL += " AND project_id = ?"

@@ -43,7 +43,7 @@ func (r *microsoftTokenRefreshRepoStub) Request(_ context.Context, _ MicrosoftTo
 	return &clone, false, nil
 }
 
-func (r *microsoftTokenRefreshRepoStub) ListPending(context.Context, int) ([]MicrosoftTokenRefreshState, error) {
+func (r *microsoftTokenRefreshRepoStub) ListPending(context.Context, int, bool) ([]MicrosoftTokenRefreshState, error) {
 	return append([]MicrosoftTokenRefreshState(nil), r.pending...), nil
 }
 
@@ -87,7 +87,7 @@ func (q *microsoftTokenRefreshQueueStub) EnqueueMicrosoftTokenRefresh(_ context.
 	return q.accepted, q.err
 }
 
-func (q *microsoftTokenRefreshQueueStub) EnqueueMicrosoftTokenRefreshDispatcher(context.Context, time.Duration) error {
+func (q *microsoftTokenRefreshQueueStub) EnqueueMicrosoftTokenRefreshDispatcher(context.Context, time.Duration, bool) error {
 	q.dispatcherCalls++
 	return nil
 }
@@ -121,7 +121,7 @@ func TestMicrosoftTokenRefreshDispatchActivatesOnlyAcceptedTask(t *testing.T) {
 				processing: true,
 			}
 			queue := &microsoftTokenRefreshQueueStub{accepted: tt.accepted, err: tt.queueErr, events: &repo.events}
-			result, err := NewMicrosoftTokenRefreshService(repo, queue, nil).DispatchPending(context.Background(), 10)
+			result, err := NewMicrosoftTokenRefreshService(repo, queue, nil).DispatchPending(context.Background(), 10, false)
 			if tt.queueErr != nil {
 				require.Error(t, err)
 			} else {

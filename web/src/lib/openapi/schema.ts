@@ -7568,7 +7568,7 @@ export interface components {
             payAmount: components["schemas"]["NonNegativeLedgerAmountResponse"];
             refundAmount: components["schemas"]["NonNegativeLedgerAmountResponse"];
             /** @enum {string} */
-            allocationType?: "microsoft" | "domain" | "gmail" | "icloud" | "proto" | "daum";
+            allocationType?: "microsoft" | "microsoft_enterprise" | "domain" | "gmail" | "icloud" | "proto" | "daum";
             allocationId?: number;
             deliveryEmail: string;
             /** Format: date-time */
@@ -9710,7 +9710,7 @@ export interface components {
             /** @description Select enterprise Microsoft resources; omitted means personal Microsoft resources. */
             enterprise?: boolean;
             /** @enum {string} */
-            resourceType: "microsoft" | "domain";
+            resourceType: "microsoft" | "microsoft_enterprise" | "domain";
             /** @description Unified fuzzy search. Microsoft matches email and suffix; domain matches domain and TLD. */
             search?: string;
             /** @description Exact Microsoft suffix such as @outlook.com. */
@@ -9854,7 +9854,7 @@ export interface components {
         };
         AllocationItem: {
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "icloud" | "proto" | "daum";
+            type: "microsoft" | "microsoft_enterprise" | "domain" | "gmail" | "icloud" | "proto" | "daum";
             id: number;
             orderNo: string;
             projectId: number;
@@ -10754,7 +10754,7 @@ export interface components {
         AdminMicrosoftResourceItem: {
             id: number;
             /** @enum {string} */
-            type: "microsoft";
+            type: "microsoft" | "microsoft_enterprise";
             /** @description Monotonic resource version used by administrator mutation preconditions. */
             version: number;
             /** Format: email */
@@ -10963,7 +10963,7 @@ export interface components {
             /** @description Select enterprise Microsoft resources; omitted means personal Microsoft resources. */
             enterprise?: boolean;
             /** @enum {string} */
-            type: "microsoft";
+            type: "microsoft" | "microsoft_enterprise";
             search?: string;
             suffix?: string;
             status?: components["schemas"]["AdminMicrosoftResourceStatus"];
@@ -11290,7 +11290,7 @@ export interface components {
         };
         AdminAllocationItem: {
             /** @enum {string} */
-            type: "microsoft" | "domain" | "gmail" | "icloud" | "proto" | "daum";
+            type: "microsoft" | "microsoft_enterprise" | "domain" | "gmail" | "icloud" | "proto" | "daum";
             /** @description Allocation ID. */
             id: number;
             orderNo: string;
@@ -18673,7 +18673,7 @@ export interface operations {
                 /** @description Select Microsoft enterprise mailboxes under tenant.onmicrosoft.com. Defaults to personal Microsoft mailboxes. */
                 enterprise?: boolean;
                 scope?: string;
-                type?: "all" | "microsoft" | "domain";
+                type?: "all" | "microsoft" | "microsoft_enterprise" | "domain";
                 /** @description Unified fuzzy search. Microsoft matches email and suffix; domain matches domain and TLD. */
                 search?: string;
                 /** @description Exact Microsoft suffix such as @outlook.com. */
@@ -19568,7 +19568,7 @@ export interface operations {
     getAdminAllocations: {
         parameters: {
             query?: {
-                type?: "microsoft" | "domain" | "gmail" | "icloud" | "proto" | "daum";
+                type?: "microsoft" | "microsoft_enterprise" | "domain" | "gmail" | "icloud" | "proto" | "daum";
                 orderNo?: string;
                 projectId?: number;
                 resourceId?: number;
@@ -19626,7 +19626,7 @@ export interface operations {
     getAdminAllocation: {
         parameters: {
             query: {
-                type: "microsoft" | "domain" | "gmail" | "icloud" | "proto" | "daum";
+                type: "microsoft" | "microsoft_enterprise" | "domain" | "gmail" | "icloud" | "proto" | "daum";
             };
             header?: never;
             path: {
@@ -24585,7 +24585,7 @@ export interface operations {
                 /** @description Select Microsoft enterprise mailboxes under tenant.onmicrosoft.com. Defaults to personal Microsoft mailboxes. */
                 enterprise?: boolean;
                 /** @description This administrator query is limited to Microsoft resources. */
-                type: "microsoft";
+                type: "microsoft" | "microsoft_enterprise";
                 /** @description Exact case-insensitive mailbox lookup across primary and alias inventories. A value without `@` is treated as a complete local-part across domains; a leading `@` matches the primary mailbox domain exactly. Owner display identity remains prefix-searchable, and an all-digit value matches resource or owner ID exactly. */
                 search?: string;
                 /** @description Exact normalized mailbox domain. Values with or without a leading `@` are accepted. */
@@ -25378,7 +25378,7 @@ export interface operations {
     postAdminMicrosoftResourceMessagesFetch: {
         parameters: {
             query?: {
-                type?: "microsoft" | "gmail" | "icloud" | "proto" | "daum";
+                type?: "microsoft" | "microsoft_enterprise" | "gmail" | "icloud" | "proto" | "daum";
             };
             header: {
                 /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
@@ -27362,7 +27362,7 @@ export interface operations {
         parameters: {
             query: {
                 /** @description Resource type; defaults to microsoft for backward compatibility. */
-                type?: "microsoft" | "gmail" | "icloud" | "domain" | "proto" | "daum";
+                type?: "microsoft" | "microsoft_enterprise" | "gmail" | "icloud" | "domain" | "proto" | "daum";
                 resourceId: number;
                 search?: string;
                 offset?: number;
@@ -27402,7 +27402,7 @@ export interface operations {
             query: {
                 resourceId: number;
                 /** @description Resource type; defaults to microsoft for backward compatibility. */
-                type?: "microsoft" | "gmail" | "icloud" | "domain" | "proto" | "daum";
+                type?: "microsoft" | "microsoft_enterprise" | "gmail" | "icloud" | "domain" | "proto" | "daum";
             };
             header?: never;
             path: {

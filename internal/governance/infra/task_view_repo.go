@@ -274,7 +274,7 @@ SELECT
     0 AS progress_failed,
     NULL AS reason_buckets
 FROM mailmatch_admin_resource_fetch_states AS state
-WHERE state.operation_kind IN ('resource_fetch', 'gmail_resource_fetch', 'icloud_resource_fetch', 'proto_resource_fetch', 'daum_resource_fetch')`
+WHERE state.operation_kind IN ('resource_fetch', 'enterprise_fetch', 'gmail_resource_fetch', 'icloud_resource_fetch', 'proto_resource_fetch', 'daum_resource_fetch')`
 
 const resourceHistoryTaskSelect = `
 SELECT
@@ -304,7 +304,7 @@ SELECT
     NULL AS progress_failed,
     NULL AS reason_buckets
 FROM mailmatch_resource_fetch_states AS state
-WHERE state.operation_kind = 'resource_history'`
+WHERE state.operation_kind IN ('resource_history','enterprise_history')`
 
 const gmailValidationTaskSelect = `
 SELECT
@@ -727,17 +727,24 @@ const iCloudImportTaskUnion = iCloudImportSingleTaskSelect + `
 UNION ALL
 ` + iCloudOnboardingSingleTaskSelect
 
+func (r *AdminTaskViewRepo) microsoftResourceKind(ctx context.Context, resourceID uint) (string, error) {
+	var root struct{ Type string }
+	err := r.db.WithContext(ctx).Table("email_resources").Select("type").
+		Where("id=? AND type IN ?", resourceID, []string{"microsoft", "microsoft_enterprise"}).Limit(1).Scan(&root).Error
+	return root.Type, err
+}
+
 func (r *AdminTaskViewRepo) MicrosoftResourceExists(ctx context.Context, resourceID uint) (bool, error) {
 	if r == nil || r.db == nil || resourceID == 0 {
 		return false, nil
 	}
+	kind, err := r.microsoftResourceKind(ctx, resourceID)
+	if err != nil || kind == "" {
+		return false, err
+	}
 	var count int64
-	if err := r.db.WithContext(ctx).
-		Table("email_resources AS root").
-		Joins("JOIN microsoft_resources AS microsoft ON microsoft.id = root.id").
-		Where("root.id = ? AND root.type = ?", resourceID, "microsoft").
-		Count(&count).Error; err != nil {
-		return false, fmt.Errorf("check microsoft task resource: %w", err)
+	if err := r.db.WithContext(ctx).Table(kind+"_resources").Where("id=?", resourceID).Count(&count).Error; err != nil {
+		return false, err
 	}
 	return count > 0, nil
 }
@@ -803,6 +810,17 @@ func (r *AdminTaskViewRepo) ProtoResourceExists(ctx context.Context, resourceID 
 }
 
 func (r *AdminTaskViewRepo) ListForMicrosoftResource(ctx context.Context, filter governanceapp.AdminTaskListFilter) ([]governanceapp.AdminTaskView, int64, int64, error) {
+	if filter.BizID > 0 {
+		kind, err := r.microsoftResourceKind(ctx, filter.BizID)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		if kind == "microsoft_enterprise" {
+			enterpriseToken := strings.Replace(tokenTaskSelect, "FROM microsoft_resources AS resource", "FROM microsoft_enterprise_resources AS resource", 1)
+			sources := importResourceTaskSelect + " AND imp.enterprise=TRUE UNION ALL " + enterpriseToken + " UNION ALL " + fetchTaskSelect + " UNION ALL " + resourceHistoryTaskSelect
+			return r.listForResource(ctx, filter, sources)
+		}
+	}
 	return r.listForResource(ctx, filter, microsoftResourceTaskUnion)
 }
 
@@ -897,6 +915,15 @@ func (r *AdminTaskViewRepo) FindByRef(ctx context.Context, ref governanceapp.Adm
 	selectSQL, err := singleTaskSelect(ref.Source)
 	if err != nil {
 		return nil, governanceapp.ErrInvalidAdminTaskQuery
+	}
+	if ref.Source == governanceapp.AdminTaskSourceToken {
+		kind, kindErr := r.microsoftResourceKind(ctx, uint(ref.ID))
+		if kindErr != nil {
+			return nil, kindErr
+		}
+		if kind == "microsoft_enterprise" {
+			selectSQL = strings.Replace(tokenTaskSelect, "FROM microsoft_resources AS resource", "FROM microsoft_enterprise_resources AS resource", 1)
+		}
 	}
 	var row adminTaskRow
 	result := r.db.WithContext(ctx).Raw(`

@@ -16,9 +16,10 @@ import (
 type ResourceType string
 
 const (
-	ResourceTypeMicrosoft ResourceType = "microsoft"
-	ResourceTypeDomain    ResourceType = "domain"
-	ResourceTypeICloud    ResourceType = "icloud"
+	ResourceTypeMicrosoft           ResourceType = "microsoft"
+	ResourceTypeMicrosoftEnterprise ResourceType = "microsoft_enterprise"
+	ResourceTypeDomain              ResourceType = "domain"
+	ResourceTypeICloud              ResourceType = "icloud"
 )
 
 // Allocation bucket counts are persisted data invariants. Keep these in sync
@@ -102,7 +103,18 @@ type EmailResource struct {
 
 // IsValidResourceType returns true if the type is recognized.
 func IsValidResourceType(t ResourceType) bool {
-	return t == ResourceTypeMicrosoft || t == ResourceTypeDomain || t == ResourceTypeICloud
+	return IsMicrosoftResourceType(t) || t == ResourceTypeDomain || t == ResourceTypeICloud
+}
+
+func IsMicrosoftResourceType(t ResourceType) bool {
+	return t == ResourceTypeMicrosoft || t == ResourceTypeMicrosoftEnterprise
+}
+
+func MicrosoftResourceType(enterprise bool) ResourceType {
+	if enterprise {
+		return ResourceTypeMicrosoftEnterprise
+	}
+	return ResourceTypeMicrosoft
 }
 
 // IsValidPurpose returns true if the purpose is recognized.
@@ -115,6 +127,7 @@ func IsValidPurpose(p ResourcePurpose) bool {
 // MicrosoftResource holds Microsoft-specific resource fields.
 type MicrosoftResource struct {
 	ID                   uint // Shared PK = EmailResource.ID
+	ResourceType         ResourceType
 	EmailAddress         string
 	Password             string // Original value, never in API responses or logs
 	ClientID             string

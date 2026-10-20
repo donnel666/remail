@@ -133,7 +133,7 @@ func historicalRecipientMatchesProject(message HistoricalProjectMessage, mainEma
 		return false
 	}
 	fetched := FetchedMessage{
-		ResourceType:      domain.ResourceTypeMicrosoft,
+		ResourceType:      domain.ResourceType(coredomain.MicrosoftResourceType(coredomain.IsMicrosoftEnterpriseEmail(mainEmail))),
 		Recipient:         recipient,
 		Recipients:        []string{recipient},
 		Sender:            strings.TrimSpace(message.Sender),

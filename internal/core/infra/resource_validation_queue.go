@@ -53,7 +53,7 @@ func (q *ResourceValidationQueue) EnqueueResourceValidation(ctx context.Context,
 	queueName := MicrosoftResourceValidationQueueName
 	if task.ResourceType == "domain" {
 		queueName = DomainResourceValidationQueueName
-	} else if task.Enterprise {
+	} else if task.Enterprise || task.ResourceType == "microsoft_enterprise" {
 		queueName = platform.QueueBackgroundMicrosoftEnterpriseValidation
 	}
 	asynqTask := asynq.NewTask(TypeResourceValidation, payload)
@@ -77,7 +77,7 @@ func (q *ResourceValidationQueue) EnqueueResourceValidation(ctx context.Context,
 }
 
 func coreappValidationTaskTypeValid(task coreapp.ResourceValidationTask) bool {
-	return task.ResourceType == "microsoft" || task.ResourceType == "domain"
+	return task.ResourceType == "microsoft" || task.ResourceType == "microsoft_enterprise" || task.ResourceType == "domain"
 }
 
 func (q *ResourceValidationQueue) EnqueueResourceValidationBatch(ctx context.Context, task coreapp.ResourceValidationBatchTask) error {

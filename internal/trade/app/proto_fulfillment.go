@@ -28,9 +28,9 @@ func (uc *UseCase) protoProtocolReady() bool {
 }
 
 func (uc *UseCase) protoFulfillmentReady(ctx context.Context, order domain.Order, allocation *AllocationResult) (bool, error) {
-	if (order.ProductType == domain.ProductTypeMicrosoft || order.ProductType == domain.ProductTypeMicrosoftEnterprise) || (allocation != nil && allocation.Type == domain.AllocationTypeMicrosoft) {
+	if (order.ProductType == domain.ProductTypeMicrosoft || order.ProductType == domain.ProductTypeMicrosoftEnterprise) || (allocation != nil && (allocation.Type == domain.AllocationTypeMicrosoft || allocation.Type == domain.AllocationTypeMicrosoftEnterprise)) {
 		ready, ok := uc.allocation.(interface {
-			MicrosoftAllocationReady(context.Context, string, uint) (bool, error)
+			MicrosoftAllocationReady(context.Context, string, uint, bool) (bool, error)
 		})
 		if !ok {
 			return false, errors.New("microsoft allocation readiness is unavailable")
@@ -39,7 +39,7 @@ func (uc *UseCase) protoFulfillmentReady(ctx context.Context, order domain.Order
 		if allocation != nil {
 			id = allocation.ID
 		}
-		return ready.MicrosoftAllocationReady(ctx, order.OrderNo, id)
+		return ready.MicrosoftAllocationReady(ctx, order.OrderNo, id, order.ProductType == domain.ProductTypeMicrosoftEnterprise || allocation != nil && allocation.Type == domain.AllocationTypeMicrosoftEnterprise)
 	}
 	if order.ProductType == domain.ProductTypeDaum || (allocation != nil && allocation.Type == domain.AllocationTypeDaum) {
 		return uc.daumFulfillmentReady(ctx, order, allocation)

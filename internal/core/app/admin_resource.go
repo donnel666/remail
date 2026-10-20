@@ -348,7 +348,7 @@ func (q *AdminResourceQuery) SetProxyBindings(port AdminProxyBindingQueryPort) {
 }
 
 func (q *AdminResourceQuery) List(ctx context.Context, filter AdminMicrosoftListFilter, offset, limit int, afterID uint) (*AdminMicrosoftListResult, error) {
-	if q == nil || q.repo == nil || q.owners == nil || q.bindings == nil {
+	if q == nil || q.repo == nil || q.owners == nil || q.bindings == nil && !filter.Enterprise {
 		return nil, domain.ErrResourceDependency
 	}
 	filter, err := normalizeAdminMicrosoftFilter(filter)
@@ -403,9 +403,12 @@ func (q *AdminResourceQuery) List(ctx context.Context, filter AdminMicrosoftList
 	if err != nil {
 		return nil, fmt.Errorf("load admin resource owners: %w", err)
 	}
-	bindings, err := q.bindings.GetByResourceIDs(ctx, ids)
-	if err != nil {
-		return nil, fmt.Errorf("load admin resource bindings: %w", err)
+	bindings := make(map[uint]AdminBindingSummary)
+	if !filter.Enterprise {
+		bindings, err = q.bindings.GetByResourceIDs(ctx, ids)
+		if err != nil {
+			return nil, fmt.Errorf("load admin resource bindings: %w", err)
+		}
 	}
 	items := make([]AdminMicrosoftResourceItem, len(records))
 	for i := range records {
@@ -441,7 +444,7 @@ func reconcileCachedListTotal(cached int64, offset, limit int, afterID uint, rec
 }
 
 func (q *AdminResourceQuery) Get(ctx context.Context, resourceID uint) (*AdminMicrosoftResourceDetail, error) {
-	if q == nil || q.repo == nil || q.owners == nil || q.bindings == nil || resourceID == 0 {
+	if q == nil || q.repo == nil || q.owners == nil || resourceID == 0 {
 		return nil, domain.ErrResourceNotFound
 	}
 	record, err := q.repo.FindAdminMicrosoft(ctx, resourceID)
@@ -459,9 +462,15 @@ func (q *AdminResourceQuery) Get(ctx context.Context, resourceID uint) (*AdminMi
 	if !ok {
 		return nil, fmt.Errorf("%w: owner summary missing", domain.ErrResourceDependency)
 	}
-	bindings, err := q.bindings.GetByResourceIDs(ctx, []uint{resourceID})
-	if err != nil {
-		return nil, fmt.Errorf("load admin resource binding: %w", err)
+	bindings := make(map[uint]AdminBindingSummary)
+	if !domain.IsMicrosoftEnterpriseEmail(record.EmailAddress) {
+		if q.bindings == nil {
+			return nil, domain.ErrResourceDependency
+		}
+		bindings, err = q.bindings.GetByResourceIDs(ctx, []uint{resourceID})
+		if err != nil {
+			return nil, fmt.Errorf("load admin resource binding: %w", err)
+		}
 	}
 	proxyBindings := []AdminProxyBindingSummary{}
 	if q.proxies != nil {

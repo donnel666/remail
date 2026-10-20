@@ -49,11 +49,15 @@ func (q *MicrosoftTokenRefreshQueue) EnqueueMicrosoftTokenRefresh(ctx context.Co
 	if err != nil {
 		return false, fmt.Errorf("marshal microsoft token refresh task: %w", err)
 	}
+	queueName := MicrosoftTokenRefreshQueueName
+	if task.Enterprise {
+		queueName = platform.QueueBackgroundMicrosoftEnterpriseValidation
+	}
 	taskTimeout := microsoftTokenRefreshTimeout()
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynq.NewTask(TypeMicrosoftTokenRefresh, payload),
-		asynq.Queue(MicrosoftTokenRefreshQueueName),
+		asynq.Queue(queueName),
 		asynq.Unique(taskTimeout),
 		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(taskTimeout),
@@ -68,16 +72,24 @@ func (q *MicrosoftTokenRefreshQueue) EnqueueMicrosoftTokenRefresh(ctx context.Co
 	return true, nil
 }
 
-func (q *MicrosoftTokenRefreshQueue) EnqueueMicrosoftTokenRefreshDispatcher(ctx context.Context, delay time.Duration) error {
+func (q *MicrosoftTokenRefreshQueue) EnqueueMicrosoftTokenRefreshDispatcher(ctx context.Context, delay time.Duration, enterprise bool) error {
 	if q == nil || q.client == nil {
 		return fmt.Errorf("microsoft token refresh queue is unavailable")
+	}
+	queue := platform.QueueDefault
+	if enterprise {
+		queue = platform.QueueMicrosoftEnterprise
+	}
+	payload, err := json.Marshal(mailapp.MicrosoftTokenRefreshTask{Enterprise: enterprise})
+	if err != nil {
+		return err
 	}
 	uniqueTTL := microsoftTokenRefreshDispatcherTimeout
 	if delay > 0 {
 		uniqueTTL += delay
 	}
 	options := []asynq.Option{
-		asynq.Queue(platform.QueueDefault),
+		asynq.Queue(queue),
 		asynq.Unique(uniqueTTL),
 		asynq.MaxRetry(0),
 		asynq.Timeout(microsoftTokenRefreshDispatcherTimeout),
@@ -86,7 +98,7 @@ func (q *MicrosoftTokenRefreshQueue) EnqueueMicrosoftTokenRefreshDispatcher(ctx 
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
-	_, err := q.client.EnqueueContext(ctx, asynq.NewTask(TypeMicrosoftTokenRefreshDispatcher, nil), options...)
+	_, err = q.client.EnqueueContext(ctx, asynq.NewTask(TypeMicrosoftTokenRefreshDispatcher, payload), options...)
 	if err != nil {
 		if errors.Is(err, asynq.ErrDuplicateTask) {
 			return nil

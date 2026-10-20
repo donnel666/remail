@@ -314,7 +314,7 @@ func (uc *ResourceValidationUseCase) Create(ctx context.Context, resourceID uint
 	}
 
 	switch resource.Type {
-	case domain.ResourceTypeMicrosoft:
+	case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
 		ms, err := uc.resources.FindMicrosoftByID(ctx, resourceID)
 		if err != nil {
 			return nil, err
@@ -457,7 +457,7 @@ func (uc *ResourceValidationUseCase) Process(ctx context.Context, task ResourceV
 	}
 	var processErr error
 	switch task.ResourceType {
-	case domain.ResourceTypeMicrosoft:
+	case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
 		processErr = uc.processMicrosoft(ctx, task, finalAttempt)
 	case domain.ResourceTypeDomain:
 		processErr = uc.processDomain(ctx, task, finalAttempt)

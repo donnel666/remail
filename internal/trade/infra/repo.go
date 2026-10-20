@@ -146,6 +146,9 @@ func (r *Repo) CreateHistoricalOrder(ctx context.Context, cmd tradeapp.CreateHis
 		return domain.ErrInvalidOrderRequest
 	}
 	allocationType := string(domain.AllocationTypeMicrosoft)
+	if historicalMicrosoftProductType(deliveryEmail) == domain.ProductTypeMicrosoftEnterprise {
+		allocationType = string(domain.AllocationTypeMicrosoftEnterprise)
+	}
 	debitTxID := cmd.DebitTxID
 	createdAt := cmd.CreatedAt.UTC()
 	expiredAt := cmd.ExpiredAt.UTC()
@@ -424,7 +427,7 @@ func (r *Repo) MarkActive(ctx context.Context, cmd tradeapp.MarkActiveCommand) (
 			updates["activated_at"] = cmd.ActivatedAt.UTC()
 		}
 		switch cmd.AllocationType {
-		case domain.AllocationTypeMicrosoft, domain.AllocationTypeDomain, domain.AllocationTypeICloud, domain.AllocationTypeProto, domain.AllocationTypeDaum:
+		case domain.AllocationTypeMicrosoft, domain.AllocationTypeMicrosoftEnterprise, domain.AllocationTypeDomain, domain.AllocationTypeICloud, domain.AllocationTypeProto, domain.AllocationTypeDaum:
 			if cmd.AllocationID == 0 {
 				return domain.ErrInvalidOrderRequest
 			}
@@ -1033,12 +1036,13 @@ func (r *Repo) listCheckoutAllocationRecoveries(ctx context.Context, staleBefore
 		Select("o.order_no, o.status, o.product_type").
 		Joins("STRAIGHT_JOIN allocation_order_guards AS g ON g.order_no = o.order_no").
 		Joins("LEFT JOIN microsoft_allocations AS ma ON g.type = ? AND ma.order_no = g.order_no AND ma.status = ?", domain.AllocationTypeMicrosoft, "allocated").
+		Joins("LEFT JOIN microsoft_enterprise_allocations AS mea ON g.type = ? AND mea.order_no = g.order_no AND mea.status = ?", domain.AllocationTypeMicrosoftEnterprise, "allocated").
 		Joins("LEFT JOIN domain_allocations AS da ON g.type = ? AND da.order_no = g.order_no AND da.status = ?", domain.AllocationTypeDomain, "allocated").
 		Joins("LEFT JOIN gmail_allocations AS ga ON g.type = ? AND ga.order_no = g.order_no AND ga.source = ? AND ga.status = ?", domain.AllocationTypeGmail, "local", "allocated").
 		Joins("LEFT JOIN icloud_allocations AS ia ON g.type = ? AND ia.order_no = g.order_no AND ia.status = ?", domain.AllocationTypeICloud, "allocated").
 		Joins("LEFT JOIN proto_allocations AS pa ON g.type = ? AND pa.order_no = g.order_no AND pa.guard_type = ? AND pa.status = ?", domain.AllocationTypeProto, domain.AllocationTypeProto, "allocated").
 		Joins("LEFT JOIN daum_allocations AS dma ON g.type = ? AND dma.order_no = g.order_no AND dma.guard_type = ? AND dma.status = ?", domain.AllocationTypeDaum, domain.AllocationTypeDaum, "allocated").
-		Where("(ma.id IS NOT NULL OR da.id IS NOT NULL OR ga.id IS NOT NULL OR ia.id IS NOT NULL OR pa.id IS NOT NULL OR dma.id IS NOT NULL) AND (o.status = ? OR (o.status = ? AND COALESCE(ma.created_at, da.created_at, ga.created_at, ia.created_at, pa.created_at, dma.created_at) < ?) OR (o.status = ? AND o.updated_at < ?))",
+		Where("(ma.id IS NOT NULL OR mea.id IS NOT NULL OR da.id IS NOT NULL OR ga.id IS NOT NULL OR ia.id IS NOT NULL OR pa.id IS NOT NULL OR dma.id IS NOT NULL) AND (o.status = ? OR (o.status = ? AND COALESCE(ma.created_at, mea.created_at, da.created_at, ga.created_at, ia.created_at, pa.created_at, dma.created_at) < ?) OR (o.status = ? AND o.updated_at < ?))",
 			domain.OrderStatusFailed,
 			domain.OrderStatusPendingPayment, staleBefore.UTC(),
 			domain.OrderStatusPaid, staleBefore.UTC())

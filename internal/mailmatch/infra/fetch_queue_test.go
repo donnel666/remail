@@ -139,7 +139,7 @@ func TestResourceFetchDispatcherUsesForegroundQueue(t *testing.T) {
 		ResourceID: 103, Generation: 1,
 	})
 	require.NoError(t, err)
-	require.NoError(t, NewFetchQueue(client).EnqueueAdminResourceFetchDispatcher(context.Background(), time.Second))
+	require.NoError(t, NewFetchQueue(client).EnqueueAdminResourceFetchDispatcher(context.Background(), time.Second, false))
 	pending, err := inspector.ListPendingTasks(platform.QueueDefault)
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
@@ -149,7 +149,7 @@ func TestResourceFetchDispatcherUsesForegroundQueue(t *testing.T) {
 	require.Equal(t, TypeMailmatchAdminResourceFetchDispatcher, scheduled[0].Type)
 }
 
-func TestResourceHistoryDispatcherUsesBackgroundProjectHistoryQueue(t *testing.T) {
+func TestResourceHistoryDispatcherUsesControlQueue(t *testing.T) {
 	server := miniredis.RunT(t)
 	options := asynq.RedisClientOpt{Addr: server.Addr()}
 	client := asynq.NewClient(options)
@@ -159,14 +159,14 @@ func TestResourceHistoryDispatcherUsesBackgroundProjectHistoryQueue(t *testing.T
 		require.NoError(t, client.Close())
 	})
 
-	require.NoError(t, NewFetchQueue(client).EnqueueResourceHistoryDispatcher(context.Background(), time.Second))
-	scheduled, err := inspector.ListScheduledTasks(platform.QueueBackgroundProjectHistory)
+	require.NoError(t, NewFetchQueue(client).EnqueueResourceHistoryDispatcher(context.Background(), time.Second, false))
+	scheduled, err := inspector.ListScheduledTasks(platform.QueueDefault)
 	require.NoError(t, err)
 	require.Len(t, scheduled, 1)
 	require.Equal(t, TypeMailmatchResourceHistoryDispatcher, scheduled[0].Type)
 
 	queues, err := inspector.Queues()
 	require.NoError(t, err)
-	require.Contains(t, queues, platform.QueueBackgroundProjectHistory)
-	require.NotContains(t, queues, platform.QueueDefault)
+	require.Contains(t, queues, platform.QueueDefault)
+	require.NotContains(t, queues, platform.QueueBackgroundProjectHistory)
 }

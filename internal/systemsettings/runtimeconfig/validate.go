@@ -52,7 +52,14 @@ var integerRanges = map[string]integerRange{
 	"fetch_lookback_window_days": positive(3650), "read_window_skew_minutes": positive(1440), "code_read_limit": positive(100), "purchase_read_limit": positive(500), ICloudMailmatchScanLimitKey: positive(10000), ICloudAdminReadLimitKey: positive(5000),
 	"pickup_fetch_reserve_ttl_minutes": positive(30), "pickup_fetch_lease_ttl_minutes": positive(10), "pickup_message_cache_ttl_seconds": positive(300),
 	"pickup_message_cache_limit": positive(100), "pickup_fetch_heartbeat_seconds": positive(300), "mailmatch_fetch_timeout_minutes": positive(60), "pickup_request_fetch_timeout_minutes": positive(30),
-	"project_history_timeout_minutes": positive(120), "fetch_dispatcher_interval_seconds": positive(3600), "fetch_dispatcher_timeout_seconds": positive(3600), "resource_fetch_dispatch_limit": positive(10000), "project_history_concurrency": positive(8096), "gmail_validation_concurrency": positive(64), "gmail_history_concurrency": positive(8096), "project_history_dispatch_limit": positive(100),
+	"project_history_timeout_minutes": positive(120), "fetch_dispatcher_interval_seconds": positive(3600), "fetch_dispatcher_timeout_seconds": positive(3600), "resource_fetch_dispatch_limit": positive(10000), "project_history_concurrency": positive(8096),
+	"microsoft_enterprise_history_concurrency":          positive(8096),
+	"microsoft_enterprise_history_dispatch_limit":       positive(100),
+	"microsoft_enterprise_token_dispatch_limit":         positive(100),
+	"microsoft_enterprise_token_refresh_lookahead_days": positive(365),
+	"microsoft_enterprise_token_refresh_scan_limit":     positive(10000),
+	"asynq_queue_microsoft_enterprise_weight":           positive(10000),
+	"gmail_validation_concurrency":                      positive(64), "gmail_history_concurrency": positive(8096), "project_history_dispatch_limit": positive(100),
 	"microsoft_alias_weekly_limit": positive(1000), "microsoft_alias_yearly_limit": positive(10000), "microsoft_alias_ensure_interval_hours": positive(720), "microsoft_alias_reconciliation_grace_hours": positive(720),
 	"microsoft_alias_transient_backoff_base_minutes": positive(1440), "microsoft_alias_transient_backoff_max_hours": positive(720), "microsoft_alias_negative_confirm_required": positive(20),
 	"token_refresh_max_attempts": positive(20), "token_refresh_scan_limit": positive(10000), "token_refresh_lookahead_days": positive(365), "recovery_code_lease_minutes": positive(60),
@@ -84,7 +91,7 @@ var integerRanges = map[string]integerRange{
 	"resource_validation_max_ids": positive(10000), "validation_batch_page_size": positive(10000), "validation_insert_chunk_size": positive(10000),
 	"bulk_user_chunk_size": positive(10000), "card_bulk_chunk_size": positive(10000), "retention_batch_size": positive(100000),
 	"retention_batch_sleep_ms": {min: 0, max: 60000}, "retention_daily_run_hour": {min: 0, max: 23},
-	"idempotency_key_retain_days": positive(3650), "mailmatch_ms_retain_days": positive(3650), "mailmatch_domain_retain_days": positive(3650), "gmail_code_retain_days": positive(3650),
+	"idempotency_key_retain_days": positive(3650), "mailmatch_ms_retain_days": positive(3650), "mailmatch_microsoft_enterprise_retain_days": positive(3650), "mailmatch_domain_retain_days": positive(3650), "gmail_code_retain_days": positive(3650),
 	"daily_usage_retain_days": positive(3650), "outbound_mail_retain_days": positive(3650), "inbound_mail_retain_days": positive(3650), "system_log_retain_days": positive(3650),
 
 	"admin_resource_list_default_limit": positive(100), "admin_log_default_limit": positive(100), "admin_task_default_limit": positive(100), "admin_ranking_limit": positive(100),
@@ -222,7 +229,7 @@ func Validate(key, value string) error {
 		if err != nil || ratio.IsNegative() || ratio.GreaterThan(decimal.NewFromInt(1)) {
 			return domain.ErrInvalidValue
 		}
-	case "token_refresh_hour":
+	case "token_refresh_hour", "microsoft_enterprise_token_refresh_hour":
 		number, err := strconv.Atoi(value)
 		if err != nil || number < 0 || number > 23 {
 			return domain.ErrInvalidValue

@@ -277,17 +277,22 @@ type ProjectMailRuleRequest struct {
 
 // ProjectUseCase handles project/product/rule commands.
 type ProjectUseCase struct {
-	projects            ProjectRepository
-	owners              OwnerQueryPort
-	historyScan         func(context.Context, uint, string) error
-	gmailHistoryScan    func(context.Context, uint, string) error
-	protoHistoryScan    func(context.Context, uint, string) error
-	daumHistoryScan     func(context.Context, uint, string) error
-	applicationNotifier func(context.Context, domain.Project, string) error
+	projects              ProjectRepository
+	owners                OwnerQueryPort
+	historyScan           func(context.Context, uint, string) error
+	enterpriseHistoryScan func(context.Context, uint, string) error
+	gmailHistoryScan      func(context.Context, uint, string) error
+	protoHistoryScan      func(context.Context, uint, string) error
+	daumHistoryScan       func(context.Context, uint, string) error
+	applicationNotifier   func(context.Context, domain.Project, string) error
 }
 
 func NewProjectUseCase(projects ProjectRepository) *ProjectUseCase {
 	return &ProjectUseCase{projects: projects}
+}
+
+func (uc *ProjectUseCase) SetMicrosoftEnterpriseHistoryScan(scan func(context.Context, uint, string) error) {
+	uc.enterpriseHistoryScan = scan
 }
 
 func (uc *ProjectUseCase) SetHistoryScan(scan func(context.Context, uint, string) error) {
@@ -678,11 +683,22 @@ func (uc *ProjectUseCase) AdminApproveWithConfig(ctx context.Context, operatorUs
 }
 
 func (uc *ProjectUseCase) scheduleHistoryScan(ctx context.Context, detail *domain.ProjectDetail, requestID string) {
-	if uc.historyScan == nil || detail == nil || detail.Project.ID == 0 || !projectHasMicrosoftProduct(detail.Products) {
+	if detail == nil || detail.Project.ID == 0 {
 		return
 	}
-	if err := uc.historyScan(context.WithoutCancel(ctx), detail.Project.ID, requestID); err != nil {
-		slog.Warn("project history scan enqueue failed", "project_id", detail.Project.ID, "request_id", requestID, "error", err)
+	for _, product := range detail.Products {
+		var schedule func(context.Context, uint, string) error
+		switch product.Type {
+		case domain.ProductTypeMicrosoft:
+			schedule = uc.historyScan
+		case domain.ProductTypeMicrosoftEnterprise:
+			schedule = uc.enterpriseHistoryScan
+		}
+		if schedule != nil {
+			if err := schedule(context.WithoutCancel(ctx), detail.Project.ID, requestID); err != nil {
+				slog.Warn("project history scan enqueue failed", "product_type", product.Type, "project_id", detail.Project.ID, "error", err)
+			}
+		}
 	}
 }
 

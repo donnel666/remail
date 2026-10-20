@@ -74,12 +74,13 @@ const (
 type AllocationType string
 
 const (
-	AllocationTypeMicrosoft AllocationType = "microsoft"
-	AllocationTypeDomain    AllocationType = "domain"
-	AllocationTypeGmail     AllocationType = "gmail"
-	AllocationTypeICloud    AllocationType = "icloud"
-	AllocationTypeProto     AllocationType = "proto"
-	AllocationTypeDaum      AllocationType = "daum"
+	AllocationTypeMicrosoft           AllocationType = "microsoft"
+	AllocationTypeMicrosoftEnterprise AllocationType = "microsoft_enterprise"
+	AllocationTypeDomain              AllocationType = "domain"
+	AllocationTypeGmail               AllocationType = "gmail"
+	AllocationTypeICloud              AllocationType = "icloud"
+	AllocationTypeProto               AllocationType = "proto"
+	AllocationTypeDaum                AllocationType = "daum"
 )
 
 type OperatorType string

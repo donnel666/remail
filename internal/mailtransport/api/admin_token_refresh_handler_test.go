@@ -176,7 +176,7 @@ func (r *adminTokenRefreshRepoStub) Request(
 	return &clone, false, nil
 }
 
-func (*adminTokenRefreshRepoStub) ListPending(context.Context, int) ([]mailapp.MicrosoftTokenRefreshState, error) {
+func (*adminTokenRefreshRepoStub) ListPending(context.Context, int, bool) ([]mailapp.MicrosoftTokenRefreshState, error) {
 	return nil, nil
 }
 
@@ -209,7 +209,7 @@ func (adminTokenRefreshQueueStub) EnqueueMicrosoftTokenRefresh(context.Context, 
 	return true, nil
 }
 
-func (adminTokenRefreshQueueStub) EnqueueMicrosoftTokenRefreshDispatcher(context.Context, time.Duration) error {
+func (adminTokenRefreshQueueStub) EnqueueMicrosoftTokenRefreshDispatcher(context.Context, time.Duration, bool) error {
 	return nil
 }
 

@@ -83,12 +83,14 @@ type ResourceFetchSubmitResult struct {
 }
 
 type AdminResourceFetchTask struct {
+	Enterprise bool   `json:"enterprise,omitempty"`
 	ResourceID uint   `json:"resourceId"`
 	Generation uint64 `json:"generation"`
 	RequestID  string `json:"requestId"`
 }
 
 type ResourceHistoryTask struct {
+	Enterprise bool   `json:"enterprise,omitempty"`
 	ResourceID uint   `json:"resourceId"`
 	Generation uint64 `json:"generation"`
 	RequestID  string `json:"requestId"`
@@ -103,7 +105,7 @@ type DispatchResourceFetchJobsResult struct {
 type resourceTaskRepository interface {
 	CreateOrReuseResourceFetch(ctx context.Context, job *domain.ResourceFetchJob, log *governancedomain.OperationLog) (bool, error)
 	FindResourceFetch(ctx context.Context, resourceID uint, generation uint64) (*domain.ResourceFetchJob, error)
-	ListPendingResourceFetches(ctx context.Context, limit int) ([]domain.ResourceFetchJob, error)
+	ListPendingResourceFetches(ctx context.Context, limit int, enterprise bool) ([]domain.ResourceFetchJob, error)
 	MarkResourceFetchProcessing(ctx context.Context, resourceID uint, generation uint64) (bool, error)
 	ReleaseResourceFetchInfrastructureFailure(ctx context.Context, resourceID uint, generation uint64, safeError string, log *governancedomain.SystemLog) (bool, error)
 	LoadResourceFetchScope(ctx context.Context, resourceID uint, expectedCredentialRevision uint64, resourceType domain.ResourceType) (*domain.ResourceFetchScope, error)
@@ -132,12 +134,12 @@ type ResourceHistoryRepository interface {
 
 type AdminResourceFetchQueue interface {
 	EnqueueAdminResourceFetch(ctx context.Context, task AdminResourceFetchTask) (bool, error)
-	EnqueueAdminResourceFetchDispatcher(ctx context.Context, delay time.Duration) error
+	EnqueueAdminResourceFetchDispatcher(ctx context.Context, delay time.Duration, enterprise bool) error
 }
 
 type ResourceHistoryQueue interface {
 	EnqueueResourceHistory(ctx context.Context, task ResourceHistoryTask) (bool, error)
-	EnqueueResourceHistoryDispatcher(ctx context.Context, delay time.Duration) error
+	EnqueueResourceHistoryDispatcher(ctx context.Context, delay time.Duration, enterprise bool) error
 }
 
 type resourceTaskUseCase struct {
@@ -230,8 +232,8 @@ func (uc *resourceTaskUseCase) submit(ctx context.Context, cmd resourceTaskSubmi
 	if cmd.ResourceType == "" {
 		cmd.ResourceType = domain.ResourceTypeMicrosoft
 	}
-	if (cmd.ResourceType != domain.ResourceTypeMicrosoft && cmd.ResourceType != domain.ResourceTypeGmail && cmd.ResourceType != domain.ResourceTypeICloud && cmd.ResourceType != domain.ResourceTypeProto && cmd.ResourceType != domain.ResourceTypeDaum) ||
-		(cmd.ResourceType != domain.ResourceTypeMicrosoft && cmd.Kind != domain.ResourceFetchJobFetch) {
+	if (!domain.IsMicrosoftResourceType(cmd.ResourceType) && cmd.ResourceType != domain.ResourceTypeGmail && cmd.ResourceType != domain.ResourceTypeICloud && cmd.ResourceType != domain.ResourceTypeProto && cmd.ResourceType != domain.ResourceTypeDaum) ||
+		(!domain.IsMicrosoftResourceType(cmd.ResourceType) && cmd.Kind != domain.ResourceFetchJobFetch) {
 		return nil, domain.ErrInvalidRequest
 	}
 	if cmd.ResourceType == domain.ResourceTypeProto && (uc.messages == nil || uc.messages.protoFetch == nil) {
@@ -338,7 +340,7 @@ func (uc *resourceTaskUseCase) process(ctx context.Context, resourceID uint, gen
 	fetched, err := uc.transport.FetchMicrosoftMessages(ctx, FetchMessagesRequest{
 		Scope: OrderScope{
 			OrderNo:                 firstNonBlank(job.RequestID, fmt.Sprintf("resource-fetch-%d", job.ID)),
-			AllocationType:          domain.ResourceTypeMicrosoft,
+			AllocationType:          scope.ResourceType,
 			EmailResourceID:         scope.ResourceID,
 			Recipient:               scope.EmailAddress,
 			MicrosoftEmail:          scope.EmailAddress,
@@ -366,7 +368,7 @@ func (uc *resourceTaskUseCase) process(ctx context.Context, resourceID uint, gen
 	if uc.messages == nil {
 		return uc.releaseResourceFetchInfrastructure(ctx, job.ResourceID, job.Generation, errors.New("mailmatch message use case is unavailable"))
 	}
-	stored, matched, _, err := uc.messages.ingestFetchedMessagesForResourcesWithFence(ctx, fetched.Messages, domain.ResourceTypeMicrosoft, []uint{job.ResourceID}, func(txCtx context.Context) error {
+	stored, matched, _, err := uc.messages.ingestFetchedMessagesForResourcesWithFence(ctx, fetched.Messages, scope.ResourceType, []uint{job.ResourceID}, func(txCtx context.Context) error {
 		return uc.adminRepo.AssertResourceFetchFence(
 			txCtx,
 			job.ResourceID,
@@ -563,28 +565,28 @@ func (uc *resourceTaskUseCase) processResourceHistory(ctx context.Context, job d
 	return nil
 }
 
-func (uc *AdminResourceFetchUseCase) DispatchPending(ctx context.Context, limit int) (*DispatchResourceFetchJobsResult, error) {
+func (uc *AdminResourceFetchUseCase) DispatchPending(ctx context.Context, limit int, enterprise bool) (*DispatchResourceFetchJobsResult, error) {
 	if uc == nil || uc.task == nil {
 		return nil, domain.ErrFetchQueueUnavailable
 	}
-	return uc.task.dispatchPending(ctx, limit)
+	return uc.task.dispatchPending(ctx, limit, enterprise)
 }
 
-func (uc *ResourceHistoryUseCase) DispatchPending(ctx context.Context, limit int) (*DispatchResourceFetchJobsResult, error) {
+func (uc *ResourceHistoryUseCase) DispatchPending(ctx context.Context, limit int, enterprise bool) (*DispatchResourceFetchJobsResult, error) {
 	if uc == nil || uc.task == nil {
 		return nil, domain.ErrFetchQueueUnavailable
 	}
-	return uc.task.dispatchPending(ctx, limit)
+	return uc.task.dispatchPending(ctx, limit, enterprise)
 }
 
-func (uc *resourceTaskUseCase) dispatchPending(ctx context.Context, limit int) (*DispatchResourceFetchJobsResult, error) {
+func (uc *resourceTaskUseCase) dispatchPending(ctx context.Context, limit int, enterprise bool) (*DispatchResourceFetchJobsResult, error) {
 	if uc == nil || uc.repo == nil || (uc.adminQueue == nil && uc.historyQueue == nil) {
 		return nil, domain.ErrFetchQueueUnavailable
 	}
 	if limit <= 0 {
 		limit = ResourceFetchDefaultDispatchLimit
 	}
-	jobs, err := uc.repo.ListPendingResourceFetches(ctx, limit)
+	jobs, err := uc.repo.ListPendingResourceFetches(ctx, limit, enterprise)
 	if err != nil {
 		return nil, err
 	}
@@ -616,10 +618,12 @@ func (uc *resourceTaskUseCase) dispatchPending(ctx context.Context, limit int) (
 func (uc *resourceTaskUseCase) enqueueTask(ctx context.Context, job domain.ResourceFetchJob) (bool, error) {
 	if uc.kind == domain.ResourceFetchJobHistory {
 		return uc.historyQueue.EnqueueResourceHistory(ctx, ResourceHistoryTask{
+			Enterprise: job.ResourceType == domain.ResourceTypeMicrosoftEnterprise,
 			ResourceID: job.ResourceID, Generation: job.Generation, RequestID: job.RequestID,
 		})
 	}
 	return uc.adminQueue.EnqueueAdminResourceFetch(ctx, AdminResourceFetchTask{
+		Enterprise: job.ResourceType == domain.ResourceTypeMicrosoftEnterprise,
 		ResourceID: job.ResourceID, Generation: job.Generation, RequestID: job.RequestID,
 	})
 }
@@ -657,10 +661,12 @@ func (uc *ResourceHistoryUseCase) ScheduleDispatcher(ctx context.Context, delay 
 }
 
 func (uc *resourceTaskUseCase) scheduleDispatcher(ctx context.Context, delay time.Duration) {
-	_ = uc.enqueueDispatcher(ctx, delay)
+	for _, enterprise := range []bool{false, true} {
+		_ = uc.enqueueDispatcher(ctx, delay, enterprise)
+	}
 }
 
-func (uc *resourceTaskUseCase) enqueueDispatcher(ctx context.Context, delay time.Duration) error {
+func (uc *resourceTaskUseCase) enqueueDispatcher(ctx context.Context, delay time.Duration, enterprise bool) error {
 	if uc == nil {
 		return domain.ErrFetchQueueUnavailable
 	}
@@ -668,12 +674,12 @@ func (uc *resourceTaskUseCase) enqueueDispatcher(ctx context.Context, delay time
 		if uc.historyQueue == nil {
 			return domain.ErrFetchQueueUnavailable
 		}
-		return uc.historyQueue.EnqueueResourceHistoryDispatcher(ctx, delay)
+		return uc.historyQueue.EnqueueResourceHistoryDispatcher(ctx, delay, enterprise)
 	}
 	if uc.adminQueue == nil {
 		return domain.ErrFetchQueueUnavailable
 	}
-	return uc.adminQueue.EnqueueAdminResourceFetchDispatcher(ctx, delay)
+	return uc.adminQueue.EnqueueAdminResourceFetchDispatcher(ctx, delay, enterprise)
 }
 
 func (uc *resourceTaskUseCase) finishScopeFailure(ctx context.Context, job domain.ResourceFetchJob, err error) error {
@@ -756,7 +762,7 @@ func (uc *resourceTaskUseCase) wakeDispatcher(ctx context.Context, job domain.Re
 	if uc == nil {
 		return
 	}
-	err := uc.enqueueDispatcher(ctx, 0)
+	err := uc.enqueueDispatcher(ctx, 0, job.ResourceType == domain.ResourceTypeMicrosoftEnterprise)
 	if err == nil {
 		return
 	}

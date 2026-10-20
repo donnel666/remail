@@ -237,7 +237,7 @@ func (r *AuxiliaryMailRepo) DaumPickupBinding(ctx context.Context, id uint) (*ma
 	if resourceID == nil || *resourceID == 0 {
 		return nil, true, nil
 	}
-	table, ok := map[string]string{"microsoft": "microsoft_resources", "domain": "domain_resources", "gmail": "gmail_resources", "icloud": "icloud_resources", "proto": "proto_resources", "daum": "daum_resources"}[row.AllocationType]
+	table, ok := map[string]string{"microsoft": "microsoft_resources", "microsoft_enterprise": "microsoft_enterprise_resources", "domain": "domain_resources", "gmail": "gmail_resources", "icloud": "icloud_resources", "proto": "proto_resources", "daum": "daum_resources"}[row.AllocationType]
 	if !ok {
 		return nil, true, nil
 	}

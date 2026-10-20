@@ -483,7 +483,7 @@ func (r *allocationLockRepo) FindReusableExplicitAlias(context.Context, uint, ui
 	return r.explicitAlias, nil
 }
 
-func (*allocationLockRepo) IsMicrosoftMailboxHistoricallyMatched(context.Context, uint, domain.MicrosoftMailbox, uint) (bool, error) {
+func (*allocationLockRepo) IsMicrosoftMailboxHistoricallyMatched(context.Context, uint, domain.MicrosoftMailbox, uint, bool) (bool, error) {
 	return false, nil
 }
 
@@ -506,7 +506,7 @@ func (r *allocationLockRepo) CreateMicrosoftAllocation(_ context.Context, alloca
 	return nil
 }
 
-func (*allocationLockRepo) TouchMicrosoftAllocated(context.Context, uint, time.Time) error {
+func (*allocationLockRepo) TouchMicrosoftAllocated(context.Context, uint, time.Time, bool) error {
 	return nil
 }
 
@@ -1289,6 +1289,6 @@ func TestDomainAllocationGeneratesAnotherAddressAfterProjectHistory(t *testing.T
 	}
 }
 
-func (*allocationLockRepo) MicrosoftAllocationReady(context.Context, string, uint) (bool, error) {
+func (*allocationLockRepo) MicrosoftAllocationReady(context.Context, string, uint, bool) (bool, error) {
 	return true, nil
 }

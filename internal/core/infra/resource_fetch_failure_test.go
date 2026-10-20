@@ -14,7 +14,8 @@ import (
 func TestRecordMicrosoftFetchFailurePersistsRotatedToken(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:resource-fetch-failure?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&MicrosoftResourceModel{}))
+	require.NoError(t, db.AutoMigrate(&EmailResourceModel{}, &MicrosoftResourceModel{}))
+	require.NoError(t, db.Create(&EmailResourceModel{ID: 95, Type: "microsoft", OwnerUserID: 1}).Error)
 	require.NoError(t, db.Create(&MicrosoftResourceModel{
 		ID: 95, EmailAddress: "owner@example.test", RefreshToken: "refresh-v1",
 		CredentialRevision: 7, CredentialUpdatedAt: time.Now().UTC(), Status: string(domain.MicrosoftStatusNormal),

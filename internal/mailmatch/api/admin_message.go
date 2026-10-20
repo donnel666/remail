@@ -169,7 +169,7 @@ func requireProtoManagementRole(c *gin.Context, resourceType domain.ResourceType
 
 func adminMessageResourceType(c *gin.Context) (domain.ResourceType, bool) {
 	value := domain.ResourceType(strings.TrimSpace(c.DefaultQuery("type", string(domain.ResourceTypeMicrosoft))))
-	return value, value == domain.ResourceTypeMicrosoft || value == domain.ResourceTypeDomain || value == domain.ResourceTypeGmail || value == domain.ResourceTypeICloud || value == domain.ResourceTypeProto || value == domain.ResourceTypeDaum
+	return value, domain.IsMicrosoftResourceType(value) || value == domain.ResourceTypeDomain || value == domain.ResourceTypeGmail || value == domain.ResourceTypeICloud || value == domain.ResourceTypeProto || value == domain.ResourceTypeDaum
 }
 
 func adminMessageSummaryDTO(item mailmatchapp.AdminMessageSummary) adminMessageSummaryResponse {

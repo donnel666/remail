@@ -380,6 +380,6 @@ func (s *unavailableRefundRepoStub) ListUnavailableMicrosoftOrders(ctx context.C
 func (*unavailableRefundRepoStub) AssertMicrosoftRefundFailure(context.Context, MicrosoftUnavailableOrder) error {
 	return nil
 }
-func (*unavailableRefundAllocationStub) MicrosoftAllocationReady(context.Context, string, uint) (bool, error) {
+func (*unavailableRefundAllocationStub) MicrosoftAllocationReady(context.Context, string, uint, bool) (bool, error) {
 	return true, nil
 }

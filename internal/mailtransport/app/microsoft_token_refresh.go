@@ -32,6 +32,7 @@ var (
 )
 
 type MicrosoftTokenRefreshState struct {
+	Enterprise                 bool
 	ResourceID                 uint
 	Generation                 uint64
 	OperatorUserID             uint
@@ -57,6 +58,7 @@ type MicrosoftTokenRefreshCommand struct {
 }
 
 type MicrosoftTokenRefreshTask struct {
+	Enterprise                 bool   `json:"enterprise,omitempty"`
 	ResourceID                 uint   `json:"resourceId"`
 	Generation                 uint64 `json:"generation"`
 	ExpectedCredentialRevision uint64 `json:"expectedCredentialRevision"`
@@ -88,7 +90,7 @@ type MicrosoftTokenRefreshProtocolResult struct {
 
 type MicrosoftTokenRefreshRepository interface {
 	Request(ctx context.Context, command MicrosoftTokenRefreshCommand, operationLog *governancedomain.OperationLog) (*MicrosoftTokenRefreshState, bool, error)
-	ListPending(ctx context.Context, limit int) ([]MicrosoftTokenRefreshState, error)
+	ListPending(ctx context.Context, limit int, enterprise bool) ([]MicrosoftTokenRefreshState, error)
 	MarkProcessing(ctx context.Context, resourceID uint, generation uint64) (bool, error)
 	ReleaseInfrastructureFailure(ctx context.Context, resourceID uint, generation uint64, safeError string) (bool, error)
 	LoadExecution(ctx context.Context, task MicrosoftTokenRefreshTask) (*MicrosoftTokenRefreshExecution, bool, error)
@@ -98,7 +100,7 @@ type MicrosoftTokenRefreshRepository interface {
 
 type MicrosoftTokenRefreshQueue interface {
 	EnqueueMicrosoftTokenRefresh(ctx context.Context, task MicrosoftTokenRefreshTask) (bool, error)
-	EnqueueMicrosoftTokenRefreshDispatcher(ctx context.Context, delay time.Duration) error
+	EnqueueMicrosoftTokenRefreshDispatcher(ctx context.Context, delay time.Duration, enterprise bool) error
 }
 
 type MicrosoftTokenRefresher interface {
@@ -138,7 +140,7 @@ func (s *MicrosoftTokenRefreshService) Accept(ctx context.Context, command Micro
 	if err != nil {
 		return nil, err
 	}
-	s.ScheduleDispatcher(ctx, 0)
+	s.ScheduleDispatcher(ctx, 0, state.Enterprise)
 	return &AdminTaskAcceptedResult{
 		Task: microsoftTokenRefreshTaskView(*state), RequestID: state.RequestID, Reused: reused,
 	}, nil
@@ -150,14 +152,14 @@ type MicrosoftTokenRefreshDispatchResult struct {
 	Failed    int
 }
 
-func (s *MicrosoftTokenRefreshService) DispatchPending(ctx context.Context, limit int) (*MicrosoftTokenRefreshDispatchResult, error) {
+func (s *MicrosoftTokenRefreshService) DispatchPending(ctx context.Context, limit int, enterprise bool) (*MicrosoftTokenRefreshDispatchResult, error) {
 	if s == nil || s.repo == nil || s.queue == nil {
 		return nil, ErrMicrosoftTokenRefreshUnavailable
 	}
 	if limit <= 0 {
 		limit = 32
 	}
-	states, err := s.repo.ListPending(ctx, limit)
+	states, err := s.repo.ListPending(ctx, limit, enterprise)
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +167,7 @@ func (s *MicrosoftTokenRefreshService) DispatchPending(ctx context.Context, limi
 	var dispatchErr error
 	for _, state := range states {
 		task := MicrosoftTokenRefreshTask{
+			Enterprise:                 state.Enterprise,
 			ResourceID:                 state.ResourceID,
 			Generation:                 state.Generation,
 			ExpectedCredentialRevision: state.ExpectedCredentialRevision,
@@ -233,7 +236,7 @@ func (s *MicrosoftTokenRefreshService) Process(ctx context.Context, task Microso
 			return retryErr
 		}
 		if !abnormal {
-			s.ScheduleDispatcher(ctx, time.Second)
+			s.ScheduleDispatcher(ctx, time.Second, task.Enterprise)
 		}
 		return nil
 	}
@@ -266,11 +269,11 @@ func (s *MicrosoftTokenRefreshService) releaseInfrastructureFailure(ctx context.
 	)
 }
 
-func (s *MicrosoftTokenRefreshService) ScheduleDispatcher(ctx context.Context, delay time.Duration) {
+func (s *MicrosoftTokenRefreshService) ScheduleDispatcher(ctx context.Context, delay time.Duration, enterprise bool) {
 	if s == nil || s.queue == nil {
 		return
 	}
-	_ = s.queue.EnqueueMicrosoftTokenRefreshDispatcher(ctx, delay)
+	_ = s.queue.EnqueueMicrosoftTokenRefreshDispatcher(ctx, delay, enterprise)
 }
 
 func microsoftTokenRefreshTaskView(state MicrosoftTokenRefreshState) governanceapp.AdminTaskView {

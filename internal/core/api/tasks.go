@@ -394,7 +394,7 @@ func queueMicrosoftImportValidations(ctx context.Context, module *CoreModule, re
 	}
 	module.ValidationUseCase.ScheduleDispatcher(ctx, 0)
 	if module.ImportUseCase != nil {
-		if _, err := module.ImportUseCase.DispatchAdminImports(ctx, 100); err != nil {
+		if _, err := module.ImportUseCase.DispatchAdminImports(ctx, 100, result.Enterprise); err != nil {
 			slog.Warn("resource import dispatcher failed", "error", err)
 		}
 	}
@@ -427,13 +427,13 @@ func startResourceValidationDispatcher(ctx context.Context, module *CoreModule, 
 		defer callCancel()
 		module.ValidationUseCase.ScheduleDispatcher(callCtx, 0)
 	}
-	dispatchImports := func() {
+	dispatchImports := func(enterprise bool) {
 		if module.ImportUseCase == nil {
 			return
 		}
 		callCtx, callCancel := context.WithTimeout(ctx, callTimeout)
 		defer callCancel()
-		if _, err := module.ImportUseCase.DispatchAdminImports(callCtx, 100); err != nil {
+		if _, err := module.ImportUseCase.DispatchAdminImports(callCtx, 100, enterprise); err != nil {
 			slog.Warn("resource import dispatcher failed", "error", err)
 		}
 	}
@@ -447,7 +447,12 @@ func startResourceValidationDispatcher(ctx context.Context, module *CoreModule, 
 			select {
 			case <-ticker.C:
 				seedValidation()
-				dispatchImports()
+				var imports sync.WaitGroup
+				for _, enterprise := range []bool{false, true} {
+					imports.Add(1)
+					go func(kind bool) { defer imports.Done(); dispatchImports(kind) }(enterprise)
+				}
+				imports.Wait()
 			case <-ctx.Done():
 				return
 			}

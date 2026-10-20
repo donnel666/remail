@@ -73,7 +73,7 @@ type bindingDomainLister interface {
 // microsoftAutoRefreshLister sources Microsoft resources whose refresh token is
 // nearing expiry, for the proactive daily refresh scan.
 type microsoftAutoRefreshLister interface {
-	ListMicrosoftAutoRefreshCandidates(ctx context.Context, before time.Time, limit int) ([]coreinfra.MicrosoftAutoRefreshCandidate, error)
+	ListMicrosoftAutoRefreshCandidates(ctx context.Context, before time.Time, limit int, enterprise bool) ([]coreinfra.MicrosoftAutoRefreshCandidate, error)
 }
 
 const (
@@ -152,12 +152,16 @@ func seedMailDispatchers(ctx context.Context, module *MailTransportModule) {
 // scanExpiringTokenRefresh enqueues a proactive refresh task for every Microsoft
 // account whose refresh token expires within the lookahead window. Idempotent
 // per-day (CreateOrReuse dedupes by IdempotencyKey), so re-runs are safe.
-func (m *MailTransportModule) scanExpiringTokenRefresh(ctx context.Context) {
+func (m *MailTransportModule) scanExpiringTokenRefresh(ctx context.Context, enterprise bool) {
 	if m == nil || m.autoRefresh == nil || m.TokenRefresh == nil {
 		return
 	}
-	before := time.Now().UTC().Add(runtimeconfig.Duration("token_refresh_lookahead_days", microsoftRTRefreshLookahead, 24*time.Hour, 1))
-	candidates, err := m.autoRefresh.ListMicrosoftAutoRefreshCandidates(ctx, before, runtimeconfig.Int("token_refresh_scan_limit", microsoftRTRefreshScanLimit, 1))
+	prefix := ""
+	if enterprise {
+		prefix = "microsoft_enterprise_"
+	}
+	before := time.Now().UTC().Add(runtimeconfig.Duration(prefix+"token_refresh_lookahead_days", microsoftRTRefreshLookahead, 24*time.Hour, 1))
+	candidates, err := m.autoRefresh.ListMicrosoftAutoRefreshCandidates(ctx, before, runtimeconfig.Int(prefix+"token_refresh_scan_limit", microsoftRTRefreshScanLimit, 1), enterprise)
 	if err != nil {
 		slog.Warn("microsoft rt auto-refresh scan failed", "error", err)
 		return
@@ -386,23 +390,29 @@ func (m *MailTransportModule) StartDispatchers(ctx context.Context) func() {
 		}
 	}()
 	// Proactive refresh-token expiry scan: once a day at the configured hour.
-	go func() {
-		ticker := time.NewTicker(time.Minute)
-		defer ticker.Stop()
-		lastDay := ""
-		for {
-			select {
-			case now := <-ticker.C:
-				day := now.Format("20060102")
-				if now.Hour() == runtimeconfig.Int("token_refresh_hour", microsoftRTRefreshHour, 0) && day != lastDay {
-					m.scanExpiringTokenRefresh(ctx)
-					lastDay = day
-				}
-			case <-ctx.Done():
-				return
+	for _, enterprise := range []bool{false, true} {
+		go func(enterprise bool) {
+			prefix := ""
+			if enterprise {
+				prefix = "microsoft_enterprise_"
 			}
-		}
-	}()
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			lastDay := ""
+			for {
+				select {
+				case now := <-ticker.C:
+					day := now.Format("20060102")
+					if now.Hour() == runtimeconfig.Int(prefix+"token_refresh_hour", microsoftRTRefreshHour, 0) && day != lastDay {
+						m.scanExpiringTokenRefresh(ctx, enterprise)
+						lastDay = day
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}(enterprise)
+	}
 	return func() {
 		once.Do(cancel)
 	}

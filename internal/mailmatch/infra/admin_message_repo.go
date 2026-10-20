@@ -98,6 +98,8 @@ func (r *AdminMessageRepo) AdminMessageResourceExists(ctx context.Context, resou
 		query = query.Joins("JOIN proto_resources pr ON pr.id = er.id AND pr.resource_type = 'proto'")
 	case domain.ResourceTypeDaum:
 		query = query.Joins("JOIN daum_resources pr ON pr.id = er.id AND pr.resource_type = 'daum'")
+	case domain.ResourceTypeMicrosoftEnterprise:
+		query = query.Joins("JOIN microsoft_enterprise_resources mr ON mr.id = er.id")
 	default:
 		query = query.Joins("JOIN microsoft_resources mr ON mr.id = er.id")
 	}
@@ -236,6 +238,8 @@ func adminMessageBaseQueryDB(db *gorm.DB, resourceID uint, resourceType domain.R
 		db = db.Joins("JOIN proto_resources pr ON pr.id = m.email_resource_id AND pr.resource_type = 'proto'")
 	case domain.ResourceTypeDaum:
 		db = db.Joins("JOIN daum_resources pr ON pr.id = m.email_resource_id AND pr.resource_type = 'daum'")
+	case domain.ResourceTypeMicrosoftEnterprise:
+		db = db.Joins("JOIN microsoft_enterprise_resources mr ON mr.id = m.email_resource_id")
 	default:
 		db = db.Joins("JOIN microsoft_resources mr ON mr.id = m.email_resource_id")
 	}

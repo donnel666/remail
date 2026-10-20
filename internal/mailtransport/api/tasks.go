@@ -26,15 +26,25 @@ const (
 )
 
 func RegisterMailTransportTaskHandlers(mux *asynq.ServeMux, module *MailTransportModule) {
-	mux.HandleFunc(mailinfra.TypeMicrosoftTokenRefreshDispatcher, func(ctx context.Context, _ *asynq.Task) error {
+	mux.HandleFunc(mailinfra.TypeMicrosoftTokenRefreshDispatcher, func(ctx context.Context, task *asynq.Task) error {
 		if module == nil || module.TokenRefresh == nil {
 			return nil
 		}
+		var payload mailapp.MicrosoftTokenRefreshTask
+		if len(task.Payload()) > 0 {
+			if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+				return err
+			}
+		}
+
 		limit := backgroundDispatchLimit(module.BackgroundExecution, microsoftTokenRefreshDispatchMaximum)
+		if payload.Enterprise {
+			limit = runtimeconfig.Int("microsoft_enterprise_token_dispatch_limit", microsoftTokenRefreshDispatchMaximum, 1)
+		}
 		if limit <= 0 {
 			return nil
 		}
-		result, err := module.TokenRefresh.DispatchPending(ctx, limit)
+		result, err := module.TokenRefresh.DispatchPending(ctx, limit, payload.Enterprise)
 		if err != nil {
 			slog.Warn("microsoft token refresh dispatcher deferred")
 			return nil
@@ -340,6 +350,8 @@ func scheduleMicrosoftTokenRefreshDispatcher(ctx context.Context, module *MailTr
 		return
 	}
 	if module.TokenRefresh != nil {
-		module.TokenRefresh.ScheduleDispatcher(ctx, delay)
+		for _, enterprise := range []bool{false, true} {
+			module.TokenRefresh.ScheduleDispatcher(ctx, delay, enterprise)
+		}
 	}
 }

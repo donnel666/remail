@@ -43,7 +43,7 @@ VALUES (1, 'durable-user-import@test.local', 'hash', 'supplier', 'active')`).Err
 	require.Equal(t, item.RequestID, row.RequestID)
 
 	now := time.Now().UTC()
-	dispatchable, err := repo.ClaimAdminImportDispatchable(context.Background(), 10, now.Add(-time.Hour), now.Add(-time.Hour))
+	dispatchable, err := repo.ClaimAdminImportDispatchable(context.Background(), 10, now.Add(-time.Hour), now.Add(-time.Hour), false)
 	require.NoError(t, err)
 	require.Len(t, dispatchable, 1)
 	require.Equal(t, item.ID, dispatchable[0].ImportID)
@@ -109,7 +109,7 @@ VALUES
 	require.True(t, created)
 
 	now := time.Now().UTC()
-	dispatchable, err := repo.ClaimAdminImportDispatchable(context.Background(), 10, now.Add(-time.Hour), now.Add(-time.Hour))
+	dispatchable, err := repo.ClaimAdminImportDispatchable(context.Background(), 10, now.Add(-time.Hour), now.Add(-time.Hour), false)
 	require.NoError(t, err)
 	require.Len(t, dispatchable, 1)
 	activated, err := repo.MarkAdminImportDispatched(context.Background(), stored.ID, dispatchable[0].Generation)
@@ -200,7 +200,7 @@ VALUES
 	require.Equal(t, metadata.IdempotencyKey, row.IdempotencyKey)
 	require.Equal(t, metadata.RequestFingerprint, row.RequestFingerprint)
 	now := time.Now().UTC()
-	dispatchable, err := repo.ClaimAdminImportDispatchable(context.Background(), 10, now.Add(-time.Hour), now.Add(-time.Hour))
+	dispatchable, err := repo.ClaimAdminImportDispatchable(context.Background(), 10, now.Add(-time.Hour), now.Add(-time.Hour), false)
 	require.NoError(t, err)
 	require.Len(t, dispatchable, 1)
 	require.Equal(t, stored.ID, dispatchable[0].ImportID)
@@ -343,7 +343,7 @@ VALUES
 	require.True(t, created)
 
 	now := time.Now().UTC()
-	dispatchable, err := repo.ClaimAdminImportDispatchable(context.Background(), 10, now.Add(-time.Hour), now.Add(-time.Hour))
+	dispatchable, err := repo.ClaimAdminImportDispatchable(context.Background(), 10, now.Add(-time.Hour), now.Add(-time.Hour), false)
 	require.NoError(t, err)
 	require.Len(t, dispatchable, 1)
 	activated, err := repo.MarkAdminImportDispatched(context.Background(), stored.ID, dispatchable[0].Generation)
@@ -356,7 +356,7 @@ VALUES
 	require.NoError(t, repo.MarkAdminImportFailed(context.Background(), stored.ID, firstClaim, "", "Temporary import failure."))
 	require.ErrorIs(t, repo.SetAdminImportCounts(context.Background(), stored.ID, firstClaim, 2, 1), domain.ErrResourceImportInvalidClaim)
 
-	dispatchable, err = repo.ClaimAdminImportDispatchable(context.Background(), 10, now.Add(-time.Hour), now.Add(time.Hour))
+	dispatchable, err = repo.ClaimAdminImportDispatchable(context.Background(), 10, now.Add(-time.Hour), now.Add(time.Hour), false)
 	require.NoError(t, err)
 	require.Len(t, dispatchable, 1)
 	activated, err = repo.MarkAdminImportDispatched(context.Background(), stored.ID, dispatchable[0].Generation)

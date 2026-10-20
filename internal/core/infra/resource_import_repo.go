@@ -217,7 +217,7 @@ func (r *ResourceImportRepo) ListAdminImportProcessedLines(ctx context.Context, 
 	return result, nil
 }
 
-func (r *ResourceImportRepo) ClaimAdminImportDispatchable(ctx context.Context, limit int, _ time.Time, _ time.Time) ([]coreapp.AdminResourceImportDispatchItem, error) {
+func (r *ResourceImportRepo) ClaimAdminImportDispatchable(ctx context.Context, limit int, _ time.Time, _ time.Time, enterprise bool) ([]coreapp.AdminResourceImportDispatchItem, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -226,14 +226,14 @@ func (r *ResourceImportRepo) ClaimAdminImportDispatchable(ctx context.Context, l
 	}
 	var models []ResourceImportModel
 	if err := r.db.WithContext(ctx).
-		Where("status = ? AND dispatch_status = ?", string(domain.ResourceImportProcessing), "pending").
+		Where("status = ? AND dispatch_status = ? AND enterprise = ?", string(domain.ResourceImportProcessing), "pending", enterprise).
 		Order("id ASC").Limit(limit).Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("list pending administrator resource imports: %w", err)
 	}
 	items := make([]coreapp.AdminResourceImportDispatchItem, len(models))
 	for i := range models {
 		items[i] = coreapp.AdminResourceImportDispatchItem{
-			ImportID: models[i].ID, OwnerUserID: models[i].OwnerUserID,
+			Enterprise: models[i].Enterprise, ImportID: models[i].ID, OwnerUserID: models[i].OwnerUserID,
 			LongLived: models[i].LongLived, ErrorStrategy: domain.ImportErrorStrategy(models[i].ErrorStrategy),
 			RequestID: models[i].RequestID, Generation: models[i].Generation,
 		}
@@ -507,7 +507,7 @@ func (r *ResourceImportRepo) CreateMicrosoftResourcesAndMarkSucceeded(
 			return nil, err
 		}
 		if len(chunkIDs) > 0 {
-			invalidateMicrosoftFacets()
+			invalidateMicrosoftFacets(domain.MicrosoftResourceType(domain.IsMicrosoftEnterpriseEmail(chunkMicrosoft[0].EmailAddress)))
 		}
 		importedResourceIDs = append(importedResourceIDs, chunkIDs...)
 	}

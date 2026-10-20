@@ -168,11 +168,11 @@ func (r *microsoftCredentialRepositoryStub) LockAdminMicrosoft(_ context.Context
 	return r.root, r.resource, nil
 }
 
-func (r *microsoftCredentialRepositoryStub) MaxMicrosoftResourceID(context.Context) (uint, error) {
+func (r *microsoftCredentialRepositoryStub) MaxMicrosoftResourceID(context.Context, bool) (uint, error) {
 	return r.resource.ID, nil
 }
 
-func (r *microsoftCredentialRepositoryStub) FindNextMicrosoft(_ context.Context, afterID, maxID uint, _ uint) (*domain.MicrosoftResource, error) {
+func (r *microsoftCredentialRepositoryStub) FindNextMicrosoft(_ context.Context, afterID, maxID uint, _ uint, _ bool) (*domain.MicrosoftResource, error) {
 	if r.resource.ID <= afterID || r.resource.ID > maxID {
 		return nil, nil
 	}

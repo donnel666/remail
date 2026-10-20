@@ -45,8 +45,9 @@ func realtimeQueueConfig() map[string]int {
 // own pool, so the shared pool must never starve mailtransport/default work.
 func foregroundQueueConfig() map[string]int {
 	return map[string]int{
-		QueueMailtransport: runtimeconfig.Int("asynq_queue_mailtransport_weight", 4, 1),
-		QueueDefault:       runtimeconfig.Int("asynq_queue_default_weight", 3, 1),
+		QueueMailtransport:       runtimeconfig.Int("asynq_queue_mailtransport_weight", 4, 1),
+		QueueDefault:             runtimeconfig.Int("asynq_queue_default_weight", 3, 1),
+		QueueMicrosoftEnterprise: runtimeconfig.Int("asynq_queue_microsoft_enterprise_weight", 1, 1),
 	}
 }
 

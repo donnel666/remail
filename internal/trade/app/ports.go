@@ -629,7 +629,7 @@ func (uc *UseCase) ImportHistoricalMicrosoftUsage(ctx context.Context, matches [
 			if allocation == nil {
 				continue
 			}
-			if strings.TrimSpace(allocation.OrderNo) == "" || allocation.ID == 0 || allocation.Type != domain.AllocationTypeMicrosoft || allocation.ProductID == 0 || allocation.SupplyScope != SupplyScopePublic || (match.Mailbox != "main" && !strings.EqualFold(allocation.Email, match.Email)) {
+			if strings.TrimSpace(allocation.OrderNo) == "" || allocation.ID == 0 || allocation.Type != domain.AllocationType(coredomain.MicrosoftResourceType(coredomain.IsMicrosoftEnterpriseEmail(allocation.Email))) || allocation.ProductID == 0 || allocation.SupplyScope != SupplyScopePublic || (match.Mailbox != "main" && !strings.EqualFold(allocation.Email, match.Email)) {
 				return domain.ErrInvalidOrderRequest
 			}
 			orderNo := strings.TrimSpace(allocation.OrderNo)
@@ -2277,7 +2277,9 @@ func (uc *UseCase) ExpireDueOrders(ctx context.Context, limit int) (*ExpireOrder
 			result.DeliveryReconciled++
 		}
 	}
-	if err := uc.expireUnavailableMicrosoftOrders(ctx, limit, result); err != nil {
+	personalRefundErr := uc.expireUnavailableMicrosoftOrders(ctx, limit, result)
+	enterpriseRefundErr := uc.expireUnavailableMicrosoftEnterpriseOrders(ctx, limit, result)
+	if err := errors.Join(personalRefundErr, enterpriseRefundErr); err != nil {
 		return nil, err
 	}
 	unavailableGmail, err := uc.repo.ListUnavailableGmailOrderNos(ctx, 0, limit)

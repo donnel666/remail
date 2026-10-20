@@ -171,7 +171,7 @@ func (h *CoreHandler) GetResourceDetail(c *gin.Context) {
 	case *coreapp.MicrosoftResourceDetail:
 		c.JSON(http.StatusOK, MicrosoftResourceDetailResponse{
 			ID:              d.ID,
-			Type:            "microsoft",
+			Type:            string(coredomain.MicrosoftResourceType(coredomain.IsMicrosoftEnterpriseEmail(d.EmailAddress))),
 			EmailAddress:    d.EmailAddress,
 			ForSale:         d.ForSale,
 			LongLived:       d.LongLived,
@@ -395,7 +395,7 @@ func (h *CoreHandler) PostResourcePublish(c *gin.Context) {
 	case *coreapp.MicrosoftResourceDetail:
 		c.JSON(http.StatusOK, MicrosoftResourceDetailResponse{
 			ID:              d.ID,
-			Type:            "microsoft",
+			Type:            string(coredomain.MicrosoftResourceType(coredomain.IsMicrosoftEnterpriseEmail(d.EmailAddress))),
 			EmailAddress:    d.EmailAddress,
 			ForSale:         d.ForSale,
 			LongLived:       d.LongLived,

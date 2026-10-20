@@ -59,15 +59,20 @@ func (uc *UseCase) refundUnavailableMicrosoftOrder(ctx context.Context, proof Mi
 	return true, uc.cleanupOrderService(ctx, *order, true, "Order refunded because its Microsoft resource is permanently unavailable.", requestID)
 }
 
-func (uc *UseCase) expireUnavailableMicrosoftOrders(ctx context.Context, limit int, result *ExpireOrdersResult) error {
-	repo, ok := uc.repo.(MicrosoftUnavailableOrderRepository)
+func (uc *UseCase) expireUnavailableMicrosoftEnterpriseOrders(ctx context.Context, limit int, result *ExpireOrdersResult) error {
+	repo, ok := uc.repo.(interface {
+		ListUnavailableMicrosoftEnterpriseOrders(context.Context, int) ([]MicrosoftUnavailableOrder, error)
+	})
 	if !ok {
 		return nil
 	}
-	orders, err := repo.ListUnavailableMicrosoftOrders(ctx, 0, limit)
+	orders, err := repo.ListUnavailableMicrosoftEnterpriseOrders(ctx, limit)
 	if err != nil {
 		return err
 	}
+	return uc.refundUnavailableMicrosoftOrders(ctx, orders, result)
+}
+func (uc *UseCase) refundUnavailableMicrosoftOrders(ctx context.Context, orders []MicrosoftUnavailableOrder, result *ExpireOrdersResult) error {
 	for _, proof := range orders {
 		refunded, err := uc.refundUnavailableMicrosoftOrder(ctx, proof, "")
 		if err != nil {
@@ -77,4 +82,16 @@ func (uc *UseCase) expireUnavailableMicrosoftOrders(ctx context.Context, limit i
 		}
 	}
 	return nil
+}
+
+func (uc *UseCase) expireUnavailableMicrosoftOrders(ctx context.Context, limit int, result *ExpireOrdersResult) error {
+	repo, ok := uc.repo.(MicrosoftUnavailableOrderRepository)
+	if !ok {
+		return nil
+	}
+	orders, err := repo.ListUnavailableMicrosoftOrders(ctx, 0, limit)
+	if err != nil {
+		return err
+	}
+	return uc.refundUnavailableMicrosoftOrders(ctx, orders, result)
 }

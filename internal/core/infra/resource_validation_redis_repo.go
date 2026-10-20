@@ -43,9 +43,9 @@ func (r *ResourceValidationRepo) MarkResourcePendingWithLog(
 		}
 		now := time.Now().UTC()
 		switch resourceType {
-		case domain.ResourceTypeMicrosoft:
+		case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
 			var resource MicrosoftResourceModel
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, resourceID).Error; err != nil {
+			if err := tx.Table(microsoftResourceTable(resourceType)).Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, resourceID).Error; err != nil {
 				return fmt.Errorf("lock microsoft validation request: %w", err)
 			}
 			switch domain.MicrosoftResourceStatus(resource.Status) {
@@ -54,7 +54,7 @@ func (r *ResourceValidationRepo) MarkResourcePendingWithLog(
 			case domain.MicrosoftStatusDisabled:
 				return domain.ErrInvalidResourceStatus
 			}
-			if err := tx.Model(&MicrosoftResourceModel{}).Where("id = ?", resourceID).Updates(map[string]any{
+			if err := tx.Model(&MicrosoftResourceModel{}).Table(microsoftResourceTable(resourceType)).Where("id = ?", resourceID).Updates(map[string]any{
 				"status": string(domain.MicrosoftStatusPending), "validation_generation": gorm.Expr("validation_generation + 1"),
 				"validation_failures": 0, "last_safe_error": "", "updated_at": now,
 			}).Error; err != nil {
@@ -85,8 +85,8 @@ func (r *ResourceValidationRepo) MarkResourcePendingWithLog(
 		}
 		return nil
 	})
-	if err == nil && resourceType == domain.ResourceTypeMicrosoft {
-		invalidateMicrosoftFacets()
+	if err == nil && domain.IsMicrosoftResourceType(resourceType) {
+		invalidateMicrosoftFacets(resourceType)
 	}
 	return err
 }
@@ -104,9 +104,13 @@ func (r *ResourceValidationRepo) RecordMicrosoftFetchFailure(
 	if r == nil || r.db == nil || resourceID == 0 || expectedCredentialRevision == 0 {
 		return false, domain.ErrInvalidResourceCommand
 	}
+	resourceType, err := microsoftResourceTypeByID(ctx, r.db, resourceID)
+	if err != nil {
+		return false, err
+	}
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var resource MicrosoftResourceModel
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, resourceID).Error; err != nil {
+		if err := tx.Table(microsoftResourceTable(resourceType)).Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, resourceID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return domain.ErrResourceNotFound
 			}
@@ -133,7 +137,7 @@ func (r *ResourceValidationRepo) RecordMicrosoftFetchFailure(
 			return nil
 		}
 		updates["updated_at"] = now
-		result := tx.Model(&MicrosoftResourceModel{}).
+		result := tx.Model(&MicrosoftResourceModel{}).Table(microsoftResourceTable(resourceType)).
 			Where("id = ? AND status IN ? AND credential_revision = ?", resourceID, []string{
 				string(domain.MicrosoftStatusNormal), string(domain.MicrosoftStatusIdentifying),
 			}, expectedCredentialRevision).
@@ -151,7 +155,7 @@ func (r *ResourceValidationRepo) RecordMicrosoftFetchFailure(
 		return createSystemLogInTx(ctx, tx, systemLog)
 	})
 	if err == nil && abnormal {
-		invalidateMicrosoftFacets()
+		invalidateMicrosoftFacets(resourceType)
 	}
 	return abnormal, err
 }
@@ -161,7 +165,7 @@ func (r *ResourceValidationRepo) MarkValidationBatchPending(ctx context.Context,
 		return nil, domain.ErrInvalidResourceCommand
 	}
 	result := &coreapp.ResourceValidationBatchPageResult{AfterID: task.AfterID, ThroughID: task.ThroughID}
-	microsoftChanged := false
+	changedTypes := make(map[domain.ResourceType]bool)
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		selection := task.Selection
 		if !selection.AllowBinding {
@@ -217,9 +221,8 @@ func (r *ResourceValidationRepo) MarkValidationBatchPending(ctx context.Context,
 			return fmt.Errorf("resource validation Redis batch made no progress")
 		}
 		for _, candidate := range candidates {
-			if domain.ResourceType(candidate.ResourceType) == domain.ResourceTypeMicrosoft {
-				microsoftChanged = true
-				break
+			if domain.IsMicrosoftResourceType(domain.ResourceType(candidate.ResourceType)) {
+				changedTypes[domain.ResourceType(candidate.ResourceType)] = true
 			}
 		}
 		return markValidationCandidatesPendingTx(ctx, tx, candidates)
@@ -227,16 +230,20 @@ func (r *ResourceValidationRepo) MarkValidationBatchPending(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	if microsoftChanged {
-		invalidateMicrosoftFacets()
+	for kind := range changedTypes {
+		invalidateMicrosoftFacets(kind)
 	}
 	return result, nil
 }
 
 func captureValidationBatchThroughID(ctx context.Context, tx *gorm.DB, ownerUserID uint, selection coreapp.ResourceBulkSelection) (uint, error) {
+	resourceType := selection.Filter.ResourceType
+	if domain.IsMicrosoftResourceType(resourceType) {
+		resourceType = domain.MicrosoftResourceType(selection.Filter.Enterprise || resourceType == domain.ResourceTypeMicrosoftEnterprise)
+	}
 	query := tx.WithContext(ctx).Table("email_resources AS er").
 		Select("COALESCE(MAX(er.id), 0)").
-		Where("er.type = ?", string(selection.Filter.ResourceType))
+		Where("er.type = ?", string(resourceType))
 	if !selection.AdminScope {
 		query = query.Where("er.owner_user_id = ?", ownerUserID)
 	} else if selection.Filter.OwnerID > 0 {
@@ -270,10 +277,9 @@ func (r *ResourceValidationRepo) countAssignedValidations(ctx context.Context) (
 	var assigned validationAssignmentCounts
 	if err := r.db.WithContext(ctx).Raw(`
 SELECT
-	    (SELECT COUNT(*) FROM microsoft_resources WHERE status = ? AND email_domain NOT LIKE ?) AS microsoft_assigned,
+	    (SELECT COUNT(*) FROM microsoft_resources WHERE status = ?) AS microsoft_assigned,
 	    (SELECT COUNT(*) FROM domain_resources WHERE status = ?) AS domain_assigned`,
 		string(domain.MicrosoftStatusValidating),
-		"%.onmicrosoft.com",
 		string(domain.DomainStatusValidating),
 	).Scan(&assigned).Error; err != nil {
 		return validationAssignmentCounts{}, fmt.Errorf("count assigned resource validations: %w", err)
@@ -287,8 +293,8 @@ func (r *ResourceValidationRepo) ClaimPendingValidations(ctx context.Context, wi
 	}
 	if enterprise {
 		var assigned int64
-		if err := r.db.WithContext(ctx).Model(&MicrosoftResourceModel{}).
-			Where("status = ? AND email_domain LIKE ?", string(domain.MicrosoftStatusValidating), "%.onmicrosoft.com").
+		if err := r.db.WithContext(ctx).Model(&MicrosoftResourceModel{}).Table("microsoft_enterprise_resources").
+			Where("status = ?", string(domain.MicrosoftStatusValidating)).
 			Count(&assigned).Error; err != nil {
 			return nil, fmt.Errorf("count assigned enterprise validations: %w", err)
 		}
@@ -387,13 +393,13 @@ type pendingValidationRow struct {
 }
 
 func (r *ResourceValidationRepo) listPendingMicrosoftValidations(ctx context.Context, limit int, readyBefore time.Time, enterprise bool) ([]coreapp.ResourceValidationTask, error) {
+	resourceType := domain.MicrosoftResourceType(enterprise)
 	var rows []pendingValidationRow
 	if err := r.db.WithContext(ctx).
-		Table("microsoft_resources AS ms").
+		Table(microsoftResourceTable(resourceType)+" AS ms").
 		Select("ms.id, er.owner_user_id, ms.credential_revision, ms.validation_generation").
-		Joins("JOIN email_resources AS er ON er.id = ms.id AND er.type = ?", string(domain.ResourceTypeMicrosoft)).
+		Joins("JOIN email_resources AS er ON er.id = ms.id AND er.type = ?", string(resourceType)).
 		Where("ms.status = ? AND ms.updated_at <= ?", string(domain.MicrosoftStatusPending), readyBefore).
-		Where("(ms.email_domain LIKE ?) = ?", "%.onmicrosoft.com", enterprise).
 		Order("ms.id ASC").Limit(limit).
 		Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list pending Microsoft validations: %w", err)
@@ -401,7 +407,7 @@ func (r *ResourceValidationRepo) listPendingMicrosoftValidations(ctx context.Con
 	tasks := make([]coreapp.ResourceValidationTask, len(rows))
 	for i := range rows {
 		tasks[i] = coreapp.ResourceValidationTask{
-			ResourceID: rows[i].ID, ResourceType: domain.ResourceTypeMicrosoft,
+			ResourceID: rows[i].ID, ResourceType: resourceType,
 			Enterprise:  enterprise,
 			OwnerUserID: rows[i].OwnerUserID, ValidationGeneration: rows[i].ValidationGeneration,
 			ExpectedCredentialRevision: rows[i].CredentialRevision,
@@ -456,8 +462,8 @@ func (r *ResourceValidationRepo) MarkValidationDispatched(ctx context.Context, t
 	now := time.Now().UTC()
 	var result *gorm.DB
 	switch task.ResourceType {
-	case domain.ResourceTypeMicrosoft:
-		result = r.db.WithContext(ctx).Model(&MicrosoftResourceModel{}).
+	case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
+		result = r.db.WithContext(ctx).Model(&MicrosoftResourceModel{}).Table(microsoftResourceTable(task.ResourceType)).
 			Where("id = ? AND status = ? AND validation_generation = ? AND credential_revision = ?", task.ResourceID, string(domain.MicrosoftStatusPending), task.ValidationGeneration, task.ExpectedCredentialRevision).
 			Updates(map[string]any{"status": string(domain.MicrosoftStatusValidating), "updated_at": now})
 	case domain.ResourceTypeDomain:
@@ -471,8 +477,8 @@ func (r *ResourceValidationRepo) MarkValidationDispatched(ctx context.Context, t
 		return false, fmt.Errorf("activate Redis validation assignment: %w", result.Error)
 	}
 	changed := result.RowsAffected == 1
-	if changed && task.ResourceType == domain.ResourceTypeMicrosoft {
-		invalidateMicrosoftFacets()
+	if changed && domain.IsMicrosoftResourceType(task.ResourceType) {
+		invalidateMicrosoftFacets(task.ResourceType)
 	}
 	return changed, nil
 }
@@ -484,8 +490,8 @@ func (r *ResourceValidationRepo) ReleaseValidation(ctx context.Context, task cor
 	now := time.Now().UTC()
 	var result *gorm.DB
 	switch task.ResourceType {
-	case domain.ResourceTypeMicrosoft:
-		result = r.db.WithContext(ctx).Model(&MicrosoftResourceModel{}).
+	case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
+		result = r.db.WithContext(ctx).Model(&MicrosoftResourceModel{}).Table(microsoftResourceTable(task.ResourceType)).
 			Where("id = ? AND status = ? AND validation_generation = ? AND credential_revision = ?", task.ResourceID, string(domain.MicrosoftStatusValidating), task.ValidationGeneration, task.ExpectedCredentialRevision).
 			Updates(map[string]any{"status": string(domain.MicrosoftStatusPending), "validation_generation": gorm.Expr("validation_generation + 1"), "updated_at": now})
 	case domain.ResourceTypeDomain:
@@ -498,8 +504,8 @@ func (r *ResourceValidationRepo) ReleaseValidation(ctx context.Context, task cor
 	if result.Error != nil {
 		return fmt.Errorf("release Redis validation assignment: %w", result.Error)
 	}
-	if result.RowsAffected == 1 && task.ResourceType == domain.ResourceTypeMicrosoft {
-		invalidateMicrosoftFacets()
+	if result.RowsAffected == 1 && domain.IsMicrosoftResourceType(task.ResourceType) {
+		invalidateMicrosoftFacets(task.ResourceType)
 	}
 	return nil
 }
@@ -574,7 +580,7 @@ func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, task 
 			updates["token_last_refreshed_at"] = now
 			updates["token_last_request_id"] = task.RequestID
 		}
-		updated := tx.Model(&MicrosoftResourceModel{}).
+		updated := tx.Model(&MicrosoftResourceModel{}).Table(microsoftResourceTable(task.ResourceType)).
 			Where("id = ? AND status = ? AND validation_generation = ? AND credential_revision = ?", task.ResourceID, string(domain.MicrosoftStatusValidating), task.ValidationGeneration, task.ExpectedCredentialRevision).
 			Updates(updates)
 		if updated.Error != nil {
@@ -595,7 +601,7 @@ func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, task 
 	if stale {
 		return coreapp.ErrValidationResultStale
 	}
-	invalidateMicrosoftFacets()
+	invalidateMicrosoftFacets(task.ResourceType)
 	return nil
 }
 
@@ -663,7 +669,7 @@ func (r *ResourceValidationRepo) ApplyDomainResult(ctx context.Context, task cor
 func lockRedisMicrosoftValidationStateTx(tx *gorm.DB, task coreapp.ResourceValidationTask) (*EmailResourceModel, *MicrosoftResourceModel, error) {
 	var root EmailResourceModel
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ? AND type = ? AND owner_user_id = ?", task.ResourceID, string(domain.ResourceTypeMicrosoft), task.OwnerUserID).
+		Where("id = ? AND type = ? AND owner_user_id = ?", task.ResourceID, string(task.ResourceType), task.OwnerUserID).
 		First(&root).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil, coreapp.ErrValidationResultStale
@@ -671,7 +677,7 @@ func lockRedisMicrosoftValidationStateTx(tx *gorm.DB, task coreapp.ResourceValid
 		return nil, nil, fmt.Errorf("lock Redis microsoft validation root: %w", err)
 	}
 	var resource MicrosoftResourceModel
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, task.ResourceID).Error; err != nil {
+	if err := tx.Table(microsoftResourceTable(task.ResourceType)).Clauses(clause.Locking{Strength: "UPDATE"}).First(&resource, task.ResourceID).Error; err != nil {
 		return nil, nil, fmt.Errorf("lock Redis microsoft validation resource: %w", err)
 	}
 	if domain.MicrosoftResourceStatus(resource.Status) != domain.MicrosoftStatusValidating || resource.ValidationGeneration != task.ValidationGeneration || resource.CredentialRevision != task.ExpectedCredentialRevision {

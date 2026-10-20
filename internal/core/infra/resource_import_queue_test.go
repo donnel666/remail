@@ -83,4 +83,15 @@ func TestResourceImportQueueReportsOnlyNewGenerationAsAccepted(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, uniqueKeys)
+	task.Enterprise = true
+	task.ImportID = 43
+	accepted, err = queue.EnqueueMicrosoftImport(context.Background(), task)
+	require.NoError(t, err)
+	require.True(t, accepted)
+	enterprise, err := inspector.ListScheduledTasks(platform.QueueMicrosoftEnterprise)
+	require.NoError(t, err)
+	require.Len(t, enterprise, 1)
+	var payload coreapp.MicrosoftImportTask
+	require.NoError(t, json.Unmarshal(enterprise[0].Payload, &payload))
+	require.True(t, payload.Enterprise)
 }

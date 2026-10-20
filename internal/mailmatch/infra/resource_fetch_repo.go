@@ -65,9 +65,9 @@ func (r *ResourceFetchRepo) states(db *gorm.DB) *gorm.DB {
 
 func (r *ResourceFetchRepo) operationKinds() []string {
 	if r.kind == domain.ResourceFetchJobHistory {
-		return []string{"resource_history"}
+		return []string{"resource_history", "enterprise_history"}
 	}
-	return []string{"resource_fetch", "gmail_resource_fetch", "icloud_resource_fetch", "proto_resource_fetch", "daum_resource_fetch"}
+	return []string{"resource_fetch", "enterprise_fetch", "gmail_resource_fetch", "icloud_resource_fetch", "proto_resource_fetch", "daum_resource_fetch"}
 }
 
 func (r *ResourceFetchRepo) withTx(ctx context.Context, fn func(context.Context, *gorm.DB) error) error {
@@ -97,8 +97,8 @@ func (r *ResourceFetchRepo) CreateOrReuseResourceFetch(ctx context.Context, job 
 	if job.ResourceType == "" {
 		job.ResourceType = domain.ResourceTypeMicrosoft
 	}
-	if (job.ResourceType != domain.ResourceTypeMicrosoft && job.ResourceType != domain.ResourceTypeGmail && job.ResourceType != domain.ResourceTypeICloud && job.ResourceType != domain.ResourceTypeProto && job.ResourceType != domain.ResourceTypeDaum) ||
-		(job.ResourceType != domain.ResourceTypeMicrosoft && job.Kind != domain.ResourceFetchJobFetch) {
+	if (!domain.IsMicrosoftResourceType(job.ResourceType) && job.ResourceType != domain.ResourceTypeGmail && job.ResourceType != domain.ResourceTypeICloud && job.ResourceType != domain.ResourceTypeProto && job.ResourceType != domain.ResourceTypeDaum) ||
+		(!domain.IsMicrosoftResourceType(job.ResourceType) && job.Kind != domain.ResourceFetchJobFetch) {
 		return false, domain.ErrInvalidRequest
 	}
 	reused := false
@@ -110,6 +110,7 @@ func (r *ResourceFetchRepo) CreateOrReuseResourceFetch(ctx context.Context, job 
 		if err := validateResourceFetchScope(scope, 0); err != nil {
 			return err
 		}
+		job.ResourceType = scope.ResourceType
 
 		var state FetchStateModel
 		err = r.states(tx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&state, "email_resource_id = ?", job.ResourceID).Error
@@ -199,13 +200,19 @@ func (r *ResourceFetchRepo) FindResourceFetch(ctx context.Context, resourceID ui
 	return &job, nil
 }
 
-func (r *ResourceFetchRepo) ListPendingResourceFetches(ctx context.Context, limit int) ([]domain.ResourceFetchJob, error) {
+func (r *ResourceFetchRepo) ListPendingResourceFetches(ctx context.Context, limit int, enterprise bool) ([]domain.ResourceFetchJob, error) {
 	if limit <= 0 {
 		limit = app.ResourceFetchDefaultDispatchLimit
 	}
+	kinds := make([]string, 0)
+	for _, kind := range r.operationKinds() {
+		if strings.HasPrefix(kind, "enterprise_") == enterprise {
+			kinds = append(kinds, kind)
+		}
+	}
 	var states []FetchStateModel
 	err := r.states(r.dbFor(ctx)).
-		Where("status = ? AND operation_kind IN ?", string(domain.ResourceFetchJobQueued), r.operationKinds()).
+		Where("status = ? AND operation_kind IN ?", string(domain.ResourceFetchJobQueued), kinds).
 		Order("requested_at ASC, email_resource_id ASC").Limit(limit).Find(&states).Error
 	if err != nil {
 		return nil, fmt.Errorf("list pending resource fetches: %w", err)
@@ -510,8 +517,12 @@ func (r *ResourceFetchRepo) lockResourceFetchScope(ctx context.Context, resource
 	if err != nil {
 		return nil, resourceFetchCredentialError("load resource fetch credential scope", err)
 	}
+	kind := domain.ResourceType(scope.ResourceType)
+	if kind == "" {
+		kind = domain.ResourceTypeMicrosoft
+	}
 	return &domain.ResourceFetchScope{
-		ResourceID: scope.ResourceID, ResourceType: domain.ResourceTypeMicrosoft, Status: scope.Status, EmailAddress: scope.EmailAddress,
+		ResourceID: scope.ResourceID, ResourceType: kind, Status: scope.Status, EmailAddress: scope.EmailAddress,
 		ClientID: scope.ClientID, RefreshToken: scope.RefreshToken, GraphAvailable: scope.GraphAvailable, CredentialRevision: scope.CredentialRevision,
 	}, nil
 }
@@ -612,6 +623,11 @@ func resourceFetchStateToDomain(state FetchStateModel) domain.ResourceFetchJob {
 	switch state.OperationKind {
 	case "resource_history":
 		kind = domain.ResourceFetchJobHistory
+	case "enterprise_history":
+		kind = domain.ResourceFetchJobHistory
+		resourceType = domain.ResourceTypeMicrosoftEnterprise
+	case "enterprise_fetch":
+		resourceType = domain.ResourceTypeMicrosoftEnterprise
 	case "gmail_resource_fetch":
 		resourceType = domain.ResourceTypeGmail
 	case "icloud_resource_fetch":
@@ -644,6 +660,12 @@ func resourceFetchStateToDomain(state FetchStateModel) domain.ResourceFetchJob {
 }
 
 func resourceFetchOperationKind(kind domain.ResourceFetchJobKind, resourceType domain.ResourceType) string {
+	if resourceType == domain.ResourceTypeMicrosoftEnterprise {
+		if kind == domain.ResourceFetchJobHistory {
+			return "enterprise_history"
+		}
+		return "enterprise_fetch"
+	}
 	if resourceType == domain.ResourceTypeProto {
 		return "proto_resource_fetch"
 	}

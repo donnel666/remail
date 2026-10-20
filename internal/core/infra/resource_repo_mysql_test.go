@@ -190,12 +190,12 @@ VALUES (9451, 'facet-cache-owner@test.local', 'hash', 'supplier', 'active')`).Er
 	require.NoError(t, err)
 	require.EqualValues(t, 2, userFacets.Matched)
 
-	generation := currentMicrosoftFacetsGeneration()
+	generation := currentMicrosoftFacetsGeneration("microsoft")
 	require.NoError(t, admin.WithTx(ctx, func(txCtx context.Context) error {
 		_, _, err := admin.LockAdminMicrosoft(txCtx, importedIDs[0])
 		return err
 	}))
-	require.Equal(t, generation, currentMicrosoftFacetsGeneration(), "read-only transactions must keep facet caches hot")
+	require.Equal(t, generation, currentMicrosoftFacetsGeneration("microsoft"), "read-only transactions must keep facet caches hot")
 
 	require.NoError(t, admin.WithTx(ctx, func(txCtx context.Context) error {
 		root, resource, err := admin.LockAdminMicrosoft(txCtx, importedIDs[0])

@@ -32,10 +32,23 @@ type ProjectHistoryScanStateModel struct {
 
 func (ProjectHistoryScanStateModel) TableName() string { return "projects" }
 
-type ProjectHistoryScanRepo struct{ db *gorm.DB }
+type ProjectHistoryScanRepo struct {
+	db         *gorm.DB
+	enterprise bool
+}
 
 func NewProjectHistoryScanRepo(db *gorm.DB) *ProjectHistoryScanRepo {
 	return &ProjectHistoryScanRepo{db: db}
+}
+
+func NewMicrosoftEnterpriseProjectHistoryScanRepo(db *gorm.DB) *ProjectHistoryScanRepo {
+	return &ProjectHistoryScanRepo{db: db, enterprise: true}
+}
+func (r *ProjectHistoryScanRepo) table() string {
+	if r.enterprise {
+		return "microsoft_enterprise_history_scans"
+	}
+	return "projects"
 }
 
 func (r *ProjectHistoryScanRepo) dbFor(ctx context.Context) *gorm.DB {
@@ -58,13 +71,18 @@ func (r *ProjectHistoryScanRepo) RequestProjectHistoryScan(ctx context.Context, 
 	}
 	var state app.ProjectHistoryScanState
 	err := r.withTx(ctx, func(tx *gorm.DB) error {
+		if r.enterprise {
+			if err := tx.Table(r.table()).Clauses(clause.OnConflict{DoNothing: true}).Create(&ProjectHistoryScanStateModel{ProjectID: projectID, Status: "normal"}).Error; err != nil {
+				return err
+			}
+		}
 		var model ProjectHistoryScanStateModel
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&model, "id = ?", projectID).Error; err != nil {
+		if err := tx.Table(r.table()).Clauses(clause.Locking{Strength: "UPDATE"}).First(&model, "id = ?", projectID).Error; err != nil {
 			return err
 		}
 		now := time.Now().UTC()
 		model.Generation++
-		result := tx.Model(&ProjectHistoryScanStateModel{}).Where("id = ?", projectID).Updates(map[string]any{
+		result := tx.Model(&ProjectHistoryScanStateModel{}).Table(r.table()).Where("id = ?", projectID).Updates(map[string]any{
 			"history_scan_status":          "pending",
 			"history_scan_generation":      model.Generation,
 			"history_scan_failures":        0,
@@ -100,7 +118,7 @@ func (r *ProjectHistoryScanRepo) ListPendingProjectHistoryScans(ctx context.Cont
 		limit = 16
 	}
 	var models []ProjectHistoryScanStateModel
-	if err := r.dbFor(ctx).
+	if err := r.dbFor(ctx).Table(r.table()).
 		Where("history_scan_status = ?", "pending").
 		Order("history_scan_requested_at ASC, id ASC").
 		Limit(limit).
@@ -116,7 +134,7 @@ func (r *ProjectHistoryScanRepo) ListPendingProjectHistoryScans(ctx context.Cont
 
 func (r *ProjectHistoryScanRepo) MarkProjectHistoryProcessing(ctx context.Context, projectID uint, generation uint64) (bool, error) {
 	now := time.Now().UTC()
-	result := r.dbFor(ctx).Model(&ProjectHistoryScanStateModel{}).
+	result := r.dbFor(ctx).Model(&ProjectHistoryScanStateModel{}).Table(r.table()).
 		Where("id = ? AND history_scan_generation = ? AND history_scan_status = ?", projectID, generation, "pending").
 		Updates(map[string]any{
 			"history_scan_status":          "processing",
@@ -131,7 +149,7 @@ func (r *ProjectHistoryScanRepo) MarkProjectHistoryProcessing(ctx context.Contex
 		return true, nil
 	}
 	var count int64
-	err := r.dbFor(ctx).Model(&ProjectHistoryScanStateModel{}).
+	err := r.dbFor(ctx).Model(&ProjectHistoryScanStateModel{}).Table(r.table()).
 		Where("id = ? AND history_scan_generation = ? AND history_scan_status = ?", projectID, generation, "processing").
 		Count(&count).Error
 	if err != nil {
@@ -142,7 +160,7 @@ func (r *ProjectHistoryScanRepo) MarkProjectHistoryProcessing(ctx context.Contex
 
 func (r *ProjectHistoryScanRepo) AssertProjectHistoryFence(ctx context.Context, projectID uint, generation uint64) error {
 	var state ProjectHistoryScanStateModel
-	err := r.dbFor(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+	err := r.dbFor(ctx).Table(r.table()).Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("id = ? AND history_scan_generation = ? AND history_scan_status = ?", projectID, generation, "processing").
 		First(&state).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -156,7 +174,7 @@ func (r *ProjectHistoryScanRepo) AssertProjectHistoryFence(ctx context.Context, 
 
 func (r *ProjectHistoryScanRepo) CompleteProjectHistoryScan(ctx context.Context, projectID uint, generation uint64, scanned int, matched int, skipped int) (bool, error) {
 	now := time.Now().UTC()
-	result := r.dbFor(ctx).Model(&ProjectHistoryScanStateModel{}).
+	result := r.dbFor(ctx).Model(&ProjectHistoryScanStateModel{}).Table(r.table()).
 		Where("id = ? AND history_scan_generation = ? AND history_scan_status = ?", projectID, generation, "processing").
 		Updates(map[string]any{
 			"history_scan_status":          "normal",
@@ -174,7 +192,7 @@ func (r *ProjectHistoryScanRepo) CompleteProjectHistoryScan(ctx context.Context,
 }
 
 func (r *ProjectHistoryScanRepo) ReleaseProjectHistoryInfrastructureFailure(ctx context.Context, projectID uint, generation uint64, safeError string) (bool, error) {
-	result := r.dbFor(ctx).Model(&ProjectHistoryScanStateModel{}).
+	result := r.dbFor(ctx).Model(&ProjectHistoryScanStateModel{}).Table(r.table()).
 		Where("id = ? AND history_scan_generation = ? AND history_scan_status = ?", projectID, generation, "processing").
 		Updates(map[string]any{
 			"history_scan_status":          "pending",
@@ -191,7 +209,7 @@ func (r *ProjectHistoryScanRepo) ReleaseProjectHistoryInfrastructureFailure(ctx 
 func (r *ProjectHistoryScanRepo) RecordProjectHistoryFailure(ctx context.Context, projectID uint, generation uint64, safeError string) (recorded bool, abnormal bool, err error) {
 	err = r.withTx(ctx, func(tx *gorm.DB) error {
 		var model ProjectHistoryScanStateModel
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		err := tx.Table(r.table()).Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ? AND history_scan_generation = ? AND history_scan_status = ?", projectID, generation, "processing").
 			First(&model).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -214,7 +232,7 @@ func (r *ProjectHistoryScanRepo) RecordProjectHistoryFailure(ctx context.Context
 			updates["history_scan_failures"] = 3
 			updates["history_scan_finished_at"] = time.Now().UTC()
 		}
-		result := tx.Model(&ProjectHistoryScanStateModel{}).
+		result := tx.Model(&ProjectHistoryScanStateModel{}).Table(r.table()).
 			Where("id = ? AND history_scan_generation = ? AND history_scan_status = ?", projectID, generation, "processing").
 			Updates(updates)
 		if result.Error != nil {

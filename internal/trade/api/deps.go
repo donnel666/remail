@@ -660,9 +660,9 @@ func mapAllocationError(err error) error {
 	}
 }
 
-func (a allocationAdapter) MicrosoftAllocationReady(ctx context.Context, orderNo string, allocationID uint) (bool, error) {
+func (a allocationAdapter) MicrosoftAllocationReady(ctx context.Context, orderNo string, allocationID uint, enterprise bool) (bool, error) {
 	if a.alloc == nil {
 		return false, nil
 	}
-	return a.alloc.MicrosoftAllocationReady(ctx, orderNo, allocationID)
+	return a.alloc.MicrosoftAllocationReady(ctx, orderNo, allocationID, enterprise)
 }

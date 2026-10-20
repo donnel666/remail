@@ -16,24 +16,42 @@ func (r *Repo) ListUnavailableDaumOrders(ctx context.Context, id uint, limit int
 	return r.listUnavailableResourceOrders(ctx, "daum", id, limit)
 }
 func (r *Repo) ListUnavailableMicrosoftOrders(ctx context.Context, id uint, limit int) ([]tradeapp.MicrosoftUnavailableOrder, error) {
-	return r.listUnavailableResourceOrders(ctx, "microsoft", id, limit)
+	if id > 0 {
+		var root struct{ Type string }
+		if err := r.dbFor(ctx).Table("email_resources").Select("type").Where("id=?", id).Take(&root).Error; err != nil {
+			return nil, err
+		}
+		if root.Type == "microsoft_enterprise" {
+			return r.listUnavailableResourceOrders(ctx, root.Type, id, limit)
+		}
+		return r.listUnavailableResourceOrders(ctx, "microsoft", id, limit)
+	}
+	return r.listUnavailableResourceOrders(ctx, "microsoft", 0, limit)
 }
+func (r *Repo) ListUnavailableMicrosoftEnterpriseOrders(ctx context.Context, limit int) ([]tradeapp.MicrosoftUnavailableOrder, error) {
+	return r.listUnavailableResourceOrders(ctx, "microsoft_enterprise", 0, limit)
+}
+
 func (r *Repo) AssertDaumRefundFailure(ctx context.Context, proof tradeapp.DaumUnavailableOrder) error {
 	return r.assertResourceRefundFailure(ctx, "daum", proof)
 }
 func (r *Repo) AssertMicrosoftRefundFailure(ctx context.Context, proof tradeapp.MicrosoftUnavailableOrder) error {
-	return r.assertResourceRefundFailure(ctx, "microsoft", proof)
+	provider := "microsoft"
+	if proof.ResourceType == "microsoft_enterprise" {
+		provider = proof.ResourceType
+	}
+	return r.assertResourceRefundFailure(ctx, provider, proof)
 }
 
 func (r *Repo) listUnavailableResourceOrders(ctx context.Context, provider string, resourceID uint, limit int) ([]tradeapp.ResourceFailureProof, error) {
-	if provider != "microsoft" && provider != "daum" {
+	if provider != "microsoft" && provider != "microsoft_enterprise" && provider != "daum" {
 		return nil, domain.ErrInvalidOrderRequest
 	}
 	category := "''"
 	if provider == "daum" {
 		category = "resource.failure_category"
 	}
-	query := r.dbFor(ctx).Table("orders o").Select("o.order_no, allocation.resource_id, resource.credential_revision, resource.validation_generation, "+category+" AS failure_category").
+	query := r.dbFor(ctx).Table("orders o").Select("o.order_no, allocation.resource_id, resource.credential_revision, resource.validation_generation, "+category+" AS failure_category, '"+provider+"' AS resource_type").
 		Joins("JOIN "+provider+"_allocations allocation ON allocation.order_no=o.order_no AND allocation.status='allocated'").
 		Joins("JOIN "+provider+"_resources resource ON resource.id=allocation.resource_id AND resource.status='abnormal'").
 		Where("o.allocation_type=? AND o.status='active' AND o.debit_tx_id IS NOT NULL AND o.refund_tx_id IS NULL", provider).Order("o.id ASC")
@@ -87,7 +105,7 @@ func (r *Repo) lockPurchaseRefundState(ctx context.Context, orderNo string, skip
 		return false, nil
 	}
 	provider := string(*order.AllocationType)
-	if provider != "microsoft" && provider != "daum" {
+	if provider != "microsoft" && provider != "microsoft_enterprise" && provider != "daum" {
 		return false, nil
 	}
 	var allocation struct{ ResourceID uint }
@@ -114,7 +132,7 @@ type refundResourceState struct {
 
 func (r *Repo) lockRefundResource(ctx context.Context, provider, orderNo string, resourceID uint, skipLocked bool) (*refundResourceState, error) {
 	tx, ok := platform.GormTxFromContext(ctx)
-	if !ok || (provider != "microsoft" && provider != "daum") || orderNo == "" || resourceID == 0 {
+	if !ok || (provider != "microsoft" && provider != "microsoft_enterprise" && provider != "daum") || orderNo == "" || resourceID == 0 {
 		return nil, domain.ErrInvalidOrderRequest
 	}
 	lock := clause.Locking{Strength: "UPDATE"}

@@ -22,7 +22,7 @@ func (r *RetentionRepo) DeleteIdempotencyKeysBefore(ctx context.Context, before 
 }
 
 func (r *RetentionRepo) DeleteMailmatchMessagesBefore(ctx context.Context, before time.Time, resourceType string, limit int) (int64, error) {
-	if resourceType != "microsoft" && resourceType != "domain" {
+	if resourceType != "microsoft" && resourceType != "microsoft_enterprise" && resourceType != "domain" {
 		return 0, fmt.Errorf("delete mailmatch messages: invalid resource type")
 	}
 	return r.deleteBySQL(ctx, "DELETE FROM mailmatch_messages WHERE resource_type = ? AND received_at < ? ORDER BY received_at, id LIMIT ?", resourceType, before, limit)

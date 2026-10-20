@@ -4898,7 +4898,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [all, microsoft, domain]
+            enum: [all, microsoft, microsoft_enterprise, domain]
             default: all
         - name: search
           in: query
@@ -5711,7 +5711,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [microsoft, domain, gmail, icloud, proto, daum]
+            enum: [microsoft, microsoft_enterprise, domain, gmail, icloud, proto, daum]
         - name: orderNo
           in: query
           schema:
@@ -5798,7 +5798,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [microsoft, domain, gmail, icloud, proto, daum]
+            enum: [microsoft, microsoft_enterprise, domain, gmail, icloud, proto, daum]
       responses:
         "200":
           description: Allocation detail
@@ -10165,7 +10165,7 @@ paths:
           description: This administrator query is limited to Microsoft resources.
           schema:
             type: string
-            enum: [microsoft]
+            enum: [microsoft, microsoft_enterprise]
         - name: search
           in: query
           description: Exact case-insensitive mailbox lookup across primary and alias inventories. A value without `@` is treated as a complete local-part across domains; a leading `@` matches the primary mailbox domain exactly. Owner display identity remains prefix-searchable, and an all-digit value matches resource or owner ID exactly.
@@ -11129,7 +11129,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [microsoft, gmail, icloud, proto, daum]
+            enum: [microsoft, microsoft_enterprise, gmail, icloud, proto, daum]
             default: microsoft
       responses:
         "202":
@@ -13444,7 +13444,7 @@ paths:
           description: Resource type; defaults to microsoft for backward compatibility.
           schema:
             type: string
-            enum: [microsoft, gmail, icloud, domain, proto, daum]
+            enum: [microsoft, microsoft_enterprise, gmail, icloud, domain, proto, daum]
             default: microsoft
         - name: resourceId
           in: query
@@ -13534,7 +13534,7 @@ paths:
           description: Resource type; defaults to microsoft for backward compatibility.
           schema:
             type: string
-            enum: [microsoft, gmail, icloud, domain, proto, daum]
+            enum: [microsoft, microsoft_enterprise, gmail, icloud, domain, proto, daum]
             default: microsoft
       responses:
         "200":
@@ -18452,7 +18452,7 @@ components:
           $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         allocationType:
           type: string
-          enum: [microsoft, domain, gmail, icloud, proto, daum]
+          enum: [microsoft, microsoft_enterprise, domain, gmail, icloud, proto, daum]
         allocationId:
           type: integer
         deliveryEmail:
@@ -22815,7 +22815,7 @@ components:
           type: integer
         type:
           type: string
-          enum: [microsoft]
+          enum: [microsoft, microsoft_enterprise]
         emailAddress:
           type: string
         forSale:
@@ -23781,7 +23781,7 @@ components:
           description: Select enterprise Microsoft resources; omitted means personal Microsoft resources.
         resourceType:
           type: string
-          enum: [microsoft, domain]
+          enum: [microsoft, microsoft_enterprise, domain]
         search:
           type: string
           description: Unified fuzzy search. Microsoft matches email and suffix; domain matches domain and TLD.
@@ -24133,7 +24133,7 @@ components:
       properties:
         type:
           type: string
-          enum: [microsoft, domain, gmail, icloud, proto, daum]
+          enum: [microsoft, microsoft_enterprise, domain, gmail, icloud, proto, daum]
         id:
           type: integer
         orderNo:
@@ -26289,7 +26289,7 @@ components:
           minimum: 1
         type:
           type: string
-          enum: [microsoft]
+          enum: [microsoft, microsoft_enterprise]
         version:
           type: integer
           minimum: 1
@@ -26740,7 +26740,7 @@ components:
           description: Select enterprise Microsoft resources; omitted means personal Microsoft resources.
         type:
           type: string
-          enum: [microsoft]
+          enum: [microsoft, microsoft_enterprise]
         search:
           type: string
           maxLength: 120
@@ -27620,7 +27620,7 @@ components:
       properties:
         type:
           type: string
-          enum: [microsoft, domain, gmail, icloud, proto, daum]
+          enum: [microsoft, microsoft_enterprise, domain, gmail, icloud, proto, daum]
         id:
           type: integer
           minimum: 1

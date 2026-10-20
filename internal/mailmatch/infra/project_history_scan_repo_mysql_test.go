@@ -7,6 +7,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestMicrosoftEnterpriseProjectHistoryHasIndependentGenerationMySQL(t *testing.T) {
+	db := newMailmatchMySQLTestDB(t)
+	require.NoError(t, db.Exec("INSERT INTO projects(id,name,target_platform,status) VALUES(970019,'separate-history','test','listed')").Error)
+	ctx := context.Background()
+	personal, enterprise := NewProjectHistoryScanRepo(db), NewMicrosoftEnterpriseProjectHistoryScanRepo(db)
+	p, err := personal.RequestProjectHistoryScan(ctx, 970019, "personal")
+	require.NoError(t, err)
+	e, err := enterprise.RequestProjectHistoryScan(ctx, 970019, "enterprise")
+	require.NoError(t, err)
+	require.Equal(t, p.Generation, e.Generation)
+	_, err = personal.RequestProjectHistoryScan(ctx, 970019, "personal-restart")
+	require.NoError(t, err)
+	active, err := enterprise.MarkProjectHistoryProcessing(ctx, 970019, e.Generation)
+	require.NoError(t, err)
+	require.True(t, active)
+	require.NoError(t, enterprise.AssertProjectHistoryFence(ctx, 970019, e.Generation))
+	done, err := enterprise.CompleteProjectHistoryScan(ctx, 970019, e.Generation, 20, 2, 0)
+	require.NoError(t, err)
+	require.True(t, done)
+	var old ProjectHistoryScanStateModel
+	require.NoError(t, db.First(&old, 970019).Error)
+	require.Equal(t, "pending", old.Status)
+	require.Zero(t, old.ScannedCount)
+	require.Equal(t, p.Generation+1, old.Generation)
+}
+
 func TestProjectHistoryScanRepoUsesProjectGenerationFenceMySQL(t *testing.T) {
 	db := newMailmatchMySQLTestDB(t)
 	const projectID = 970017

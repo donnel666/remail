@@ -18,7 +18,7 @@ type resourceFetchDispatchRepoStub struct {
 	limit      int
 }
 
-func (s *resourceFetchDispatchRepoStub) ListPendingResourceFetches(_ context.Context, limit int) ([]domain.ResourceFetchJob, error) {
+func (s *resourceFetchDispatchRepoStub) ListPendingResourceFetches(_ context.Context, limit int, _ bool) ([]domain.ResourceFetchJob, error) {
 	s.limit = limit
 	return s.pending, nil
 }
@@ -74,12 +74,12 @@ func (s *resourceFetchDispatchQueueStub) EnqueueResourceHistory(_ context.Contex
 	return true, nil
 }
 
-func (s *resourceFetchDispatchQueueStub) EnqueueAdminResourceFetchDispatcher(context.Context, time.Duration) error {
+func (s *resourceFetchDispatchQueueStub) EnqueueAdminResourceFetchDispatcher(context.Context, time.Duration, bool) error {
 	s.adminWakeups++
 	return nil
 }
 
-func (s *resourceFetchDispatchQueueStub) EnqueueResourceHistoryDispatcher(context.Context, time.Duration) error {
+func (s *resourceFetchDispatchQueueStub) EnqueueResourceHistoryDispatcher(context.Context, time.Duration, bool) error {
 	s.historyWakeups++
 	return nil
 }
@@ -88,7 +88,7 @@ func TestResourceFetchMarksProcessingOnlyAfterAcceptedEnqueue(t *testing.T) {
 	repo := &resourceFetchDispatchRepoStub{pending: []domain.ResourceFetchJob{{ResourceID: 100, Generation: 4}}}
 	queue := &resourceFetchDispatchQueueStub{}
 	uc := NewAdminResourceFetchUseCase(repo, queue, nil, nil, nil)
-	result, err := uc.DispatchPending(context.Background(), 10)
+	result, err := uc.DispatchPending(context.Background(), 10, false)
 	require.NoError(t, err)
 	require.Zero(t, result.Queued)
 	require.Zero(t, repo.processing)
@@ -96,7 +96,7 @@ func TestResourceFetchMarksProcessingOnlyAfterAcceptedEnqueue(t *testing.T) {
 	require.Empty(t, queue.historyTasks)
 
 	queue.accepted = true
-	result, err = uc.DispatchPending(context.Background(), 10)
+	result, err = uc.DispatchPending(context.Background(), 10, false)
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Queued)
 	require.Equal(t, 1, repo.processing)
@@ -109,14 +109,14 @@ func TestResourceFetchDispatchersUseIndependentRepositoriesAndQueues(t *testing.
 	admin := NewAdminResourceFetchUseCase(adminRepo, queue, nil, nil, nil)
 	history := NewResourceHistoryUseCase(historyRepo, queue, nil, nil)
 
-	adminResult, err := admin.DispatchPending(context.Background(), 10)
+	adminResult, err := admin.DispatchPending(context.Background(), 10, false)
 	require.NoError(t, err)
 	require.Equal(t, 1, adminResult.Attempted)
 	require.Equal(t, 1, adminResult.Queued)
 	require.Equal(t, []AdminResourceFetchTask{{ResourceID: 100, Generation: 1}}, queue.adminTasks)
 	require.Empty(t, queue.historyTasks)
 
-	historyResult, err := history.DispatchPending(context.Background(), 10)
+	historyResult, err := history.DispatchPending(context.Background(), 10, false)
 	require.NoError(t, err)
 	require.Equal(t, 1, historyResult.Attempted)
 	require.Equal(t, 1, historyResult.Queued)
@@ -127,7 +127,7 @@ func TestResourceFetchDefaultDispatchLimitIsTenThousand(t *testing.T) {
 	repo := &resourceFetchDispatchRepoStub{}
 	uc := NewAdminResourceFetchUseCase(repo, &resourceFetchDispatchQueueStub{}, nil, nil, nil)
 
-	_, err := uc.DispatchPending(context.Background(), 0)
+	_, err := uc.DispatchPending(context.Background(), 0, false)
 
 	require.NoError(t, err)
 	require.Equal(t, 10000, repo.limit)

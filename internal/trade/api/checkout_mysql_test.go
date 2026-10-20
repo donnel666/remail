@@ -71,7 +71,7 @@ func pinTradeMicrosoftFixtureBucket(t *testing.T, db *gorm.DB) {
 		if ok && order.ProductType == string(tradedomain.ProductTypeDaum) && len(order.OrderNo) == 34 && strings.HasPrefix(order.OrderNo, "OR") {
 			order.OrderNo = testmysql.AllocationOrderNo(order.OrderNo, order.ProjectID, "main", 0, allocapp.DaumBucketCount)
 		}
-		if ok && order.ProductType == string(tradedomain.ProductTypeMicrosoft) && len(order.OrderNo) == 34 && strings.HasPrefix(order.OrderNo, "OR") {
+		if ok && (order.ProductType == string(tradedomain.ProductTypeMicrosoft) || order.ProductType == string(tradedomain.ProductTypeMicrosoftEnterprise)) && len(order.OrderNo) == 34 && strings.HasPrefix(order.OrderNo, "OR") {
 			order.OrderNo = testmysql.AllocationOrderNo(order.OrderNo, order.ProjectID, "main", 1000, allocapp.MicrosoftBucketCount)
 		}
 	}))
@@ -2736,7 +2736,7 @@ func seedTradeBaseFacts(t *testing.T, db *gorm.DB, productType string) {
 	dotWeight := 0
 	plusWeight := 0
 	codeWindowMinutes := 10
-	if productType == "microsoft" || productType == "gmail" || productType == "icloud" || productType == "proto" || productType == "daum" {
+	if productType == "microsoft" || productType == "microsoft_enterprise" || productType == "gmail" || productType == "icloud" || productType == "proto" || productType == "daum" {
 		mainWeight = 1
 	}
 	if productType == "gmail" {

@@ -20,6 +20,7 @@ var (
 // logs.
 type MicrosoftCredentialScope struct {
 	ResourceID         uint
+	ResourceType       domain.ResourceType
 	Status             string
 	EmailAddress       string
 	ClientID           string
@@ -65,8 +66,8 @@ type MicrosoftHistoryScanResult struct {
 // bounded contexts for Microsoft protocol work.
 type MicrosoftCredentialPort interface {
 	LockMicrosoftCredentialScope(ctx context.Context, resourceID uint) (*MicrosoftCredentialScope, error)
-	MaxMicrosoftResourceID(ctx context.Context) (uint, error)
-	FindNextMicrosoftCredentialScope(ctx context.Context, afterID, maxID, projectID uint) (*MicrosoftCredentialScope, error)
+	MaxMicrosoftResourceID(ctx context.Context, enterprise bool) (uint, error)
+	FindNextMicrosoftCredentialScope(ctx context.Context, afterID, maxID, projectID uint, enterprise bool) (*MicrosoftCredentialScope, error)
 	ApplyMicrosoftTokenRefreshSuccess(ctx context.Context, update MicrosoftTokenRefreshSuccess) error
 	ApplyMicrosoftTokenRefreshFailure(ctx context.Context, update MicrosoftTokenRefreshFailure) error
 	ApplyMicrosoftFetchRefreshToken(ctx context.Context, update MicrosoftFetchRefreshTokenRotation) error
@@ -76,8 +77,8 @@ type MicrosoftCredentialPort interface {
 type MicrosoftCredentialRepository interface {
 	WithTx(ctx context.Context, fn func(context.Context) error) error
 	LockAdminMicrosoft(ctx context.Context, resourceID uint) (*domain.EmailResource, *domain.MicrosoftResource, error)
-	MaxMicrosoftResourceID(ctx context.Context) (uint, error)
-	FindNextMicrosoft(ctx context.Context, afterID, maxID, projectID uint) (*domain.MicrosoftResource, error)
+	MaxMicrosoftResourceID(ctx context.Context, enterprise bool) (uint, error)
+	FindNextMicrosoft(ctx context.Context, afterID, maxID, projectID uint, enterprise bool) (*domain.MicrosoftResource, error)
 	SaveAdminMicrosoft(ctx context.Context, root *domain.EmailResource, resource *domain.MicrosoftResource, expectedVersion uint64) error
 }
 
@@ -111,18 +112,18 @@ func (s *MicrosoftCredentialService) LockMicrosoftCredentialScope(ctx context.Co
 	return scope, nil
 }
 
-func (s *MicrosoftCredentialService) MaxMicrosoftResourceID(ctx context.Context) (uint, error) {
+func (s *MicrosoftCredentialService) MaxMicrosoftResourceID(ctx context.Context, enterprise bool) (uint, error) {
 	if s == nil || s.repo == nil {
 		return 0, ErrMicrosoftCredentialNotFound
 	}
-	return s.repo.MaxMicrosoftResourceID(ctx)
+	return s.repo.MaxMicrosoftResourceID(ctx, enterprise)
 }
 
-func (s *MicrosoftCredentialService) FindNextMicrosoftCredentialScope(ctx context.Context, afterID, maxID, projectID uint) (*MicrosoftCredentialScope, error) {
+func (s *MicrosoftCredentialService) FindNextMicrosoftCredentialScope(ctx context.Context, afterID, maxID, projectID uint, enterprise bool) (*MicrosoftCredentialScope, error) {
 	if s == nil || s.repo == nil || projectID == 0 || maxID == 0 || afterID >= maxID {
 		return nil, nil
 	}
-	resource, err := s.repo.FindNextMicrosoft(ctx, afterID, maxID, projectID)
+	resource, err := s.repo.FindNextMicrosoft(ctx, afterID, maxID, projectID, enterprise)
 	if err != nil {
 		return nil, microsoftCredentialError(err)
 	}
@@ -273,6 +274,7 @@ func microsoftCredentialScope(resource *domain.MicrosoftResource) *MicrosoftCred
 	}
 	return &MicrosoftCredentialScope{
 		ResourceID:         resource.ID,
+		ResourceType:       resource.ResourceType,
 		Status:             string(resource.Status),
 		EmailAddress:       resource.EmailAddress,
 		ClientID:           resource.ClientID,

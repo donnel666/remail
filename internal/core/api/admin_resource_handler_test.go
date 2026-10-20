@@ -541,7 +541,7 @@ func (r *adminHandlerImportRepo) CreateAdminWithLog(_ context.Context, item *dom
 	return &result, true, nil
 }
 
-func (*adminHandlerImportRepo) ClaimAdminImportDispatchable(context.Context, int, time.Time, time.Time) ([]coreapp.AdminResourceImportDispatchItem, error) {
+func (*adminHandlerImportRepo) ClaimAdminImportDispatchable(context.Context, int, time.Time, time.Time, bool) ([]coreapp.AdminResourceImportDispatchItem, error) {
 	return nil, nil
 }
 

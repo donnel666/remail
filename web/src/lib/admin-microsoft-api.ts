@@ -78,7 +78,7 @@ function filterSelection(
   filter: AdminMicrosoftListFilter
 ): AdminMicrosoftResourceSelection {
   const bulkFilter: AdminMicrosoftBulkFilter = {
-    type: "microsoft",
+    type: filter.enterprise ? "microsoft_enterprise" : "microsoft",
     ...normalizeFilter(filter),
   };
   return { mode: "filter", filter: bulkFilter };
@@ -99,7 +99,7 @@ export async function listAdminMicrosoftResources(
     await client.GET("/v1/admin/resources", {
       params: {
         query: {
-          type: "microsoft",
+          type: filter.enterprise ? "microsoft_enterprise" : "microsoft",
           ...normalizeFilter(filter),
           offset: Math.max(0, Math.trunc(offset)),
           limit: pageLimit(limit),
@@ -130,7 +130,7 @@ export async function listAdminMicrosoftAllocations(
   offset = 0,
   limit = 20,
   signal?: AbortSignal,
-  resourceType: "microsoft" | "gmail" | "icloud" | "daum" = "microsoft"
+  resourceType: "microsoft" | "microsoft_enterprise" | "gmail" | "icloud" | "daum" = "microsoft"
 ): Promise<AdminMicrosoftAllocationListResponse> {
   return unwrap(
     await client.GET("/v1/admin/allocations", {
@@ -391,7 +391,7 @@ export async function createAdminMicrosoftExplicitAlias(
 
 export async function fetchAdminMicrosoftMail(
   resourceId: number,
-  resourceType: "microsoft" | "gmail" | "icloud" | "daum" = "microsoft"
+  resourceType: "microsoft" | "microsoft_enterprise" | "gmail" | "icloud" | "daum" = "microsoft"
 ): Promise<AdminMicrosoftTaskAcceptedResponse> {
   return unwrap(
     await client.POST("/v1/admin/resources/{resourceId}/messages/fetch", {
@@ -510,7 +510,7 @@ export async function listAdminMicrosoftMessages(
   limit = 100,
   cursor?: AdminMicrosoftMessageCursor,
   signal?: AbortSignal,
-  resourceType: "microsoft" | "gmail" | "icloud" | "daum" = "microsoft"
+  resourceType: "microsoft" | "microsoft_enterprise" | "gmail" | "icloud" | "daum" = "microsoft"
 ): Promise<AdminMicrosoftMessageListResponse> {
   return unwrap(
     await client.GET("/v1/admin/messages", {
@@ -535,7 +535,7 @@ export async function getAdminMicrosoftMessage(
   resourceId: number,
   messageId: number,
   signal?: AbortSignal,
-  resourceType: "microsoft" | "gmail" | "icloud" | "daum" = "microsoft"
+  resourceType: "microsoft" | "microsoft_enterprise" | "gmail" | "icloud" | "daum" = "microsoft"
 ): Promise<AdminMicrosoftMessageDetail> {
   return unwrap(
     await client.GET("/v1/admin/messages/{messageId}", {

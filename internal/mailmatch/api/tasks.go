@@ -27,16 +27,23 @@ const (
 )
 
 var projectHistoryActive atomic.Int64
+var enterpriseProjectHistoryActive atomic.Int64
 
 func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 	// These two dispatchers are intentionally separate. Administrator mail
 	// fetches are foreground work; project-history identification remains on
 	// the paused/background queue and never competes for the same dispatcher.
-	mux.HandleFunc(mailmatchinfra.TypeMailmatchAdminResourceFetchDispatcher, func(ctx context.Context, _ *asynq.Task) error {
+	mux.HandleFunc(mailmatchinfra.TypeMailmatchAdminResourceFetchDispatcher, func(ctx context.Context, task *asynq.Task) error {
 		if module == nil || module.AdminResourceFetch == nil {
 			return nil
 		}
-		result, err := module.AdminResourceFetch.DispatchPending(ctx, resourceFetchDispatchLimitValue())
+		var payload mailmatchapp.AdminResourceFetchTask
+		if len(task.Payload()) > 0 {
+			if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+				return err
+			}
+		}
+		result, err := module.AdminResourceFetch.DispatchPending(ctx, resourceFetchDispatchLimitValue(), payload.Enterprise)
 		if err != nil {
 			slog.Warn("admin resource fetch dispatcher failed", "error", err)
 			return err
@@ -46,11 +53,17 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		}
 		return nil
 	})
-	mux.HandleFunc(mailmatchinfra.TypeMailmatchResourceHistoryDispatcher, func(ctx context.Context, _ *asynq.Task) error {
+	mux.HandleFunc(mailmatchinfra.TypeMailmatchResourceHistoryDispatcher, func(ctx context.Context, task *asynq.Task) error {
 		if module == nil || module.ResourceHistory == nil {
 			return nil
 		}
-		result, err := module.ResourceHistory.DispatchPending(ctx, resourceFetchDispatchLimitValue())
+		var payload mailmatchapp.AdminResourceFetchTask
+		if len(task.Payload()) > 0 {
+			if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+				return err
+			}
+		}
+		result, err := module.ResourceHistory.DispatchPending(ctx, resourceFetchDispatchLimitValue(), payload.Enterprise)
 		if err != nil {
 			slog.Warn("resource history dispatcher failed", "error", err)
 			return err
@@ -66,6 +79,9 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		}
 		if module.ResourceHistory != nil {
 			module.ResourceHistory.ScheduleDispatcher(context.Background(), 0)
+		}
+		if module.EnterpriseProjectHistory != nil {
+			module.EnterpriseProjectHistory.ScheduleDispatcher(context.Background(), 0)
 		}
 		if module.ProjectHistory != nil {
 			module.ProjectHistory.ScheduleDispatcher(context.Background(), 0)
@@ -149,12 +165,19 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 			return fmt.Errorf("decode project history scan task: %w: %w", err, asynq.SkipRetry)
 		}
-		release, admitted := acquireProjectHistoryCapacity(ctx, module)
+		history := module.ProjectHistory
+		if payload.Enterprise {
+			history = module.EnterpriseProjectHistory
+		}
+		if history == nil {
+			return nil
+		}
+		release, admitted := acquireProjectHistoryCapacity(ctx, module, payload.Enterprise)
 		if !admitted {
 			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
 				recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundReleaseTimeout)
 				defer cancel()
-				if err := module.ProjectHistory.ReleaseDispatch(recoveryCtx, payload); err != nil {
+				if err := history.ReleaseDispatch(recoveryCtx, payload); err != nil {
 					return err
 				}
 				return nil
@@ -162,7 +185,7 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 			return platform.ErrBackgroundExecutionDeferred
 		}
 		defer release()
-		if err := module.ProjectHistory.Process(ctx, payload); err != nil {
+		if err := history.Process(ctx, payload); err != nil {
 			slog.Warn(
 				"project history scan task failed",
 				"project_id", payload.ProjectID,
@@ -185,7 +208,14 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		if payload.ResourceID == 0 {
 			return fmt.Errorf("decode validated microsoft history scan task: resource identity is missing: %w", asynq.SkipRetry)
 		}
-		release, admitted := acquireProjectHistoryCapacity(ctx, module)
+		history := module.ProjectHistory
+		if payload.Enterprise {
+			history = module.EnterpriseProjectHistory
+		}
+		if history == nil {
+			return nil
+		}
+		release, admitted := acquireProjectHistoryCapacity(ctx, module, payload.Enterprise)
 		if !admitted {
 			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
 				return nil
@@ -193,7 +223,7 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 			return platform.ErrBackgroundExecutionDeferred
 		}
 		defer release()
-		if err := module.ProjectHistory.ProcessValidatedMicrosoftHistory(ctx, payload); err != nil {
+		if err := history.ProcessValidatedMicrosoftHistory(ctx, payload); err != nil {
 			if !errors.Is(err, platform.ErrBackgroundExecutionDeferred) {
 				slog.Warn(
 					"validated microsoft history scan task failed",
@@ -210,12 +240,25 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) {
 		return nil
 	})
 
-	mux.HandleFunc(mailmatchinfra.TypeProjectHistoryDispatcher, func(ctx context.Context, _ *asynq.Task) error {
+	mux.HandleFunc(mailmatchinfra.TypeProjectHistoryDispatcher, func(ctx context.Context, task *asynq.Task) error {
 		if module == nil || module.ProjectHistory == nil {
 			return nil
 		}
-		limit := min(runtimeconfig.Int("project_history_dispatch_limit", projectHistoryDispatchLimit, 1), maxProjectHistoryDispatchLimit)
-		if err := module.ProjectHistory.DispatchPending(ctx, limit); err != nil {
+		var payload mailmatchapp.ProjectHistoryScanTask
+		if len(task.Payload()) > 0 {
+			if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+				return err
+			}
+		}
+		history, key := module.ProjectHistory, "project_history_dispatch_limit"
+		if payload.Enterprise {
+			history, key = module.EnterpriseProjectHistory, "microsoft_enterprise_history_dispatch_limit"
+		}
+		if history == nil {
+			return nil
+		}
+		limit := min(runtimeconfig.Int(key, projectHistoryDispatchLimit, 1), maxProjectHistoryDispatchLimit)
+		if err := history.DispatchPending(ctx, limit); err != nil {
 			slog.Warn("project history dispatcher failed", "error", err)
 		}
 		return nil
@@ -321,6 +364,9 @@ func startFetchDispatcherSeeder(module *Module) {
 			if module.ResourceHistory != nil {
 				module.ResourceHistory.ScheduleDispatcher(context.Background(), 0)
 			}
+			if module.EnterpriseProjectHistory != nil {
+				module.EnterpriseProjectHistory.ScheduleDispatcher(context.Background(), 0)
+			}
 			if module.ProjectHistory != nil {
 				module.ProjectHistory.ScheduleDispatcher(context.Background(), 0)
 			}
@@ -328,21 +374,25 @@ func startFetchDispatcherSeeder(module *Module) {
 	}()
 }
 
-func acquireProjectHistoryCapacity(ctx context.Context, module *Module) (func(), bool) {
+func acquireProjectHistoryCapacity(ctx context.Context, module *Module, enterprise bool) (func(), bool) {
 	backgroundRelease, admitted := acquireBackgroundExecution(ctx, module)
 	if !admitted {
 		return func() {}, false
 	}
-	limit := int64(min(runtimeconfig.Int("project_history_concurrency", projectHistoryConcurrency, 1), maxProjectHistoryConcurrency))
+	key, counter := "project_history_concurrency", &projectHistoryActive
+	if enterprise {
+		key, counter = "microsoft_enterprise_history_concurrency", &enterpriseProjectHistoryActive
+	}
+	limit := int64(min(runtimeconfig.Int(key, projectHistoryConcurrency, 1), maxProjectHistoryConcurrency))
 	for {
-		active := projectHistoryActive.Load()
+		active := counter.Load()
 		if active >= limit {
 			backgroundRelease()
 			return func() {}, false
 		}
-		if projectHistoryActive.CompareAndSwap(active, active+1) {
+		if counter.CompareAndSwap(active, active+1) {
 			return func() {
-				projectHistoryActive.Add(-1)
+				counter.Add(-1)
 				backgroundRelease()
 			}, true
 		}

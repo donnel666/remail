@@ -443,6 +443,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 			history: mailmatchMod.ResourceHistory,
 		})
 		coreMod.ProjectUseCase.SetHistoryScan(mailmatchMod.ProjectHistory.Schedule)
+		coreMod.ProjectUseCase.SetMicrosoftEnterpriseHistoryScan(mailmatchMod.EnterpriseProjectHistory.Schedule)
 		coreMod.ProjectUseCase.SetGmailHistoryScan(gmailMod.Service.ScheduleProjectHistory)
 		coreMod.SetMicrosoftHistoryScanTrigger(mailmatchMod.ProjectHistory)
 		mailmatchapi.RegisterTaskHandlers(taskMux, mailmatchMod)

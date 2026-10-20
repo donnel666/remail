@@ -28,8 +28,8 @@ func (uc *UseCase) ProtoProtocolReady() bool {
 
 func (uc *UseCase) findAllocationForFulfillment(ctx context.Context, orderNo string) (*domain.UnifiedAllocation, error) {
 	allocation, err := uc.repo.FindExistingAllocation(ctx, orderNo)
-	if err == nil && allocation != nil && allocation.Type == domain.AllocationTypeMicrosoft {
-		ready, checkErr := uc.MicrosoftAllocationReady(ctx, orderNo, allocation.ID)
+	if err == nil && allocation != nil && (allocation.Type == domain.AllocationTypeMicrosoft || allocation.Type == domain.AllocationTypeMicrosoftEnterprise) {
+		ready, checkErr := uc.MicrosoftAllocationReady(ctx, orderNo, allocation.ID, allocation.Type == domain.AllocationTypeMicrosoftEnterprise)
 		if checkErr != nil {
 			return nil, checkErr
 		}

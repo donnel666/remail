@@ -553,6 +553,11 @@ func (uc *UseCase) productSuffixInventoryForSelection(ctx context.Context, confi
 
 func (uc *UseCase) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd HistoricalMicrosoftAllocationCommand) (*domain.UnifiedAllocation, error) {
 	cmd.Email = strings.ToLower(strings.TrimSpace(cmd.Email))
+	enterprise := coredomain.IsMicrosoftEnterpriseEmail(cmd.Email)
+	allocationType := domain.AllocationType(coredomain.MicrosoftResourceType(enterprise))
+	if enterprise && cmd.Mailbox != domain.MicrosoftMailboxMain {
+		return nil, domain.ErrInvalidAllocationRequest
+	}
 	cmd.CreatedAt = cmd.CreatedAt.UTC()
 	cmd.ReleasedAt = cmd.ReleasedAt.UTC()
 	if uc == nil || uc.repo == nil || cmd.ProjectID == 0 || cmd.ProductID == 0 ||
@@ -563,7 +568,7 @@ func (uc *UseCase) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd 
 	}
 	var result *domain.UnifiedAllocation
 	err := uc.repo.WithTx(ctx, func(txCtx context.Context) error {
-		lockedRoot, err := uc.repo.LockResourceRoot(txCtx, cmd.ResourceID, domain.AllocationTypeMicrosoft)
+		lockedRoot, err := uc.repo.LockResourceRoot(txCtx, cmd.ResourceID, allocationType)
 		if err != nil {
 			return err
 		}
@@ -640,19 +645,20 @@ func (uc *UseCase) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd 
 			result = existing
 			return nil
 		}
-		matched, err := uc.repo.IsMicrosoftMailboxHistoricallyMatched(txCtx, cmd.ProjectID, cmd.Mailbox, mailboxID)
+		matched, err := uc.repo.IsMicrosoftMailboxHistoricallyMatched(txCtx, cmd.ProjectID, cmd.Mailbox, mailboxID, enterprise)
 		if err != nil {
 			return err
 		}
 		if matched {
 			return nil
 		}
-		if err := uc.repo.CreateOrderGuard(txCtx, orderNo, domain.AllocationTypeMicrosoft); err != nil {
+		if err := uc.repo.CreateOrderGuard(txCtx, orderNo, allocationType); err != nil {
 			return err
 		}
 		releasedAt := cmd.ReleasedAt
 		allocation := &domain.MicrosoftAllocation{
-			OrderNo: orderNo, ProjectID: cmd.ProjectID, ProductID: cmd.ProductID,
+			Enterprise: enterprise,
+			OrderNo:    orderNo, ProjectID: cmd.ProjectID, ProductID: cmd.ProductID,
 			ResourceID: cmd.ResourceID, SupplyScope: domain.SupplyScopePublic,
 			Mailbox: cmd.Mailbox, ExplicitAliasID: explicitAliasID, DotAliasID: dotAliasID, PlusAliasID: plusAliasID,
 			Email: cmd.Email, Status: domain.AllocationStatusReleased,
@@ -662,7 +668,7 @@ func (uc *UseCase) ImportHistoricalMicrosoftAllocation(ctx context.Context, cmd 
 			return err
 		}
 		unified := domain.UnifiedAllocation{
-			Type: domain.AllocationTypeMicrosoft, ID: allocation.ID, OrderNo: allocation.OrderNo,
+			Type: allocationType, ID: allocation.ID, OrderNo: allocation.OrderNo,
 			ProjectID: allocation.ProjectID, ProductID: allocation.ProductID, ResourceID: allocation.ResourceID,
 			SupplyScope: allocation.SupplyScope, Mailbox: string(allocation.Mailbox), Email: allocation.Email,
 			Status: allocation.Status, CreatedAt: allocation.CreatedAt, ReleasedAt: allocation.ReleasedAt, Created: true,
@@ -697,7 +703,7 @@ func historicalAliasMailbox(email string) (domain.MicrosoftMailbox, string) {
 
 func sameHistoricalMicrosoftAllocation(existing domain.UnifiedAllocation, orderNo string, cmd HistoricalMicrosoftAllocationCommand) bool {
 	emailMatches := cmd.Mailbox == domain.MicrosoftMailboxMain || strings.EqualFold(existing.Email, cmd.Email)
-	return existing.Type == domain.AllocationTypeMicrosoft && existing.OrderNo == orderNo &&
+	return existing.Type == domain.AllocationType(coredomain.MicrosoftResourceType(coredomain.IsMicrosoftEnterpriseEmail(cmd.Email))) && existing.OrderNo == orderNo &&
 		existing.ProjectID == cmd.ProjectID && existing.ProductID == cmd.ProductID && existing.ResourceID == cmd.ResourceID &&
 		existing.Mailbox == string(cmd.Mailbox) && emailMatches &&
 		existing.Status == domain.AllocationStatusReleased
@@ -2072,7 +2078,7 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 	if cmd.lockResourceRoot != nil {
 		lockRoot = cmd.lockResourceRoot
 	}
-	lockedRoot, err := lockRoot(ctx, candidate.ResourceID, domain.AllocationTypeMicrosoft)
+	lockedRoot, err := lockRoot(ctx, candidate.ResourceID, domain.AllocationType(coredomain.MicrosoftResourceType(config.ProductType == coredomain.ProductTypeMicrosoftEnterprise)))
 	if err != nil {
 		return nil, err
 	}
@@ -2092,7 +2098,7 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 
 	switch mailbox {
 	case domain.MicrosoftMailboxMain:
-		matched, err := uc.repo.IsMicrosoftMailboxHistoricallyMatched(ctx, config.ProjectID, domain.MicrosoftMailboxMain, candidate.ResourceID)
+		matched, err := uc.repo.IsMicrosoftMailboxHistoricallyMatched(ctx, config.ProjectID, domain.MicrosoftMailboxMain, candidate.ResourceID, config.ProductType == coredomain.ProductTypeMicrosoftEnterprise)
 		if err != nil {
 			return nil, err
 		}
@@ -2127,7 +2133,7 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 			if alias == nil {
 				continue
 			}
-			matched, err := uc.repo.IsMicrosoftMailboxHistoricallyMatched(ctx, config.ProjectID, domain.MicrosoftMailboxDot, alias.ID)
+			matched, err := uc.repo.IsMicrosoftMailboxHistoricallyMatched(ctx, config.ProjectID, domain.MicrosoftMailboxDot, alias.ID, false)
 			if err != nil {
 				return nil, err
 			}
@@ -2163,7 +2169,7 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 			if alias == nil {
 				continue
 			}
-			matched, err := uc.repo.IsMicrosoftMailboxHistoricallyMatched(ctx, config.ProjectID, domain.MicrosoftMailboxPlus, alias.ID)
+			matched, err := uc.repo.IsMicrosoftMailboxHistoricallyMatched(ctx, config.ProjectID, domain.MicrosoftMailboxPlus, alias.ID, false)
 			if err != nil {
 				return nil, err
 			}
@@ -2179,6 +2185,8 @@ func (uc *UseCase) tryMicrosoftCandidate(ctx context.Context, cmd AllocateComman
 }
 
 func (uc *UseCase) createMicrosoftAllocation(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, resourceID uint, mailbox domain.MicrosoftMailbox, explicitAliasID, dotAliasID, plusAliasID *uint, email string, now time.Time, dailyUsage *DailyUsageReservation) (*domain.UnifiedAllocation, error) {
+	enterprise := config.ProductType == coredomain.ProductTypeMicrosoftEnterprise
+	allocationType := domain.AllocationType(coredomain.MicrosoftResourceType(enterprise))
 	if cmd.ensureOrderGuard == nil {
 		return nil, domain.ErrAllocationTxRequired
 	}
@@ -2186,6 +2194,7 @@ func (uc *UseCase) createMicrosoftAllocation(ctx context.Context, cmd AllocateCo
 		return nil, errCandidateUnavailable
 	}
 	allocation := &domain.MicrosoftAllocation{
+		Enterprise:      enterprise,
 		OrderNo:         cmd.OrderNo,
 		ProjectID:       config.ProjectID,
 		ProductID:       config.ProductID,
@@ -2206,17 +2215,17 @@ func (uc *UseCase) createMicrosoftAllocation(ctx context.Context, cmd AllocateCo
 			return nil, err
 		}
 	}
-	if err := cmd.ensureOrderGuard(ctx, domain.AllocationTypeMicrosoft); err != nil {
+	if err := cmd.ensureOrderGuard(ctx, allocationType); err != nil {
 		return nil, err
 	}
 	if err := uc.repo.CreateMicrosoftAllocation(ctx, allocation); err != nil {
 		return nil, err
 	}
-	if err := uc.repo.TouchMicrosoftAllocated(ctx, resourceID, now); err != nil {
+	if err := uc.repo.TouchMicrosoftAllocated(ctx, resourceID, now, enterprise); err != nil {
 		return nil, err
 	}
 	return &domain.UnifiedAllocation{
-		Type:        domain.AllocationTypeMicrosoft,
+		Type:        allocationType,
 		ID:          allocation.ID,
 		OrderNo:     allocation.OrderNo,
 		ProjectID:   allocation.ProjectID,

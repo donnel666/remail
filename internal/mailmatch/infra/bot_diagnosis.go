@@ -44,7 +44,7 @@ SELECT
 	project.name AS project_name,
     o.service_mode,
     o.status,
-    COALESCE(ma.resource_id, da.resource_id, ga.resource_id, ia.resource_id, pa.resource_id, dau.resource_id, 0) AS email_resource_id,
+    COALESCE(ma.resource_id, mea.resource_id, da.resource_id, ga.resource_id, ia.resource_id, pa.resource_id, dau.resource_id, 0) AS email_resource_id,
 	message.created_at AS delivery_stored_at,
     (
         o.status IN ('refunded', 'failed')
@@ -61,6 +61,8 @@ FROM orders o
 JOIN projects project ON project.id = o.project_id
 LEFT JOIN microsoft_allocations ma
     ON ma.order_no = o.order_no AND o.allocation_type = 'microsoft'
+LEFT JOIN microsoft_enterprise_allocations mea
+    ON mea.order_no = o.order_no AND o.allocation_type = 'microsoft_enterprise'
 LEFT JOIN domain_allocations da
     ON da.order_no = o.order_no AND o.allocation_type = 'domain'
 LEFT JOIN gmail_allocations ga
@@ -237,6 +239,8 @@ func codeDiagnosisAllocationTable(resourceType string) string {
 	switch resourceType {
 	case "microsoft":
 		return "microsoft_allocations"
+	case "microsoft_enterprise":
+		return "microsoft_enterprise_allocations"
 	case "domain":
 		return "domain_allocations"
 	case "gmail":
@@ -254,7 +258,7 @@ func codeDiagnosisAllocationTable(resourceType string) string {
 func codeDiagnosisOverlapRecipient(resourceType domain.ResourceType, email string) (string, []any, bool) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	switch resourceType {
-	case domain.ResourceTypeProto, domain.ResourceTypeDaum:
+	case domain.ResourceTypeMicrosoftEnterprise, domain.ResourceTypeProto, domain.ResourceTypeDaum:
 		return "other_allocation.email = ?", []any{email}, email != ""
 	case domain.ResourceTypeMicrosoft:
 		_, _, canonical, ok := domain.RecipientAliasForms(email)

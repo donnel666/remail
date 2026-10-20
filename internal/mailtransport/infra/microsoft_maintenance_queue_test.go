@@ -59,6 +59,18 @@ func TestMicrosoftTokenRefreshQueueReportsOnlyNewAcceptance(t *testing.T) {
 	require.NoError(t, json.Unmarshal(pending[0].Payload, &payload))
 	require.Equal(t, task, payload)
 
+	enterprise := task
+	enterprise.ResourceID = 43
+	enterprise.Enterprise = true
+	accepted, err = queue.EnqueueMicrosoftTokenRefresh(context.Background(), enterprise)
+	require.NoError(t, err)
+	require.True(t, accepted)
+	enterprisePending, err := inspector.ListPendingTasks(platform.QueueBackgroundMicrosoftEnterpriseValidation)
+	require.NoError(t, err)
+	require.Len(t, enterprisePending, 1)
+	require.NoError(t, json.Unmarshal(enterprisePending[0].Payload, &payload))
+	require.Equal(t, enterprise, payload)
+
 	server.FastForward(microsoftTokenRefreshTaskTimeout + time.Second)
 	accepted, err = queue.EnqueueMicrosoftTokenRefresh(context.Background(), task)
 	require.NoError(t, err)

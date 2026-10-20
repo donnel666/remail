@@ -59,7 +59,7 @@ export function toResourceStatus(status?: string): ResourceStatus {
 }
 
 export function toEmailResource(item: ResourceItem): EmailResource | null {
-  if (item.type !== "microsoft" || !item.email) return null;
+  if ((item.type !== "microsoft" && item.type !== "microsoft_enterprise") || !item.email) return null;
 
   const forSale = Boolean(item.forSale);
   const suffix = getSuffix(item.email);

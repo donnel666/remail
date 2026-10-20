@@ -78,15 +78,34 @@ func (s *pickupFallbackTaskState) Release(context.Context, uint, string) error {
 func TestProjectHistoryCapacityIsLimitedToFourWorkers(t *testing.T) {
 	releases := make([]func(), 0, projectHistoryConcurrency)
 	for range projectHistoryConcurrency {
-		release, admitted := acquireProjectHistoryCapacity(context.Background(), nil)
+		release, admitted := acquireProjectHistoryCapacity(context.Background(), nil, false)
 		require.True(t, admitted)
 		releases = append(releases, release)
 	}
-	_, admitted := acquireProjectHistoryCapacity(context.Background(), nil)
+	_, admitted := acquireProjectHistoryCapacity(context.Background(), nil, false)
 	require.False(t, admitted)
 	for _, release := range releases {
 		release()
 	}
+}
+
+func TestMicrosoftEnterpriseHistoryCapacityIndependentOfPersonal(t *testing.T) {
+	runtimeconfig.Set("project_history_concurrency", "1")
+	runtimeconfig.Set("microsoft_enterprise_history_concurrency", "2")
+	t.Cleanup(func() {
+		runtimeconfig.Delete("project_history_concurrency")
+		runtimeconfig.Delete("microsoft_enterprise_history_concurrency")
+	})
+	release, admitted := acquireProjectHistoryCapacity(context.Background(), nil, false)
+	require.True(t, admitted)
+	defer release()
+	for range 2 {
+		releaseEnterprise, ok := acquireProjectHistoryCapacity(context.Background(), nil, true)
+		require.True(t, ok, "personal work cannot consume enterprise capacity")
+		defer releaseEnterprise()
+	}
+	_, admitted = acquireProjectHistoryCapacity(context.Background(), nil, true)
+	require.False(t, admitted, "enterprise work obeys its own capacity")
 }
 
 func TestProjectHistoryCapacitySupportsConfiguredMaximum(t *testing.T) {
@@ -100,11 +119,11 @@ func TestProjectHistoryCapacitySupportsConfiguredMaximum(t *testing.T) {
 		}
 	})
 	for range 8096 {
-		release, admitted := acquireProjectHistoryCapacity(context.Background(), nil)
+		release, admitted := acquireProjectHistoryCapacity(context.Background(), nil, false)
 		require.True(t, admitted)
 		releases = append(releases, release)
 	}
-	_, admitted := acquireProjectHistoryCapacity(context.Background(), nil)
+	_, admitted := acquireProjectHistoryCapacity(context.Background(), nil, false)
 	require.False(t, admitted)
 }
 

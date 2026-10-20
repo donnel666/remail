@@ -308,8 +308,8 @@ export default function MicrosoftEmails({ enterprise = false }: { enterprise?: b
   }, [activeSuffix, resourceFacets, suffixSet]);
 
   const microsoftBulkFilter = useMemo<ResourceBulkFilter>(() => {
-    return { ...microsoftListFilter, resourceType: "microsoft" };
-  }, [microsoftListFilter]);
+    return { ...microsoftListFilter, resourceType: enterprise ? "microsoft_enterprise" : "microsoft" };
+  }, [enterprise, microsoftListFilter]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(activePage, totalPages);

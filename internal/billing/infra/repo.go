@@ -194,13 +194,14 @@ func (ReferralRewardModel) TableName() string {
 }
 
 type BillingRepo struct {
-	db                   *gorm.DB
-	operationLogs        operationLogWriter
-	hasGmailAllocations  bool
-	hasICloudAllocations bool
-	hasProtoAllocations  bool
-	hasDaumAllocations   bool
-	fulfillmentStats     *platform.HourlySnapshotCache[supplierFulfillmentMetrics]
+	db                                *gorm.DB
+	operationLogs                     operationLogWriter
+	hasGmailAllocations               bool
+	hasMicrosoftEnterpriseAllocations bool
+	hasICloudAllocations              bool
+	hasProtoAllocations               bool
+	hasDaumAllocations                bool
+	fulfillmentStats                  *platform.HourlySnapshotCache[supplierFulfillmentMetrics]
 }
 
 func (r *BillingRepo) SetStatisticsCache(client redis.UniversalClient) {
@@ -214,6 +215,7 @@ func NewBillingRepo(db *gorm.DB) *BillingRepo {
 	}
 	if db != nil {
 		repo.hasGmailAllocations = db.Migrator().HasTable("gmail_allocations")
+		repo.hasMicrosoftEnterpriseAllocations = db.Migrator().HasTable("microsoft_enterprise_allocations")
 		repo.hasICloudAllocations = db.Migrator().HasTable("icloud_allocations")
 		repo.hasProtoAllocations = db.Migrator().HasTable("proto_allocations")
 		repo.hasDaumAllocations = db.Migrator().HasTable("daum_allocations")
@@ -280,6 +282,12 @@ const supplierMicrosoftAllocationsSQL = `SELECT ma.order_no
     LEFT JOIN email_resources er ON er.id = ma.resource_id AND er.type = 'microsoft'
     WHERE COALESCE(guard.owner_user_id, er.owner_user_id) = ? AND ma.supply_scope = 'public'`
 
+const supplierMicrosoftEnterpriseAllocationsSQL = `SELECT ma.order_no
+    FROM microsoft_enterprise_allocations ma
+    JOIN allocation_order_guards guard ON guard.order_no = ma.order_no AND guard.type = 'microsoft_enterprise'
+    LEFT JOIN email_resources er ON er.id = ma.resource_id AND er.type = 'microsoft_enterprise'
+    WHERE COALESCE(guard.owner_user_id, er.owner_user_id) = ? AND ma.supply_scope = 'public'`
+
 const supplierDomainAllocationsSQL = `SELECT da.order_no
     FROM domain_allocations da
     JOIN email_resources er ON er.id = da.resource_id AND er.type = 'domain'
@@ -342,6 +350,10 @@ func (r *BillingRepo) loadSupplierFulfillmentMetrics(ctx context.Context, db *go
 	var metrics supplierFulfillmentMetrics
 	allocationQueries := []string{supplierMicrosoftAllocationsSQL, supplierDomainAllocationsSQL}
 	args := []any{time.Now().UTC(), userID, userID}
+	if r.hasMicrosoftEnterpriseAllocations {
+		allocationQueries = append(allocationQueries, supplierMicrosoftEnterpriseAllocationsSQL)
+		args = append(args, userID)
+	}
 	if r.hasGmailAllocations {
 		allocationQueries = append(allocationQueries, supplierGmailAllocationsSQL)
 		args = append(args, userID)

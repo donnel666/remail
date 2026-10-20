@@ -19,6 +19,7 @@ import (
 )
 
 type MicrosoftTokenRefreshStateModel struct {
+	ResourceType               string     `gorm:"column:resource_type"`
 	ResourceID                 uint       `gorm:"primaryKey;column:id"`
 	Status                     string     `gorm:"column:token_refresh_status"`
 	Generation                 uint64     `gorm:"column:token_refresh_generation"`
@@ -38,7 +39,7 @@ type MicrosoftTokenRefreshStateModel struct {
 func (MicrosoftTokenRefreshStateModel) TableName() string { return "microsoft_resources" }
 
 const microsoftTokenRefreshStateColumns = `
-id,
+id, resource_type,
 token_refresh_status,
 token_refresh_generation,
 token_refresh_failures,
@@ -88,6 +89,24 @@ func (r *MicrosoftTokenRefreshRepo) withTx(ctx context.Context, fn func(context.
 	})
 }
 
+func microsoftTokenTable(enterprise bool) string {
+	if enterprise {
+		return "microsoft_enterprise_resources"
+	}
+	return "microsoft_resources"
+}
+
+func microsoftTokenResourceTable(ctx context.Context, db *gorm.DB, id uint) (string, error) {
+	var root struct{ Type string }
+	if err := db.WithContext(ctx).Table("email_resources").Select("type").Where("id=? AND type IN ?", id, []string{"microsoft", "microsoft_enterprise"}).Take(&root).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", mailapp.ErrMicrosoftTokenRefreshNotFound
+		}
+		return "", err
+	}
+	return microsoftTokenTable(root.Type == "microsoft_enterprise"), nil
+}
+
 func (r *MicrosoftTokenRefreshRepo) Request(
 	ctx context.Context,
 	command mailapp.MicrosoftTokenRefreshCommand,
@@ -96,9 +115,13 @@ func (r *MicrosoftTokenRefreshRepo) Request(
 	var accepted mailapp.MicrosoftTokenRefreshState
 	reused := false
 	err := r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
+		table, tableErr := microsoftTokenResourceTable(txCtx, tx, command.ResourceID)
+		if tableErr != nil {
+			return tableErr
+		}
 		scope := fmt.Sprintf("%d:%s", command.OperatorUserID, strings.TrimSpace(command.IdempotencyKey))
 		var replay MicrosoftTokenRefreshStateModel
-		err := tx.Select(microsoftTokenRefreshStateColumns).
+		err := tx.Table(table).Select(microsoftTokenRefreshStateColumns).
 			Where("token_refresh_idempotency_scope = ?", scope).
 			Take(&replay).Error
 		if err == nil {
@@ -124,7 +147,7 @@ func (r *MicrosoftTokenRefreshRepo) Request(
 			return mailapp.ErrMicrosoftTokenCredentialsMissing
 		}
 		var state MicrosoftTokenRefreshStateModel
-		if err := tx.Select(microsoftTokenRefreshStateColumns).
+		if err := tx.Table(table).Select(microsoftTokenRefreshStateColumns).
 			Clauses(clause.Locking{Strength: "UPDATE"}).
 			First(&state, command.ResourceID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -153,7 +176,7 @@ func (r *MicrosoftTokenRefreshRepo) Request(
 		state.StartedAt = nil
 		state.FinishedAt = nil
 		state.UpdatedAt = now
-		updated := tx.Model(&MicrosoftTokenRefreshStateModel{}).
+		updated := tx.Model(&MicrosoftTokenRefreshStateModel{}).Table(table).
 			Where("id = ?", command.ResourceID).
 			Updates(map[string]any{
 				"token_refresh_status":                       state.Status,
@@ -185,17 +208,13 @@ func (r *MicrosoftTokenRefreshRepo) Request(
 	return &accepted, reused, nil
 }
 
-func (r *MicrosoftTokenRefreshRepo) ListPending(ctx context.Context, limit int) ([]mailapp.MicrosoftTokenRefreshState, error) {
+func (r *MicrosoftTokenRefreshRepo) ListPending(ctx context.Context, limit int, enterprise bool) ([]mailapp.MicrosoftTokenRefreshState, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 32
 	}
 	var models []MicrosoftTokenRefreshStateModel
-	if err := r.db.WithContext(ctx).
-		Select(microsoftTokenRefreshStateColumns).
-		Where("token_refresh_status = ?", mailapp.MicrosoftTokenRefreshPending).
-		Order("token_refresh_requested_at ASC, id ASC").
-		Limit(limit).
-		Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Table(microsoftTokenTable(enterprise)).Select(microsoftTokenRefreshStateColumns).
+		Where("token_refresh_status = ?", mailapp.MicrosoftTokenRefreshPending).Order("token_refresh_requested_at ASC, id ASC").Limit(limit).Find(&models).Error; err != nil {
 		return nil, tokenRefreshUnavailable("list pending resource refreshes", err)
 	}
 	states := make([]mailapp.MicrosoftTokenRefreshState, len(models))
@@ -206,8 +225,12 @@ func (r *MicrosoftTokenRefreshRepo) ListPending(ctx context.Context, limit int) 
 }
 
 func (r *MicrosoftTokenRefreshRepo) MarkProcessing(ctx context.Context, resourceID uint, generation uint64) (bool, error) {
+	table, err := microsoftTokenResourceTable(ctx, r.db, resourceID)
+	if err != nil {
+		return false, err
+	}
 	now := time.Now().UTC()
-	result := r.db.WithContext(ctx).Model(&MicrosoftTokenRefreshStateModel{}).
+	result := r.db.WithContext(ctx).Model(&MicrosoftTokenRefreshStateModel{}).Table(table).
 		Where("id = ? AND token_refresh_generation = ? AND token_refresh_status = ?",
 			resourceID, generation, mailapp.MicrosoftTokenRefreshPending).
 		Updates(map[string]any{
@@ -224,8 +247,12 @@ func (r *MicrosoftTokenRefreshRepo) MarkProcessing(ctx context.Context, resource
 }
 
 func (r *MicrosoftTokenRefreshRepo) ReleaseInfrastructureFailure(ctx context.Context, resourceID uint, generation uint64, safeError string) (bool, error) {
+	table, err := microsoftTokenResourceTable(ctx, r.db, resourceID)
+	if err != nil {
+		return false, err
+	}
 	now := time.Now().UTC()
-	result := r.db.WithContext(ctx).Model(&MicrosoftTokenRefreshStateModel{}).
+	result := r.db.WithContext(ctx).Model(&MicrosoftTokenRefreshStateModel{}).Table(table).
 		Where("id = ? AND token_refresh_generation = ? AND token_refresh_status = ?",
 			resourceID, generation, mailapp.MicrosoftTokenRefreshProcessing).
 		Updates(map[string]any{
@@ -251,7 +278,7 @@ func (r *MicrosoftTokenRefreshRepo) LoadExecution(ctx context.Context, task mail
 			return err
 		}
 		var state MicrosoftTokenRefreshStateModel
-		if err := tx.Select(microsoftTokenRefreshStateColumns).First(&state, task.ResourceID).Error; err != nil {
+		if err := tx.Table(microsoftTokenTable(task.Enterprise)).Select(microsoftTokenRefreshStateColumns).First(&state, task.ResourceID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return mailapp.ErrMicrosoftTokenRefreshNotFound
 			}
@@ -315,7 +342,7 @@ func (r *MicrosoftTokenRefreshRepo) RecordRetryableFailure(ctx context.Context, 
 			}
 		}
 		now := time.Now().UTC()
-		updated := tx.Model(&MicrosoftTokenRefreshStateModel{}).
+		updated := tx.Model(&MicrosoftTokenRefreshStateModel{}).Table(microsoftTokenTable(task.Enterprise)).
 			Where("id = ? AND token_refresh_generation = ? AND token_refresh_status = ?",
 				task.ResourceID, task.Generation, mailapp.MicrosoftTokenRefreshProcessing).
 			Updates(map[string]any{
@@ -391,7 +418,7 @@ func (r *MicrosoftTokenRefreshRepo) ApplyResult(ctx context.Context, task mailap
 				return err
 			}
 		}
-		updated := tx.Model(&MicrosoftTokenRefreshStateModel{}).
+		updated := tx.Model(&MicrosoftTokenRefreshStateModel{}).Table(microsoftTokenTable(task.Enterprise)).
 			Where("id = ? AND token_refresh_generation = ? AND token_refresh_status = ?",
 				task.ResourceID, task.Generation, mailapp.MicrosoftTokenRefreshProcessing).
 			Updates(map[string]any{
@@ -419,7 +446,7 @@ func (r *MicrosoftTokenRefreshRepo) ApplyResult(ctx context.Context, task mailap
 
 func lockCurrentTokenRefreshState(tx *gorm.DB, task mailapp.MicrosoftTokenRefreshTask) (*MicrosoftTokenRefreshStateModel, bool, error) {
 	var state MicrosoftTokenRefreshStateModel
-	err := tx.Select(microsoftTokenRefreshStateColumns).
+	err := tx.Table(microsoftTokenTable(task.Enterprise)).Select(microsoftTokenRefreshStateColumns).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		First(&state, task.ResourceID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -435,7 +462,7 @@ func lockCurrentTokenRefreshState(tx *gorm.DB, task mailapp.MicrosoftTokenRefres
 }
 
 func (r *MicrosoftTokenRefreshRepo) finishStaleStateTx(tx *gorm.DB, state MicrosoftTokenRefreshStateModel, safeError string) (bool, error) {
-	result := tx.Model(&MicrosoftTokenRefreshStateModel{}).
+	result := tx.Model(&MicrosoftTokenRefreshStateModel{}).Table(microsoftTokenTable(state.ResourceType == "microsoft_enterprise")).
 		Where("id = ? AND token_refresh_generation = ? AND token_refresh_status = ?",
 			state.ResourceID, state.Generation, mailapp.MicrosoftTokenRefreshProcessing).
 		Updates(map[string]any{
@@ -533,6 +560,7 @@ func tokenRefreshStateFromModel(model MicrosoftTokenRefreshStateModel) mailapp.M
 		operatorUserID = *model.OperatorUserID
 	}
 	return mailapp.MicrosoftTokenRefreshState{
+		Enterprise: model.ResourceType == "microsoft_enterprise",
 		ResourceID: model.ResourceID, Generation: model.Generation,
 		OperatorUserID: operatorUserID, ExpectedCredentialRevision: model.ExpectedCredentialRevision,
 		Status: model.Status, Failures: model.Failures, LastSafeError: model.LastSafeError,

@@ -85,9 +85,13 @@ func (q *FetchQueue) EnqueueAdminResourceFetch(ctx context.Context, task app.Adm
 	if err != nil {
 		return false, fmt.Errorf("marshal admin resource fetch task: %w", err)
 	}
+	queue := platform.QueueDefault
+	if task.Enterprise {
+		queue = platform.QueueMicrosoftEnterprise
+	}
 	timeout := resourceFetchTaskTimeout()
 	_, err = q.client.EnqueueContext(ctx, asynq.NewTask(TypeMailmatchAdminResourceFetch, payload),
-		asynq.Queue(platform.QueueDefault), asynq.Unique(timeout),
+		asynq.Queue(queue), asynq.Unique(timeout),
 		asynq.MaxRetry(resourceFetchTaskMaxRetry), asynq.Timeout(timeout), asynq.Retention(0))
 	if err != nil {
 		if errors.Is(err, asynq.ErrDuplicateTask) {
@@ -107,8 +111,12 @@ func (q *FetchQueue) EnqueueResourceHistory(ctx context.Context, task app.Resour
 		return false, fmt.Errorf("marshal resource history task: %w", err)
 	}
 	timeout := resourceFetchTaskTimeout()
+	queue := platform.QueueBackgroundProjectHistory
+	if task.Enterprise {
+		queue = platform.QueueBackgroundMicrosoftEnterpriseHistory
+	}
 	_, err = q.client.EnqueueContext(ctx, asynq.NewTask(TypeMailmatchResourceHistory, payload),
-		asynq.Queue(platform.QueueBackgroundProjectHistory), asynq.Unique(timeout),
+		asynq.Queue(queue), asynq.Unique(timeout),
 		asynq.MaxRetry(resourceFetchTaskMaxRetry), asynq.Timeout(timeout), asynq.Retention(0))
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return false, nil
@@ -131,11 +139,15 @@ func (q *FetchQueue) EnqueueProjectHistoryScan(ctx context.Context, task app.Pro
 	if err != nil {
 		return false, fmt.Errorf("marshal project history scan task: %w", err)
 	}
+	queue := platform.QueueBackgroundProjectHistory
+	if task.Enterprise {
+		queue = platform.QueueBackgroundMicrosoftEnterpriseHistory
+	}
 	timeout := min(runtimeconfig.Duration("project_history_timeout_minutes", projectHistoryTaskTimeout, time.Minute, 1), maxProjectHistoryTaskTimeout)
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynq.NewTask(TypeProjectHistoryScan, payload),
-		asynq.Queue(platform.QueueBackgroundProjectHistory),
+		asynq.Queue(queue),
 		asynq.Unique(timeout),
 		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(timeout),
@@ -181,16 +193,24 @@ func (q *FetchQueue) EnqueueValidatedMicrosoftHistoryScan(ctx context.Context, t
 	return nil
 }
 
-func (q *FetchQueue) EnqueueProjectHistoryDispatcher(ctx context.Context, delay time.Duration) error {
+func (q *FetchQueue) EnqueueProjectHistoryDispatcher(ctx context.Context, delay time.Duration, enterprise bool) error {
 	if q == nil || q.client == nil {
 		return fmt.Errorf("project history dispatcher queue is unavailable")
+	}
+	queue := platform.QueueBackgroundProjectHistory
+	if enterprise {
+		queue = platform.QueueBackgroundMicrosoftEnterpriseHistory
+	}
+	payload, err := json.Marshal(app.ProjectHistoryScanTask{Enterprise: enterprise})
+	if err != nil {
+		return err
 	}
 	uniqueTTL := projectHistoryDispatchTimeout
 	if delay > 0 {
 		uniqueTTL += delay
 	}
 	options := []asynq.Option{
-		asynq.Queue(platform.QueueBackgroundProjectHistory),
+		asynq.Queue(queue),
 		asynq.Unique(uniqueTTL),
 		asynq.MaxRetry(0),
 		asynq.Timeout(projectHistoryDispatchTimeout),
@@ -199,7 +219,7 @@ func (q *FetchQueue) EnqueueProjectHistoryDispatcher(ctx context.Context, delay 
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
-	_, err := q.client.EnqueueContext(ctx, asynq.NewTask(TypeProjectHistoryDispatcher, nil), options...)
+	_, err = q.client.EnqueueContext(ctx, asynq.NewTask(TypeProjectHistoryDispatcher, payload), options...)
 	if errors.Is(err, asynq.ErrDuplicateTask) {
 		return nil
 	}
@@ -209,22 +229,29 @@ func (q *FetchQueue) EnqueueProjectHistoryDispatcher(ctx context.Context, delay 
 	return nil
 }
 
-func (q *FetchQueue) EnqueueAdminResourceFetchDispatcher(ctx context.Context, delay time.Duration) error {
+func (q *FetchQueue) EnqueueAdminResourceFetchDispatcher(ctx context.Context, delay time.Duration, enterprise bool) error {
 	if q == nil || q.client == nil {
 		return fmt.Errorf("admin resource fetch dispatcher queue is unavailable")
 	}
-	return q.enqueueResourceDispatcher(ctx, TypeMailmatchAdminResourceFetchDispatcher, platform.QueueDefault, delay)
+	return q.enqueueResourceDispatcher(ctx, TypeMailmatchAdminResourceFetchDispatcher, platform.QueueDefault, delay, enterprise)
 }
 
-func (q *FetchQueue) EnqueueResourceHistoryDispatcher(ctx context.Context, delay time.Duration) error {
+func (q *FetchQueue) EnqueueResourceHistoryDispatcher(ctx context.Context, delay time.Duration, enterprise bool) error {
 	if q == nil || q.client == nil {
 		return fmt.Errorf("resource history dispatcher queue is unavailable")
 	}
-	return q.enqueueResourceDispatcher(ctx, TypeMailmatchResourceHistoryDispatcher, platform.QueueBackgroundProjectHistory, delay)
+	return q.enqueueResourceDispatcher(ctx, TypeMailmatchResourceHistoryDispatcher, platform.QueueDefault, delay, enterprise)
 }
 
-func (q *FetchQueue) enqueueResourceDispatcher(ctx context.Context, taskType, queue string, delay time.Duration) error {
-	task := asynq.NewTask(taskType, nil)
+func (q *FetchQueue) enqueueResourceDispatcher(ctx context.Context, taskType, queue string, delay time.Duration, enterprise bool) error {
+	if enterprise {
+		queue = platform.QueueMicrosoftEnterprise
+	}
+	payload, err := json.Marshal(app.AdminResourceFetchTask{Enterprise: enterprise})
+	if err != nil {
+		return err
+	}
+	task := asynq.NewTask(taskType, payload)
 	timeout := runtimeconfig.Duration("fetch_dispatcher_timeout_seconds", mailmatchDispatchTaskTimeout, time.Second, 1)
 	uniqueTTL := timeout
 	if delay > 0 {
@@ -240,7 +267,7 @@ func (q *FetchQueue) enqueueResourceDispatcher(ctx context.Context, taskType, qu
 	if delay > 0 {
 		options = append(options, asynq.ProcessIn(delay))
 	}
-	_, err := q.client.EnqueueContext(ctx, task, options...)
+	_, err = q.client.EnqueueContext(ctx, task, options...)
 	if err != nil {
 		if errors.Is(err, asynq.ErrDuplicateTask) {
 			return nil

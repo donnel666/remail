@@ -419,6 +419,21 @@ func TestProjectUseCaseSkipsHistoryScanWithoutMicrosoftProduct(t *testing.T) {
 	require.False(t, scanned)
 }
 
+func TestMicrosoftEnterpriseProjectSchedulesOnlyItsOwnHistory(t *testing.T) {
+	uc := &ProjectUseCase{}
+	personal, enterprise := 0, 0
+	uc.SetHistoryScan(func(context.Context, uint, string) error { personal++; return nil })
+	uc.SetMicrosoftEnterpriseHistoryScan(func(context.Context, uint, string) error { enterprise++; return nil })
+	detail := &domain.ProjectDetail{Project: domain.Project{ID: 1}, Products: []domain.Product{{Type: domain.ProductTypeMicrosoftEnterprise}}}
+	uc.scheduleHistoryScan(context.Background(), detail, "enterprise")
+	require.Zero(t, personal)
+	require.Equal(t, 1, enterprise)
+	detail.Products = []domain.Product{{Type: domain.ProductTypeMicrosoft}}
+	uc.scheduleHistoryScan(context.Background(), detail, "personal")
+	require.Equal(t, 1, personal)
+	require.Equal(t, 1, enterprise)
+}
+
 func TestProjectUseCaseGmailHistoryScanRunsAfterCreateButNotUpdate(t *testing.T) {
 	repo := &fakeProjectRepo{}
 	uc := NewProjectUseCase(repo)

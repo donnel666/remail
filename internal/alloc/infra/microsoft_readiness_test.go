@@ -37,7 +37,7 @@ func TestMicrosoftAllocationReadinessRejectsChangedOrUnavailableAddress(t *testi
 	repo := NewRepo(db)
 	ctx := context.Background()
 	for i, no := range []string{"MAIN", "ALIAS", "DOT", "PLUS"} {
-		ready, err := repo.MicrosoftAllocationReady(ctx, no, uint(i+1))
+		ready, err := repo.MicrosoftAllocationReady(ctx, no, uint(i+1), false)
 		require.NoError(t, err)
 		require.True(t, ready)
 	}
@@ -50,15 +50,15 @@ func TestMicrosoftAllocationReadinessRejectsChangedOrUnavailableAddress(t *testi
 		{"UPDATE microsoft_allocations SET status='released' WHERE order_no='PLUS'", "UPDATE microsoft_allocations SET status='allocated' WHERE order_no='PLUS'", "PLUS"},
 	} {
 		require.NoError(t, db.Exec(change.sql).Error)
-		ready, err := repo.MicrosoftAllocationReady(ctx, change.no, 0)
+		ready, err := repo.MicrosoftAllocationReady(ctx, change.no, 0, false)
 		require.NoError(t, err)
 		require.False(t, ready, change.sql)
 		require.NoError(t, db.Exec(change.restore).Error)
 	}
-	ready, err := repo.MicrosoftAllocationReady(ctx, "NEW", 0)
+	ready, err := repo.MicrosoftAllocationReady(ctx, "NEW", 0, false)
 	require.NoError(t, err)
 	require.True(t, ready, "an accepted order without an allocation may allocate")
-	ready, err = repo.MicrosoftAllocationReady(ctx, "NEW", 1)
+	ready, err = repo.MicrosoftAllocationReady(ctx, "NEW", 1, false)
 	require.NoError(t, err)
 	require.False(t, ready, "an existing allocation ID must resolve")
 }

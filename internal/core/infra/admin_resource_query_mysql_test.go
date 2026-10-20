@@ -363,7 +363,7 @@ func TestAdminMicrosoftFacetsKeepFreshSnapshotAcrossGenerationChangesMySQL(t *te
 	require.NoError(t, db.Callback().Row().Before("gorm:row").Register(callback, func(*gorm.DB) {
 		queries.Add(1)
 	}))
-	invalidateMicrosoftFacets()
+	invalidateMicrosoftFacets("microsoft")
 
 	second, err := repo.AdminMicrosoftFacets(context.Background(), coreapp.AdminMicrosoftListFilter{}, now)
 	require.NoError(t, err)
@@ -387,7 +387,7 @@ func TestAdminMicrosoftFacetsReuseRedisSnapshotAcrossRepoInstancesMySQL(t *testi
 	require.NoError(t, db.Callback().Row().Before("gorm:row").Register(callback, func(*gorm.DB) {
 		queries.Add(1)
 	}))
-	invalidateMicrosoftFacets()
+	invalidateMicrosoftFacets("microsoft")
 
 	secondRepo := NewAdminResourceRepo(db, redisClient)
 	second, err := secondRepo.AdminMicrosoftFacets(context.Background(), coreapp.AdminMicrosoftListFilter{}, now)
