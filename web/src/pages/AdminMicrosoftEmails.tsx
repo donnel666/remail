@@ -846,7 +846,7 @@ export default function AdminMicrosoftEmails({ enterprise = false }: { enterpris
           width: 120,
           render: (value: unknown) => (
             <Tag color="white" shape="circle">
-              {String(value)}
+              {enterprise ? String(value).replace(/\.onmicrosoft\.com$/i, "") : String(value)}
             </Tag>
           ),
         },
@@ -1003,7 +1003,7 @@ export default function AdminMicrosoftEmails({ enterprise = false }: { enterpris
           tab={
             <span className="flex items-center gap-2">
               <Layers size={14} />
-              {suffix}
+              {enterprise ? suffix.replace(/\.onmicrosoft\.com$/i, "") : suffix}
               <Tag color={activeSuffix === suffix ? "red" : "grey"} shape="circle">
                 {count}
               </Tag>

@@ -49,6 +49,35 @@ func TestBackgroundValidationWindowLimitUsesTotalWindow(t *testing.T) {
 	require.Equal(t, 32, backgroundValidationWindowLimit(gate, resourceValidationDispatchMaximum))
 }
 
+func TestMicrosoftEnterpriseDispatcherWorksWithPersonalWindowFull(t *testing.T) {
+	resources := newMockResourceRepo()
+	ctx := context.Background()
+	for _, entry := range []struct {
+		email  string
+		status coredomain.MicrosoftResourceStatus
+	}{
+		{"busy@outlook.com", coredomain.MicrosoftStatusValidating},
+		{"ready@tenant.onmicrosoft.com", coredomain.MicrosoftStatusPending},
+	} {
+		require.NoError(t, resources.CreateMicrosoft(ctx, &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}, &coredomain.MicrosoftResource{
+			EmailAddress: entry.email, Status: entry.status, CredentialRevision: 1,
+		}))
+	}
+	queue := &mockValidationQueue{}
+	module := &CoreModule{
+		ValidationUseCase:   coreapp.NewResourceValidationUseCase(resources, newMockValidationRepo(resources), queue, nil),
+		BackgroundExecution: &coreBackgroundExecutionGateStub{limit: 1},
+	}
+	mux := asynq.NewServeMux()
+	RegisterCoreTaskHandlers(mux, module)
+	require.NoError(t, mux.ProcessTask(ctx, asynq.NewTask(coreinfra.TypeResourceValidationDispatcher, nil)))
+	require.Empty(t, queue.tasks)
+	require.NoError(t, mux.ProcessTask(ctx, asynq.NewTask(coreinfra.TypeResourceValidationDispatcher, []byte(`{"enterprise":true}`))))
+	require.Len(t, queue.tasks, 1)
+	require.True(t, queue.tasks[0].Enterprise)
+	require.Equal(t, "ready@tenant.onmicrosoft.com", resources.microsoft[queue.tasks[0].ResourceID].EmailAddress)
+}
+
 func TestResourceValidationAdmissionDenialDefersInAsynqWithoutDatabaseMutation(t *testing.T) {
 	resources := newMockResourceRepo()
 	root := &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}

@@ -68,15 +68,22 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		}
 		return nil
 	})
-	mux.HandleFunc(coreinfra.TypeResourceValidationDispatcher, func(ctx context.Context, _ *asynq.Task) error {
+	mux.HandleFunc(coreinfra.TypeResourceValidationDispatcher, func(ctx context.Context, task *asynq.Task) error {
 		if module == nil || module.ValidationUseCase == nil {
 			return nil
+		}
+		var payload coreapp.ResourceValidationDispatcherTask
+		if len(task.Payload()) > 0 {
+			if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+				slog.Warn("discard malformed resource validation dispatcher", "error", err)
+				return nil
+			}
 		}
 		limit := backgroundValidationWindowLimit(module.BackgroundExecution, min(runtimeconfig.Int("validation_dispatch_maximum", resourceValidationDispatchMaximum, 1), 10000))
 		if limit <= 0 {
 			return nil
 		}
-		result, err := module.ValidationUseCase.DispatchPending(ctx, limit)
+		result, err := module.ValidationUseCase.DispatchPending(ctx, limit, payload.Enterprise)
 		if err != nil {
 			slog.Warn("resource validation dispatcher failed", "error", err)
 			return nil

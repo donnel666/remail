@@ -65,7 +65,9 @@ const (
 	// QueueBackgroundValidation carries temporary Microsoft validation tasks.
 	// Existing deployments use it for Microsoft validation, so the name remains
 	// stable while domain validation gets its own queue below.
-	QueueBackgroundValidation = "background_validation"
+	QueueBackgroundValidation                    = "background_validation"
+	QueueBackgroundMicrosoftEnterpriseValidation = "background_microsoft_enterprise_validation"
+	QueueBackgroundMicrosoftEnterpriseHistory    = "background_microsoft_enterprise_history"
 	// QueueBackgroundGmailValidation carries Gmail validation dispatchers, batches, and workers.
 	QueueBackgroundGmailValidation = "background_gmail_validation"
 	// QueueBackgroundICloudValidation carries iCloud account validation and alias-recognition tasks.
@@ -103,6 +105,8 @@ var AllQueueNames = []string{
 	QueueMailtransport,
 	QueueDefault,
 	QueueBackgroundValidation,
+	QueueBackgroundMicrosoftEnterpriseValidation,
+	QueueBackgroundMicrosoftEnterpriseHistory,
 	QueueBackgroundGmailValidation,
 	QueueBackgroundICloudValidation,
 	QueueBackgroundDomainValidation,

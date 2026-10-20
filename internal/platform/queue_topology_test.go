@@ -62,6 +62,8 @@ func TestEveryQueueWeightUsesItsRuntimeSetting(t *testing.T) {
 		{"asynq_queue_mailtransport_weight", QueueMailtransport, foregroundQueueConfig},
 		{"asynq_queue_default_weight", QueueDefault, foregroundQueueConfig},
 		{"asynq_queue_background_validation_weight", QueueBackgroundValidation, backgroundQueueConfig},
+		{"asynq_queue_background_microsoft_enterprise_validation_weight", QueueBackgroundMicrosoftEnterpriseValidation, backgroundQueueConfig},
+		{"asynq_queue_background_microsoft_enterprise_history_weight", QueueBackgroundMicrosoftEnterpriseHistory, backgroundQueueConfig},
 		{"asynq_queue_background_gmail_validation_weight", QueueBackgroundGmailValidation, backgroundQueueConfig},
 		{"asynq_queue_background_icloud_validation_weight", QueueBackgroundICloudValidation, backgroundQueueConfig},
 		{"asynq_queue_background_domain_validation_weight", QueueBackgroundDomainValidation, backgroundQueueConfig},

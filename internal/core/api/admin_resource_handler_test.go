@@ -197,7 +197,7 @@ func (*adminHandlerValidationRepo) MarkValidationBatchPending(context.Context, c
 func (*adminHandlerValidationRepo) CountAssignedValidations(context.Context) (int, error) {
 	return 0, nil
 }
-func (*adminHandlerValidationRepo) ClaimPendingValidations(context.Context, int) ([]coreapp.ResourceValidationTask, error) {
+func (*adminHandlerValidationRepo) ClaimPendingValidations(context.Context, int, bool) ([]coreapp.ResourceValidationTask, error) {
 	return nil, nil
 }
 func (*adminHandlerValidationRepo) MarkValidationDispatched(context.Context, coreapp.ResourceValidationTask) (bool, error) {

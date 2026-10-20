@@ -693,7 +693,7 @@ export default function MicrosoftEmails({ enterprise = false }: { enterprise?: b
           width: 120,
           render: (_: string, record: EmailResource) => (
             <Tag color="white" shape="circle">
-              {getSuffix(record.emailAddress)}
+              {enterprise ? getSuffix(record.emailAddress).replace(/\.onmicrosoft\.com$/i, "") : getSuffix(record.emailAddress)}
             </Tag>
           ),
         },
@@ -839,7 +839,7 @@ export default function MicrosoftEmails({ enterprise = false }: { enterprise?: b
           tab={
             <span className="flex items-center gap-2">
               <Layers size={14} />
-              {suffix}
+              {enterprise ? suffix.replace(/\.onmicrosoft\.com$/i, "") : suffix}
               <Tag
                 color={activeSuffix === suffix ? "red" : "grey"}
                 shape="circle"

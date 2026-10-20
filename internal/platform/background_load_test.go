@@ -381,6 +381,18 @@ func TestNilBackgroundLoadControllerAdmitsWithoutLimiting(t *testing.T) {
 	release()
 }
 
+func TestMicrosoftEnterpriseQueuesCanEnterSaturatedPersonalWindow(t *testing.T) {
+	gate := newAdaptiveConcurrencyGate(1, 8)
+	release, admitted := gate.TryAcquireQueue(QueueBackgroundValidation)
+	require.True(t, admitted)
+	defer release()
+	for _, queue := range []string{QueueBackgroundMicrosoftEnterpriseValidation, QueueBackgroundMicrosoftEnterpriseHistory} {
+		releaseEnterprise, admitted := gate.TryAcquireQueue(queue)
+		require.True(t, admitted)
+		releaseEnterprise()
+	}
+}
+
 func TestValidSystemPercentRejectsInvalidSamples(t *testing.T) {
 	require.True(t, validSystemPercent(0))
 	require.True(t, validSystemPercent(100))

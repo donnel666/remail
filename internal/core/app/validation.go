@@ -20,7 +20,7 @@ type ResourceValidationRepository interface {
 	MarkResourcePendingWithLog(ctx context.Context, resourceID uint, resourceType domain.ResourceType, ownerUserID uint, log *governancedomain.OperationLog) error
 	RecordMicrosoftFetchFailure(ctx context.Context, resourceID uint, expectedCredentialRevision uint64, refreshToken string, safeError string, requestID string, markAbnormal bool, systemLog *governancedomain.SystemLog) (abnormal bool, err error)
 	MarkValidationBatchPending(ctx context.Context, task ResourceValidationBatchTask, limit int) (*ResourceValidationBatchPageResult, error)
-	ClaimPendingValidations(ctx context.Context, limit int) ([]ResourceValidationTask, error)
+	ClaimPendingValidations(ctx context.Context, limit int, enterprise bool) ([]ResourceValidationTask, error)
 	MarkValidationDispatched(ctx context.Context, task ResourceValidationTask) (bool, error)
 	ReleaseValidation(ctx context.Context, task ResourceValidationTask) error
 	ApplyMicrosoftResult(ctx context.Context, task ResourceValidationTask, result MicrosoftValidationResult, systemLog *governancedomain.SystemLog) error
@@ -69,7 +69,7 @@ type MicrosoftAliasScheduleTriggerPort interface {
 // after Core commits a successful Microsoft validation so mailbox history can
 // be scanned independently from the validation worker.
 type MicrosoftHistoryScanTriggerPort interface {
-	ScheduleValidatedMicrosoftHistory(ctx context.Context, resourceID uint, requestID string) error
+	ScheduleValidatedMicrosoftHistory(ctx context.Context, resourceID uint, requestID string, enterprise bool) error
 }
 
 type MicrosoftValidationRequest struct {
@@ -154,12 +154,17 @@ type DomainValidationResult struct {
 }
 
 type ResourceValidationTask struct {
+	Enterprise                 bool                `json:"enterprise,omitempty"`
 	ResourceID                 uint                `json:"resourceId"`
 	ResourceType               domain.ResourceType `json:"resourceType"`
 	OwnerUserID                uint                `json:"ownerUserId"`
 	ValidationGeneration       uint64              `json:"validationGeneration"`
 	ExpectedCredentialRevision uint64              `json:"expectedCredentialRevision,omitempty"`
 	RequestID                  string              `json:"requestId,omitempty"`
+}
+
+type ResourceValidationDispatcherTask struct {
+	Enterprise bool `json:"enterprise,omitempty"`
 }
 
 // ResourceValidationBatchTask is deliberately Redis-only coordination. A lost
@@ -478,14 +483,14 @@ func (uc *ResourceValidationUseCase) Process(ctx context.Context, task ResourceV
 	return nil
 }
 
-func (uc *ResourceValidationUseCase) DispatchPending(ctx context.Context, limit int) (*DispatchResourceValidationsResult, error) {
+func (uc *ResourceValidationUseCase) DispatchPending(ctx context.Context, limit int, enterprise bool) (*DispatchResourceValidationsResult, error) {
 	if uc == nil || uc.validations == nil || uc.queue == nil {
 		return nil, ErrValidationTemporaryUnavailable
 	}
 	if limit <= 0 {
 		limit = 100
 	}
-	tasks, err := uc.validations.ClaimPendingValidations(ctx, limit)
+	tasks, err := uc.validations.ClaimPendingValidations(ctx, limit, enterprise)
 	if err != nil {
 		return nil, err
 	}
@@ -575,7 +580,7 @@ func (uc *ResourceValidationUseCase) processMicrosoft(ctx context.Context, task 
 		// this short transaction commits, so Redis failure cannot strand an
 		// identifying resource without a recovery owner.
 		triggerCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		triggerErr := uc.historyTrigger.ScheduleValidatedMicrosoftHistory(triggerCtx, task.ResourceID, task.RequestID)
+		triggerErr := uc.historyTrigger.ScheduleValidatedMicrosoftHistory(triggerCtx, task.ResourceID, task.RequestID, domain.IsMicrosoftEnterpriseEmail(ms.EmailAddress))
 		cancel()
 		if triggerErr != nil {
 			slog.Warn(

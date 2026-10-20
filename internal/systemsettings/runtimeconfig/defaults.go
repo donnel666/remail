@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	DefaultSettingsCount                         = 317
+	DefaultSettingsCount                         = 319
 	ICloudDeviceBaseURLKey                       = "icloud_device_base_url"
 	ICloudDeviceAPIKey                           = "icloud_device_api_key"
 	ICloudDeviceSMSBaseURLKey                    = "icloud_device_sms_base_url"
@@ -333,6 +333,8 @@ var defaultSettings = []domain.Setting{
 	{Key: "asynq_queue_mailtransport_weight", Value: "4"},
 	{Key: "asynq_queue_default_weight", Value: "3"},
 	{Key: "asynq_queue_background_validation_weight", Value: "3"},
+	{Key: "asynq_queue_background_microsoft_enterprise_validation_weight", Value: "1"},
+	{Key: "asynq_queue_background_microsoft_enterprise_history_weight", Value: "1"},
 	{Key: "asynq_queue_background_gmail_validation_weight", Value: "1"},
 	{Key: "asynq_queue_background_icloud_validation_weight", Value: "1"},
 	{Key: "asynq_queue_background_domain_validation_weight", Value: "1"},

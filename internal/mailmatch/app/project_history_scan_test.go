@@ -298,8 +298,10 @@ func TestProjectHistoryRetryableBusinessFailureIsRecorded(t *testing.T) {
 func TestValidatedMicrosoftHistoryScheduleCreatesResourceTask(t *testing.T) {
 	queue := &projectHistoryQueueStub{}
 	uc := NewProjectHistoryScanUseCase(nil, nil, queue, nil)
-	require.NoError(t, uc.ScheduleValidatedMicrosoftHistory(context.Background(), 10, " request-1 "))
+	require.NoError(t, uc.ScheduleValidatedMicrosoftHistory(context.Background(), 10, " request-1 ", false))
 	require.Equal(t, []ValidatedMicrosoftHistoryScanTask{{ResourceID: 10, RequestID: "request-1"}}, queue.validated)
+	require.NoError(t, uc.ScheduleValidatedMicrosoftHistory(context.Background(), 11, "enterprise", true))
+	require.Equal(t, ValidatedMicrosoftHistoryScanTask{ResourceID: 11, RequestID: "enterprise", Enterprise: true}, queue.validated[1])
 }
 
 func TestValidatedMicrosoftHistoryDefersPreCommitDelivery(t *testing.T) {

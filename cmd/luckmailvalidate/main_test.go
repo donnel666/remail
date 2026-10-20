@@ -65,7 +65,7 @@ func TestCommandHistoryTriggerSchedulesBoundValidationOnce(t *testing.T) {
 	item := manifestRecord{Email: "owner@example.com", ResourceID: 42, Eligible: true}
 	trigger.bind(item)
 
-	if err := trigger.ScheduleValidatedMicrosoftHistory(context.Background(), item.ResourceID, "request-1"); err != nil {
+	if err := trigger.ScheduleValidatedMicrosoftHistory(context.Background(), item.ResourceID, "request-1", false); err != nil {
 		t.Fatal(err)
 	}
 	if err := trigger.enqueue(context.Background(), item); err != nil {

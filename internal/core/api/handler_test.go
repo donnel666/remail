@@ -1531,29 +1531,45 @@ func (r *mockValidationRepo) CountAssignedValidations(context.Context) (int, err
 	return assigned, nil
 }
 
-func (r *mockValidationRepo) ClaimPendingValidations(_ context.Context, limit int) ([]coreapp.ResourceValidationTask, error) {
+func (r *mockValidationRepo) ClaimPendingValidations(_ context.Context, limit int, enterprise bool) ([]coreapp.ResourceValidationTask, error) {
 	result := make([]coreapp.ResourceValidationTask, 0)
 	if r.resources == nil {
 		return result, nil
 	}
-	assigned, _ := r.CountAssignedValidations(context.Background())
+	assigned := 0
+	for _, resource := range r.resources.microsoft {
+		if coredomain.IsMicrosoftEnterpriseEmail(resource.EmailAddress) == enterprise && resource.Status == coredomain.MicrosoftStatusValidating {
+			assigned++
+		}
+	}
+	if !enterprise {
+		for _, resource := range r.resources.domains {
+			if resource.Status == coredomain.DomainStatusValidating {
+				assigned++
+			}
+		}
+	}
 	limit = max(0, limit-assigned)
 	if limit == 0 {
 		return result, nil
 	}
 	for id, resource := range r.resources.microsoft {
-		if resource.Status != coredomain.MicrosoftStatusPending {
+		if resource.Status != coredomain.MicrosoftStatusPending || coredomain.IsMicrosoftEnterpriseEmail(resource.EmailAddress) != enterprise {
 			continue
 		}
 		root := r.resources.resources[id]
 		result = append(result, coreapp.ResourceValidationTask{
 			ResourceID: id, ResourceType: coredomain.ResourceTypeMicrosoft,
+			Enterprise:  enterprise,
 			OwnerUserID: root.OwnerUserID, ValidationGeneration: resource.ValidationGeneration,
 			ExpectedCredentialRevision: resource.CredentialRevision,
 		})
 		if limit > 0 && len(result) >= limit {
 			return result, nil
 		}
+	}
+	if enterprise {
+		return result, nil
 	}
 	for id, resource := range r.resources.domains {
 		if resource.Status != coredomain.DomainStatusPending {
@@ -1751,7 +1767,7 @@ type validationHistoryTrigger struct {
 	err error
 }
 
-func (t *validationHistoryTrigger) ScheduleValidatedMicrosoftHistory(_ context.Context, resourceID uint, requestID string) error {
+func (t *validationHistoryTrigger) ScheduleValidatedMicrosoftHistory(_ context.Context, resourceID uint, requestID string, _ bool) error {
 	t.tasks = append(t.tasks, struct {
 		resourceID uint
 		requestID  string
@@ -2416,7 +2432,7 @@ func TestResourceValidationUseCase_DispatchClaimsOnlyPendingResources(t *testing
 	resource := &coredomain.MicrosoftResource{EmailAddress: "pending@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending, CredentialRevision: 7}
 	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, resource))
 
-	result, err := uc.DispatchPending(context.Background(), 1)
+	result, err := uc.DispatchPending(context.Background(), 1, false)
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Queued)
 	require.Equal(t, coredomain.MicrosoftStatusValidating, resourceRepo.microsoft[root.ID].Status)
@@ -2441,13 +2457,13 @@ func TestResourceValidationUseCase_DispatchSubtractsAlreadyAssignedResources(t *
 		}))
 	}
 
-	result, err := uc.DispatchPending(context.Background(), 3)
+	result, err := uc.DispatchPending(context.Background(), 3, false)
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Attempted)
 	require.Equal(t, 1, result.Queued)
 	require.Len(t, queue.tasks, 1)
 
-	result, err = uc.DispatchPending(context.Background(), 3)
+	result, err = uc.DispatchPending(context.Background(), 3, false)
 	require.NoError(t, err)
 	require.Zero(t, result.Attempted)
 	require.Len(t, queue.tasks, 1)
@@ -2463,7 +2479,7 @@ func TestResourceValidationUseCase_DispatchFailureReturnsResourcePending(t *test
 	require.NoError(t, resourceRepo.CreateDomain(context.Background(), root, &coredomain.MailDomainResource{
 		Domain: "example.com", MailServerID: 1, Purpose: coredomain.PurposeNotSale, Status: coredomain.DomainStatusPending,
 	}))
-	result, err := uc.DispatchPending(context.Background(), 1)
+	result, err := uc.DispatchPending(context.Background(), 1, false)
 	require.Error(t, err)
 	require.Equal(t, 1, result.Failed)
 	require.Equal(t, coredomain.DomainStatusPending, resourceRepo.domains[root.ID].Status)
@@ -2479,7 +2495,7 @@ func TestResourceValidationUseCase_DuplicateDispatchLeavesResourcePending(t *tes
 	require.NoError(t, resourceRepo.CreateDomain(context.Background(), root, &coredomain.MailDomainResource{
 		Domain: "duplicate.example.com", MailServerID: 1, Purpose: coredomain.PurposeNotSale, Status: coredomain.DomainStatusPending,
 	}))
-	result, err := uc.DispatchPending(context.Background(), 1)
+	result, err := uc.DispatchPending(context.Background(), 1, false)
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Attempted)
 	require.Zero(t, result.Queued)
@@ -2498,7 +2514,7 @@ func TestResourceValidationUseCase_ActivationFailureLeavesResourcePending(t *tes
 	require.NoError(t, resourceRepo.CreateMicrosoft(context.Background(), root, &coredomain.MicrosoftResource{
 		EmailAddress: "activation@example.com", Password: "secret", Status: coredomain.MicrosoftStatusPending, CredentialRevision: 2,
 	}))
-	result, err := uc.DispatchPending(context.Background(), 1)
+	result, err := uc.DispatchPending(context.Background(), 1, false)
 	require.Error(t, err)
 	require.Equal(t, 1, result.Failed)
 	require.Zero(t, result.Queued)

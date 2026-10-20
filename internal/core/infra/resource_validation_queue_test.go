@@ -14,6 +14,55 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestMicrosoftEnterpriseValidationQueueAndDispatcherAreIndependent(t *testing.T) {
+	server := miniredis.RunT(t)
+	options := asynq.RedisClientOpt{Addr: server.Addr()}
+	client := asynq.NewClient(options)
+	inspector := asynq.NewInspector(options)
+	t.Cleanup(func() {
+		require.NoError(t, inspector.Close())
+		require.NoError(t, client.Close())
+	})
+	queue := NewResourceValidationQueue(client, nil)
+	ctx := context.Background()
+	for _, enterprise := range []bool{false, true} {
+		accepted, err := queue.EnqueueResourceValidation(ctx, coreapp.ResourceValidationTask{
+			ResourceID: 42, ResourceType: "microsoft", OwnerUserID: 7, ValidationGeneration: 1,
+			ExpectedCredentialRevision: 1, Enterprise: enterprise,
+		})
+		require.NoError(t, err)
+		require.True(t, accepted)
+	}
+	require.NoError(t, inspector.PauseQueue(MicrosoftResourceValidationQueueName))
+	require.NoError(t, queue.EnqueueResourceValidationDispatcher(ctx, 0))
+	require.NoError(t, queue.EnqueueResourceValidationDispatcher(ctx, 0))
+	for _, entry := range []struct {
+		queue      string
+		enterprise bool
+	}{
+		{MicrosoftResourceValidationQueueName, false},
+		{platform.QueueBackgroundMicrosoftEnterpriseValidation, true},
+	} {
+		workers, err := inspector.ListScheduledTasks(entry.queue)
+		require.NoError(t, err)
+		require.Len(t, workers, 1)
+		var task coreapp.ResourceValidationTask
+		require.NoError(t, json.Unmarshal(workers[0].Payload, &task))
+		require.Equal(t, entry.enterprise, task.Enterprise)
+	}
+	dispatchers, err := inspector.ListPendingTasks(platform.QueueBackgroundMicrosoftEnterpriseValidation)
+	require.NoError(t, err)
+	require.Len(t, dispatchers, 1)
+	require.Equal(t, TypeResourceValidationDispatcher, dispatchers[0].Type)
+	var payload coreapp.ResourceValidationDispatcherTask
+	require.NoError(t, json.Unmarshal(dispatchers[0].Payload, &payload))
+	require.True(t, payload.Enterprise)
+	legacy, err := inspector.ListPendingTasks(platform.QueueDefault)
+	require.NoError(t, err)
+	require.Len(t, legacy, 1)
+	require.Empty(t, legacy[0].Payload)
+}
+
 func TestResourceValidationQueueReportsOnlyNewEnqueueAsAccepted(t *testing.T) {
 	server := miniredis.RunT(t)
 	redisOptions := asynq.RedisClientOpt{Addr: server.Addr()}

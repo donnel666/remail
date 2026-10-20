@@ -44,6 +44,7 @@ type ProjectHistoryScanTask struct {
 }
 
 type ValidatedMicrosoftHistoryScanTask struct {
+	Enterprise bool   `json:"enterprise,omitempty"`
 	ResourceID uint   `json:"resourceId"`
 	RequestID  string `json:"requestId,omitempty"`
 }
@@ -115,11 +116,12 @@ func (uc *ProjectHistoryScanUseCase) Schedule(ctx context.Context, projectID uin
 	return nil
 }
 
-func (uc *ProjectHistoryScanUseCase) ScheduleValidatedMicrosoftHistory(ctx context.Context, resourceID uint, requestID string) error {
+func (uc *ProjectHistoryScanUseCase) ScheduleValidatedMicrosoftHistory(ctx context.Context, resourceID uint, requestID string, enterprise bool) error {
 	if uc == nil || uc.queue == nil || resourceID == 0 {
 		return domain.ErrInvalidRequest
 	}
 	return uc.queue.EnqueueValidatedMicrosoftHistoryScan(ctx, ValidatedMicrosoftHistoryScanTask{
+		Enterprise: enterprise,
 		ResourceID: resourceID,
 		RequestID:  strings.TrimSpace(requestID),
 	})

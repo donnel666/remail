@@ -158,11 +158,15 @@ func (q *FetchQueue) EnqueueValidatedMicrosoftHistoryScan(ctx context.Context, t
 	if err != nil {
 		return fmt.Errorf("marshal validated microsoft history scan task: %w", err)
 	}
+	queueName := platform.QueueBackgroundProjectHistory
+	if task.Enterprise {
+		queueName = platform.QueueBackgroundMicrosoftEnterpriseHistory
+	}
 	timeout := min(runtimeconfig.Duration("project_history_timeout_minutes", projectHistoryTaskTimeout, time.Minute, 1), maxProjectHistoryTaskTimeout)
 	_, err = q.client.EnqueueContext(
 		ctx,
 		asynq.NewTask(TypeValidatedMicrosoftHistoryScan, payload),
-		asynq.Queue(platform.QueueBackgroundProjectHistory),
+		asynq.Queue(queueName),
 		asynq.Unique(timeout),
 		asynq.MaxRetry(ValidatedHistoryTaskMaxRetry),
 		asynq.Timeout(timeout),

@@ -26,6 +26,53 @@ func TestResourceValidationRedisSchemaMySQL(t *testing.T) {
 	require.True(t, db.Migrator().HasColumn(&DomainResourceModel{}, "validation_failures"))
 }
 
+func TestMicrosoftEnterpriseValidationDispatchIsolationMySQL(t *testing.T) {
+	db := newCoreMySQLTestDB(t)
+	repo := NewResourceRepo(db)
+	validations := NewResourceValidationRepo(db)
+	insertAdminValidationOwner(t, db)
+	ctx := context.Background()
+	personal := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
+	require.NoError(t, repo.CreateMicrosoft(ctx, personal, &domain.MicrosoftResource{
+		EmailAddress: "busy@outlook.com", Password: "test", Status: domain.MicrosoftStatusValidating,
+	}))
+	for index := 0; index < 20; index++ {
+		root := &domain.EmailResource{Type: domain.ResourceTypeMicrosoft, OwnerUserID: 1}
+		require.NoError(t, repo.CreateMicrosoft(ctx, root, &domain.MicrosoftResource{
+			EmailAddress: fmt.Sprintf("user%d@tenant.onmicrosoft.com", index), Password: "test", Status: domain.MicrosoftStatusPending,
+		}))
+	}
+	makeValidationAssignmentsReady(t, db)
+	legacy, err := validations.ClaimPendingValidations(ctx, 1, false)
+	require.NoError(t, err)
+	require.Empty(t, legacy)
+	enterprise, err := validations.ClaimPendingValidations(ctx, 1, true)
+	require.NoError(t, err)
+	require.Len(t, enterprise, 1, "personal validation assignments must not consume the enterprise window")
+	require.True(t, enterprise[0].Enterprise)
+	require.NotEqual(t, personal.ID, enterprise[0].ResourceID)
+	require.True(t, mustActivateValidation(t, validations, enterprise[0]))
+	full, err := validations.ClaimPendingValidations(ctx, 1, true)
+	require.NoError(t, err)
+	require.Empty(t, full, "enterprise assignments still obey their own bounded window")
+
+	require.NoError(t, db.Model(&MicrosoftResourceModel{}).Where("id = ?", personal.ID).
+		Updates(map[string]any{"status": "pending", "updated_at": time.Now().UTC().Add(-time.Minute)}).Error)
+	legacy, err = validations.ClaimPendingValidations(ctx, 1, false)
+	require.NoError(t, err)
+	require.Len(t, legacy, 1, "enterprise assignments must not consume the personal window")
+	require.Equal(t, personal.ID, legacy[0].ResourceID)
+	require.False(t, legacy[0].Enterprise)
+
+	require.NoError(t, validations.ReleaseValidation(ctx, enterprise[0]))
+	makeValidationAssignmentsReady(t, db)
+	retry, err := validations.ClaimPendingValidations(ctx, 1, true)
+	require.NoError(t, err)
+	require.Len(t, retry, 1)
+	require.True(t, retry[0].Enterprise)
+	require.Greater(t, retry[0].ValidationGeneration, enterprise[0].ValidationGeneration)
+}
+
 func TestResourceValidationRepoClaimsAndReleasesRedisAssignmentsMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	repo := NewResourceRepo(db)
@@ -37,7 +84,7 @@ func TestResourceValidationRepoClaimsAndReleasesRedisAssignmentsMySQL(t *testing
 	require.NoError(t, repo.CreateMicrosoft(context.Background(), root, resource))
 	makeValidationAssignmentsReady(t, db)
 
-	tasks, err := validations.ClaimPendingValidations(context.Background(), 1)
+	tasks, err := validations.ClaimPendingValidations(context.Background(), 1, false)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	require.Equal(t, root.ID, tasks[0].ResourceID)
@@ -68,11 +115,11 @@ func TestResourceValidationRepoClaimsAndReleasesRedisAssignmentsMySQL(t *testing
 	require.NoError(t, db.First(&stored, root.ID).Error)
 	require.Equal(t, string(domain.MicrosoftStatusPending), stored.Status)
 	require.Equal(t, tasks[0].ValidationGeneration+1, stored.ValidationGeneration)
-	immediate, err := validations.ClaimPendingValidations(context.Background(), 1)
+	immediate, err := validations.ClaimPendingValidations(context.Background(), 1, false)
 	require.NoError(t, err)
 	require.Empty(t, immediate, "the current Asynq task must finish before the same Redis task ID can be reassigned")
 	makeValidationAssignmentsReady(t, db)
-	reassigned, err := validations.ClaimPendingValidations(context.Background(), 1)
+	reassigned, err := validations.ClaimPendingValidations(context.Background(), 1, false)
 	require.NoError(t, err)
 	require.Len(t, reassigned, 1)
 	require.Equal(t, stored.ValidationGeneration, reassigned[0].ValidationGeneration)
@@ -95,7 +142,7 @@ func TestResourceValidationRepoLimitsPendingScanMySQL(t *testing.T) {
 		Update("status", string(domain.MicrosoftStatusValidating)).Error)
 	makeValidationAssignmentsReady(t, db)
 
-	tasks, err := validations.ClaimPendingValidations(context.Background(), 2)
+	tasks, err := validations.ClaimPendingValidations(context.Background(), 2, false)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	for _, task := range tasks {
@@ -103,7 +150,7 @@ func TestResourceValidationRepoLimitsPendingScanMySQL(t *testing.T) {
 		require.NoError(t, activateErr)
 		require.True(t, activated)
 	}
-	tasks, err = validations.ClaimPendingValidations(context.Background(), 2)
+	tasks, err = validations.ClaimPendingValidations(context.Background(), 2, false)
 	require.NoError(t, err)
 	require.Empty(t, tasks)
 }
@@ -126,7 +173,7 @@ func TestResourceValidationRepoDoesNotStarveDomainBehindMicrosoftBacklogMySQL(t 
 	}))
 	makeValidationAssignmentsReady(t, db)
 
-	tasks, err := validations.ClaimPendingValidations(context.Background(), 4)
+	tasks, err := validations.ClaimPendingValidations(context.Background(), 4, false)
 	require.NoError(t, err)
 	require.Len(t, tasks, 4)
 	require.Contains(t, []uint{tasks[0].ResourceID, tasks[1].ResourceID, tasks[2].ResourceID, tasks[3].ResourceID}, domainRoot.ID)
@@ -152,7 +199,7 @@ func TestResourceValidationRepoAdmitsDomainWhenMicrosoftOwnsFullWindowMySQL(t *t
 	}))
 	makeValidationAssignmentsReady(t, db)
 
-	tasks, err := validations.ClaimPendingValidations(context.Background(), 4)
+	tasks, err := validations.ClaimPendingValidations(context.Background(), 4, false)
 	require.NoError(t, err)
 	require.Equal(t, []coreapp.ResourceValidationTask{{
 		ResourceID: domainRoot.ID, ResourceType: domain.ResourceTypeDomain, OwnerUserID: 1, ValidationGeneration: 1,
@@ -273,7 +320,7 @@ func TestResourceValidationRepoExplicitRetryFencesRunningGenerationMySQL(t *test
 		Domain: "explicit-retry.example.com", MailServerID: 1, Purpose: domain.PurposeNotSale, Status: domain.DomainStatusPending,
 	}))
 	makeValidationAssignmentsReady(t, db)
-	tasks, err := validations.ClaimPendingValidations(context.Background(), 1)
+	tasks, err := validations.ClaimPendingValidations(context.Background(), 1, false)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	require.True(t, mustActivateValidation(t, validations, tasks[0]))
@@ -292,7 +339,7 @@ func TestResourceValidationRepoExplicitRetryFencesRunningGenerationMySQL(t *test
 		EmailAddress: "explicit-batch-retry@outlook.com", Password: "secret", Status: domain.MicrosoftStatusPending,
 	}))
 	makeValidationAssignmentsReady(t, db)
-	tasks, err = validations.ClaimPendingValidations(context.Background(), 1)
+	tasks, err = validations.ClaimPendingValidations(context.Background(), 1, false)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	require.True(t, mustActivateValidation(t, validations, tasks[0]))
@@ -327,7 +374,7 @@ ON DUPLICATE KEY UPDATE email = VALUES(email)`).Error)
 		Domain: "owner-transfer.example.com", MailServerID: 1, Purpose: domain.PurposeNotSale, Status: domain.DomainStatusPending,
 	}))
 	makeValidationAssignmentsReady(t, db)
-	tasks, err := validations.ClaimPendingValidations(context.Background(), 1)
+	tasks, err := validations.ClaimPendingValidations(context.Background(), 1, false)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	require.Equal(t, uint(1), tasks[0].OwnerUserID)
@@ -354,7 +401,7 @@ func TestResourceValidationRepoAppliesRedisMicrosoftResultWithRevisionFenceMySQL
 	}
 	require.NoError(t, repo.CreateMicrosoft(context.Background(), root, resource))
 	makeValidationAssignmentsReady(t, db)
-	tasks, err := validations.ClaimPendingValidations(context.Background(), 1)
+	tasks, err := validations.ClaimPendingValidations(context.Background(), 1, false)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	activated, err := validations.MarkValidationDispatched(context.Background(), tasks[0])
@@ -393,7 +440,7 @@ func TestResourceValidationRepoCountsOnlyBusinessFailuresMySQL(t *testing.T) {
 
 	for attempt := 1; attempt <= coreapp.ResourceValidationMaxFailures; attempt++ {
 		makeValidationAssignmentsReady(t, db)
-		tasks, err := validations.ClaimPendingValidations(context.Background(), 1)
+		tasks, err := validations.ClaimPendingValidations(context.Background(), 1, false)
 		require.NoError(t, err)
 		require.Len(t, tasks, 1)
 		require.True(t, mustActivateValidation(t, validations, tasks[0]))
@@ -403,7 +450,7 @@ func TestResourceValidationRepoCountsOnlyBusinessFailuresMySQL(t *testing.T) {
 			require.NoError(t, db.First(&released, root.ID).Error)
 			require.Zero(t, released.ValidationFailures, "infrastructure release must not consume a business attempt")
 			makeValidationAssignmentsReady(t, db)
-			tasks, err = validations.ClaimPendingValidations(context.Background(), 1)
+			tasks, err = validations.ClaimPendingValidations(context.Background(), 1, false)
 			require.NoError(t, err)
 			require.Len(t, tasks, 1)
 			require.True(t, mustActivateValidation(t, validations, tasks[0]))
@@ -434,7 +481,7 @@ func TestResourceValidationRepoDoesNotCountRecoveryMailboxBusyMySQL(t *testing.T
 		QualityScore: 87, GraphAvailable: true,
 	}))
 	makeValidationAssignmentsReady(t, db)
-	tasks, err := validations.ClaimPendingValidations(context.Background(), 1)
+	tasks, err := validations.ClaimPendingValidations(context.Background(), 1, false)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	require.True(t, mustActivateValidation(t, validations, tasks[0]))
@@ -471,7 +518,7 @@ func TestResourceValidationRepoBindingFailureDoesNotUndoHealthyResultMySQL(t *te
 		EmailAddress: "binding@outlook.com", Password: "secret", Status: domain.MicrosoftStatusPending,
 	}))
 	makeValidationAssignmentsReady(t, db)
-	tasks, err := validations.ClaimPendingValidations(context.Background(), 1)
+	tasks, err := validations.ClaimPendingValidations(context.Background(), 1, false)
 	require.NoError(t, err)
 	activated, err := validations.MarkValidationDispatched(context.Background(), tasks[0])
 	require.NoError(t, err)

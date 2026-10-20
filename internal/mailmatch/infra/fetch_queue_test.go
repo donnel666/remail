@@ -64,6 +64,14 @@ func TestValidatedHistoryQueueRetriesThreeTimes(t *testing.T) {
 	require.Len(t, pending, 1)
 	require.Equal(t, 3, ValidatedHistoryTaskMaxRetry)
 	require.Equal(t, ValidatedHistoryTaskMaxRetry, pending[0].MaxRetry)
+	require.NoError(t, NewFetchQueue(client).EnqueueValidatedMicrosoftHistoryScan(
+		context.Background(), mailmatchapp.ValidatedMicrosoftHistoryScanTask{ResourceID: 2, Enterprise: true},
+	))
+	enterprise, err := inspector.ListPendingTasks(platform.QueueBackgroundMicrosoftEnterpriseHistory)
+	require.NoError(t, err)
+	require.Len(t, enterprise, 1)
+	require.Equal(t, TypeValidatedMicrosoftHistoryScan, enterprise[0].Type)
+	require.Equal(t, ValidatedHistoryTaskMaxRetry, enterprise[0].MaxRetry)
 }
 
 func TestAdminResourceFetchQueueUsesDefault(t *testing.T) {

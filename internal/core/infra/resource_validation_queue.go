@@ -53,6 +53,8 @@ func (q *ResourceValidationQueue) EnqueueResourceValidation(ctx context.Context,
 	queueName := MicrosoftResourceValidationQueueName
 	if task.ResourceType == "domain" {
 		queueName = DomainResourceValidationQueueName
+	} else if task.Enterprise {
+		queueName = platform.QueueBackgroundMicrosoftEnterpriseValidation
 	}
 	asynqTask := asynq.NewTask(TypeResourceValidation, payload)
 	_, err = q.client.EnqueueContext(
@@ -198,16 +200,26 @@ return redis.call('DEL', KEYS[1])
 `)
 
 func (q *ResourceValidationQueue) EnqueueResourceValidationDispatcher(ctx context.Context, delay time.Duration) error {
+	return errors.Join(q.enqueueValidationDispatcher(ctx, delay, false), q.enqueueValidationDispatcher(ctx, delay, true))
+}
+
+func (q *ResourceValidationQueue) enqueueValidationDispatcher(ctx context.Context, delay time.Duration, enterprise bool) error {
 	if q == nil || q.client == nil {
 		return fmt.Errorf("resource validation queue is unavailable")
 	}
-	asynqTask := asynq.NewTask(TypeResourceValidationDispatcher, nil)
+	queueName := platform.QueueDefault
+	var payload []byte
+	if enterprise {
+		queueName = platform.QueueBackgroundMicrosoftEnterpriseValidation
+		payload = []byte(`{"enterprise":true}`)
+	}
+	asynqTask := asynq.NewTask(TypeResourceValidationDispatcher, payload)
 	uniqueTTL := validationDispatcherTaskTimeout
 	if delay > 0 {
 		uniqueTTL += delay
 	}
 	options := []asynq.Option{
-		asynq.Queue(platform.QueueDefault),
+		asynq.Queue(queueName),
 		// Asynq releases the uniqueness key as soon as the dispatcher finishes.
 		// Keeping the lease for the full task timeout prevents a slow scan from
 		// spawning overlapping dispatcher tasks every two seconds.

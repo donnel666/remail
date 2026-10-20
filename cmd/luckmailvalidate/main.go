@@ -254,7 +254,7 @@ func (t *commandHistoryTrigger) unbind(resourceID uint) {
 	t.mu.Unlock()
 }
 
-func (t *commandHistoryTrigger) ScheduleValidatedMicrosoftHistory(ctx context.Context, resourceID uint, _ string) error {
+func (t *commandHistoryTrigger) ScheduleValidatedMicrosoftHistory(ctx context.Context, resourceID uint, _ string, _ bool) error {
 	if t == nil || resourceID == 0 || t.output == nil {
 		return errors.New("CMD history trigger is unavailable")
 	}

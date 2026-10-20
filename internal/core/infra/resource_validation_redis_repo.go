@@ -270,9 +270,10 @@ func (r *ResourceValidationRepo) countAssignedValidations(ctx context.Context) (
 	var assigned validationAssignmentCounts
 	if err := r.db.WithContext(ctx).Raw(`
 SELECT
-	    (SELECT COUNT(*) FROM microsoft_resources WHERE status = ?) AS microsoft_assigned,
+	    (SELECT COUNT(*) FROM microsoft_resources WHERE status = ? AND email_domain NOT LIKE ?) AS microsoft_assigned,
 	    (SELECT COUNT(*) FROM domain_resources WHERE status = ?) AS domain_assigned`,
 		string(domain.MicrosoftStatusValidating),
+		"%.onmicrosoft.com",
 		string(domain.DomainStatusValidating),
 	).Scan(&assigned).Error; err != nil {
 		return validationAssignmentCounts{}, fmt.Errorf("count assigned resource validations: %w", err)
@@ -280,9 +281,22 @@ SELECT
 	return assigned, nil
 }
 
-func (r *ResourceValidationRepo) ClaimPendingValidations(ctx context.Context, windowLimit int) ([]coreapp.ResourceValidationTask, error) {
+func (r *ResourceValidationRepo) ClaimPendingValidations(ctx context.Context, windowLimit int, enterprise bool) ([]coreapp.ResourceValidationTask, error) {
 	if r == nil || r.db == nil || windowLimit <= 0 {
 		return nil, nil
+	}
+	if enterprise {
+		var assigned int64
+		if err := r.db.WithContext(ctx).Model(&MicrosoftResourceModel{}).
+			Where("status = ? AND email_domain LIKE ?", string(domain.MicrosoftStatusValidating), "%.onmicrosoft.com").
+			Count(&assigned).Error; err != nil {
+			return nil, fmt.Errorf("count assigned enterprise validations: %w", err)
+		}
+		available := max(0, windowLimit-int(assigned))
+		if available == 0 {
+			return nil, nil
+		}
+		return r.listPendingMicrosoftValidations(ctx, available, time.Now().UTC().Add(-validationAssignmentSettleAfter), true)
 	}
 	assigned, err := r.countAssignedValidations(ctx)
 	if err != nil {
@@ -295,7 +309,7 @@ func (r *ResourceValidationRepo) ClaimPendingValidations(ctx context.Context, wi
 	scanLimit := max(available, 1)
 	now := time.Now().UTC()
 	readyBefore := now.Add(-validationAssignmentSettleAfter)
-	microsoftTasks, err := r.listPendingMicrosoftValidations(ctx, scanLimit, readyBefore)
+	microsoftTasks, err := r.listPendingMicrosoftValidations(ctx, scanLimit, readyBefore, false)
 	if err != nil {
 		return nil, err
 	}
@@ -372,13 +386,14 @@ type pendingValidationRow struct {
 	ValidationGeneration uint64 `gorm:"column:validation_generation"`
 }
 
-func (r *ResourceValidationRepo) listPendingMicrosoftValidations(ctx context.Context, limit int, readyBefore time.Time) ([]coreapp.ResourceValidationTask, error) {
+func (r *ResourceValidationRepo) listPendingMicrosoftValidations(ctx context.Context, limit int, readyBefore time.Time, enterprise bool) ([]coreapp.ResourceValidationTask, error) {
 	var rows []pendingValidationRow
 	if err := r.db.WithContext(ctx).
 		Table("microsoft_resources AS ms").
 		Select("ms.id, er.owner_user_id, ms.credential_revision, ms.validation_generation").
 		Joins("JOIN email_resources AS er ON er.id = ms.id AND er.type = ?", string(domain.ResourceTypeMicrosoft)).
 		Where("ms.status = ? AND ms.updated_at <= ?", string(domain.MicrosoftStatusPending), readyBefore).
+		Where("(ms.email_domain LIKE ?) = ?", "%.onmicrosoft.com", enterprise).
 		Order("ms.id ASC").Limit(limit).
 		Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list pending Microsoft validations: %w", err)
@@ -387,6 +402,7 @@ func (r *ResourceValidationRepo) listPendingMicrosoftValidations(ctx context.Con
 	for i := range rows {
 		tasks[i] = coreapp.ResourceValidationTask{
 			ResourceID: rows[i].ID, ResourceType: domain.ResourceTypeMicrosoft,
+			Enterprise:  enterprise,
 			OwnerUserID: rows[i].OwnerUserID, ValidationGeneration: rows[i].ValidationGeneration,
 			ExpectedCredentialRevision: rows[i].CredentialRevision,
 		}
