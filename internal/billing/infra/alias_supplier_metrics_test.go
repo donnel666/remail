@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -68,5 +69,55 @@ func TestMicrosoftDaumSupplierMetricsFollowImmutableAllocationOwner(t *testing.T
 		var nullSnapshots int64
 		require.NoError(t, db.Table("allocation_order_guards").Where("owner_user_id IS NULL").Count(&nullSnapshots).Error)
 		require.EqualValues(t, 2, nullSnapshots, "statistics never backfill historical billing facts")
+	}
+}
+
+func TestSupplierSnapshotMetricsIncludeOnlyMatchingOwners(t *testing.T) {
+	for _, resourceType := range []string{"microsoft", "microsoft_enterprise", "daum"} {
+		t.Run(resourceType, func(t *testing.T) {
+			db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+			require.NoError(t, err)
+			pool, err := db.DB()
+			require.NoError(t, err)
+			pool.SetMaxOpenConns(1)
+			t.Cleanup(func() { _ = pool.Close() })
+			require.NoError(t, db.Exec(`
+CREATE TABLE email_resources(id INTEGER PRIMARY KEY,type TEXT,owner_user_id INTEGER);
+CREATE TABLE microsoft_allocations(order_no TEXT,resource_id INTEGER,supply_scope TEXT);
+CREATE TABLE microsoft_enterprise_allocations(order_no TEXT,resource_id INTEGER,supply_scope TEXT);
+CREATE TABLE daum_allocations(order_no TEXT,resource_id INTEGER,supply_scope TEXT);
+CREATE TABLE domain_allocations(order_no TEXT,resource_id INTEGER,supply_scope TEXT);
+CREATE TABLE allocation_order_guards(order_no TEXT PRIMARY KEY,type TEXT,owner_user_id INTEGER);
+CREATE TABLE orders(id INTEGER PRIMARY KEY,order_no TEXT,status TEXT,service_mode TEXT,activated_at DATETIME,receive_until DATETIME,debit_tx_id INTEGER);
+CREATE TABLE mailmatch_order_delivery_heads(order_id INTEGER);`).Error)
+			require.NoError(t, db.Exec("INSERT INTO email_resources VALUES(1,?,8)", resourceType).Error)
+			for i, fixture := range []struct {
+				name, scope, guardType string
+				owner, debit           any
+				resourceID             int
+			}{
+				{"snapshot", "public", resourceType, 1, 1, 1},
+				{"legacy", "public", resourceType, nil, 1, 1},
+				{"same-root-owner", "public", resourceType, 8, 1, 1},
+				{"missing-root", "public", resourceType, 1, 1, 999},
+				{"missing-root-legacy", "public", resourceType, nil, 1, 999},
+				{"private", "owned", resourceType, 1, 1, 1},
+				{"unpaid", "public", resourceType, 1, nil, 1},
+				{"HIST-import", "public", resourceType, 1, 1, 1},
+				{"wrong-guard", "public", "domain", 1, 1, 1},
+			} {
+				require.NoError(t, db.Exec("INSERT INTO orders VALUES(?,?,'completed','code',NULL,NULL,?)", i+1, fixture.name, fixture.debit).Error)
+				require.NoError(t, db.Exec("INSERT INTO mailmatch_order_delivery_heads VALUES(?)", i+1).Error)
+				require.NoError(t, db.Exec("INSERT INTO allocation_order_guards VALUES(?,?,?)", fixture.name, fixture.guardType, fixture.owner).Error)
+				require.NoError(t, db.Exec(fmt.Sprintf("INSERT INTO %s_allocations VALUES(?,?,?)", resourceType), fixture.name, fixture.resourceID, fixture.scope).Error)
+			}
+			repo := NewBillingRepo(db)
+			for _, owner := range []uint{1, 8} {
+				metrics, err := repo.loadSupplierFulfillmentMetrics(context.Background(), db, owner)
+				require.NoError(t, err)
+				require.EqualValues(t, 2, metrics.AllocationCount)
+				require.Equal(t, 100.0, metrics.FulfillmentSuccessRate)
+			}
+		})
 	}
 }

@@ -282,7 +282,8 @@ const supplierMicrosoftAllocationsSQL = `SELECT ma.order_no
     LEFT JOIN email_resources er ON er.id = ma.resource_id AND er.type = 'microsoft'
     WHERE COALESCE(guard.owner_user_id, er.owner_user_id) = ? AND ma.supply_scope = 'public'`
 
-const supplierMicrosoftEnterpriseAllocationsSQL = `SELECT ma.order_no
+// Start with enterprise allocations so this branch cannot scan shared guards for other products.
+const supplierMicrosoftEnterpriseAllocationsSQL = `SELECT /*+ JOIN_ORDER(ma, guard, er) */ ma.order_no
     FROM microsoft_enterprise_allocations ma
     JOIN allocation_order_guards guard ON guard.order_no = ma.order_no AND guard.type = 'microsoft_enterprise'
     LEFT JOIN email_resources er ON er.id = ma.resource_id AND er.type = 'microsoft_enterprise'
