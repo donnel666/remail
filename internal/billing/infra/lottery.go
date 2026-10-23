@@ -11,9 +11,43 @@ import (
 
 	billingapp "github.com/donnel666/remail/internal/billing/app"
 	"github.com/donnel666/remail/internal/billing/domain"
+	"github.com/donnel666/remail/internal/platform"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+func (r *BillingRepo) LookupLotteryScoreStats(ctx context.Context, userIDs []uint) (map[uint]billingapp.LotteryScoreStats, error) {
+	stats := make(map[uint]billingapp.LotteryScoreStats, len(userIDs))
+	if len(userIDs) == 0 {
+		return stats, nil
+	}
+	db := r.db.WithContext(ctx)
+	if tx, ok := platform.GormTxFromContext(ctx); ok {
+		db = tx.WithContext(ctx)
+	}
+	var rows []struct {
+		UserID uint
+		billingapp.LotteryScoreStats
+	}
+	// Referrals and leaderboard rewards are earned; other consumer credits are gifts.
+	const earned = "t.biz_type IN ('leaderboard_reward', 'invitation_reward', 'referral_transfer')"
+	if err := db.Table("wallet_transactions AS t").Select(`t.user_id,
+		SUM(CASE WHEN t.transaction_type IN ('recharge', 'card_redeem') THEN t.amount ELSE 0 END) AS recharge_points,
+		SUM(CASE WHEN t.transaction_type = 'credit' AND `+earned+` THEN t.amount ELSE 0 END) AS earned_points,
+		SUM(CASE WHEN t.transaction_type = 'credit' AND NOT (`+earned+`) THEN t.amount ELSE 0 END) AS free_points`).
+		Where("t.user_id IN ?", userIDs).
+		Where("t.balance_bucket = ? AND t.direction = ? AND t.amount > 0", domain.BalanceBucketConsumer, domain.TransactionDirectionIn).
+		Where("t.transaction_type IN ?", []domain.TransactionType{domain.TransactionTypeRecharge, domain.TransactionTypeCardRedeem, domain.TransactionTypeCredit}).
+		Where("t.reversal_of_no IS NULL").
+		Where("NOT EXISTS (SELECT 1 FROM wallet_transactions AS reversal WHERE reversal.reversal_of_no = t.transaction_no)").
+		Group("t.user_id").Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("lookup lottery score credits: %w", err)
+	}
+	for _, row := range rows {
+		stats[row.UserID] = row.LotteryScoreStats
+	}
+	return stats, nil
+}
 
 type LotterySettlementModel struct {
 	LotteryID          uint      `gorm:"primaryKey;column:lottery_id"`

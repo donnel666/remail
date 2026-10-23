@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	// v3 uses history-weighted fixed prize counts and allocates the complete pool.
+	// v3 ranks participants by history, uses fixed prize counts, and allocates the complete pool.
 	algorithmVersion               = "fixed-tier-v3"
 	legacyAlgorithmVersionV2       = "bounded-tier-v2"
 	legacyAlgorithmVersionV1       = "bounded-tier-v1"
@@ -31,6 +31,7 @@ const (
 	winnerLuckyPenalty       int64 = 500
 	winnerNormalPenalty      int64 = 100
 	winnerConsolationBonus   int64 = 50
+	winnerOrderTicketPenalty int64 = 10
 	// ponytail: keep one settlement below the current Billing task ceiling;
 	// raise this only with a chunked Billing contract.
 	maxLotteryEntries = 5000
@@ -254,6 +255,26 @@ func (s *Service) drawSettling(ctx context.Context, lottery *lotterydomain.Lotte
 			stats, statsErr := s.repo.LookupWinnerStats(ctx, entryUserIDs(entries))
 			if statsErr != nil {
 				return nil, nil, statsErr
+			}
+			if s.billing == nil || s.aftersale == nil {
+				return nil, nil, fmt.Errorf("lottery score statistics unavailable")
+			}
+			pointStats, pointsErr := s.billing.LookupLotteryScoreStats(ctx, entryUserIDs(entries))
+			if pointsErr != nil {
+				return nil, nil, pointsErr
+			}
+			ticketCounts, ticketsErr := s.aftersale.CountOrderTicketsByUsers(ctx, entryUserIDs(entries))
+			if ticketsErr != nil {
+				return nil, nil, ticketsErr
+			}
+			if stats == nil {
+				stats = make(map[uint]WinnerStats, len(entries))
+			}
+			for _, entry := range entries {
+				item := stats[entry.UserID]
+				item.Points = pointStats[entry.UserID]
+				item.OrderTicketCount = ticketCounts[entry.UserID]
+				stats[entry.UserID] = item
 			}
 			if err := rankEntriesByHistory(entries, stats); err != nil {
 				return nil, nil, err
@@ -1184,17 +1205,17 @@ func rankEntriesByHistory(entries []lotterydomain.Entry, stats map[uint]WinnerSt
 	}
 	type rankedEntry struct {
 		entry lotterydomain.Entry
-		score int64
+		score decimal.Decimal
 	}
 	ranked := make([]rankedEntry, len(entries))
 	for i, entry := range entries {
 		winnerStats := stats[entry.UserID]
 		ranked[i] = rankedEntry{entry: entry, score: winnerHistoryScore(winnerStats)}
 	}
-	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].score > ranked[j].score })
+	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].score.GreaterThan(ranked[j].score) })
 	for start := 0; start < len(ranked); {
 		end := start + 1
-		for end < len(ranked) && ranked[end].score == ranked[start].score {
+		for end < len(ranked) && ranked[end].score.Equal(ranked[start].score) {
 			end++
 		}
 		if end-start == 1 {
@@ -1217,24 +1238,19 @@ func rankEntriesByHistory(entries []lotterydomain.Entry, stats map[uint]WinnerSt
 	return nil
 }
 
-// score = max(0, 1000 - lucky awards*500 - normal awards*100 + consolation awards*50).
-func winnerHistoryScore(stats WinnerStats) int64 {
+// Apply all history adjustments before flooring, retaining fractional points / 100.
+func winnerHistoryScore(stats WinnerStats) decimal.Decimal {
 	lucky := max(stats.LuckyCount, int64(0))
 	normal := max(stats.NormalCount, int64(0))
 	consolation := max(stats.ConsolationCount, int64(0))
-	// Keep the intermediate arithmetic exact; the final score is the only
-	// value that needs to be bounded to the ranking type.
-	score := big.NewInt(winnerInitialScore)
-	score.Sub(score, new(big.Int).Mul(big.NewInt(lucky), big.NewInt(winnerLuckyPenalty)))
-	score.Sub(score, new(big.Int).Mul(big.NewInt(normal), big.NewInt(winnerNormalPenalty)))
-	score.Add(score, new(big.Int).Mul(big.NewInt(consolation), big.NewInt(winnerConsolationBonus)))
-	if score.Sign() <= 0 {
-		return 0
-	}
-	if !score.IsInt64() {
-		return math.MaxInt64
-	}
-	return score.Int64()
+	tickets := max(stats.OrderTicketCount, int64(0))
+	score := decimal.NewFromInt(winnerInitialScore).
+		Sub(decimal.NewFromInt(lucky).Mul(decimal.NewFromInt(winnerLuckyPenalty))).
+		Sub(decimal.NewFromInt(normal).Mul(decimal.NewFromInt(winnerNormalPenalty))).
+		Add(decimal.NewFromInt(consolation).Mul(decimal.NewFromInt(winnerConsolationBonus))).
+		Add(stats.Points.RechargePoints.Add(stats.Points.EarnedPoints).Sub(stats.Points.FreePoints).Shift(-2)).
+		Sub(decimal.NewFromInt(tickets).Mul(decimal.NewFromInt(winnerOrderTicketPenalty)))
+	return decimal.Min(decimal.NewFromInt(math.MaxInt64), decimal.Max(decimal.Zero, score))
 }
 
 func randomShuffle(entries []lotterydomain.Entry) error {

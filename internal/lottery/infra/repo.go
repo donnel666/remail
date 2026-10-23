@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -105,10 +106,11 @@ func (r *Repo) WithDrawTransaction(ctx context.Context, lotteryID uint, fn func(
 	if tx, ok := platform.GormTxFromContext(ctx); ok {
 		return r.withLockedDraw(ctx, tx.WithContext(ctx), lotteryID, fn)
 	}
+	// Refresh history after waiting for another draw to release the user locks.
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		txCtx := platform.WithGormTx(ctx, tx)
 		return r.withLockedDraw(txCtx, tx, lotteryID, fn)
-	})
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 }
 
 func (r *Repo) withLockedDraw(ctx context.Context, tx *gorm.DB, lotteryID uint, fn func(context.Context, *lotterydomain.Lottery) error) error {

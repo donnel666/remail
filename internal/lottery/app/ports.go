@@ -22,11 +22,13 @@ type UserDirectory interface {
 	LookupLotteryUsers(ctx context.Context, userIDs []uint) (map[uint]User, error)
 }
 
-// WinnerStats is the small history snapshot used by the weighted draw order.
+// WinnerStats is the history snapshot used to rank participants before drawing.
 type WinnerStats struct {
 	LuckyCount       int64
 	NormalCount      int64
 	ConsolationCount int64
+	OrderTicketCount int64
+	Points           billingapp.LotteryScoreStats
 }
 
 type Repository interface {
@@ -87,16 +89,22 @@ type CreateResult struct {
 }
 
 type Service struct {
-	repo     Repository
-	billing  BillingPort
-	users    UserDirectory
-	delivery mailapp.DeliveryPort
-	queue    Queue
-	now      func() time.Time
+	repo      Repository
+	billing   BillingPort
+	aftersale OrderTicketCounter
+	users     UserDirectory
+	delivery  mailapp.DeliveryPort
+	queue     Queue
+	now       func() time.Time
 }
 
 type BillingPort interface {
 	SettleLotteryPool(ctx context.Context, req billingapp.LotterySettlementRequest) (*billingapp.LotterySettlementResult, error)
+	LookupLotteryScoreStats(ctx context.Context, userIDs []uint) (map[uint]billingapp.LotteryScoreStats, error)
+}
+
+type OrderTicketCounter interface {
+	CountOrderTicketsByUsers(ctx context.Context, userIDs []uint) (map[uint]int64, error)
 }
 
 // DrawTransactionRepository is optional so lightweight service fakes can keep
@@ -113,8 +121,8 @@ type WinnerUserLockRepository interface {
 	LockWinnerUsers(ctx context.Context, userIDs []uint) error
 }
 
-func NewService(repo Repository, billing BillingPort, users UserDirectory, delivery mailapp.DeliveryPort, queue Queue) *Service {
-	return &Service{repo: repo, billing: billing, users: users, delivery: delivery, queue: queue, now: func() time.Time { return time.Now().UTC() }}
+func NewService(repo Repository, billing BillingPort, aftersale OrderTicketCounter, users UserDirectory, delivery mailapp.DeliveryPort, queue Queue) *Service {
+	return &Service{repo: repo, billing: billing, aftersale: aftersale, users: users, delivery: delivery, queue: queue, now: func() time.Time { return time.Now().UTC() }}
 }
 
 func (s *Service) SetNow(now func() time.Time) {

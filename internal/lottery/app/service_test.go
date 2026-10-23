@@ -206,26 +206,62 @@ func TestRankEntriesByHistoryPrioritizesLeastServedUsers(t *testing.T) {
 }
 
 func TestWinnerHistoryScoreFloorsAtZero(t *testing.T) {
-	require.Zero(t, winnerHistoryScore(WinnerStats{LuckyCount: 3}))
-	require.Zero(t, winnerHistoryScore(WinnerStats{NormalCount: 11}))
-	require.Equal(t, int64(450), winnerHistoryScore(WinnerStats{LuckyCount: 1, NormalCount: 1, ConsolationCount: 1}))
-	require.Equal(t, int64(500), winnerHistoryScore(WinnerStats{LuckyCount: 3, ConsolationCount: 20}))
+	require.True(t, winnerHistoryScore(WinnerStats{LuckyCount: 3}).IsZero())
+	require.True(t, winnerHistoryScore(WinnerStats{NormalCount: 11}).IsZero())
+	require.Equal(t, "450", winnerHistoryScore(WinnerStats{LuckyCount: 1, NormalCount: 1, ConsolationCount: 1}).String())
+	require.Equal(t, "500", winnerHistoryScore(WinnerStats{LuckyCount: 3, ConsolationCount: 20}).String())
 }
 
 func TestWinnerHistoryScorePreservesRepresentableInt64Results(t *testing.T) {
 	maxInt := int64(math.MaxInt64)
 	normalCount := maxInt/winnerNormalPenalty + 1
 	consolationCount := maxInt / winnerConsolationBonus
-	require.Equal(t, int64(900), winnerHistoryScore(WinnerStats{
+	require.Equal(t, "900", winnerHistoryScore(WinnerStats{
 		NormalCount:      normalCount,
 		ConsolationCount: consolationCount,
-	}))
+	}).String())
 
 	consolationCount = maxInt/winnerConsolationBonus + 1
-	require.Equal(t, maxInt-457, winnerHistoryScore(WinnerStats{
+	require.True(t, decimal.NewFromInt(maxInt-457).Equal(winnerHistoryScore(WinnerStats{
 		LuckyCount:       3,
 		ConsolationCount: consolationCount,
-	}))
+	})))
+}
+
+func TestWinnerHistoryScoreIncludesPointsAndOrderTickets(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		stats    WinnerStats
+		expected string
+	}{
+		{"recharge", WinnerStats{Points: billingapp.LotteryScoreStats{RechargePoints: decimal.NewFromInt(1000)}}, "1010"},
+		{"earned rewards", WinnerStats{Points: billingapp.LotteryScoreStats{EarnedPoints: decimal.NewFromInt(1000)}}, "1010"},
+		{"free rewards", WinnerStats{Points: billingapp.LotteryScoreStats{FreePoints: decimal.NewFromInt(1000)}}, "990"},
+		{"order tickets", WinnerStats{OrderTicketCount: 2}, "980"},
+		{"fractional score", WinnerStats{Points: billingapp.LotteryScoreStats{RechargePoints: decimal.NewFromInt(150)}}, "1001.5"},
+		{"ledger precision", WinnerStats{Points: billingapp.LotteryScoreStats{FreePoints: decimal.RequireFromString("0.000001")}}, "999.99999999"},
+		{"combined history", WinnerStats{
+			LuckyCount: 1, NormalCount: 1, ConsolationCount: 1, OrderTicketCount: 2,
+			Points: billingapp.LotteryScoreStats{RechargePoints: decimal.NewFromInt(1000), EarnedPoints: decimal.NewFromInt(500), FreePoints: decimal.NewFromInt(1000)},
+		}, "435"},
+		{"floor after every adjustment", WinnerStats{LuckyCount: 3, Points: billingapp.LotteryScoreStats{RechargePoints: decimal.NewFromInt(1000)}}, "0"},
+		{"recharge offsets negative history", WinnerStats{LuckyCount: 3, Points: billingapp.LotteryScoreStats{RechargePoints: decimal.NewFromInt(50150)}}, "1.5"},
+		{"large ticket count", WinnerStats{OrderTicketCount: math.MaxInt64}, "0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.expected, winnerHistoryScore(tc.stats).String())
+		})
+	}
+}
+
+func TestRankEntriesPreservesFractionalScoreDifferences(t *testing.T) {
+	entries := []lotterydomain.Entry{{UserID: 1}, {UserID: 2}, {UserID: 3}}
+	stats := map[uint]WinnerStats{
+		2: {Points: billingapp.LotteryScoreStats{RechargePoints: decimal.RequireFromString("0.000001")}},
+		3: {Points: billingapp.LotteryScoreStats{FreePoints: decimal.RequireFromString("0.000001")}},
+	}
+	require.NoError(t, rankEntriesByHistory(entries, stats))
+	require.Equal(t, []uint{2, 1, 3}, entryUserIDs(entries))
 }
 
 func TestRankEntriesByHistoryRandomizesEqualScoreBoundary(t *testing.T) {
@@ -293,7 +329,23 @@ func (r *weightedDrawRepoStub) Complete(_ context.Context, _ uint, status lotter
 	return nil
 }
 
-type weightedDrawBillingStub struct{}
+type weightedDrawBillingStub struct {
+	stats    map[uint]billingapp.LotteryScoreStats
+	statsErr error
+}
+
+func (s weightedDrawBillingStub) LookupLotteryScoreStats(context.Context, []uint) (map[uint]billingapp.LotteryScoreStats, error) {
+	return s.stats, s.statsErr
+}
+
+type orderTicketCountStub struct {
+	counts map[uint]int64
+	err    error
+}
+
+func (s orderTicketCountStub) CountOrderTicketsByUsers(context.Context, []uint) (map[uint]int64, error) {
+	return s.counts, s.err
+}
 
 func (weightedDrawBillingStub) SettleLotteryPool(_ context.Context, req billingapp.LotterySettlementRequest) (*billingapp.LotterySettlementResult, error) {
 	result := &billingapp.LotterySettlementResult{Awards: make([]billingapp.LotteryAwardResult, len(req.Awards))}
@@ -313,7 +365,7 @@ func TestDrawUsesHistoryScoresToChooseTiers(t *testing.T) {
 		entries: []lotterydomain.Entry{{LotteryID: 16, UserID: 1}, {LotteryID: 16, UserID: 2}, {LotteryID: 16, UserID: 3}},
 		stats:   map[uint]WinnerStats{2: {ConsolationCount: 1}, 3: {LuckyCount: 1}},
 	}
-	service := NewService(repo, weightedDrawBillingStub{}, nil, nil, nil)
+	service := NewService(repo, weightedDrawBillingStub{}, orderTicketCountStub{}, nil, nil, nil)
 	require.NoError(t, service.Draw(context.Background(), 16))
 	require.Len(t, repo.payouts, 3)
 	byUser := make(map[uint]lotterydomain.Payout, len(repo.payouts))
@@ -323,6 +375,60 @@ func TestDrawUsesHistoryScoresToChooseTiers(t *testing.T) {
 	require.Equal(t, lotterydomain.TierLucky, byUser[2].Tier)
 	require.Equal(t, lotterydomain.TierNormal, byUser[1].Tier)
 	require.Equal(t, lotterydomain.TierConsolation, byUser[3].Tier)
+}
+
+func TestDrawUsesCreditAndTicketStatisticsToChooseTiers(t *testing.T) {
+	repo := &weightedDrawRepoStub{
+		lottery: &lotterydomain.Lottery{
+			ID: 16, Status: lotterydomain.StatusSettling, AlgorithmVersion: algorithmVersion,
+			TotalAmount: "30.00", MinPayout: "1.00", MaxPayout: "20.00",
+			TierWeights: lotterydomain.TierWeights{Normal: 2, Lucky: 1},
+		},
+		entries: []lotterydomain.Entry{{LotteryID: 16, UserID: 1}, {LotteryID: 16, UserID: 2}, {LotteryID: 16, UserID: 3}, {LotteryID: 16, UserID: 4}, {LotteryID: 16, UserID: 5}},
+		stats:   map[uint]WinnerStats{5: {NormalCount: 1}},
+	}
+	billing := weightedDrawBillingStub{stats: map[uint]billingapp.LotteryScoreStats{
+		1: {RechargePoints: decimal.NewFromInt(1000)},
+		2: {EarnedPoints: decimal.NewFromInt(1500)},
+		3: {FreePoints: decimal.NewFromInt(1000)},
+		5: {RechargePoints: decimal.NewFromInt(20000)},
+	}}
+	tickets := orderTicketCountStub{counts: map[uint]int64{4: 2}}
+	service := NewService(repo, billing, tickets, nil, nil, nil)
+	require.NoError(t, service.Draw(context.Background(), 16))
+	require.Equal(t, lotterydomain.StatusCompleted, repo.lottery.Status)
+	require.Len(t, repo.payouts, 5)
+	for i, userID := range []uint{5, 2, 1, 3, 4} {
+		require.Equal(t, userID, repo.payouts[i].UserID)
+	}
+	require.Equal(t, lotterydomain.TierLucky, repo.payouts[0].Tier)
+	require.Equal(t, lotterydomain.TierNormal, repo.payouts[1].Tier)
+	require.Equal(t, lotterydomain.TierNormal, repo.payouts[2].Tier)
+	require.Equal(t, lotterydomain.TierConsolation, repo.payouts[3].Tier)
+	require.Equal(t, lotterydomain.TierConsolation, repo.payouts[4].Tier)
+}
+
+func TestDrawRetriesWhenAdditionalScoreStatisticsFail(t *testing.T) {
+	statsErr := errors.New("statistics unavailable")
+	for _, tc := range []struct {
+		name    string
+		billing weightedDrawBillingStub
+		tickets orderTicketCountStub
+	}{
+		{"credits", weightedDrawBillingStub{statsErr: statsErr}, orderTicketCountStub{}},
+		{"tickets", weightedDrawBillingStub{}, orderTicketCountStub{err: statsErr}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &weightedDrawRepoStub{
+				lottery: &lotterydomain.Lottery{ID: 16, Status: lotterydomain.StatusSettling, AlgorithmVersion: algorithmVersion},
+				entries: []lotterydomain.Entry{{LotteryID: 16, UserID: 1}},
+			}
+			service := NewService(repo, tc.billing, tc.tickets, nil, nil, nil)
+			require.ErrorIs(t, service.Draw(context.Background(), 16), statsErr)
+			require.Empty(t, repo.payouts)
+			require.Equal(t, lotterydomain.StatusSettling, repo.lottery.Status)
+		})
+	}
 }
 
 func TestDrawFallsBackWhenFixedPoolCannotFitTheEntries(t *testing.T) {
@@ -335,7 +441,7 @@ func TestDrawFallsBackWhenFixedPoolCannotFitTheEntries(t *testing.T) {
 		entries: []lotterydomain.Entry{{LotteryID: 17, UserID: 1}, {LotteryID: 17, UserID: 2}},
 		stats:   map[uint]WinnerStats{},
 	}
-	service := NewService(repo, weightedDrawBillingStub{}, nil, nil, nil)
+	service := NewService(repo, weightedDrawBillingStub{}, orderTicketCountStub{}, nil, nil, nil)
 	require.NoError(t, service.Draw(context.Background(), 17))
 	require.Equal(t, lotterydomain.StatusCompleted, repo.lottery.Status)
 	require.Len(t, repo.payouts, len(repo.entries))
@@ -359,7 +465,7 @@ func TestDrawAdjustsFixedCountsWhenTimeWinsEarly(t *testing.T) {
 				entries: []lotterydomain.Entry{{LotteryID: 18, UserID: 1}, {LotteryID: 18, UserID: 2}},
 				stats:   map[uint]WinnerStats{},
 			}
-			service := NewService(repo, weightedDrawBillingStub{}, nil, nil, nil)
+			service := NewService(repo, weightedDrawBillingStub{}, orderTicketCountStub{}, nil, nil, nil)
 			require.NoError(t, service.Draw(context.Background(), 18))
 			require.Equal(t, lotterydomain.StatusCompleted, repo.lottery.Status)
 			require.Len(t, repo.payouts, 2)
@@ -390,7 +496,7 @@ func TestDrawCompletesGrowingPoolWithConsolationSurplus(t *testing.T) {
 		entries: entries,
 		stats:   map[uint]WinnerStats{},
 	}
-	service := NewService(repo, weightedDrawBillingStub{}, nil, nil, nil)
+	service := NewService(repo, weightedDrawBillingStub{}, orderTicketCountStub{}, nil, nil, nil)
 	require.NoError(t, service.Draw(context.Background(), 20))
 	require.Equal(t, lotterydomain.StatusCompleted, repo.lottery.Status)
 	require.Len(t, repo.payouts, len(entries))
@@ -420,7 +526,7 @@ func TestDrawFallsBackWhenGrowingPoolCannotFitConfiguredCounts(t *testing.T) {
 		entries: entries,
 		stats:   map[uint]WinnerStats{},
 	}
-	service := NewService(repo, weightedDrawBillingStub{}, nil, nil, nil)
+	service := NewService(repo, weightedDrawBillingStub{}, orderTicketCountStub{}, nil, nil, nil)
 	require.NoError(t, service.Draw(context.Background(), 19))
 	require.Equal(t, lotterydomain.StatusCompleted, repo.lottery.Status)
 	require.Len(t, repo.payouts, len(repo.entries))
@@ -438,7 +544,7 @@ func TestDrawFallsBackWhenLegacyAllocationLeavesUnusedBudget(t *testing.T) {
 		},
 		entries: entries,
 	}
-	service := NewService(repo, weightedDrawBillingStub{}, nil, nil, nil)
+	service := NewService(repo, weightedDrawBillingStub{}, orderTicketCountStub{}, nil, nil, nil)
 	require.NoError(t, service.Draw(context.Background(), 21))
 	require.Equal(t, lotterydomain.StatusCompleted, repo.lottery.Status)
 	require.Len(t, repo.payouts, len(entries))
@@ -456,7 +562,7 @@ func TestDrawKeepsInfrastructureFailuresRetryable(t *testing.T) {
 		entries:  []lotterydomain.Entry{{LotteryID: 22, UserID: 1}},
 		statsErr: lookupErr,
 	}
-	service := NewService(repo, weightedDrawBillingStub{}, nil, nil, nil)
+	service := NewService(repo, weightedDrawBillingStub{}, orderTicketCountStub{}, nil, nil, nil)
 	require.ErrorIs(t, service.Draw(context.Background(), 22), lookupErr)
 	require.Equal(t, lotterydomain.StatusSettling, repo.lottery.Status)
 	require.Empty(t, repo.payouts)
@@ -619,7 +725,7 @@ func TestEnterReportsTheSpecificAccountRequirement(t *testing.T) {
 		ID: 1, CreatedByUserID: 99, Status: lotterydomain.StatusOpen, MaxParticipants: 10,
 		MinAccountAgeDays: 30,
 	}}
-	service := NewService(repo, nil, lotteryUserDirectoryStub{user: &User{
+	service := NewService(repo, nil, nil, lotteryUserDirectoryStub{user: &User{
 		ID: 7, Status: "active", CreatedAt: now.AddDate(0, 0, -3),
 	}}, nil, nil)
 	service.SetNow(func() time.Time { return now })
@@ -637,7 +743,7 @@ func TestEnterReportsInactiveAccountsSeparately(t *testing.T) {
 	repo := &enterLotteryRepoStub{lottery: &lotterydomain.Lottery{
 		ID: 1, CreatedByUserID: 99, Status: lotterydomain.StatusOpen, MaxParticipants: 10,
 	}}
-	service := NewService(repo, nil, lotteryUserDirectoryStub{user: &User{
+	service := NewService(repo, nil, nil, lotteryUserDirectoryStub{user: &User{
 		ID: 7, Status: "disabled", CreatedAt: now.AddDate(0, 0, -100),
 	}}, nil, nil)
 	service.SetNow(func() time.Time { return now })
@@ -654,7 +760,7 @@ func TestEnterPropagatesUserDirectoryErrors(t *testing.T) {
 		ID: 1, CreatedByUserID: 99, Status: lotterydomain.StatusOpen, MaxParticipants: 10,
 	}}
 	directoryErr := errors.New("user directory unavailable")
-	service := NewService(repo, nil, lotteryUserDirectoryStub{err: directoryErr}, nil, nil)
+	service := NewService(repo, nil, nil, lotteryUserDirectoryStub{err: directoryErr}, nil, nil)
 
 	_, err := service.Enter(context.Background(), "public-token", 7)
 	require.ErrorIs(t, err, directoryErr)
@@ -668,7 +774,7 @@ func TestPublicHidesPayoutUntilLotteryCompletes(t *testing.T) {
 				entry:   &lotterydomain.Entry{LotteryID: 1, UserID: 7},
 				payout:  &lotterydomain.Payout{LotteryID: 1, UserID: 7, Amount: "8.00"},
 			}
-			service := NewService(repo, nil, nil, nil, nil)
+			service := NewService(repo, nil, nil, nil, nil, nil)
 			_, entry, payout, err := service.Public(context.Background(), "public-token", 7)
 			require.NoError(t, err)
 			require.NotNil(t, entry)
@@ -686,7 +792,7 @@ func TestPublicHidesPayoutWhenUserHasNoEntry(t *testing.T) {
 		lottery: &lotterydomain.Lottery{ID: 1, Status: lotterydomain.StatusCompleted},
 		payout:  &lotterydomain.Payout{LotteryID: 1, UserID: 7, Amount: "8.00"},
 	}
-	service := NewService(repo, nil, nil, nil, nil)
+	service := NewService(repo, nil, nil, nil, nil, nil)
 
 	_, entry, payout, err := service.Public(context.Background(), "public-token", 7)
 	require.NoError(t, err)
@@ -740,7 +846,7 @@ func TestCreateUsesOnlyConfiguredDrawCondition(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &createLotteryRepoStub{}
 			queue := &drawQueueStub{}
-			service := NewService(repo, nil, nil, nil, queue)
+			service := NewService(repo, nil, nil, nil, nil, queue)
 			service.SetNow(func() time.Time { return now })
 			result, err := service.Create(context.Background(), CreateRequest{
 				CreatedByUserID:   1,
@@ -799,7 +905,7 @@ func TestCreateReplaysExistingActivityAfterDrawTime(t *testing.T) {
 		Status:             lotterydomain.StatusCompleted,
 	}
 	repo := &createLotteryRepoStub{existing: existing}
-	service := NewService(repo, nil, nil, nil, nil)
+	service := NewService(repo, nil, nil, nil, nil, nil)
 	service.SetNow(func() time.Time { return now })
 
 	result, err := service.Create(context.Background(), req)
@@ -937,7 +1043,7 @@ func TestGrowingAllocationKeepsConfiguredSpecialCounts(t *testing.T) {
 func TestCreateRoutesLegacyPercentageRequestsToV2(t *testing.T) {
 	drawAt := time.Now().Add(time.Hour)
 	repo := &createLotteryRepoStub{}
-	service := NewService(repo, nil, nil, nil, nil)
+	service := NewService(repo, nil, nil, nil, nil, nil)
 	_, err := service.Create(context.Background(), CreateRequest{
 		CreatedByUserID: 1, Title: "legacy", TotalAmount: "100.00", MinPayout: "1.00", MaxPayout: "20.00",
 		TierWeights: lotterydomain.TierWeights{Consolation: 80, Normal: 15, Lucky: 5},

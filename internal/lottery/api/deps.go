@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	aftersaleapp "github.com/donnel666/remail/internal/aftersale/app"
 	billingapp "github.com/donnel666/remail/internal/billing/app"
 	iamapp "github.com/donnel666/remail/internal/iam/app"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
@@ -20,11 +21,11 @@ type Module struct {
 	Queue   *lotteryinfra.Queue
 }
 
-func NewModule(db *gorm.DB, client *asynq.Client, billing *billingapp.WalletUseCase, users iamapp.UserRepository, delivery mailapp.DeliveryPort) *Module {
+func NewModule(db *gorm.DB, client *asynq.Client, billing *billingapp.WalletUseCase, aftersale *aftersaleapp.UseCase, users iamapp.UserRepository, delivery mailapp.DeliveryPort) *Module {
 	repo := lotteryinfra.NewRepo(db)
 	queue := lotteryinfra.NewQueue(client)
 	return &Module{
-		Service: lotteryapp.NewService(repo, billing, iamUserDirectory{users: users}, delivery, queue),
+		Service: lotteryapp.NewService(repo, billing, aftersale, iamUserDirectory{users: users}, delivery, queue),
 		Repo:    repo,
 		Queue:   queue,
 	}

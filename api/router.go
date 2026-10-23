@@ -346,10 +346,6 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		billingapi.RegisterBillingRoutes(v1, billingMod, iamSessionFetcher, iamMod.PermissionChecker, turnstileGuard)
 		cleanupFuncs = append(cleanupFuncs, billingapi.RegisterBillingTaskHandlers(taskMux, billingMod))
 
-		lotteryMod := lotteryapi.NewModule(p.DB, p.Asynq, billingMod.WalletUseCase, iamMod.Users, mailMod.DeliveryUseCase)
-		lotteryapi.RegisterRoutes(v1, lotteryMod, iamSessionFetcher, iamMod.PermissionChecker, turnstileGuard)
-		cleanupFuncs = append(cleanupFuncs, lotteryapi.RegisterTaskHandlers(taskMux, lotteryMod))
-
 		// OpenAPI credentials and order service tokens.
 		openapiMod := openapiapi.NewModule(p.DB, p.Redis)
 		openapiMod.ConsumerBalances = billingMod.WalletUseCase.ListConsumerBalances
@@ -419,6 +415,10 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		aftersaleMod.UseCase.SetOwnerLookupPort(ticketParticipantDirectory{owners: iamMod.AdminResourceOwners, users: iamMod.Users})
 		aftersaleMod.UseCase.SetSupplierWalletPort(supplierWithdrawalWalletAdapter{wallets: billingMod.WalletUseCase})
 		aftersaleapi.RegisterRoutes(v1, aftersaleMod, iamSessionFetcher, iamMod.PermissionChecker, turnstileGuard)
+
+		lotteryMod := lotteryapi.NewModule(p.DB, p.Asynq, billingMod.WalletUseCase, aftersaleMod.UseCase, iamMod.Users, mailMod.DeliveryUseCase)
+		lotteryapi.RegisterRoutes(v1, lotteryMod, iamSessionFetcher, iamMod.PermissionChecker, turnstileGuard)
+		cleanupFuncs = append(cleanupFuncs, lotteryapi.RegisterTaskHandlers(taskMux, lotteryMod))
 
 		// MailMatch module (order-scoped message cache, async fetch and matching).
 		mailmatchMod := mailmatchapi.NewModule(p.DB, fileStore, p.Redis, p.Asynq, proxyMod.ProxyUseCase, tradeMod.UseCase, coreMod.ValidationUseCase)

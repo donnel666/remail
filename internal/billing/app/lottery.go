@@ -7,7 +7,27 @@ import (
 	"strings"
 
 	"github.com/donnel666/remail/internal/billing/domain"
+	"github.com/shopspring/decimal"
 )
+
+// LotteryScoreStats contains settled consumer credits, excluding reversed entries.
+type LotteryScoreStats struct {
+	RechargePoints decimal.Decimal
+	EarnedPoints   decimal.Decimal
+	FreePoints     decimal.Decimal
+}
+
+type LotteryScoreRepository interface {
+	LookupLotteryScoreStats(ctx context.Context, userIDs []uint) (map[uint]LotteryScoreStats, error)
+}
+
+func (uc *WalletUseCase) LookupLotteryScoreStats(ctx context.Context, userIDs []uint) (map[uint]LotteryScoreStats, error) {
+	repo, ok := uc.repo.(LotteryScoreRepository)
+	if !ok {
+		return nil, fmt.Errorf("lottery score statistics unavailable")
+	}
+	return repo.LookupLotteryScoreStats(ctx, userIDs)
+}
 
 // LotteryAward is the only reward data Billing accepts from the lottery
 // bounded context. Wallet balances and ledger rows remain Billing-owned.
