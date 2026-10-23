@@ -414,6 +414,9 @@ export default function AdminTickets() {
       <TicketDetailSheet
         platformCanOperate={canOperateTickets}
         platformCanRefund={canRefundOrders}
+        platformCanWithdraw={
+          canOperateTickets && hasPermissionKey(currentUser, "billing:wallet:operate")
+        }
         onChanged={handleTicketChanged}
         onClose={() => setDetailTicketNo(null)}
         ticketNo={detailTicketNo}

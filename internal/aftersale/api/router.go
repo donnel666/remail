@@ -43,5 +43,6 @@ func RegisterRoutes(rg *gin.RouterGroup, mod *Module, fetcher middleware.Session
 		admin.POST("/tickets/:ticketNo/read", middleware.PermissionRequiredAny(checker, ticketReadPermissions...), h.PostAdminTicketRead)
 		admin.POST("/tickets/:ticketNo/close", middleware.PermissionRequiredAny(checker, ticketOperatePermissions...), h.PostAdminTicketClose)
 		admin.POST("/tickets/:ticketNo/refund", middleware.PermissionRequired(checker, "trade:order", "operate"), h.PostAdminTicketRefund)
+		admin.POST("/tickets/:ticketNo/withdraw", middleware.PermissionRequiredAny(checker, ticketOperatePermissions...), middleware.PermissionRequired(checker, "billing:wallet", "operate"), h.PostAdminTicketWithdraw)
 	}
 }

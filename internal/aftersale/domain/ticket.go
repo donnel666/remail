@@ -36,8 +36,9 @@ const (
 type ResolutionKind string
 
 const (
-	ResolutionRefunded ResolutionKind = "refunded"
-	ResolutionClosed   ResolutionKind = "closed"
+	ResolutionRefunded  ResolutionKind = "refunded"
+	ResolutionWithdrawn ResolutionKind = "withdrawn"
+	ResolutionClosed    ResolutionKind = "closed"
 )
 
 // OrderSnapshot holds the immutable order display fields captured at ticket
@@ -122,6 +123,8 @@ var (
 	ErrSupplierSettlementBalance   = errors.New("aftersale: supplier balance insufficient to reverse settlement")
 	ErrInsufficientSupplierBalance = errors.New("aftersale: insufficient supplier balance")
 	ErrSupplierWalletUnavailable   = errors.New("aftersale: supplier wallet unavailable")
+	ErrWithdrawalAlreadyProcessed  = errors.New("aftersale: ticket withdrawal already processed")
+	ErrWithdrawalAlreadyRecorded   = errors.New("aftersale: withdrawal already recorded in wallet")
 )
 
 // NormalizeTicketType parses an untrusted type string.

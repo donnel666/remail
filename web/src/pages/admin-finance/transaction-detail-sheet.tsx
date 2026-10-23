@@ -53,6 +53,7 @@ export function TransactionDetailSheet({
   const canReverse = Boolean(
     transaction &&
       transaction.transactionType !== "transfer" &&
+      transaction.bizType !== "ticket_withdrawal" &&
       !transaction.orderLinked &&
       !transaction.bizType.startsWith("supplier_settlement") &&
       !transaction.reversed &&

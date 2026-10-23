@@ -33,10 +33,18 @@ type OrderPort interface {
 	GetOrderForTicket(ctx context.Context, orderNo string, requesterUserID uint) (*OrderInfo, error)
 }
 
-// SupplierWalletPort exposes only the supplier balance needed to validate a
-// withdrawal request without coupling aftersale to billing.
+// SupplierWalletPort keeps supplier balance queries and withdrawals in billing.
 type SupplierWalletPort interface {
 	SupplierAvailable(ctx context.Context, userID uint) (string, error)
+	WithdrawSupplier(ctx context.Context, cmd SupplierWithdrawalCommand) error
+}
+
+type SupplierWithdrawalCommand struct {
+	TicketNo       string
+	UserID         uint
+	Amount         string
+	OperatorUserID uint
+	RequestID      string
 }
 
 // OrderInfo is the trade-owned view of an order needed to open a ticket.
@@ -210,6 +218,8 @@ type ReplyParams struct {
 }
 
 type CloseParams struct {
+	// Runs after locking the open ticket, in the same transaction as closing it.
+	BeforeClose   func(context.Context) error
 	TicketNo      string
 	By            domain.SenderType
 	Resolution    domain.Resolution
@@ -251,8 +261,9 @@ type TicketStatusFacets struct {
 
 // TicketView pairs a ticket with the requester's enriched summary.
 type TicketView struct {
-	Ticket    *domain.Ticket
-	Requester *RequesterSummary
+	Ticket           *domain.Ticket
+	Requester        *RequesterSummary
+	WithdrawalAmount string
 }
 
 type TicketListResult struct {
@@ -306,5 +317,11 @@ type RefundTicketRequest struct {
 	TicketNo       string
 	OperatorUserID uint
 	IdempotencyKey string
+	RequestID      string
+}
+
+type WithdrawTicketRequest struct {
+	TicketNo       string
+	OperatorUserID uint
 	RequestID      string
 }

@@ -66,6 +66,7 @@ type TicketResponse struct {
 	RequesterRole        string                    `json:"requesterRole"`
 	RequesterGroupName   string                    `json:"requesterGroupName"`
 	Resolution           *TicketResolutionResponse `json:"resolution,omitempty"`
+	WithdrawalAmount     string                    `json:"withdrawalAmount,omitempty"`
 	RequesterUnreadCount int                       `json:"requesterUnreadCount"`
 	PlatformUnreadCount  int                       `json:"platformUnreadCount"`
 	Messages             []TicketMessageResponse   `json:"messages"`
@@ -108,6 +109,7 @@ func ticketResponseBase(view aftersaleapp.TicketView) TicketResponse {
 	resp := TicketResponse{
 		ID:                   ticket.ID,
 		TicketNo:             ticket.TicketNo,
+		WithdrawalAmount:     view.WithdrawalAmount,
 		TicketType:           string(ticket.TicketType),
 		Title:                ticket.Title,
 		Status:               string(ticket.Status),

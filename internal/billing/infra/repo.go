@@ -223,13 +223,13 @@ func NewBillingRepo(db *gorm.DB) *BillingRepo {
 	return repo
 }
 
-func (r *BillingRepo) withTx(ctx context.Context, fn func(context.Context, *gorm.DB) error) error {
+func (r *BillingRepo) withTx(ctx context.Context, fn func(context.Context, *gorm.DB) error, options ...*sql.TxOptions) error {
 	if tx, ok := platform.GormTxFromContext(ctx); ok {
 		return fn(ctx, tx.WithContext(ctx))
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return fn(platform.WithGormTx(ctx, tx), tx)
-	})
+	}, options...)
 }
 
 type operationLogWriter interface {

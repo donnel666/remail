@@ -72,7 +72,7 @@ stateDiagram-v2
 | INV-AS5 | 每次流转写 `FlowLog`。 |
 | INV-AS6 | 附件存储失败写 SystemLog，不暴露 objectKey。 |
 | INV-AS7 | 通知是旁路事实，失败不回滚工单主流程。 |
-| INV-AS8 | 支付宝提现工单只记录请求，不预冻结或修改钱包；管理员处理时必须重新核对供应商可用余额。 |
+| INV-AS8 | 支付宝提现申请不预冻结钱包；管理员确认时经 Billing 扣减供应商可用积分，与工单关闭、流水及审计记录同事务提交。金额取原始系统申请，单工单至多扣款一次，成功后再人工打款。 |
 
 ---
 
@@ -107,7 +107,7 @@ stateDiagram-v2
 
 供应商权限申请复用 `POST /v1/tickets`：`ticketType=general`、标题固定为“供应商申请”、首条消息为用户填写内容。AFTERSALE 不修改用户角色；管理员看到工单后通过 IAM 用户管理人工将申请人角色改为 `supplier`。
 
-供应商提现到支付宝复用 `POST /v1/tickets`：`ticketType=general`、标题固定为“供应商提现申请”，首条消息按固定格式记录提现金额、支付宝去向和用户备注，并必须带一张支付宝收款码图片附件。AFTERSALE 不执行资金操作，管理员核对申请人实时余额后通过 Billing 后台钱包能力人工处理，并在工单中回复和关闭。转入用户钱包不创建工单，由 BC-BILLING `POST /v1/wallet/supplier-transfers` 直接完成。
+供应商提现到支付宝调用 `POST /v1/wallet/supplier-withdrawals`：`ticketType=general`、标题固定为“供应商提现申请”，首条系统消息按固定格式记录提现积分、支付宝去向和用户备注，并必须带一张收款码附件。管理员通过 `POST /v1/admin/tickets/{ticketNo}/withdraw` 确认扣分并关闭，要求同时具有工单操作及钱包操作权限。AFTERSALE 只负责编排，钱包变更经 Billing Port 完成，并共享同一事务。扣分成功后才进行人工打款；再次确认会明确返回已处理，不再扣款。普通关闭工单仍不扣款。转入用户钱包不创建工单，由 BC-BILLING `POST /v1/wallet/supplier-transfers` 直接完成。
 
 后台/供应商特权动作：
 

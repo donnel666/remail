@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Button,
   Modal,
@@ -15,8 +15,11 @@ import { createCopyableConfig } from "@/components/semi/copyable-config";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { ProjectIcon } from "@/pages/workbench/project-icon";
+import { getIamErrorMessage } from "@/lib/iam-errors";
+import { IamApiError } from "@/lib/api-client";
 
 import { TicketConversation } from "./ticket-conversation";
+import { TicketRequesterCard } from "./ticket-requester-card";
 import {
   formatTicketAmount,
   formatTicketDateTime,
@@ -28,6 +31,7 @@ import {
   getTicket,
   markTicketRead,
   refundAndCloseTicket,
+  withdrawAndCloseTicket,
   type Ticket,
 } from "./tickets-api";
 
@@ -38,6 +42,7 @@ export function TicketDetailSheet({
   viewerRole,
   platformCanOperate = false,
   platformCanRefund = false,
+  platformCanWithdraw = false,
   onClose,
   onChanged,
 }: {
@@ -45,6 +50,7 @@ export function TicketDetailSheet({
   viewerRole: "user" | "platform";
   platformCanOperate?: boolean;
   platformCanRefund?: boolean;
+  platformCanWithdraw?: boolean;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -53,6 +59,8 @@ export function TicketDetailSheet({
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [loading, setLoading] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const activeTicketNo = useRef(ticketNo);
+  activeTicketNo.current = ticketNo;
 
   useEffect(() => {
     if (!ticketNo) {
@@ -60,6 +68,7 @@ export function TicketDetailSheet({
       return;
     }
     let cancelled = false;
+    setTicket(null);
     setLoading(true);
     void getTicket(ticketNo)
       .then(async (detail) => {
@@ -85,7 +94,7 @@ export function TicketDetailSheet({
   // Both replies and quick actions run through here so the list stays in sync.
   const applyUpdate = useCallback(
     (next: Ticket) => {
-      setTicket(next);
+      if (next.ticketNo === activeTicketNo.current) setTicket(next);
       onChanged();
     },
     [onChanged]
@@ -98,8 +107,8 @@ export function TicketDetailSheet({
         const next = await action();
         applyUpdate(next);
         Toast.success(t(successKey));
-      } catch {
-        Toast.error(t("Ticket operation failed."));
+      } catch (error) {
+        Toast.error(getIamErrorMessage(t, error, "Ticket operation failed."));
       } finally {
         setActionBusy(false);
       }
@@ -141,6 +150,53 @@ export function TicketDetailSheet({
     });
   };
 
+  const handleWithdrawAndClose = () => {
+    if (!ticket?.withdrawalAmount || !platformCanWithdraw) return;
+    Modal.confirm({
+      title: t("Confirm withdrawal and close"),
+      width: isMobile ? "calc(100vw - 32px)" : undefined,
+      content: t("Confirm withdrawal and close prompt", {
+        name: ticket.requesterName || ticket.requesterEmail,
+        userId: ticket.requesterUserId,
+        amount: formatTicketAmount(ticket.withdrawalAmount),
+      }),
+      okText: t("Deduct points and close"),
+      cancelText: t("Cancel"),
+      onOk: async () => {
+        setActionBusy(true);
+        try {
+          const next = await withdrawAndCloseTicket(ticket.ticketNo);
+          applyUpdate(next);
+          Toast.success(t("Withdrawal deducted points", {
+            amount: formatTicketAmount(next.withdrawalAmount),
+            userId: next.requesterUserId,
+          }));
+        } catch (error) {
+          // A timeout can follow a committed debit. Read the authoritative state
+          // before reporting failure; never automatically issue another debit.
+          try {
+            const latest = await getTicket(ticket.ticketNo);
+            applyUpdate(latest);
+            if (latest.resolution?.kind === "withdrawn") {
+              Toast.warning(t("Withdrawal already recorded points", {
+                amount: formatTicketAmount(latest.withdrawalAmount),
+                userId: latest.requesterUserId,
+              }));
+            } else if (!(error instanceof IamApiError) || error.status >= 500) {
+              Toast.error(t("Withdrawal result is unknown. Refresh the ticket and check the ledger before proceeding."));
+            } else {
+              Toast.error(getIamErrorMessage(t, error, "Ticket operation failed."));
+            }
+          } catch {
+            Toast.error(t("Withdrawal result is unknown. Refresh the ticket and check the ledger before proceeding."));
+          }
+        } finally {
+          setActionBusy(false);
+        }
+      },
+    });
+  };
+
   const headerArea = ticket ? (
     <div className="min-w-0">
       <div className="flex min-w-0 items-center gap-2">
@@ -155,7 +211,7 @@ export function TicketDetailSheet({
         {renderTicketStatusTag(ticket.status, t)}
         {renderTicketTypeTag(ticket.ticketType, t)}
         <Text
-          className="font-mono-data text-xs"
+          className="font-mono-data break-all text-xs"
           copyable={createCopyableConfig(ticket.ticketNo, t("Copied"))}
           type="tertiary"
         >
@@ -211,7 +267,7 @@ export function TicketDetailSheet({
   const resolutionCard = ticket?.resolution ? (
     <div
       className={`ticket-resolution ${
-        ticket.resolution.kind === "refunded" ? "is-success" : "is-neutral"
+        ticket.resolution.kind !== "closed" ? "is-success" : "is-neutral"
       }`}
     >
       {ticket.resolution.kind === "refunded" ? (
@@ -224,7 +280,11 @@ export function TicketDetailSheet({
           ? t("Ticket refunded amount", {
               amount: formatTicketAmount(ticket.resolution.refundAmount),
             })
-          : t("Ticket has been closed")}
+          : ticket.resolution.kind === "withdrawn"
+            ? t("Ticket withdrawal completed", {
+                amount: formatTicketAmount(ticket.withdrawalAmount),
+              })
+            : t("Ticket has been closed")}
       </div>
     </div>
   ) : null;
@@ -233,8 +293,18 @@ export function TicketDetailSheet({
     ticket &&
     viewerRole === "platform" &&
     ticket.status !== "closed" &&
-    (platformCanOperate || platformCanRefund) ? (
+    (platformCanOperate || platformCanRefund || platformCanWithdraw) ? (
       <div className="ticket-sheet-footer">
+        {ticket.withdrawalAmount && platformCanWithdraw ? (
+          <Button
+            icon={<BadgeCheck size={14} />}
+            loading={actionBusy}
+            type="primary"
+            onClick={handleWithdrawAndClose}
+          >
+            {t("Confirm withdrawal and close")}
+          </Button>
+        ) : null}
         {ticket.ticketType === "order" && platformCanRefund ? (
           <Button
             icon={<Undo2 size={14} />}
@@ -289,8 +359,11 @@ export function TicketDetailSheet({
         </div>
       ) : (
         <div className="flex h-full min-h-0 flex-col">
-          {orderCard || resolutionCard ? (
-            <div className="shrink-0 space-y-2 px-5 pt-4">
+          {viewerRole === "platform" || orderCard || resolutionCard ? (
+            <div className="max-h-[40%] shrink-0 space-y-2 overflow-y-auto px-5 pt-4">
+              {viewerRole === "platform" ? (
+                <TicketRequesterCard key={ticket.ticketNo} ticket={ticket} />
+              ) : null}
               {orderCard}
               {resolutionCard}
             </div>

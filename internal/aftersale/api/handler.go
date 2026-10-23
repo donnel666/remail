@@ -292,6 +292,23 @@ func (h *Handler) PostAdminTicketRefund(c *gin.Context) {
 	c.JSON(http.StatusOK, ticketDetailResponse(*view))
 }
 
+func (h *Handler) PostAdminTicketWithdraw(c *gin.Context) {
+	operatorUserID, ok := currentUserID(c)
+	if !ok {
+		return
+	}
+	view, err := h.mod.UseCase.WithdrawAndCloseTicket(c.Request.Context(), aftersaleapp.WithdrawTicketRequest{
+		TicketNo:       c.Param("ticketNo"),
+		OperatorUserID: operatorUserID,
+		RequestID:      middleware.GetRequestID(c),
+	})
+	if err != nil {
+		writeAftersaleError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, ticketDetailResponse(*view))
+}
+
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
@@ -359,6 +376,10 @@ func writeAftersaleError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"message": "Ticket not found.", "requestId": requestID})
 	case errors.Is(err, domain.ErrTicketForbidden):
 		c.JSON(http.StatusForbidden, gin.H{"message": "Permission denied.", "requestId": requestID})
+	case errors.Is(err, domain.ErrWithdrawalAlreadyProcessed):
+		c.JSON(http.StatusConflict, gin.H{"message": "This ticket withdrawal is already processed. No additional points were deducted.", "code": "withdrawal_already_processed", "requestId": requestID})
+	case errors.Is(err, domain.ErrWithdrawalAlreadyRecorded):
+		c.JSON(http.StatusConflict, gin.H{"message": "A withdrawal is already recorded for this ticket. Check the ledger before proceeding.", "requestId": requestID})
 	case errors.Is(err, domain.ErrTicketClosed), errors.Is(err, domain.ErrTicketStateConflict):
 		c.JSON(http.StatusConflict, gin.H{"message": "Ticket state conflict.", "requestId": requestID})
 	case errors.Is(err, domain.ErrOrderNotEligible):

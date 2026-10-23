@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -143,7 +144,7 @@ const (
 	adminTransactionRefundCondition   = "transaction_type = 'refund'"
 	adminTransactionReferralCondition = "transaction_type = 'credit' AND biz_type IN ('referral_transfer', 'invitation_reward')"
 	adminTransactionActivityCondition = "transaction_type = 'credit' AND biz_type IN ('daily_checkin', 'leaderboard_reward', 'registration_reward')"
-	adminTransactionAllCondition      = "((" + adminTransactionRechargeCondition + ") OR (" + adminTransactionSpendCondition + ") OR (" + adminTransactionRefundCondition + ") OR (" + adminTransactionReferralCondition + ") OR (" + adminTransactionActivityCondition + ") OR biz_type IN ('supplier_settlement', 'supplier_settlement_cancel'))"
+	adminTransactionAllCondition      = "((" + adminTransactionRechargeCondition + ") OR (" + adminTransactionSpendCondition + ") OR (" + adminTransactionRefundCondition + ") OR (" + adminTransactionReferralCondition + ") OR (" + adminTransactionActivityCondition + ") OR transaction_type = 'withdrawal' OR biz_type IN ('supplier_settlement', 'supplier_settlement_cancel'))"
 	adminTransactionFacetSelect       = "COUNT(*) AS all_count, " +
 		"COALESCE(SUM(CASE WHEN " + adminTransactionRechargeCondition + " THEN 1 ELSE 0 END), 0) AS recharge, " +
 		"COALESCE(SUM(CASE WHEN " + adminTransactionSpendCondition + " THEN 1 ELSE 0 END), 0) AS spend, " +
@@ -361,7 +362,7 @@ func (r *BillingRepo) reverseTransactionInTx(ctx context.Context, tx *gorm.DB, c
 		}
 		return nil, fmt.Errorf("lock transaction: %w", err)
 	}
-	if original.OrderLinked || original.BizType == "historical_order" || strings.HasPrefix(original.BizType, "supplier_settlement") {
+	if original.OrderLinked || original.BizType == "historical_order" || strings.HasPrefix(original.BizType, "supplier_settlement") || original.BizType == domain.BizTypeTicketWithdrawal {
 		return nil, domain.ErrTransactionNotReversible
 	}
 	if original.ReversalOfNo != nil {
@@ -496,18 +497,38 @@ func (r *BillingRepo) TransferSupplierBalance(ctx context.Context, cmd billingap
 
 func (r *BillingRepo) WithdrawSupplier(ctx context.Context, cmd billingapp.WithdrawSupplierCommand) (*billingapp.AdjustBalanceResult, error) {
 	var result billingapp.AdjustBalanceResult
+	operation, bizType := "wallets.withdraw", "withdrawal"
+	if cmd.TicketNo != "" {
+		operation, bizType = "wallets.ticket-withdraw", domain.BizTypeTicketWithdrawal
+	}
 	err := r.withTx(ctx, func(txCtx context.Context, tx *gorm.DB) error {
-		response, replayed, err := r.withIdempotencyInTx(txCtx, tx, cmd.UserID, "wallets.withdraw", cmd.IdempotencyKey, cmd.RequestFingerprint, func(writeTx *gorm.DB) ([]byte, error) {
+		response, replayed, err := r.withIdempotencyInTx(txCtx, tx, cmd.UserID, operation, cmd.IdempotencyKey, cmd.RequestFingerprint, func(writeTx *gorm.DB) ([]byte, error) {
 			wallet, err := r.lockWalletInTx(txCtx, writeTx, cmd.UserID)
 			if err != nil {
 				return nil, err
+			}
+			// Both entry points lock this wallet. READ COMMITTED sees the preceding
+			// withdrawal without locking gaps for unrelated wallets' missing records.
+			bizTypes := []string{domain.BizTypeTicketWithdrawal}
+			if cmd.TicketNo != "" {
+				bizTypes = append(bizTypes, "withdrawal")
+			}
+			var existing WalletTransactionModel
+			err = writeTx.WithContext(txCtx).
+				Where("biz_type IN ? AND biz_id = ? AND user_id = ? AND transaction_type = ?", bizTypes, cmd.BizID, cmd.UserID, string(domain.TransactionTypeWithdrawal)).
+				First(&existing).Error
+			if err == nil {
+				return nil, domain.ErrWithdrawalAlreadyRecorded
+			}
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, fmt.Errorf("check existing ticket withdrawal: %w", err)
 			}
 			created, err := r.createLedgerEntryInTx(txCtx, writeTx, wallet, ledgerEntryRequest{
 				UserID:          cmd.UserID,
 				Bucket:          domain.BalanceBucketSupplierAvailable,
 				Direction:       domain.TransactionDirectionOut,
 				TransactionType: domain.TransactionTypeWithdrawal,
-				BizType:         "withdrawal",
+				BizType:         bizType,
 				BizID:           cmd.BizID,
 				Amount:          cmd.Amount,
 				IdempotencyKey:  cmd.IdempotencyKey,
@@ -531,7 +552,7 @@ func (r *BillingRepo) WithdrawSupplier(ctx context.Context, cmd billingapp.Withd
 			}
 		}
 		return nil
-	})
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return nil, err
 	}

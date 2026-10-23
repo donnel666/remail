@@ -363,6 +363,25 @@ func TestWithdrawSupplierDefaultsBizID(t *testing.T) {
 	}
 }
 
+func TestTicketWithdrawalUsesTicketIdentityAndWholePoints(t *testing.T) {
+	var commands []WithdrawSupplierCommand
+	uc := NewWalletUseCase(financeStubRepo{withdraw: func(cmd WithdrawSupplierCommand) (*AdjustBalanceResult, error) {
+		commands = append(commands, cmd)
+		return &AdjustBalanceResult{}, nil
+	}})
+	request := WithdrawSupplierRequest{TicketNo: "AS-TICKET", UserID: 7, Amount: "12.5", Note: "unrelated note", IdempotencyKey: "key"}
+	if _, err := uc.WithdrawSupplier(context.Background(), request); err != domain.ErrInvalidAmount {
+		t.Fatalf("fractional ticket withdrawal: %v", err)
+	}
+	request.Amount = "12.00"
+	if _, err := uc.WithdrawSupplier(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if len(commands) != 1 || commands[0].TicketNo != "AS-TICKET" || commands[0].BizID != "AS-TICKET" || commands[0].Amount != "12.00" {
+		t.Fatalf("wrong ticket withdrawal commands: %+v", commands)
+	}
+}
+
 func TestListAdminWalletsZeroesMissing(t *testing.T) {
 	repo := financeStubRepo{walletsByID: map[uint]domain.Wallet{
 		1: {UserID: 1, ConsumerBalance: "12.00", SupplierAvailable: "3.00", SupplierFrozen: "0.00"},

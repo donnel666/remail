@@ -3309,5 +3309,16 @@
   "Total Microsoft enterprise emails": "微软企邮总量",
   "Available Microsoft enterprise emails": "可用微软企邮",
   "Microsoft enterprise code receipts": "微软企邮接码数",
-  "Microsoft enterprise code success rate": "微软企邮接码成功率"
+  "Microsoft enterprise code success rate": "微软企邮接码成功率",
+  "Ticket attachment": "工单图片附件",
+  "Requested withdrawal points": "申请提现积分",
+  "Confirm withdrawal and close": "确认提现并关闭",
+  "Confirm withdrawal and close prompt": "确认从 {{name}}（用户 ID：{{userId}}）的供应商可提现积分中扣除 {{amount}}，并关闭工单？请核对金额，扣分成功后再打款。",
+  "Ticket withdrawal completed": "已确认提现，已扣除 {{amount}} 积分",
+  "Deduct points and close": "确认扣分并关闭",
+  "Withdrawal deducted points": "已从用户 {{userId}} 扣除 {{amount}} 积分并关闭工单。",
+  "Withdrawal already recorded points": "该工单已从用户 {{userId}} 扣除 {{amount}} 积分，本次未发起新的扣款，请核对原提现流水。",
+  "Withdrawal result is unknown. Refresh the ticket and check the ledger before proceeding.": "暂时无法确认提现结果，请刷新工单并核对财务流水后再处理。",
+  "This ticket withdrawal is already processed. No additional points were deducted.": "该工单已完成提现扣分，本次未重复扣款。",
+  "A withdrawal is already recorded for this ticket. Check the ledger before proceeding.": "此工单已有提现流水，已阻止再次扣款，请先核对财务流水。"
 }

@@ -5187,6 +5187,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/tickets/{ticketNo}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm a supplier withdrawal and close the ticket atomically
+         * @description Requires ticket operate and billing wallet operate permissions. Debits the amount in the server-authored withdrawal request from supplier available points and closes the ticket with its ledger and audit entries in one transaction. Confirm deduction before manually paying. Does not send an external payment. Repeated withdrawals return 409 with code withdrawal_already_processed without another debit; other closed tickets and existing manual withdrawal records also return a conflict. Ticket and wallet row locks, the existing idempotency table, and ledger checks prevent repeat deductions through the supported withdrawal routes. Ticket withdrawals cannot be independently reversed. On transport failure, query the ticket before deciding the outcome.
+         */
+        post: operations["postAdminTicketWithdraw"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/gmail/resources": {
         parameters: {
             query?: never;
@@ -11885,7 +11905,7 @@ export interface components {
         };
         TicketResolutionResponse: {
             /** @enum {string} */
-            kind: "refunded" | "closed";
+            kind: "refunded" | "withdrawn" | "closed";
             refundAmount?: components["schemas"]["NonNegativeLedgerAmountResponse"];
         };
         TicketMessageResponse: {
@@ -11915,6 +11935,8 @@ export interface components {
             requesterRole: string;
             requesterGroupName: string;
             resolution?: components["schemas"]["TicketResolutionResponse"];
+            /** @description Validated supplier withdrawal points from the server-authored opening message. Present only in withdrawal ticket details. */
+            withdrawalAmount?: components["schemas"]["NonNegativeLedgerAmountResponse"];
             requesterUnreadCount: number;
             platformUnreadCount: number;
             messages: components["schemas"]["TicketMessageResponse"][];
@@ -22872,7 +22894,7 @@ export interface operations {
                 limit?: number;
                 search?: string;
                 type?: "recharge" | "debit" | "refund" | "freeze" | "credit" | "withdrawal" | "manual_adjustment" | "card_redeem" | "transfer";
-                /** @description Business category used by the admin finance filter. All is the union of the five categories; recharge includes Alipay and redemption-code credits; activity includes check-in, leaderboard, and registration rewards. */
+                /** @description Business category used by the admin finance filter. All includes the five categories, supplier settlements, and withdrawals; recharge includes Alipay and redemption-code credits; activity includes check-in, leaderboard, and registration rewards. */
                 category?: "all" | "recharge" | "spend" | "refund" | "referral_cashback" | "activity";
                 direction?: "in" | "out";
                 createdFrom?: string;
@@ -27867,6 +27889,43 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    postAdminTicketWithdraw: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                ticketNo: components["parameters"]["TicketNoPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Withdrawal confirmed and ticket closed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            /** @description Supplier wallet is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     getAdminGmailResources: {

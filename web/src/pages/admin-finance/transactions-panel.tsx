@@ -281,6 +281,7 @@ export function TransactionsPanel({ tabsArea }: { tabsArea: ReactNode }) {
           const canReverse =
             canOperate &&
             record.transactionType !== "transfer" &&
+            record.bizType !== "ticket_withdrawal" &&
             !record.orderLinked &&
             !record.bizType.startsWith("supplier_settlement") &&
             !record.reversed &&

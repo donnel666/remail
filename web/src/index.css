@@ -3397,6 +3397,11 @@ body[theme-mode="dark"] .semi-always-light,
   padding-bottom: 10px;
 }
 
+.ticket-detail-sheet .semi-sidesheet-title {
+  min-width: 0;
+  flex: 1;
+}
+
 .ticket-sheet-order {
   display: flex;
   align-items: center;
@@ -3467,6 +3472,14 @@ body[theme-mode="dark"] .semi-always-light,
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
+}
+
+.ticket-chat-system.has-attachments {
+  align-items: flex-start;
+  flex-direction: column;
+  border-radius: 12px;
+  padding: 12px;
+  text-align: left;
 }
 
 .ticket-chat-system-time {

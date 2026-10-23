@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -98,13 +99,13 @@ func (r *Repo) dbFor(ctx context.Context) *gorm.DB {
 	return r.db.WithContext(ctx)
 }
 
-func (r *Repo) withTx(ctx context.Context, fn func(context.Context) error) error {
+func (r *Repo) withTx(ctx context.Context, fn func(context.Context) error, options ...*sql.TxOptions) error {
 	if _, ok := platform.GormTxFromContext(ctx); ok {
 		return fn(ctx)
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return fn(platform.WithGormTx(ctx, tx))
-	})
+	}, options...)
 }
 
 func (r *Repo) Create(ctx context.Context, params aftersaleapp.CreateTicketParams) (*domain.Ticket, error) {
@@ -352,13 +353,27 @@ func (r *Repo) MarkRead(ctx context.Context, ticketNo string, platformSide bool)
 
 func (r *Repo) Close(ctx context.Context, params aftersaleapp.CloseParams) (*domain.Ticket, error) {
 	now := r.now()
+	var result *domain.Ticket
+	var options []*sql.TxOptions
+	if params.Resolution.Kind == domain.ResolutionWithdrawn {
+		// Wallet duplicate checks need a fresh read after acquiring the wallet lock.
+		options = append(options, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	}
 	err := r.withTx(ctx, func(txCtx context.Context) error {
 		model, err := r.lockTicket(txCtx, params.TicketNo)
 		if err != nil {
 			return err
 		}
 		if domain.TicketStatus(model.Status).IsTerminal() {
+			if params.Resolution.Kind == domain.ResolutionWithdrawn && model.ResolutionKind == string(domain.ResolutionWithdrawn) {
+				return domain.ErrWithdrawalAlreadyProcessed
+			}
 			return domain.ErrTicketStateConflict
+		}
+		if params.BeforeClose != nil {
+			if err := params.BeforeClose(txCtx); err != nil {
+				return err
+			}
 		}
 		systemMessage := aftersaleapp.MessageInsert{
 			SenderType: domain.SenderTypeSystem,
@@ -386,12 +401,18 @@ func (r *Repo) Close(ctx context.Context, params aftersaleapp.CloseParams) (*dom
 			updates["requester_unread_count"] = 0
 			updates["platform_unread_count"] = gorm.Expr("platform_unread_count + 1")
 		}
-		return r.applyTicketUpdates(txCtx, params.TicketNo, updates)
-	})
+		if err := r.applyTicketUpdates(txCtx, params.TicketNo, updates); err != nil {
+			return err
+		}
+		// A failed detail read must roll back the debit, not report a committed
+		// withdrawal as failed to the operator.
+		result, err = r.Get(txCtx, params.TicketNo, true)
+		return err
+	}, options...)
 	if err != nil {
 		return nil, err
 	}
-	return r.Get(ctx, params.TicketNo, true)
+	return result, nil
 }
 
 func (r *Repo) FindAttachment(ctx context.Context, ticketNo, attachmentNo string) (*domain.TicketAttachment, error) {

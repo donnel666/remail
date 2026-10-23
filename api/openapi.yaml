@@ -8559,7 +8559,7 @@ paths:
             enum: [recharge, debit, refund, freeze, credit, withdrawal, manual_adjustment, card_redeem, transfer]
         - name: category
           in: query
-          description: Business category used by the admin finance filter. All is the union of the five categories; recharge includes Alipay and redemption-code credits; activity includes check-in, leaderboard, and registration rewards.
+          description: Business category used by the admin finance filter. All includes the five categories, supplier settlements, and withdrawals; recharge includes Alipay and redemption-code credits; activity includes check-in, leaderboard, and registration rewards.
           schema:
             type: string
             enum: [all, recharge, spend, refund, referral_cashback, activity]
@@ -14027,6 +14027,37 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/admin/tickets/{ticketNo}/withdraw:
+    post:
+      operationId: postAdminTicketWithdraw
+      summary: Confirm a supplier withdrawal and close the ticket atomically
+      description: Requires ticket operate and billing wallet operate permissions. Debits the amount in the server-authored withdrawal request from supplier available points and closes the ticket with its ledger and audit entries in one transaction. Confirm deduction before manually paying. Does not send an external payment. Repeated withdrawals return 409 with code withdrawal_already_processed without another debit; other closed tickets and existing manual withdrawal records also return a conflict. Ticket and wallet row locks, the existing idempotency table, and ledger checks prevent repeat deductions through the supported withdrawal routes. Ticket withdrawals cannot be independently reversed. On transport failure, query the ticket before deciding the outcome.
+      tags: [Aftersale]
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketNoPath"
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Withdrawal confirmed and ticket closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          description: Supplier wallet is unavailable
 
   /v1/admin/gmail/resources:
     get:
@@ -29016,7 +29047,7 @@ components:
       properties:
         kind:
           type: string
-          enum: [refunded, closed]
+          enum: [refunded, withdrawn, closed]
         refundAmount:
           $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
       additionalProperties: false
@@ -29096,6 +29127,9 @@ components:
           type: string
         resolution:
           $ref: "#/components/schemas/TicketResolutionResponse"
+        withdrawalAmount:
+          description: Validated supplier withdrawal points from the server-authored opening message. Present only in withdrawal ticket details.
+          $ref: "#/components/schemas/NonNegativeLedgerAmountResponse"
         requesterUnreadCount:
           type: integer
         platformUnreadCount:

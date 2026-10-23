@@ -165,6 +165,8 @@ type ReverseTransactionResult struct {
 }
 
 type WithdrawSupplierRequest struct {
+	// Set only by the aftersale adapter, never from a wallet HTTP request.
+	TicketNo       string
 	UserID         uint
 	Amount         string
 	Note           string
@@ -174,6 +176,7 @@ type WithdrawSupplierRequest struct {
 }
 
 type WithdrawSupplierCommand struct {
+	TicketNo           string
 	UserID             uint
 	Amount             string
 	BizID              string
@@ -403,7 +406,7 @@ func (uc *WalletUseCase) ReverseTransaction(ctx context.Context, req ReverseTran
 	if err != nil {
 		return nil, err
 	}
-	if original.OrderLinked || original.Transaction.ReversalOfNo != nil {
+	if original.OrderLinked || original.Transaction.ReversalOfNo != nil || original.Transaction.BizType == domain.BizTypeTicketWithdrawal {
 		return nil, domain.ErrTransactionNotReversible
 	}
 	if original.Reversed {
@@ -465,11 +468,20 @@ func (uc *WalletUseCase) WithdrawSupplier(ctx context.Context, req WithdrawSuppl
 		return nil, domain.ErrIdempotencyRequired
 	}
 	note := strings.TrimSpace(req.Note)
+	ticketNo := strings.TrimSpace(req.TicketNo)
+	if ticketNo != "" {
+		value, _ := domain.ParseMoney(amount)
+		if len(ticketNo) > 64 || !value.Equal(value.Truncate(0)) {
+			return nil, domain.ErrInvalidAmount
+		}
+		note = ticketNo
+	}
 	bizID := note
 	if bizID == "" {
 		bizID = "withdrawal"
 	}
 	return uc.repo.WithdrawSupplier(ctx, WithdrawSupplierCommand{
+		TicketNo:           ticketNo,
 		UserID:             req.UserID,
 		Amount:             amount,
 		BizID:              bizID,

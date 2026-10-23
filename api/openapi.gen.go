@@ -5048,8 +5048,9 @@ func (e TicketOrderResponseServiceMode) Valid() bool {
 
 // Defines values for TicketResolutionResponseKind.
 const (
-	TicketResolutionResponseKindClosed   TicketResolutionResponseKind = "closed"
-	TicketResolutionResponseKindRefunded TicketResolutionResponseKind = "refunded"
+	TicketResolutionResponseKindClosed    TicketResolutionResponseKind = "closed"
+	TicketResolutionResponseKindRefunded  TicketResolutionResponseKind = "refunded"
+	TicketResolutionResponseKindWithdrawn TicketResolutionResponseKind = "withdrawn"
 )
 
 // Valid indicates whether the value is a known member of the TicketResolutionResponseKind enum.
@@ -5058,6 +5059,8 @@ func (e TicketResolutionResponseKind) Valid() bool {
 	case TicketResolutionResponseKindClosed:
 		return true
 	case TicketResolutionResponseKindRefunded:
+		return true
+	case TicketResolutionResponseKindWithdrawn:
 		return true
 	default:
 		return false
@@ -14207,6 +14210,9 @@ type TicketResponse struct {
 	TicketType           TicketResponseTicketType  `json:"ticketType"`
 	Title                string                    `json:"title"`
 	UpdatedAt            time.Time                 `json:"updatedAt"`
+
+	// WithdrawalAmount Non-negative point amount with up to 6 decimal places.
+	WithdrawalAmount *NonNegativeLedgerAmountResponse `json:"withdrawalAmount,omitempty"`
 }
 
 // TicketResponseStatus defines model for TicketResponse.Status.
@@ -16641,6 +16647,12 @@ type PostAdminTicketRefundParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// PostAdminTicketWithdrawParams defines parameters for PostAdminTicketWithdraw.
+type PostAdminTicketWithdrawParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // GetAdminTransactionsParams defines parameters for GetAdminTransactions.
 type GetAdminTransactionsParams struct {
 	Offset *int                            `form:"offset,omitempty" json:"offset,omitempty"`
@@ -16648,7 +16660,7 @@ type GetAdminTransactionsParams struct {
 	Search *string                         `form:"search,omitempty" json:"search,omitempty"`
 	Type   *GetAdminTransactionsParamsType `form:"type,omitempty" json:"type,omitempty"`
 
-	// Category Business category used by the admin finance filter. All is the union of the five categories; recharge includes Alipay and redemption-code credits; activity includes check-in, leaderboard, and registration rewards.
+	// Category Business category used by the admin finance filter. All includes the five categories, supplier settlements, and withdrawals; recharge includes Alipay and redemption-code credits; activity includes check-in, leaderboard, and registration rewards.
 	Category    *GetAdminTransactionsParamsCategory  `form:"category,omitempty" json:"category,omitempty"`
 	Direction   *GetAdminTransactionsParamsDirection `form:"direction,omitempty" json:"direction,omitempty"`
 	CreatedFrom *time.Time                           `form:"createdFrom,omitempty" json:"createdFrom,omitempty"`
@@ -20479,6 +20491,9 @@ type ServerInterface interface {
 	// Refund the linked order and close the ticket
 	// (POST /v1/admin/tickets/{ticketNo}/refund)
 	PostAdminTicketRefund(c *gin.Context, ticketNo TicketNoPath, params PostAdminTicketRefundParams)
+	// Confirm a supplier withdrawal and close the ticket atomically
+	// (POST /v1/admin/tickets/{ticketNo}/withdraw)
+	PostAdminTicketWithdraw(c *gin.Context, ticketNo TicketNoPath, params PostAdminTicketWithdrawParams)
 	// List transactions
 	// (GET /v1/admin/transactions)
 	GetAdminTransactions(c *gin.Context, params GetAdminTransactionsParams)
@@ -36033,6 +36048,60 @@ func (siw *ServerInterfaceWrapper) PostAdminTicketRefund(c *gin.Context) {
 	siw.Handler.PostAdminTicketRefund(c, ticketNo, params)
 }
 
+// PostAdminTicketWithdraw operation middleware
+func (siw *ServerInterfaceWrapper) PostAdminTicketWithdraw(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ticketNo" -------------
+	var ticketNo TicketNoPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ticketNo", c.Param("ticketNo"), &ticketNo, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter ticketNo: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAdminTicketWithdrawParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAdminTicketWithdraw(c, ticketNo, params)
+}
+
 // GetAdminTransactions operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminTransactions(c *gin.Context) {
 
@@ -45658,6 +45727,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/tickets/:ticketNo/messages", wrapper.PostAdminTicketMessage)
 	router.POST(options.BaseURL+"/v1/admin/tickets/:ticketNo/read", wrapper.PostAdminTicketRead)
 	router.POST(options.BaseURL+"/v1/admin/tickets/:ticketNo/refund", wrapper.PostAdminTicketRefund)
+	router.POST(options.BaseURL+"/v1/admin/tickets/:ticketNo/withdraw", wrapper.PostAdminTicketWithdraw)
 	router.GET(options.BaseURL+"/v1/admin/transactions", wrapper.GetAdminTransactions)
 	router.POST(options.BaseURL+"/v1/admin/transactions/:id/reverse", wrapper.PostAdminTransactionReverse)
 	router.GET(options.BaseURL+"/v1/admin/users", wrapper.GetAdminUsers)

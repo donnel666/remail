@@ -20,6 +20,20 @@ import { TransactionDetailSheet } from "./transaction-detail-sheet";
 afterEach(cleanup);
 
 describe("order payment reversal protection", () => {
+  it("disables reversal for a ticket withdrawal", () => {
+    const transaction: FinanceTransaction = {
+      id: 2, transactionNo: "TX-WITHDRAWAL", userId: 7, userEmail: "supplier@example.com", userNickname: "Supplier",
+      userRole: "supplier", userGroupName: "Default", transactionType: "withdrawal", balanceBucket: "supplier_available", direction: "out",
+      amount: "-260000.00", balanceBefore: "500000.00", balanceAfter: "240000.00", bizType: "ticket_withdrawal",
+      bizId: "AS-WITHDRAWAL", orderLinked: false, createdAt: "2026-10-23T00:00:00Z",
+    };
+    const onReverse = vi.fn();
+    render(<TransactionDetailSheet transaction={transaction} onClose={() => {}} onReverse={onReverse} />);
+    expect(screen.getByRole("button", { name: "Reverse" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Reverse" }));
+    expect(onReverse).not.toHaveBeenCalled();
+  });
+
   it.each(["debit", "refund"] as const)("disables reversal for an order-linked %s", (transactionType) => {
     const transaction: FinanceTransaction = {
       id: 1, transactionNo: "TX-ORDER", userId: 2, userEmail: "buyer@example.com", userNickname: "Buyer",

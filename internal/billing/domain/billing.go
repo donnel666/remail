@@ -26,6 +26,8 @@ const (
 
 type TransactionType string
 
+const BizTypeTicketWithdrawal = "ticket_withdrawal"
+
 const (
 	TransactionTypeRecharge         TransactionType = "recharge"
 	TransactionTypeDebit            TransactionType = "debit"

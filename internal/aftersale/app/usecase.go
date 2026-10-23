@@ -398,7 +398,7 @@ func (uc *UseCase) LoadAttachment(ctx context.Context, ticketNo, attachmentNo st
 // ---------------------------------------------------------------------------
 
 func (uc *UseCase) viewOf(ctx context.Context, ticket *domain.Ticket) (*TicketView, error) {
-	view := TicketView{Ticket: ticket}
+	view := TicketView{Ticket: ticket, WithdrawalAmount: supplierWithdrawalAmount(ticket)}
 	if uc.owners == nil || ticket.RequesterUserID == 0 {
 		return &view, nil
 	}

@@ -21,7 +21,7 @@ type TicketFacetsDTO = components["schemas"]["TicketFacets"];
 export type TicketSender = "user" | "platform" | "system";
 export type TicketStatus = "open" | "processing" | "closed";
 export type TicketType = "order" | "general";
-export type TicketResolutionKind = "refunded" | "closed";
+export type TicketResolutionKind = "refunded" | "withdrawn" | "closed";
 
 export interface TicketMessage {
   id: number;
@@ -53,6 +53,7 @@ export interface Ticket {
   requesterRole: string;
   requesterGroupName: string;
   resolution?: TicketResolution;
+  withdrawalAmount?: string;
   requesterUnreadCount: number;
   platformUnreadCount: number;
   messages: TicketMessage[];
@@ -123,6 +124,7 @@ function toTicket(dto: TicketResponse): Ticket {
     requesterName: dto.requesterName,
     requesterRole: dto.requesterRole,
     requesterGroupName: dto.requesterGroupName,
+    withdrawalAmount: dto.withdrawalAmount,
     resolution: dto.resolution
       ? {
           kind: dto.resolution.kind,
@@ -332,6 +334,16 @@ export async function refundAndCloseTicket(
           path: { ticketNo },
           header: { ...csrfHeader(), "Idempotency-Key": generateIdempotencyKey() },
         },
+      })
+    )
+  );
+}
+
+export async function withdrawAndCloseTicket(ticketNo: string): Promise<Ticket> {
+  return toTicket(
+    await unwrap<TicketResponse>(
+      await apiClient.POST("/v1/admin/tickets/{ticketNo}/withdraw", {
+        params: { path: { ticketNo }, header: csrfHeader() },
       })
     )
   );

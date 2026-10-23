@@ -34,6 +34,7 @@ var (
 	ErrTransactionNotFound         = errors.New("billing: transaction not found")
 	ErrTransactionAlreadyReversed  = errors.New("billing: transaction already reversed")
 	ErrTransactionNotReversible    = errors.New("billing: transaction is not reversible")
+	ErrWithdrawalAlreadyRecorded   = errors.New("billing: withdrawal already recorded for this ticket")
 )
 
 // ErrRechargeGatewayAuthUnavailable means the provider rejected the

@@ -196,9 +196,34 @@ export function TicketConversation({
       <div className="ticket-chat" ref={scrollRef}>
         {ticket.messages.map((message) => {
           if (message.senderType === "system") {
+            const images = message.attachments ?? [];
             return (
-              <div className="ticket-chat-system" key={message.id}>
-                <span className="min-w-0">{message.content}</span>
+              <div
+                className={`ticket-chat-system ${images.length ? "has-attachments" : ""}`}
+                key={message.id}
+              >
+                <span className="min-w-0 whitespace-pre-wrap break-words">
+                  {message.content}
+                </span>
+                {images.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {images.map((src, index) => (
+                      <Image
+                        alt={
+                          ticket.withdrawalAmount && message === ticket.messages[0]
+                            ? t("Alipay payment QR code")
+                            : t("Ticket attachment")
+                        }
+                        height={160}
+                        imgStyle={{ objectFit: "contain" }}
+                        key={index}
+                        src={src}
+                        style={{ borderRadius: 8 }}
+                        width={160}
+                      />
+                    ))}
+                  </div>
+                ) : null}
                 <span className="ticket-chat-system-time">
                   {formatTicketDateTime(message.createdAt)}
                 </span>

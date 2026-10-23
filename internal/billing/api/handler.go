@@ -950,6 +950,8 @@ func writeBillingError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Idempotency-Key is required.", "requestId": requestID})
 	case errors.Is(err, domain.ErrInvalidIdempotencyKey):
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid Idempotency-Key.", "requestId": requestID})
+	case errors.Is(err, domain.ErrWithdrawalAlreadyRecorded):
+		c.JSON(http.StatusConflict, gin.H{"message": "A withdrawal is already recorded for this ticket. Check the ledger before proceeding.", "requestId": requestID})
 	case errors.Is(err, domain.ErrIdempotencyConflict):
 		c.JSON(http.StatusConflict, gin.H{"message": "Idempotency-Key conflicts with a different request.", "requestId": requestID})
 	case errors.Is(err, domain.ErrInvalidFilter):

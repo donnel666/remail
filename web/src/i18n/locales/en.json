@@ -3309,5 +3309,16 @@
   "Total Microsoft enterprise emails": "Total Microsoft enterprise emails",
   "Available Microsoft enterprise emails": "Available Microsoft enterprise emails",
   "Microsoft enterprise code receipts": "Microsoft enterprise code receipts",
-  "Microsoft enterprise code success rate": "Microsoft enterprise code success rate"
+  "Microsoft enterprise code success rate": "Microsoft enterprise code success rate",
+  "Ticket attachment": "Ticket attachment",
+  "Requested withdrawal points": "Requested withdrawal points",
+  "Confirm withdrawal and close": "Confirm withdrawal and close",
+  "Confirm withdrawal and close prompt": "Deduct {{amount}} supplier points from {{name}} (user ID {{userId}}) and close this ticket? Verify the amount and wait for a successful deduction before making payment.",
+  "Ticket withdrawal completed": "Withdrawal confirmed: {{amount}} deducted.",
+  "Deduct points and close": "Deduct points and close",
+  "Withdrawal deducted points": "Deducted {{amount}} points from user {{userId}} and closed the ticket.",
+  "Withdrawal already recorded points": "User {{userId}} already has a withdrawal of {{amount}} points for this ticket. No new withdrawal was issued. Check the existing ledger entry.",
+  "Withdrawal result is unknown. Refresh the ticket and check the ledger before proceeding.": "Withdrawal result is unknown. Refresh the ticket and check the ledger before proceeding.",
+  "This ticket withdrawal is already processed. No additional points were deducted.": "This ticket withdrawal is already processed. No additional points were deducted.",
+  "A withdrawal is already recorded for this ticket. Check the ledger before proceeding.": "A withdrawal is already recorded for this ticket. Check the ledger before proceeding."
 }

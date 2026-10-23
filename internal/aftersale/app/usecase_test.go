@@ -46,6 +46,11 @@ func (f *fakeRepo) Create(_ context.Context, params CreateTicketParams) (*domain
 			Content:      params.FirstMessage.Content,
 		}},
 	}
+	for _, attachment := range params.FirstMessage.Attachments {
+		f.ticket.Messages[0].Attachments = append(f.ticket.Messages[0].Attachments, domain.TicketAttachment{
+			AttachmentNo: attachment.AttachmentNo, ObjectKey: attachment.ObjectKey, Mime: attachment.Mime, Size: attachment.Size,
+		})
+	}
 	return f.ticket, nil
 }
 
@@ -111,7 +116,15 @@ func (f *fakeRepo) MarkRead(_ context.Context, _ string, platformSide bool) (*do
 	return f.ticket, nil
 }
 
-func (f *fakeRepo) Close(_ context.Context, params CloseParams) (*domain.Ticket, error) {
+func (f *fakeRepo) Close(ctx context.Context, params CloseParams) (*domain.Ticket, error) {
+	if f.ticket.Status.IsTerminal() {
+		return nil, domain.ErrTicketStateConflict
+	}
+	if params.BeforeClose != nil {
+		if err := params.BeforeClose(ctx); err != nil {
+			return nil, err
+		}
+	}
 	f.closeCalls = append(f.closeCalls, params)
 	f.ticket.Messages = append(f.ticket.Messages, domain.TicketMessage{
 		ID:         uint(len(f.ticket.Messages) + 1),
@@ -142,9 +155,15 @@ func (f fakeOrderPort) GetOrderForTicket(context.Context, string, uint) (*OrderI
 }
 
 type fakeSupplierWallet struct {
-	available string
-	err       error
-	calls     []uint
+	available   string
+	err         error
+	calls       []uint
+	withdrawals []SupplierWithdrawalCommand
+}
+
+func (f *fakeSupplierWallet) WithdrawSupplier(_ context.Context, cmd SupplierWithdrawalCommand) error {
+	f.withdrawals = append(f.withdrawals, cmd)
+	return f.err
 }
 
 func (f *fakeSupplierWallet) SupplierAvailable(_ context.Context, userID uint) (string, error) {
