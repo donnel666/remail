@@ -500,6 +500,7 @@ func TestPickupMessageCacheMatchesExplicitAliasOnLaterRequest(t *testing.T) {
 	}}}
 	uc := NewUseCase(repo, nil, nil, &matchResultStub{})
 	uc.SetPickupMessageCachePort(cache)
+	uc.now = func() time.Time { return now }
 
 	result := uc.applyPickupMessageCache(context.Background(), 100, repo.scopes)
 
@@ -1046,6 +1047,7 @@ func TestApplyPickupMessageCachesIncludesPurchaseScopesWithDelivery(t *testing.T
 	}}}
 	uc := NewUseCase(repo, nil, nil, nil)
 	uc.SetPickupMessageCachePort(cache)
+	uc.now = func() time.Time { return now }
 
 	hits, applied := uc.applyPickupMessageCaches(context.Background(), []PickupBatchRead{{
 		Scope: &scope, Delivery: &OrderDelivery{Message: &domain.Message{ID: 1, ReceivedAt: now}},
