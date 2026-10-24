@@ -495,6 +495,11 @@ func (uc *WalletUseCase) WithdrawSupplier(ctx context.Context, req WithdrawSuppl
 
 // ---- Finance summary ----------------------------------------------------
 
+// TotalSupplierAvailable returns current withdrawable points, excluding user 1.
+func (uc *WalletUseCase) TotalSupplierAvailable(ctx context.Context) (string, error) {
+	return uc.repo.TotalSupplierAvailable(ctx)
+}
+
 func (uc *WalletUseCase) FinanceSummary(ctx context.Context, from, to *time.Time) (*FinanceSummaryResult, error) {
 	fromT, toT := resolveFinanceRange(from, to, uc.now())
 	gran := financeGranularity(fromT, toT)

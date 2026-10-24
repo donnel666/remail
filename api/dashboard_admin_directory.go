@@ -19,8 +19,8 @@ var (
 	_ dashboardapp.AdminInventoryPort = dashboardInventoryDirectory{}
 )
 
-// dashboardFinanceDirectory adapts billing's finance summary to the admin
-// dashboard's finance port so the money numbers match /admin/finance/summary.
+// dashboardFinanceDirectory combines billing's finance summary and current
+// supplier withdrawable balance for the admin dashboard.
 // It lives in the composition root so the dashboard context need not depend on
 // billing (mirrors financeUserDirectory / orderOwnerDirectory).
 type dashboardFinanceDirectory struct {
@@ -29,6 +29,10 @@ type dashboardFinanceDirectory struct {
 
 func (d dashboardFinanceDirectory) FinanceSummary(ctx context.Context, from, to *time.Time) (dashboardapp.AdminFinance, error) {
 	res, err := d.wallet.FinanceSummary(ctx, from, to)
+	if err != nil {
+		return dashboardapp.AdminFinance{}, err
+	}
+	withdrawable, err := d.wallet.TotalSupplierAvailable(ctx)
 	if err != nil {
 		return dashboardapp.AdminFinance{}, err
 	}
@@ -44,12 +48,13 @@ func (d dashboardFinanceDirectory) FinanceSummary(ctx context.Context, from, to 
 		}
 	}
 	return dashboardapp.AdminFinance{
-		RechargeAmount:  dashboardMoneyFloat(res.RechargeAmount),
-		SpendAmount:     dashboardMoneyFloat(res.SpendAmount),
-		RefundAmount:    dashboardMoneyFloat(res.RefundAmount),
-		WithdrawAmount:  dashboardMoneyFloat(res.WithdrawAmount),
-		PlatformRevenue: dashboardMoneyFloat(res.PlatformRevenue),
-		Trend:           trend,
+		RechargeAmount:     dashboardMoneyFloat(res.RechargeAmount),
+		SpendAmount:        dashboardMoneyFloat(res.SpendAmount),
+		RefundAmount:       dashboardMoneyFloat(res.RefundAmount),
+		WithdrawAmount:     dashboardMoneyFloat(res.WithdrawAmount),
+		WithdrawableAmount: dashboardMoneyFloat(withdrawable),
+		PlatformRevenue:    dashboardMoneyFloat(res.PlatformRevenue),
+		Trend:              trend,
 	}, nil
 }
 

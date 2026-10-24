@@ -19817,6 +19817,7 @@ components:
         - spendAmount
         - refundAmount
         - withdrawAmount
+        - withdrawableAmount
         - platformRevenue
         - totalOrders
         - successfulCodeReceipts
@@ -19893,6 +19894,9 @@ components:
           type: number
         withdrawAmount:
           type: number
+        withdrawableAmount:
+          type: number
+          description: Current total supplier withdrawable points (wallet supplier_available), excluding user ID 1 and independent of the selected date range.
         platformRevenue:
           type: number
         totalOrders:

@@ -8303,6 +8303,9 @@ type AdminDashboardStats struct {
 	TotalOrders            int     `json:"totalOrders"`
 	TotalUsers             int     `json:"totalUsers"`
 	WithdrawAmount         float32 `json:"withdrawAmount"`
+
+	// WithdrawableAmount Current total supplier withdrawable points (wallet supplier_available), excluding user ID 1 and independent of the selected date range.
+	WithdrawableAmount float32 `json:"withdrawableAmount"`
 }
 
 // AdminDashboardTrendPoint defines model for AdminDashboardTrendPoint.

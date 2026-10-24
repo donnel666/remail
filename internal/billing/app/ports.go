@@ -44,6 +44,7 @@ type WalletRepository interface {
 	ReverseTransaction(ctx context.Context, req ReverseTransactionCommand) (*ReverseTransactionResult, error)
 	WithdrawSupplier(ctx context.Context, req WithdrawSupplierCommand) (*AdjustBalanceResult, error)
 	GetWalletsByUserIDs(ctx context.Context, userIDs []uint) (map[uint]domain.Wallet, error)
+	TotalSupplierAvailable(ctx context.Context) (string, error)
 	FinanceLedgerBuckets(ctx context.Context, granularity string, from, to time.Time) ([]LedgerBucketRow, error)
 	HotOrderItems(ctx context.Context, dimension string, from, to time.Time, limit int) ([]HotItem, error)
 }

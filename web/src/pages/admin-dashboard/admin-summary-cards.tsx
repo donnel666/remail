@@ -143,10 +143,9 @@ export function AdminDashboardSummaryCards({
         {
           avatarColor: "cyan",
           icon: <IconCoinMoneyStroked />,
-          title: t("Withdraw amount"),
+          title: t("Withdrawable points"),
           trendColor: "#06b6d4",
-          trendData: trend.map((point) => point.withdrawAmount),
-          value: formatPoints(stats?.withdrawAmount),
+          value: formatPoints(stats?.withdrawableAmount),
         },
       ],
     },

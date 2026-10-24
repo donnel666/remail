@@ -18,6 +18,7 @@ type AdminDashboardStats struct {
 	SpendAmount                                         float64 `json:"spendAmount"`
 	RefundAmount                                        float64 `json:"refundAmount"`
 	WithdrawAmount                                      float64 `json:"withdrawAmount"`
+	WithdrawableAmount                                  float64 `json:"withdrawableAmount"`
 	PlatformRevenue                                     float64 `json:"platformRevenue"`
 	TotalOrders                                         int     `json:"totalOrders"`
 	SuccessfulCodeReceipts                              int     `json:"successfulCodeReceipts"`

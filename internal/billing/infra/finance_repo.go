@@ -687,6 +687,17 @@ func absMoney(value string) string {
 
 // ---- Finance summary ----------------------------------------------------
 
+func (r *BillingRepo) TotalSupplierAvailable(ctx context.Context) (string, error) {
+	var total string
+	if err := r.db.WithContext(ctx).Model(&WalletModel{}).
+		Select("COALESCE(SUM(supplier_available), 0)").
+		Where("user_id <> ?", 1).
+		Scan(&total).Error; err != nil {
+		return "", fmt.Errorf("total supplier available: %w", err)
+	}
+	return total, nil
+}
+
 // FinanceLedgerBuckets aggregates the ledger by time bucket and category within
 // the range, excluding compensating reversal rows (reversal_of_no set) so
 // reversed pairs do not double count. Money is returned as strings.

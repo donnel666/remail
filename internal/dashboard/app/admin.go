@@ -14,19 +14,20 @@ import (
 
 // ---- ports ---------------------------------------------------------------
 
-// AdminFinancePort adapts billing's finance summary (recharge/spend/refund/
-// withdraw/platform revenue) so the money numbers match /admin/finance/summary.
+// AdminFinancePort combines billing's finance summary with the current
+// supplier withdrawable balance.
 type AdminFinancePort interface {
 	FinanceSummary(ctx context.Context, from, to *time.Time) (AdminFinance, error)
 }
 
 type AdminFinance struct {
-	RechargeAmount  float64
-	SpendAmount     float64
-	RefundAmount    float64
-	WithdrawAmount  float64
-	PlatformRevenue float64
-	Trend           []AdminFinanceBucket
+	RechargeAmount     float64
+	SpendAmount        float64
+	RefundAmount       float64
+	WithdrawAmount     float64
+	WithdrawableAmount float64
+	PlatformRevenue    float64
+	Trend              []AdminFinanceBucket
 }
 
 type AdminFinanceBucket struct {
@@ -126,6 +127,7 @@ type AdminStats struct {
 	SpendAmount                                         float64
 	RefundAmount                                        float64
 	WithdrawAmount                                      float64
+	WithdrawableAmount                                  float64
 	PlatformRevenue                                     float64
 	TotalOrders                                         int
 	SuccessfulCodeReceipts                              int
@@ -469,6 +471,7 @@ func (s *AdminQueryService) AdminDashboard(ctx context.Context, from, to *time.T
 			SpendAmount:                                         finance.SpendAmount,
 			RefundAmount:                                        finance.RefundAmount,
 			WithdrawAmount:                                      finance.WithdrawAmount,
+			WithdrawableAmount:                                  finance.WithdrawableAmount,
 			PlatformRevenue:                                     finance.PlatformRevenue,
 			TotalOrders:                                         totalOrders,
 			SuccessfulCodeReceipts:                              totalReceipts,

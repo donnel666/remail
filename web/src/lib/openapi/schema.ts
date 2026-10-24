@@ -8106,6 +8106,8 @@ export interface components {
             spendAmount: number;
             refundAmount: number;
             withdrawAmount: number;
+            /** @description Current total supplier withdrawable points (wallet supplier_available), excluding user ID 1 and independent of the selected date range. */
+            withdrawableAmount: number;
             platformRevenue: number;
             totalOrders: number;
             successfulCodeReceipts: number;

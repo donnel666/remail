@@ -156,6 +156,7 @@ func TestAdminDashboardAssembly(t *testing.T) {
 	}
 	finance := fakeFinance{fin: AdminFinance{
 		RechargeAmount: 1000, SpendAmount: 800, RefundAmount: 20, WithdrawAmount: 60, PlatformRevenue: 120,
+		WithdrawableAmount: 125.750001,
 		Trend: []AdminFinanceBucket{
 			{Label: labels[0], Recharge: 500, Spend: 400, Refund: 10, Withdraw: 30, PlatformRevenue: 60},
 			{Label: labels[2], Recharge: 500, Spend: 400, Refund: 10, Withdraw: 30, PlatformRevenue: 60},
@@ -203,6 +204,9 @@ func TestAdminDashboardAssembly(t *testing.T) {
 	s := got.Stats
 	if s.RechargeAmount != 1000 || s.PlatformRevenue != 120 {
 		t.Errorf("finance stats: %+v", s)
+	}
+	if s.WithdrawableAmount != 125.750001 || s.WithdrawAmount != 60 {
+		t.Errorf("withdrawable balance must be separate from historical withdrawals: %+v", s)
 	}
 	if s.TotalOrders != 34 || s.SuccessfulCodeReceipts != 16 {
 		t.Errorf("order/receipt totals: %d / %d", s.TotalOrders, s.SuccessfulCodeReceipts)
