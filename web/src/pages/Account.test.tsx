@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
     permissions: [],
     qqNumber: "123456789",
     hasLocalPassword: false,
+    twoFactorEnabled: false,
     enabled: true,
     createdAt: "2026-07-28T00:00:00Z",
     updatedAt: "2026-07-28T00:00:00Z",
@@ -33,6 +34,9 @@ const mocks = vi.hoisted(() => ({
   getAPIKeyUsage: vi.fn(),
   getLoginConfig: vi.fn(),
   getWallet: vi.fn(),
+  disableTwoFactor: vi.fn(),
+  enableTwoFactor: vi.fn(),
+  setupTwoFactor: vi.fn(),
   logout: vi.fn(),
   navigate: vi.fn(),
   refreshCurrentUser: vi.fn(),
@@ -54,10 +58,13 @@ vi.mock("@/context/auth-provider", () => ({
 }));
 vi.mock("@/lib/iam-api", () => ({
   changePassword: vi.fn(),
+  disableTwoFactor: mocks.disableTwoFactor,
+  enableTwoFactor: mocks.enableTwoFactor,
   githubBindURL: "/v1/oauth/github/bind",
   getLoginConfig: mocks.getLoginConfig,
   linuxDOBindURL: "/v1/oauth/linuxdo/bind",
   nodeLocBindURL: "/v1/oauth/nodeloc/bind",
+  setupTwoFactor: mocks.setupTwoFactor,
 }));
 vi.mock("@/lib/openapi-credentials-api", () => ({ getAPIKeyUsage: mocks.getAPIKeyUsage }));
 vi.mock("@/lib/wallet-api", () => ({ getWallet: mocks.getWallet }));
@@ -85,6 +92,8 @@ vi.mock("@douyinfe/semi-ui", async () => {
       {children}
     </button>
   );
+  const Modal = ({ children, visible }: any) => visible ? <div role="dialog">{children}</div> : null;
+  const Input = ({ value, onChange, ...rest }: any) => <input {...rest} value={value} onChange={(event) => onChange?.(event.target.value)} />;
   const Card = ({ children, cover }: any) => <section>{cover}{children}</section>;
   const Tabs = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
   (Tabs as any).TabPane = Box;
@@ -94,10 +103,12 @@ vi.mock("@douyinfe/semi-ui", async () => {
     Button,
     Card,
     Divider: () => <hr />,
+    Input,
+    Modal,
     Space: Box,
     Tabs,
     Tag: Box,
-    Toast: { info: mocks.toastInfo },
+    Toast: { info: mocks.toastInfo, success: vi.fn(), error: vi.fn() },
     Typography: {
       Text: Box,
       Title: ({ children }: { children?: ReactNode }) => <h3>{children}</h3>,
@@ -114,10 +125,15 @@ describe("Account LinuxDO binding", () => {
     mocks.currentUser.email = "linuxdo-42@oauth.invalid";
     mocks.currentUser.qqNumber = "123456789";
     mocks.currentUser.hasLocalPassword = false;
+    mocks.currentUser.twoFactorEnabled = false;
     mocks.getLoginConfig.mockResolvedValue({ githubOAuthEnabled: false, githubBound: false, linuxdoOAuthEnabled: true, linuxdoBound: false, nodelocOAuthEnabled: false, nodelocBound: false });
     mocks.getWallet.mockResolvedValue({ consumerBalance: "0", historicalSpend: "0" });
     mocks.getAPIKeyUsage.mockResolvedValue({ requestCount: 0 });
     mocks.refreshCurrentUser.mockResolvedValue(mocks.currentUser);
+    mocks.setupTwoFactor.mockResolvedValue({ otpauthUri: "otpauth://totp/Remail:test?secret=JBSWY3DPEHPK3PXP&issuer=Remail", expiresAt: "2026-11-05T12:00:00Z" });
+    mocks.enableTwoFactor.mockResolvedValue({ enabled: true });
+    mocks.disableTwoFactor.mockResolvedValue(undefined);
+    mocks.logout.mockResolvedValue(undefined);
   });
 
   afterEach(() => cleanup());
@@ -131,6 +147,33 @@ describe("Account LinuxDO binding", () => {
     expect(screen.queryByRole("button", { name: "Change Binding" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Set login password" })).toHaveAttribute("href", "/password-reset");
     expect(screen.getByText("Set a password through email verification if you also want to sign in with email and password.")).toBeInTheDocument();
+  });
+
+  it("renders the setup QR code in the browser and confirms the authenticator code", async () => {
+    render(<Account />);
+    fireEvent.click(screen.getByRole("button", { name: "Enable 2FA" }));
+
+    const code = await screen.findByLabelText("Authenticator code");
+    expect(screen.getByLabelText("Authenticator setup QR code").tagName).toBe("svg");
+    expect(screen.getByLabelText("Authenticator setup key")).toHaveValue("JBSWY3DPEHPK3PXP");
+    fireEvent.change(code, { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and enable 2FA" }));
+
+    await waitFor(() => expect(mocks.enableTwoFactor).toHaveBeenCalledWith({ code: "123456" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("requires the current authenticator code before disabling protection", async () => {
+    mocks.currentUser.twoFactorEnabled = true;
+    render(<Account />);
+    fireEvent.click(screen.getByRole("button", { name: "Disable 2FA" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Authenticator code"), { target: { value: "123456" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Disable 2FA" }));
+
+    await waitFor(() => expect(mocks.disableTwoFactor).toHaveBeenCalledWith({ code: "123456" }));
+    expect(mocks.navigate).toHaveBeenCalledWith({ to: "/login", replace: true });
+    expect(mocks.setupTwoFactor).not.toHaveBeenCalled();
   });
 
   it("shows the bound QQ number without a write action", () => {

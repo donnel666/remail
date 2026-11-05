@@ -25,6 +25,14 @@ type LoginRequest struct {
 	TurnstileToken string `json:"turnstileToken" binding:"max=2048"`
 }
 
+type TwoFactorCodeRequest struct {
+	Code string `json:"code" binding:"required,len=6,numeric"`
+}
+
+type TwoFactorLoginRequest struct {
+	Code string `json:"code" binding:"required,len=6,numeric"`
+}
+
 // RegisterRequest is the request body for POST /v1/users.
 type RegisterRequest struct {
 	Email      string `json:"email" binding:"required,email"`
@@ -184,6 +192,7 @@ type UserResponse struct {
 	ThirdPartyIdentities []ThirdPartyIdentityResponse `json:"thirdPartyIdentities,omitempty"`
 	QQNumber             string                       `json:"qqNumber,omitempty"`
 	HasLocalPassword     bool                         `json:"hasLocalPassword"`
+	TwoFactorEnabled     bool                         `json:"twoFactorEnabled"`
 	Enabled              bool                         `json:"enabled"`
 	CreatedAt            time.Time                    `json:"createdAt"`
 	UpdatedAt            time.Time                    `json:"updatedAt"`
@@ -215,6 +224,15 @@ type CurrentInviteResponse struct {
 // LoginResponse is the response for POST /v1/login.
 type LoginResponse struct {
 	User UserResponse `json:"user"`
+}
+
+type TwoFactorSetupResponse struct {
+	OtpAuthURI string    `json:"otpauthUri"`
+	ExpiresAt  time.Time `json:"expiresAt"`
+}
+
+type TwoFactorStatusResponse struct {
+	Enabled bool `json:"enabled"`
 }
 
 type LoginConfigResponse struct {

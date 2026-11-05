@@ -15,7 +15,7 @@ import { getIamErrorMessage } from "@/lib/iam-errors";
 interface GitHubVerificationModalProps {
   open: boolean;
   onCancel: () => void;
-  onComplete: (intent: GitHubPendingResponse["intent"]) => Promise<void> | void;
+  onComplete: (intent: GitHubPendingResponse["intent"], result?: unknown) => Promise<void> | void;
 }
 
 function removeOAuthSetupParam() {
@@ -90,9 +90,13 @@ export function GitHubVerificationModal({
     setError("");
     setNotice("");
     try {
-      await completeGitHub({ code: code.trim() });
+      const result = await completeGitHub({ code: code.trim() });
       removeOAuthSetupParam();
-      await onComplete(pending.intent);
+      if (pending.intent === "bind") {
+        await onComplete(pending.intent);
+      } else {
+        await onComplete(pending.intent, result);
+      }
     } catch (nextError) {
       setError(getIamErrorMessage(t, nextError, "GitHub account verification failed."));
     } finally {

@@ -1,0 +1,14 @@
+-- +goose Up
+
+CREATE TABLE IF NOT EXISTS user_two_factors (
+    user_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+    secret VARCHAR(255) NOT NULL,
+    last_used_step BIGINT NOT NULL DEFAULT 0,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    CONSTRAINT fk_user_two_factors_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- +goose Down
+
+DROP TABLE IF EXISTS user_two_factors;

@@ -521,6 +521,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/login/2fa": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete a pending login with an authenticator code
+         * @description Validates a six-digit code against the five-minute pending login challenge. The challenge is supplied by the HttpOnly remail_2fa_login cookie and is consumed once. A successful response sets the regular session cookies.
+         */
+        post: operations["postTwoFactorLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sessions/current": {
         parameters: {
             query?: never;
@@ -588,6 +608,66 @@ export interface paths {
         /** Create or get current user's referral invite code */
         post: operations["postMeInvite"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/2fa/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prepare authenticator enrollment
+         * @description Generates a ten-minute pending TOTP secret and sets an HttpOnly setup cookie. The frontend renders the returned otpauth URI as a QR code. Enrollment is enabled only after a valid code is submitted to the enable endpoint. The URI contains a secret and the response uses Cache-Control no-store.
+         */
+        post: operations["postTwoFactorSetup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/2fa/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm and enable authenticator authentication
+         * @description Requires the pending enrollment cookie from setup and a valid six-digit authenticator code. Two-factor authentication is optional and disabled by default.
+         */
+        post: operations["postTwoFactorEnable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/2fa": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Disable authenticator authentication
+         * @description Requires a current authenticator code and revokes the user's sessions. A user who has lost their authenticator must ask a super administrator for a manual reset. Recovery codes are not issued.
+         */
+        delete: operations["deleteTwoFactor"];
         options?: never;
         head?: never;
         patch?: never;
@@ -761,6 +841,26 @@ export interface paths {
          * @description Requires `iam:user:write`. An existing `super_admin` only permits a group-only request containing `userGroupId` from another or the same `super_admin`, with additional `iam:permission:sensitive` permission. An ordinary administrator cannot change a super administrator's group even with these permissions. Identity and status changes remain forbidden for that target; a group-only update preserves sessions.
          */
         patch: operations["patchAdminUser"];
+        trace?: never;
+    };
+    "/v1/admin/users/{userId}/2fa": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Manually reset a user's authenticator (super administrator only)
+         * @description Removes the user's TOTP enrollment and revokes their sessions after manual identity verification by a super administrator. Requires the iam:user operate permission and the super_admin role.
+         */
+        delete: operations["deleteAdminTwoFactor"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/admin/users/{userId}/sessions/revoke": {
@@ -8579,6 +8679,25 @@ export interface components {
         LoginResponse: {
             user: components["schemas"]["UserResponse"];
         };
+        TwoFactorRequiredResponse: {
+            /** @enum {boolean} */
+            twoFactorRequired: true;
+        };
+        TwoFactorCodeRequest: {
+            code: string;
+        };
+        TwoFactorLoginRequest: {
+            code: string;
+        };
+        TwoFactorSetupResponse: {
+            /** @description Secret-bearing otpauth URI for local frontend QR rendering. Available only during enrollment. */
+            otpauthUri: string;
+            /** Format: date-time */
+            expiresAt: string;
+        };
+        TwoFactorStatusResponse: {
+            enabled: boolean;
+        };
         LoginConfigResponse: {
             githubOAuthEnabled: boolean;
             githubBound: boolean;
@@ -8668,6 +8787,8 @@ export interface components {
             /** @description Read-only QQ number bound through the current QQ Bot identity. Omitted when no QQ account is bound; LinuxDO, Telegram and other identities are never projected into this field. */
             qqNumber?: string;
             hasLocalPassword: boolean;
+            /** @description Whether the user has confirmed a TOTP authenticator enrollment. */
+            twoFactorEnabled: boolean;
             enabled: boolean;
             /** Format: date-time */
             createdAt: string;
@@ -12728,6 +12849,26 @@ export interface components {
         };
     };
     responses: {
+        /** @description First factor accepted; verify the authenticator code before a session is created */
+        TwoFactorRequired: {
+            headers: {
+                "Set-Cookie"?: string;
+                "Cache-Control"?: "no-store";
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["TwoFactorRequiredResponse"];
+            };
+        };
+        /** @description An unexpected error occurred */
+        InternalServerError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description Malformed JSON, path, query, pagination, enum, or multipart input */
         BadRequest: {
             headers: {
@@ -13311,7 +13452,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Redirect to login or account with the OAuth result */
+            /** @description Redirect to login or account with the OAuth result. Enrolled users receive a pending challenge cookie and are redirected to /login?mfa_required=1 before any session is created. */
             303: {
                 headers: {
                     Location?: string;
@@ -13450,6 +13591,7 @@ export interface operations {
                     "application/json": components["schemas"]["LoginResponse"];
                 };
             };
+            202: components["responses"]["TwoFactorRequired"];
             /** @description Invalid request body */
             400: {
                 headers: {
@@ -13583,7 +13725,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Redirect to login or account with the OAuth result */
+            /** @description Redirect to login or account with the OAuth result. Enrolled users receive a pending challenge cookie and are redirected to /login?mfa_required=1 before any session is created. */
             303: {
                 headers: {
                     Location?: string;
@@ -13712,6 +13854,7 @@ export interface operations {
                     "application/json": components["schemas"]["LoginResponse"];
                 };
             };
+            202: components["responses"]["TwoFactorRequired"];
             /** @description Invalid request body */
             400: {
                 headers: {
@@ -13835,7 +13978,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Redirect to login or account with the OAuth result */
+            /** @description Redirect to login or account with the OAuth result. Enrolled users receive a pending challenge cookie and are redirected to /login?mfa_required=1 before any session is created. */
             303: {
                 headers: {
                     Location?: string;
@@ -13974,6 +14117,7 @@ export interface operations {
                     "application/json": components["schemas"]["LoginResponse"];
                 };
             };
+            202: components["responses"]["TwoFactorRequired"];
             /** @description GitHub account bound to the current authenticated account */
             204: {
                 headers: {
@@ -14070,6 +14214,7 @@ export interface operations {
                     "application/json": components["schemas"]["LoginResponse"];
                 };
             };
+            202: components["responses"]["TwoFactorRequired"];
             /** @description Invalid request body */
             400: {
                 headers: {
@@ -14107,6 +14252,33 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    postTwoFactorLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TwoFactorLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Two-factor verification completed and session cookies set */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     deleteSession: {
@@ -14273,6 +14445,96 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    postTwoFactorSetup: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pending authenticator enrollment */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TwoFactorSetupResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    postTwoFactorEnable: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TwoFactorCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description Two-factor authentication enabled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TwoFactorStatusResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    deleteTwoFactor: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TwoFactorCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description Two-factor authentication disabled and sessions revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     patchPassword: {
@@ -14967,6 +15229,34 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    deleteAdminTwoFactor: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests. */
+                "X-CSRF-Token": components["parameters"]["CsrfToken"];
+            };
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authenticator enrollment reset and sessions revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     postAdminRevokeSessions: {

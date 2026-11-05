@@ -62,6 +62,7 @@ type IAMModule struct {
 	GitHubPendingStore         app.GitHubPendingStore
 	NodeLocPendingStore        app.NodeLocPendingStore
 	EmailCodeStore             app.EmailCodeStore
+	TwoFactorService           app.TwoFactorService
 	AbuseLimiter               abuseLimiter
 	TurnstileVerifier          turnstileVerifier
 	TurnstileSiteKey           string
@@ -91,12 +92,16 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.D
 	emailCodeUseCase := app.NewEmailCodeUseCase(emailCodeStore, mailDelivery)
 	loginUseCase := app.NewLoginUseCase(userRepo, hasher, sessionStore, mailDelivery)
 	loginUseCase.SetEmailCodeStore(emailCodeStore)
+	twoFactorService := infra.NewTwoFactorService(db, rdb)
+	loginUseCase.SetTwoFactorService(twoFactorService)
+	botBindingUseCase := app.NewBotBindingUseCase(userRepo, hasher)
+	botBindingUseCase.SetTwoFactorService(twoFactorService)
 
 	return &IAMModule{
 		ActivationUseCase:          app.NewActivationUseCase(userRepo, hasher),
 		RegistrationUseCase:        app.NewRegistrationUseCase(userRepo, hasher, emailCodeStore),
 		LoginUseCase:               loginUseCase,
-		BotBindingUseCase:          app.NewBotBindingUseCase(userRepo, hasher),
+		BotBindingUseCase:          botBindingUseCase,
 		SessionUseCase:             app.NewSessionUseCase(sessionStore, userRepo),
 		ChangePasswordUseCase:      app.NewChangePasswordUseCase(userRepo, hasher, sessionStore),
 		PasswordResetUseCase:       app.NewPasswordResetUseCase(userRepo, hasher, sessionStore, emailCodeStore, emailCodeUseCase),
@@ -112,6 +117,7 @@ func NewIAMModule(db *gorm.DB, rdb redis.UniversalClient, mailDelivery mailapp.D
 		GitHubPendingStore:         sessionStore,
 		NodeLocPendingStore:        sessionStore,
 		EmailCodeStore:             emailCodeStore,
+		TwoFactorService:           twoFactorService,
 		AbuseLimiter:               infra.NewAbuseLimiter(rdb),
 		TurnstileVerifier:          infra.NewTurnstileVerifier(turnstileSecretKey),
 		TurnstileSiteKey:           turnstileSiteKey,

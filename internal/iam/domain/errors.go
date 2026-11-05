@@ -46,6 +46,10 @@ var (
 	ErrInviteNotFound                 = errors.New("invite not found")
 	ErrInviteInvalid                  = errors.New("invite is invalid or expired")
 	ErrInvalidPermissionPolicy        = errors.New("invalid permission policy")
+	ErrTwoFactorCodeIncorrect         = errors.New("two-factor code is incorrect or expired")
+	ErrTwoFactorSetupExpired          = errors.New("two-factor setup expired")
+	ErrTwoFactorNotEnabled            = errors.New("two-factor authentication is not enabled")
+	ErrTwoFactorAlreadyEnabled        = errors.New("two-factor authentication is already enabled")
 )
 
 // EmailCodeThrottledError reports that a verification-code request hit the

@@ -8,6 +8,7 @@ export interface AdminUserCapabilities {
   canManageApiKeys: boolean;
   canOperateUsers: boolean;
   canReadMetrics: boolean;
+  canResetTwoFactor: boolean;
   canWriteUsers: boolean;
 }
 
@@ -27,6 +28,8 @@ export function getAdminUserCapabilities(
     canManageApiKeys: permissionSet.has("iam:user:operate"),
     canOperateUsers: permissionSet.has("iam:user:operate"),
     canReadMetrics: permissionSet.has("billing:wallet:read"),
+    canResetTwoFactor:
+      operatorRole === "super_admin" && permissionSet.has("iam:user:operate"),
     canWriteUsers: permissionSet.has("iam:user:write"),
   };
 }

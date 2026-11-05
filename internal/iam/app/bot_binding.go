@@ -16,14 +16,17 @@ type BotBindingRepository interface {
 	FindByEmail(ctx context.Context, email string) (*domain.User, error)
 	FindByThirdPartyIdentity(ctx context.Context, provider, providerUserID string) (*domain.User, error)
 	FindThirdPartyProviderUserID(ctx context.Context, userID uint, provider string) (string, error)
-	BindThirdPartyIdentityWithPasswordSnapshot(ctx context.Context, userID uint, expectedPasswordHash, provider, providerUserID string) error
+	BindThirdPartyIdentityWithPasswordSnapshot(ctx context.Context, userID uint, expectedTokenVersion int, expectedPasswordHash, provider, providerUserID string) error
 	DeleteThirdPartyIdentity(ctx context.Context, provider, providerUserID string) error
 }
 
 type BotBindingUseCase struct {
-	repo   BotBindingRepository
-	hasher Hasher
+	repo      BotBindingRepository
+	hasher    Hasher
+	twoFactor TwoFactorService
 }
+
+func (uc *BotBindingUseCase) SetTwoFactorService(service TwoFactorService) { uc.twoFactor = service }
 
 type BotBindingInfo struct {
 	Bound       bool
@@ -63,7 +66,16 @@ func (uc *BotBindingUseCase) Bind(ctx context.Context, platform, namespace, subj
 	if user == nil || !uc.hasher.Verify(password, user.PasswordHash) || !user.IsActive() {
 		return BotBindingInfo{}, domain.ErrAccountOrPasswordIncorrect
 	}
-	if err := uc.repo.BindThirdPartyIdentityWithPasswordSnapshot(ctx, user.ID, user.PasswordHash, provider, subject); err != nil {
+	if uc.twoFactor != nil {
+		enabled, err := uc.twoFactor.Enabled(ctx, user.ID)
+		if err != nil {
+			return BotBindingInfo{}, fmt.Errorf("check bot binding two-factor: %w", err)
+		}
+		if enabled {
+			return BotBindingInfo{}, domain.ErrAccountOrPasswordIncorrect
+		}
+	}
+	if err := uc.repo.BindThirdPartyIdentityWithPasswordSnapshot(ctx, user.ID, user.TokenVersion, user.PasswordHash, provider, subject); err != nil {
 		return BotBindingInfo{}, fmt.Errorf("bot binding commit: %w", err)
 	}
 	return BotBindingInfo{Bound: true, Available: true, MaskedEmail: maskBotBindingEmail(user.Email)}, nil

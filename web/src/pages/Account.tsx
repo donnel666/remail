@@ -34,13 +34,16 @@ import { LinuxDoIcon } from "@/components/auth/LinuxDoIcon";
 import { NodeLocIcon } from "@/components/auth/NodeLocIcon";
 import { OverflowTooltip } from "@/components/semi/overflow-tooltip";
 import { useAuth, type CurrentUser } from "@/context/auth-provider";
-import { LOGIN_NOTICE_KEY, clearLoginReturnTo } from "@/lib/auth-flow";
+import { LOGIN_NOTICE_KEY, clearBrowserAuthState, clearLoginReturnTo } from "@/lib/auth-flow";
 import {
   changePassword,
+  disableTwoFactor,
   githubBindURL,
   getLoginConfig,
+  enableTwoFactor,
   linuxDOBindURL,
   nodeLocBindURL,
+  setupTwoFactor,
 } from "@/lib/iam-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import { formatPriceMultiplier } from "@/lib/membership";
@@ -51,6 +54,7 @@ import { getWallet, type WalletResponse } from "@/lib/wallet-api";
 import { ApiKeyPanel } from "./account/api-key-panel";
 import { ChangePasswordDialog } from "./account/change-password-dialog";
 import { SettingItem } from "./account/setting-item";
+import { TwoFactorDialog, type TwoFactorSetup } from "./account/two-factor-dialog";
 
 const { Text } = Typography;
 
@@ -143,6 +147,10 @@ export default function Account() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [twoFactorDialogOpen, setTwoFactorDialogOpen] = useState(false);
+  const [twoFactorSetup, setTwoFactorSetup] = useState<TwoFactorSetup | null>(null);
+  const [twoFactorError, setTwoFactorError] = useState("");
+  const [twoFactorSubmitting, setTwoFactorSubmitting] = useState(false);
 
   const displayName = currentUser?.nickname || currentUser?.name || "-";
   const hasLocalPassword = currentUser?.hasLocalPassword ?? false;
@@ -293,6 +301,53 @@ export default function Account() {
       setError(getIamErrorMessage(t, nextError, "Password change failed."));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const openTwoFactorDialog = async () => {
+    setTwoFactorError("");
+    if (currentUser?.twoFactorEnabled) {
+      setTwoFactorSetup(null);
+      setTwoFactorDialogOpen(true);
+      return;
+    }
+    setTwoFactorSubmitting(true);
+    try {
+      setTwoFactorSetup(await setupTwoFactor());
+      setTwoFactorDialogOpen(true);
+    } catch (nextError) {
+      Toast.error(getIamErrorMessage(t, nextError, "Two-factor setup failed."));
+    } finally {
+      setTwoFactorSubmitting(false);
+    }
+  };
+
+  const closeTwoFactorDialog = (force = false) => {
+    if (twoFactorSubmitting && !force) return;
+    setTwoFactorDialogOpen(false);
+    setTwoFactorSetup(null);
+    setTwoFactorError("");
+  };
+
+  const confirmTwoFactor = async (code: string) => {
+    setTwoFactorSubmitting(true);
+    setTwoFactorError("");
+    try {
+      if (currentUser?.twoFactorEnabled) {
+        await disableTwoFactor({ code });
+      } else {
+        await enableTwoFactor({ code });
+      }
+      closeTwoFactorDialog(true);
+      clearBrowserAuthState();
+      clearLoginReturnTo();
+      sessionStorage.setItem(LOGIN_NOTICE_KEY, currentUser?.twoFactorEnabled ? "Two-factor authentication disabled. Please log in again." : "Two-factor authentication enabled. Please log in again with the next code from your authenticator app.");
+      await logout();
+      void navigate({ to: "/login", replace: true });
+    } catch (nextError) {
+      setTwoFactorError(getIamErrorMessage(t, nextError, currentUser?.twoFactorEnabled ? "Two-factor disable failed." : "Two-factor confirmation failed."));
+    } finally {
+      setTwoFactorSubmitting(false);
     }
   };
 
@@ -547,6 +602,23 @@ export default function Account() {
                   <SettingItem
                     action={
                       <Button
+                        disabled={twoFactorSubmitting}
+                        loading={twoFactorSubmitting}
+                        onClick={() => void openTwoFactorDialog()}
+                        theme="outline"
+                        type={currentUser?.twoFactorEnabled ? "danger" : "primary"}
+                      >
+                        {t(currentUser?.twoFactorEnabled ? "Disable 2FA" : "Enable 2FA")}
+                      </Button>
+                    }
+                    description={t(currentUser?.twoFactorEnabled ? "Authenticator app protection is enabled for this account." : "Use an authenticator app to add a second sign-in step.")}
+                    icon={<ShieldCheck size={20} />}
+                    iconTone="green"
+                    title={t("Two-factor authentication")}
+                  />
+                  <SettingItem
+                    action={
+                      <Button
                         icon={<IconDelete />}
                         onClick={handleMockOnly}
                         theme="outline"
@@ -581,6 +653,15 @@ export default function Account() {
         onOldPasswordChange={setOldPassword}
         open={showChangePasswordModal}
         submitting={submitting}
+      />
+      <TwoFactorDialog
+        enabled={Boolean(currentUser?.twoFactorEnabled)}
+        error={twoFactorError}
+        onCancel={closeTwoFactorDialog}
+        onConfirm={(code) => void confirmTwoFactor(code)}
+        open={twoFactorDialogOpen}
+        setup={twoFactorSetup}
+        submitting={twoFactorSubmitting}
       />
       <GitHubVerificationModal
         onCancel={() => setGitHubSetupOpen(false)}

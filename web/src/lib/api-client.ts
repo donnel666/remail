@@ -20,6 +20,7 @@ const authRequiredIgnoredPaths = new Set([
   "/v1/activation",
   "/v1/email/code",
   "/v1/login",
+  "/v1/login/2fa",
   "/v1/me",
   "/v1/oauth/github/complete",
   "/v1/oauth/github/email/code",

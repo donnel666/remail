@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   refreshCurrentUser: vi.fn(),
   sendLinuxDOEmailCode: vi.fn(),
   sendNodeLocEmailCode: vi.fn(),
+  verifyLoginTwoFactor: vi.fn(),
   t: (key: string) => key,
 }));
 
@@ -42,7 +43,9 @@ vi.mock("@/components/auth/SendCodeField", () => ({
     <input aria-label="Verification code" onChange={(event) => onCodeChange(event.target.value)} value={code} />
   ),
 }));
-vi.mock("@/components/auth/TurnstileField", () => ({ TurnstileField: () => null }));
+vi.mock("@/components/auth/TurnstileField", () => ({
+  TurnstileField: ({ onTokenChange }: any) => <button onClick={() => onTokenChange("token")} type="button">human verified</button>,
+}));
 vi.mock("@/components/auth/GitHubVerificationModal", () => ({
   GitHubVerificationModal: ({ open }: { open: boolean }) => open ? <div role="dialog" aria-label="GitHub verification" /> : null,
 }));
@@ -61,6 +64,7 @@ vi.mock("@/lib/iam-api", () => ({
   nodeLocLoginURL: "/v1/oauth/nodeloc",
   sendLinuxDOEmailCode: mocks.sendLinuxDOEmailCode,
   sendNodeLocEmailCode: mocks.sendNodeLocEmailCode,
+  verifyLoginTwoFactor: mocks.verifyLoginTwoFactor,
 }));
 
 import Login from "./Login";
@@ -77,6 +81,9 @@ beforeEach(() => {
     legacyAccount: false,
   });
   window.history.replaceState({}, "", "/login?oauth_error=trust_level");
+  mocks.login.mockResolvedValue({ email: "user@example.com" });
+  mocks.verifyLoginTwoFactor.mockResolvedValue({ user: { email: "user@example.com" } });
+  mocks.refreshCurrentUser.mockResolvedValue({ email: "user@example.com" });
 });
 
 afterEach(() => {
@@ -190,4 +197,59 @@ it("only allows an in-place email upgrade for legacy LinuxDO accounts", async ()
   expect(screen.getByRole("radio", { name: "Upgrade current account" })).toBeEnabled();
   expect(screen.getByText("This legacy LinuxDO account already contains site data. Verify a new email to keep this account, balance, orders, and resources.")).toBeInTheDocument();
   expect(within(dialog).getByLabelText("Email")).toHaveValue("");
+});
+
+it("waits for the authenticator code before finishing password login", async () => {
+  window.history.replaceState({}, "", "/login");
+  mocks.login.mockResolvedValue({ twoFactorRequired: true });
+  render(<Login />);
+
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "user@example.com" } });
+  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "password" } });
+  fireEvent.click(screen.getByRole("button", { name: "human verified" }));
+  fireEvent.click(screen.getByRole("button", { name: "Login" }));
+
+  const code = await screen.findByLabelText("Authenticator code");
+  expect(mocks.navigate).not.toHaveBeenCalled();
+  fireEvent.change(code, { target: { value: "12x3456" } });
+  fireEvent.click(screen.getByRole("button", { name: "Verify and sign in" }));
+
+  await waitFor(() => expect(mocks.verifyLoginTwoFactor).toHaveBeenCalledWith({ code: "123456" }));
+  expect(mocks.refreshCurrentUser).toHaveBeenCalledOnce();
+  expect(mocks.navigate).toHaveBeenCalledWith({ to: "/dashboard", replace: true });
+});
+
+it("opens the authenticator step after an OAuth callback", async () => {
+  window.history.replaceState({}, "", "/login?mfa_required=1");
+  render(<Login />);
+
+  expect(await screen.findByLabelText("Authenticator code")).toHaveFocus();
+  expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+  expect(window.location.search).toBe("");
+});
+
+it("keeps the authenticator step after LinuxDO account completion requires 2FA", async () => {
+  window.history.replaceState({}, "", "/login?oauth_setup=linuxdo");
+  mocks.completeLinuxDO.mockResolvedValue({ twoFactorRequired: true });
+  render(<Login />);
+
+  const dialog = await screen.findByRole("dialog", { name: "Finish LinuxDO sign-in" });
+  fireEvent.change(within(dialog).getByLabelText("Verification code"), { target: { value: "123456" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
+
+  await waitFor(() => expect(mocks.completeLinuxDO).toHaveBeenCalledWith({ mode: "existing", email: "owner@qq.com", code: "123456" }));
+  expect(await screen.findByLabelText("Authenticator code")).toBeInTheDocument();
+  expect(mocks.refreshCurrentUser).not.toHaveBeenCalled();
+});
+
+it("keeps the authenticator step available after verification fails", async () => {
+  window.history.replaceState({}, "", "/login?mfa_required=1");
+  mocks.verifyLoginTwoFactor.mockRejectedValue(new Error("expired"));
+  render(<Login />);
+  fireEvent.change(await screen.findByLabelText("Authenticator code"), { target: { value: "123456" } });
+  fireEvent.click(screen.getByRole("button", { name: "Verify and sign in" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Two-factor verification failed.");
+  expect(screen.getByLabelText("Authenticator code")).toHaveValue("");
+  expect(mocks.navigate).not.toHaveBeenCalled();
 });

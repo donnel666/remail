@@ -67,6 +67,7 @@ export interface AdminUser {
   thirdPartyIdentities?: components["schemas"]["ThirdPartyIdentityResponse"][];
   qqNumber?: string;
   hasLocalPassword: boolean;
+  twoFactorEnabled?: boolean;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -393,6 +394,14 @@ export async function deleteAdminUser(userId: number): Promise<void> {
 export async function revokeAdminUserSessions(userId: number): Promise<void> {
   await unwrap<void>(
     await apiClient.POST("/v1/admin/users/{userId}/sessions/revoke", {
+      params: { header: csrfHeader(), path: { userId } },
+    })
+  );
+}
+
+export async function resetAdminUserTwoFactor(userId: number): Promise<void> {
+  await unwrap<void>(
+    await apiClient.DELETE("/v1/admin/users/{userId}/2fa", {
       params: { header: csrfHeader(), path: { userId } },
     })
   );

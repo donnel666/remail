@@ -265,6 +265,9 @@ func (h *IAMHandler) GetNodeLocCallback(c *gin.Context) {
 		redirectNodeLocError(c, intent, "failed")
 		return
 	}
+	if h.redirectTwoFactorChallenge(c, result, "/login") {
+		return
+	}
 	csrfToken, err := newCSRFToken()
 	if err != nil {
 		redirectNodeLocError(c, intent, "failed")
@@ -371,6 +374,9 @@ func (h *IAMHandler) PostNodeLocComplete(c *gin.Context) {
 		slog.Warn("delete nodeloc pending setup", "request_id", middleware.GetRequestID(c), "error", err.Error())
 	}
 	h.clearNodeLocPendingCookie(c)
+	if h.writeTwoFactorChallenge(c, result) {
+		return
+	}
 	setAuthCookies(c, result.Session.ID, csrfToken, result.SessionMaxAge, h.sessionSecure)
 	c.JSON(http.StatusOK, LoginResponse{User: h.userResponseWithPermissions(c.Request.Context(), result.User)})
 }

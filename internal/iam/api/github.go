@@ -247,6 +247,9 @@ func (h *IAMHandler) GetGitHubCallback(c *gin.Context) {
 		redirectGitHubError(c, intent, "failed")
 		return
 	}
+	if h.redirectTwoFactorChallenge(c, result, "/login") {
+		return
+	}
 	csrfToken, err := newCSRFToken()
 	if err != nil {
 		redirectGitHubError(c, intent, "failed")
@@ -396,6 +399,9 @@ func (h *IAMHandler) PostGitHubComplete(c *gin.Context) {
 	}
 	if result == nil {
 		writeError(c, domain.ErrGitHubAccountUnavailable)
+		return
+	}
+	if h.writeTwoFactorChallenge(c, result) {
 		return
 	}
 	setAuthCookies(c, result.Session.ID, csrfToken, result.SessionMaxAge, h.sessionSecure)

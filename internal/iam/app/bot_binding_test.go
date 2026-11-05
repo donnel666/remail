@@ -80,7 +80,11 @@ func TestBotBindingUsesCredentialSnapshotAndOneIdentityPerPlatformNamespace(t *t
 	// A password change between verification and commit rejects the stale
 	// snapshot and leaves no new identity behind.
 	require.ErrorIs(t,
-		repo.BindThirdPartyIdentityWithPasswordSnapshot(ctx, 2, "stale-hash", "telegram:main", "456"),
+		repo.BindThirdPartyIdentityWithPasswordSnapshot(ctx, 2, 0, "stale-hash", "telegram:main", "456"),
+		domain.ErrAccountOrPasswordIncorrect,
+	)
+	require.ErrorIs(t,
+		repo.BindThirdPartyIdentityWithPasswordSnapshot(ctx, 2, 99, "bob-password", "telegram:main", "456"),
 		domain.ErrAccountOrPasswordIncorrect,
 	)
 	var staleCount int64

@@ -16,6 +16,7 @@ describe("admin user operation access", () => {
       canManageApiKeys: false,
       canOperateUsers: false,
       canReadMetrics: false,
+      canResetTwoFactor: false,
       canWriteUsers: false,
     });
 
@@ -36,6 +37,7 @@ describe("admin user operation access", () => {
       canManageApiKeys: true,
       canOperateUsers: true,
       canReadMetrics: true,
+      canResetTwoFactor: false,
       canWriteUsers: true,
     });
   });
@@ -44,6 +46,14 @@ describe("admin user operation access", () => {
     expect(canMutateAdminUser("super_admin", true)).toBe(false);
     expect(canMutateAdminUser("admin", true)).toBe(true);
     expect(canMutateAdminUser("user", false)).toBe(false);
+  });
+
+  it("reserves two-factor recovery for super administrators with user operation access", () => {
+    expect(getAdminUserCapabilities(["iam:user:operate"], "super_admin").canResetTwoFactor).toBe(true);
+    expect(getAdminUserCapabilities([], "super_admin").canResetTwoFactor).toBe(false);
+    for (const role of ["admin", "supplier", "user", undefined] as const) {
+      expect(getAdminUserCapabilities(["iam:user:operate", "iam:permission:sensitive"], role).canResetTwoFactor).toBe(false);
+    }
   });
 
   it("requires the super administrator role and permissions to change a protected user's group", () => {

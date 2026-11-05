@@ -17,6 +17,7 @@
 | 2026-07-20 | V1.10 | Codex | 新增 `governance:log(read/operate)` 权限目录与角色基线；admin/super_admin 可读，operate 仅默认授予 super_admin，日志清理仍额外校验 super_admin 角色。 |
 | 2026-07-26 | V1.11 | Codex | 供应商权限申请改为 BC-AFTERSALE 非订单工单：标题固定为“供应商申请”，正文为用户填写内容；管理员看到工单后通过用户管理人工将角色改为 supplier，不再进入独立审批状态机。旧 SupplierApplication 数据和接口仅保留存量兼容。 |
 | 2026-07-31 | V1.12 | Codex | 删除 V1.11 起已无入口的独立供应商审批实现：移除 `/v1/suppliers/applications`、`/v1/suppliers/applications/current`、三个后台审批接口、`SupplierApplication` 领域/用例/仓储和 `iam:supplier_application` 权限。`supplier_applications` 表保留存量数据，不再有代码读写。 |
+| 2026-11-05 | V1.13 | Codex | 增加用户自助 TOTP 2FA，默认关闭；二维码在前端渲染，密钥按产品决定明文存储，不提供恢复码，由超级管理员通过受审计接口人工重置。 |
 
 > 通用域。BC-IAM 回答“你是谁、你能做什么”。管理员、供应商、普通用户共用一张用户表。
 
@@ -137,6 +138,26 @@ eft = allow/deny
 | 禁用用户 | 递增 `tokenVersion`，清理旧 Session 和 API Key 缓存。 |
 | 人机验证 | 系统设置 `captcha_enabled=true` 时，登录、注册发码、找回密码发码提交 Cloudflare Turnstile token；服务端调用 Siteverify 并校验对应 `action`。 |
 | 邮箱验证码 | `POST /v1/email/code` 发送，发送幂等，验证码不进日志。 |
+
+### 5.1 TOTP 双重认证
+
+用户在个人中心的安全设置中自助开启或关闭，默认未启用。服务端采用 `pquerna/otp`，使用 30 秒周期、6 位数字、SHA-1；前端通过 `qrcode.react` 将一次性返回的 `otpauth://` URI 渲染为二维码，也支持手动填写 setup key。扫码后必须提交正确验证码才能启用。
+
+| API | 规则 |
+|-----|------|
+| `POST /v1/me/2fa/setup` | 登录态 + CSRF；生成待确认密钥，Redis 保存 10 分钟，用 HttpOnly setup cookie 引用，响应禁止缓存。 |
+| `POST /v1/me/2fa/enable` | 登录态 + CSRF；提交 6 位 `code` 确认启用。 |
+| `DELETE /v1/me/2fa` | 登录态 + CSRF；提交当前验证器的 `code` 关闭。 |
+| `POST /v1/login/2fa` | 第一因子通过后提交 `code`，通过短期 HttpOnly challenge cookie 关联用户；验证码通过后才创建正式会话。 |
+| `DELETE /v1/admin/users/{userId}/2fa` | 仅实际角色为 `super_admin` 且具备 `iam:user/operate` 的调用者可人工重置；操作写审计，可用于恢复其他超级管理员。 |
+
+密码、LinuxDO、GitHub、NodeLoc 登录及其邮箱确认登录统一经过 2FA 检查。启用 2FA 的用户在第一因子通过时得到 `202 {"twoFactorRequired":true}`，OAuth callback 则跳转到 `/login?mfa_required=1`。此时不签发 `sid`，挑战有效期 5 分钟、最多尝试 5 次，成功后原子消费。启用、关闭和人工重置会递增 `tokenVersion`，使旧会话及旧登录挑战失效，用户需要重新登录。
+
+账号级验证码尝试另限每 5 分钟 10 次，更换登录挑战不会清除计数；同一时间步的验证码只能成功使用一次。已启用 2FA 的账号不能仅凭邮箱密码新建机器人绑定，提交时同时检查 `tokenVersion`，避免与启用操作竞态；已有机器人绑定和 API Key 仍使用原有机器凭证认证。
+
+TOTP secret 单独存于 `user_two_factors`，不进入 `User`、普通用户概要或日志。按产品决定不做应用层加密，因此数据库及其备份的读取权限等同于读取第二因子密钥。没有恢复码或邮箱绕过功能；验证器丢失时，超级管理员先人工核验身份，再在用户详情执行“重置 2FA”。若所有超级管理员都无法登录，需要有数据库权限的运维人员介入恢复。
+
+人工 2FA 重置是受保护 `super_admin` 账号命令限制的明确例外，只改变第二因子及会话版本，不改变身份、角色、权限或账号状态。
 
 认证错误：
 

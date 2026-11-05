@@ -25,6 +25,7 @@ import {
   getAdminUserDashboardStats,
   getAdminUserRealtimeUsage,
   listAdminUsers,
+  resetAdminUserTwoFactor,
   setAdminUsersEnabledByFilter,
   setAdminUsersEnabledByIds,
 } from "./admin-users-api";
@@ -40,6 +41,14 @@ describe("admin user bulk API adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     idempotencyMock.mockReturnValue("user-command-1");
+  });
+
+  it("sends two-factor recovery to the protected user endpoint with CSRF", async () => {
+    apiMocks.DELETE.mockResolvedValueOnce({ data: undefined });
+    await resetAdminUserTwoFactor(42);
+    expect(apiMocks.DELETE).toHaveBeenCalledWith("/v1/admin/users/{userId}/2fa", {
+      params: { header: { "X-CSRF-Token": "user-csrf" }, path: { userId: 42 } },
+    });
   });
 
   it("sends enable as an ids command, dedupes ids, and drops requested from the result", async () => {

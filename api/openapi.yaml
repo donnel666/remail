@@ -396,7 +396,7 @@ paths:
             type: string
       responses:
         "303":
-          description: Redirect to login or account with the OAuth result
+          description: Redirect to login or account with the OAuth result. Enrolled users receive a pending challenge cookie and are redirected to /login?mfa_required=1 before any session is created.
           headers:
             Location:
               schema:
@@ -501,6 +501,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LoginResponse"
+        "202":
+          $ref: "#/components/responses/TwoFactorRequired"
         "400":
           description: Invalid request body
           content:
@@ -612,7 +614,7 @@ paths:
             type: string
       responses:
         "303":
-          description: Redirect to login or account with the OAuth result
+          description: Redirect to login or account with the OAuth result. Enrolled users receive a pending challenge cookie and are redirected to /login?mfa_required=1 before any session is created.
           headers:
             Location:
               schema:
@@ -707,6 +709,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LoginResponse"
+        "202":
+          $ref: "#/components/responses/TwoFactorRequired"
         "400":
           description: Invalid request body
           content:
@@ -808,7 +812,7 @@ paths:
             type: string
       responses:
         "303":
-          description: Redirect to login or account with the OAuth result
+          description: Redirect to login or account with the OAuth result. Enrolled users receive a pending challenge cookie and are redirected to /login?mfa_required=1 before any session is created.
           headers:
             Location:
               schema:
@@ -915,6 +919,8 @@ paths:
                 $ref: "#/components/schemas/LoginResponse"
         "204":
           description: GitHub account bound to the current authenticated account
+        "202":
+          $ref: "#/components/responses/TwoFactorRequired"
         "400":
           description: Invalid request body
           content:
@@ -986,6 +992,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LoginResponse"
+        "202":
+          $ref: "#/components/responses/TwoFactorRequired"
         "400":
           description: Invalid request body
           content:
@@ -1014,6 +1022,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+
+  /v1/login/2fa:
+    post:
+      operationId: postTwoFactorLogin
+      summary: Complete a pending login with an authenticator code
+      description: Validates a six-digit code against the five-minute pending login challenge. The challenge is supplied by the HttpOnly remail_2fa_login cookie and is consumed once. A successful response sets the regular session cookies.
+      tags:
+        - IAM
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TwoFactorLoginRequest"
+      responses:
+        "200":
+          description: Two-factor verification completed and session cookies set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
 
   /v1/sessions/current:
     delete:
@@ -1138,6 +1174,101 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+
+  /v1/me/2fa/setup:
+    post:
+      operationId: postTwoFactorSetup
+      summary: Prepare authenticator enrollment
+      description: Generates a ten-minute pending TOTP secret and sets an HttpOnly setup cookie. The frontend renders the returned otpauth URI as a QR code. Enrollment is enabled only after a valid code is submitted to the enable endpoint. The URI contains a secret and the response uses Cache-Control no-store.
+      tags:
+        - IAM
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Pending authenticator enrollment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TwoFactorSetupResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /v1/me/2fa/enable:
+    post:
+      operationId: postTwoFactorEnable
+      summary: Confirm and enable authenticator authentication
+      description: Requires the pending enrollment cookie from setup and a valid six-digit authenticator code. Two-factor authentication is optional and disabled by default.
+      tags:
+        - IAM
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TwoFactorCodeRequest"
+      responses:
+        "200":
+          description: Two-factor authentication enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TwoFactorStatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /v1/me/2fa:
+    delete:
+      operationId: deleteTwoFactor
+      summary: Disable authenticator authentication
+      description: Requires a current authenticator code and revokes the user's sessions. A user who has lost their authenticator must ask a super administrator for a manual reset. Recovery codes are not issued.
+      tags:
+        - IAM
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TwoFactorCodeRequest"
+      responses:
+        "204":
+          description: Two-factor authentication disabled and sessions revoked
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
 
   # --- Password Change ---
   /v1/password:
@@ -1729,6 +1860,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+
+  /v1/admin/users/{userId}/2fa:
+    delete:
+      operationId: deleteAdminTwoFactor
+      summary: Manually reset a user's authenticator (super administrator only)
+      description: Removes the user's TOTP enrollment and revokes their sessions after manual identity verification by a super administrator. Requires the iam:user operate permission and the super_admin role.
+      tags:
+        - Admin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "204":
+          description: Authenticator enrollment reset and sessions revoked
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
 
   /v1/admin/users/{userId}/sessions/revoke:
     post:
@@ -17677,6 +17839,27 @@ components:
       description: Server-side integration key created in administrator system settings. Its immutable purpose and scope restrict it to iCloud forwarding, SMTP submission, or one Bot platform namespace.
 
   responses:
+    TwoFactorRequired:
+      description: First factor accepted; verify the authenticator code before a session is created
+      headers:
+        Set-Cookie:
+          schema:
+            type: string
+            description: Five-minute HttpOnly remail_2fa_login challenge cookie scoped to /v1/login/2fa
+        Cache-Control:
+          schema:
+            type: string
+            enum: [no-store]
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/TwoFactorRequiredResponse"
+    InternalServerError:
+      description: An unexpected error occurred
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     BadRequest:
       description: Malformed JSON, path, query, pagination, enum, or multipart input
       content:
@@ -21007,6 +21190,63 @@ components:
           $ref: "#/components/schemas/UserResponse"
       additionalProperties: false
 
+    TwoFactorRequiredResponse:
+      type: object
+      required:
+        - twoFactorRequired
+      properties:
+        twoFactorRequired:
+          type: boolean
+          enum: [true]
+      additionalProperties: false
+
+    TwoFactorCodeRequest:
+      type: object
+      required:
+        - code
+      properties:
+        code:
+          type: string
+          pattern: '^[0-9]{6}$'
+          minLength: 6
+          maxLength: 6
+      additionalProperties: false
+
+    TwoFactorLoginRequest:
+      type: object
+      required:
+        - code
+      properties:
+        code:
+          type: string
+          pattern: '^[0-9]{6}$'
+          minLength: 6
+          maxLength: 6
+      additionalProperties: false
+
+    TwoFactorSetupResponse:
+      type: object
+      required:
+        - otpauthUri
+        - expiresAt
+      properties:
+        otpauthUri:
+          type: string
+          description: Secret-bearing otpauth URI for local frontend QR rendering. Available only during enrollment.
+        expiresAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    TwoFactorStatusResponse:
+      type: object
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+      additionalProperties: false
+
     LoginConfigResponse:
       type: object
       required:
@@ -21228,6 +21468,7 @@ components:
         - role
         - userGroup
         - hasLocalPassword
+        - twoFactorEnabled
         - enabled
         - createdAt
         - updatedAt
@@ -21262,6 +21503,9 @@ components:
           description: Read-only QQ number bound through the current QQ Bot identity. Omitted when no QQ account is bound; LinuxDO, Telegram and other identities are never projected into this field.
         hasLocalPassword:
           type: boolean
+        twoFactorEnabled:
+          type: boolean
+          description: Whether the user has confirmed a TOTP authenticator enrollment.
         enabled:
           type: boolean
         createdAt:

@@ -37,7 +37,7 @@ interface EmailOAuthSetupModalProps {
     code: string;
   }) => Promise<unknown>;
   onCancel: () => void;
-  onComplete: () => Promise<void> | void;
+  onComplete: (result?: unknown) => Promise<void> | void;
 }
 
 function removeOAuthSetupParam() {
@@ -120,9 +120,9 @@ export function EmailOAuthSetupModal({
     setError("");
     setNotice("");
     try {
-      await complete({ mode, email: email.trim(), code: code.trim() });
+      const result = await complete({ mode, email: email.trim(), code: code.trim() });
       removeOAuthSetupParam();
-      await onComplete();
+      await onComplete(result);
     } catch (nextError) {
       setError(getIamErrorMessage(t, nextError, failedKey));
     } finally {

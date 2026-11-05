@@ -506,7 +506,7 @@ func (r *UserRepo) BindThirdPartyIdentity(ctx context.Context, userID uint, prov
 // the account is still active and the bcrypt hash verified by the use case is
 // unchanged. This closes the password-change/disable race without creating a
 // login session or mutating login state.
-func (r *UserRepo) BindThirdPartyIdentityWithPasswordSnapshot(ctx context.Context, userID uint, expectedPasswordHash, provider, providerUserID string) error {
+func (r *UserRepo) BindThirdPartyIdentityWithPasswordSnapshot(ctx context.Context, userID uint, expectedTokenVersion int, expectedPasswordHash, provider, providerUserID string) error {
 	provider, providerUserID, ok := normalizeThirdPartyIdentity(provider, providerUserID)
 	if userID == 0 || expectedPasswordHash == "" || !ok {
 		return domain.ErrAccountOrPasswordIncorrect
@@ -515,14 +515,14 @@ func (r *UserRepo) BindThirdPartyIdentityWithPasswordSnapshot(ctx context.Contex
 	return r.dbFor(ctx).Transaction(func(tx *gorm.DB) error {
 		var user UserModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("id", "status", "password_hash").
+			Select("id", "status", "password_hash", "token_version").
 			First(&user, userID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return domain.ErrAccountOrPasswordIncorrect
 			}
 			return fmt.Errorf("bind third-party lock credential: %w", err)
 		}
-		if user.Status != string(domain.UserStatusActive) || user.PasswordHash != expectedPasswordHash {
+		if user.Status != string(domain.UserStatusActive) || user.PasswordHash != expectedPasswordHash || user.TokenVersion != expectedTokenVersion {
 			return domain.ErrAccountOrPasswordIncorrect
 		}
 		return bindThirdPartyIdentity(tx, userID, provider, providerUserID)

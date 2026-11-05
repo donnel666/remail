@@ -18,6 +18,9 @@ export type LoginRequest = components["schemas"]["LoginRequest"];
 export type EmailCodeRequest = components["schemas"]["EmailCodeRequest"];
 export type RegisterRequest = components["schemas"]["RegisterRequest"];
 export type ChangePasswordRequest = components["schemas"]["ChangePasswordRequest"];
+export type TwoFactorSetupResponse = components["schemas"]["TwoFactorSetupResponse"];
+export type TwoFactorStatusResponse = components["schemas"]["TwoFactorStatusResponse"];
+export type TwoFactorRequiredResponse = components["schemas"]["TwoFactorRequiredResponse"];
 export type PasswordResetCodeRequest =
   components["schemas"]["PasswordResetCodeRequest"];
 export type PasswordResetRequest = components["schemas"]["PasswordResetRequest"];
@@ -80,8 +83,40 @@ export async function sendEmailCode(payload: EmailCodeRequest) {
 }
 
 export async function login(payload: LoginRequest) {
-  return unwrap<LoginResponse>(
+  return unwrap<LoginResponse | TwoFactorRequiredResponse>(
     await client.POST("/v1/login", { body: payload })
+  );
+}
+
+export async function verifyLoginTwoFactor(payload: { code: string }) {
+  return unwrap<LoginResponse>(
+    await client.POST("/v1/login/2fa", { body: payload })
+  );
+}
+
+export async function setupTwoFactor() {
+  return unwrap<TwoFactorSetupResponse>(
+    await client.POST("/v1/me/2fa/setup", {
+      params: { header: csrfHeader() },
+    })
+  );
+}
+
+export async function enableTwoFactor(payload: { code: string }) {
+  return unwrap<TwoFactorStatusResponse>(
+    await client.POST("/v1/me/2fa/enable", {
+      body: payload,
+      params: { header: csrfHeader() },
+    })
+  );
+}
+
+export async function disableTwoFactor(payload: { code: string }) {
+  return unwrap<void>(
+    await client.DELETE("/v1/me/2fa", {
+      body: payload,
+      params: { header: csrfHeader() },
+    })
   );
 }
 
@@ -111,7 +146,7 @@ export async function sendLinuxDOEmailCode(payload: LinuxDOEmailCodeRequest) {
 }
 
 export async function completeLinuxDO(payload: LinuxDOCompleteRequest) {
-  return unwrap<LoginResponse>(
+  return unwrap<LoginResponse | TwoFactorRequiredResponse>(
     await client.POST("/v1/oauth/linuxdo/complete", { body: payload })
   );
 }
@@ -131,7 +166,7 @@ export async function sendGitHubEmailCode(payload: GitHubEmailCodeRequest) {
 }
 
 export async function completeGitHub(payload: GitHubCompleteRequest) {
-  return unwrap<LoginResponse | undefined>(
+  return unwrap<LoginResponse | TwoFactorRequiredResponse | undefined>(
     await client.POST("/v1/oauth/github/complete", { body: payload })
   );
 }
@@ -151,7 +186,7 @@ export async function sendNodeLocEmailCode(payload: NodeLocEmailCodeRequest) {
 }
 
 export async function completeNodeLoc(payload: NodeLocCompleteRequest) {
-  return unwrap<LoginResponse>(
+  return unwrap<LoginResponse | TwoFactorRequiredResponse>(
     await client.POST("/v1/oauth/nodeloc/complete", { body: payload })
   );
 }

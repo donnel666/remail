@@ -70,6 +70,7 @@ import {
   listAdminUserApiKeys,
   listAdminUserTransactions,
   putAdminUserPermissions,
+  resetAdminUserTwoFactor,
   revokeAdminUserSessions,
   roleBaselinePermissions,
   updateAdminUser,
@@ -1921,7 +1922,7 @@ export function UserDetailSheet({
   const [current, setCurrent] = useState<AdminUser | null>(user);
   const [balanceOpen, setBalanceOpen] = useState(false);
   const [managementAction, setManagementAction] = useState<
-    "status" | "logout" | "delete" | null
+    "status" | "logout" | "delete" | "twoFactor" | null
   >(null);
   const userId = user?.id;
 
@@ -2017,6 +2018,30 @@ export function UserDetailSheet({
     });
   };
 
+  const confirmResetTwoFactor = () => {
+    if (!current || !capabilities.canResetTwoFactor) return;
+    Modal.confirm({
+      cancelText: t("Cancel"),
+      content: t("Reset two-factor authentication for {{email}}? Verify their identity first. All their sessions will be revoked.", { email: current.email }),
+      okButtonProps: { type: "danger" },
+      okText: t("Reset 2FA"),
+      onOk: async () => {
+        setManagementAction("twoFactor");
+        try {
+          await resetAdminUserTwoFactor(current.id);
+          await handleSaved({ ...current, twoFactorEnabled: false });
+          Toast.success(t("Two-factor authentication reset. The user can sign in and set it up again."));
+        } catch (error) {
+          Toast.error(getIamErrorMessage(t, error, "Two-factor reset failed."));
+          throw error;
+        } finally {
+          setManagementAction(null);
+        }
+      },
+      title: t("Reset 2FA"),
+    });
+  };
+
   const canEditCurrent = current
     ? canMutateAdminUser(current.role, capabilities.canWriteUsers)
     : false;
@@ -2106,6 +2131,16 @@ export function UserDetailSheet({
           </div>
           <div className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-[var(--semi-color-border)] bg-[var(--semi-color-bg-0)] px-5 py-3">
             <Space wrap>
+              {capabilities.canResetTwoFactor ? (
+                <Button
+                  disabled={managementAction !== null}
+                  loading={managementAction === "twoFactor"}
+                  onClick={confirmResetTwoFactor}
+                  type="warning"
+                >
+                  {t("Reset 2FA")}
+                </Button>
+              ) : null}
               <Button
                 disabled={!canEditCurrent}
                 onClick={() => setActiveTab("profile")}

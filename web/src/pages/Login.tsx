@@ -22,6 +22,7 @@ import {
   nodeLocLoginURL,
   sendLinuxDOEmailCode,
   sendNodeLocEmailCode,
+  verifyLoginTwoFactor,
 } from "@/lib/iam-api";
 
 const linuxDOErrorKeys: Record<string, string> = {
@@ -65,6 +66,10 @@ const nodeLocErrorKeys: Record<string, string> = {
 
 type OAuthConfigState = "loading" | "enabled" | "disabled" | "error";
 
+function requiresTwoFactor(value: unknown) {
+  return Boolean(value && typeof value === "object" && "twoFactorRequired" in value && value.twoFactorRequired === true);
+}
+
 export default function Login() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -76,6 +81,8 @@ export default function Login() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [twoFactorRequired, setTwoFactorRequired] = useState(false);
+  const [twoFactorCode, setTwoFactorCode] = useState("");
   const [linuxDOConfigState, setLinuxDOConfigState] = useState<OAuthConfigState>("loading");
   const [githubConfigState, setGitHubConfigState] = useState<OAuthConfigState>("loading");
   const [nodeLocConfigState, setNodeLocConfigState] = useState<OAuthConfigState>("loading");
@@ -90,6 +97,12 @@ export default function Login() {
     }
 
     const params = new URLSearchParams(window.location.search);
+    if (params.get("mfa_required") === "1") {
+      setTwoFactorRequired(true);
+      params.delete("mfa_required");
+      const search = params.toString();
+      window.history.replaceState({}, "", window.location.pathname + (search ? "?" + search : "") + window.location.hash);
+    }
     const oauthError = params.get("oauth_error");
     if (oauthError) {
       const provider = params.get("oauth_provider");
@@ -139,16 +152,41 @@ export default function Login() {
     setNotice("");
 
     try {
-      await login({
+      const result = await login({
         email: email.trim(),
         password,
         turnstileToken,
       });
+      if ("twoFactorRequired" in result && result.twoFactorRequired) {
+        setTwoFactorRequired(true);
+        setPassword("");
+        setTurnstileToken("");
+        setTurnstileResetKey((key) => key + 1);
+        return;
+      }
       void navigate({ to: consumeLoginReturnTo() as never, replace: true });
     } catch (nextError) {
       setError(getIamErrorMessage(t, nextError, "Login failed."));
       setTurnstileToken("");
       setTurnstileResetKey((key) => key + 1);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleTwoFactorSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (twoFactorCode.length !== 6) return;
+
+    setSubmitting(true);
+    setError("");
+    try {
+      await verifyLoginTwoFactor({ code: twoFactorCode });
+      await refreshCurrentUser();
+      void navigate({ to: consumeLoginReturnTo() as never, replace: true });
+    } catch (nextError) {
+      setError(getIamErrorMessage(t, nextError, "Two-factor verification failed."));
+      setTwoFactorCode("");
     } finally {
       setSubmitting(false);
     }
@@ -172,7 +210,7 @@ export default function Login() {
             {error}
           </div>
         ) : null}
-        {linuxDOConfigState === "enabled" || linuxDOConfigState === "loading" || githubConfigState === "enabled" || githubConfigState === "loading" || nodeLocConfigState === "enabled" || nodeLocConfigState === "loading" ? (
+        {!twoFactorRequired && (linuxDOConfigState === "enabled" || linuxDOConfigState === "loading" || githubConfigState === "enabled" || githubConfigState === "loading" || nodeLocConfigState === "enabled" || nodeLocConfigState === "loading") ? (
           <div className="mb-5 space-y-4">
             {linuxDOConfigState === "enabled" || linuxDOConfigState === "loading" ? (
               <button
@@ -217,15 +255,54 @@ export default function Login() {
             </div>
           </div>
         ) : null}
-        {linuxDOConfigState === "error" ? (
+        {!twoFactorRequired && linuxDOConfigState === "error" ? (
           <div role="alert" aria-live="polite" className="mb-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">{t("Could not load LinuxDO login settings. Please refresh and try again.")}</div>
         ) : null}
-        {githubConfigState === "error" ? (
+        {!twoFactorRequired && githubConfigState === "error" ? (
           <div role="alert" aria-live="polite" className="mb-5 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">{t("Could not load GitHub login settings. Please refresh and try again.")}</div>
         ) : null}
-        {nodeLocConfigState === "error" ? (
+        {!twoFactorRequired && nodeLocConfigState === "error" ? (
           <div role="alert" aria-live="polite" className="mb-5 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">{t("Could not load NodeLoc login settings. Please refresh and try again.")}</div>
         ) : null}
+        {twoFactorRequired ? (
+          <form className="space-y-4" onSubmit={handleTwoFactorSubmit}>
+            <div className="rounded-lg border border-[var(--divider)] bg-[var(--surface-sunken)] px-3 py-3 text-sm text-[var(--ink-secondary)]">
+              {t("Enter the 6-digit code from your authenticator app to finish signing in.")}
+            </div>
+            <label htmlFor="login-two-factor-code" className="sr-only">{t("Authenticator code")}</label>
+            <input
+              id="login-two-factor-code"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={twoFactorCode}
+              onChange={(event) => setTwoFactorCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+              placeholder={t("6-digit code")}
+              className="input-antd h-11 w-full text-center tracking-[0.4em]"
+              autoFocus
+              required
+            />
+            <button
+              className="flex h-11 w-full cursor-pointer items-center justify-center rounded-lg bg-gradient-to-br from-[var(--brand-start)] to-[var(--brand-end)] text-[14px] font-semibold text-white shadow-sm transition-shadow duration-200 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-start)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
+              disabled={submitting || twoFactorCode.length !== 6}
+            >
+              {submitting ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+              {t("Verify and sign in")}
+            </button>
+            <button
+              className="w-full text-sm text-[var(--ink-muted)] underline-offset-4 hover:underline"
+              onClick={() => {
+                setTwoFactorRequired(false);
+                setTwoFactorCode("");
+                setError("");
+              }}
+              type="button"
+            >
+              {t("Use a different account")}
+            </button>
+          </form>
+        ) : (
         <form className="space-y-4" onSubmit={handleSubmit}>
           <label htmlFor="login-email" className="sr-only">{t("Email")}</label>
           <input
@@ -262,6 +339,7 @@ export default function Login() {
             {t("Login")}
           </button>
         </form>
+        )}
         <div className="mt-5 flex flex-col items-center gap-2 text-sm text-[var(--ink-muted)]">
           <Link to="/password-reset" className="font-medium text-brand hover:text-brand-hover">
             {t("Forgot password")}
@@ -281,8 +359,12 @@ export default function Login() {
         failedKey="LinuxDO account setup failed."
         getPending={getLinuxDOPending}
         onCancel={() => setEmailOAuthSetup(null)}
-        onComplete={async () => {
+        onComplete={async (result) => {
           setEmailOAuthSetup(null);
+          if (requiresTwoFactor(result)) {
+            setTwoFactorRequired(true);
+            return;
+          }
           await refreshCurrentUser();
           void navigate({ to: consumeLoginReturnTo() as never, replace: true });
         }}
@@ -300,8 +382,12 @@ export default function Login() {
         failedKey="NodeLoc account setup failed."
         getPending={getNodeLocPending}
         onCancel={() => setEmailOAuthSetup(null)}
-        onComplete={async () => {
+        onComplete={async (result) => {
           setEmailOAuthSetup(null);
+          if (requiresTwoFactor(result)) {
+            setTwoFactorRequired(true);
+            return;
+          }
           await refreshCurrentUser();
           void navigate({ to: consumeLoginReturnTo() as never, replace: true });
         }}
@@ -315,8 +401,12 @@ export default function Login() {
 
       <GitHubVerificationModal
         onCancel={() => setGitHubSetupOpen(false)}
-        onComplete={async () => {
+        onComplete={async (_intent, result) => {
           setGitHubSetupOpen(false);
+          if (requiresTwoFactor(result)) {
+            setTwoFactorRequired(true);
+            return;
+          }
           await refreshCurrentUser();
           void navigate({ to: consumeLoginReturnTo() as never, replace: true });
         }}

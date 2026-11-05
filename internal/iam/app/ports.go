@@ -185,6 +185,19 @@ type SessionStore interface {
 	ConsumeOAuthFlow(ctx context.Context, state string) (*OAuthFlow, error)
 }
 
+// TwoFactorService owns TOTP setup and short-lived login challenges.
+// Implementations must consume login challenges atomically.
+type TwoFactorService interface {
+	Enabled(ctx context.Context, userID uint) (bool, error)
+	EnabledForUsers(ctx context.Context, userIDs []uint) (map[uint]bool, error)
+	BeginLogin(ctx context.Context, challenge string, pending domain.LoginChallenge, ttl time.Duration) error
+	ConsumeLogin(ctx context.Context, challenge, code string) (*domain.LoginChallenge, error)
+	Setup(ctx context.Context, userID uint, account string, ttl time.Duration) (uri, token string, err error)
+	Enable(ctx context.Context, userID uint, token, code string) error
+	Disable(ctx context.Context, userID uint, code string) error
+	ForceDisable(ctx context.Context, userID uint, audit *governancedomain.OperationLog) error
+}
+
 type OAuthFlow struct {
 	Provider     string
 	Intent       string

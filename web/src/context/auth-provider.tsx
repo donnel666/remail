@@ -26,17 +26,22 @@ export interface CurrentUser {
   permissions: string[];
   qqNumber?: string;
   hasLocalPassword: boolean;
+  twoFactorEnabled: boolean;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
   lastLoginAt?: string | null;
 }
 
+export interface LoginChallenge {
+  twoFactorRequired: true;
+}
+
 interface AuthProviderState {
   currentUser: CurrentUser | null;
   authenticationError: boolean;
   loading: boolean;
-  login: (payload: LoginRequest) => Promise<CurrentUser>;
+  login: (payload: LoginRequest) => Promise<CurrentUser | LoginChallenge>;
   logout: () => Promise<void>;
   refreshCurrentUser: () => Promise<CurrentUser | null>;
   retryCurrentUser: () => Promise<CurrentUser | null>;
@@ -57,6 +62,7 @@ function toCurrentUser(user: UserResponse): CurrentUser {
     permissions: user.permissions ?? [],
     qqNumber: user.qqNumber,
     hasLocalPassword: user.hasLocalPassword,
+    twoFactorEnabled: user.twoFactorEnabled,
     enabled: user.enabled,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
@@ -133,6 +139,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (payload: LoginRequest) => {
     const response = await loginRequest(payload);
+    if (!("user" in response)) {
+      setAuthenticationError(false);
+      return response;
+    }
     const nextUser = toCurrentUser(response.user);
     setCurrentUser(nextUser);
     setAuthenticationError(false);

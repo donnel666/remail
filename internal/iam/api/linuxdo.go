@@ -317,6 +317,9 @@ func (h *IAMHandler) GetLinuxDOCallback(c *gin.Context) {
 		redirectLinuxDOError(c, intent, "failed")
 		return
 	}
+	if h.redirectTwoFactorChallenge(c, result, "/login") {
+		return
+	}
 	setAuthCookies(c, result.Session.ID, csrfToken, result.SessionMaxAge, h.sessionSecure)
 	c.Redirect(http.StatusSeeOther, "/login")
 }
@@ -429,6 +432,9 @@ func (h *IAMHandler) PostLinuxDOComplete(c *gin.Context) {
 		slog.Warn("delete linuxdo pending setup", "request_id", middleware.GetRequestID(c), "error", err.Error())
 	}
 	h.clearLinuxDOPendingCookie(c)
+	if h.writeTwoFactorChallenge(c, result) {
+		return
+	}
 	setAuthCookies(c, result.Session.ID, csrfToken, result.SessionMaxAge, h.sessionSecure)
 	c.JSON(http.StatusOK, LoginResponse{User: h.userResponseWithPermissions(c.Request.Context(), result.User)})
 }

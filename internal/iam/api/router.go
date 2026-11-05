@@ -90,6 +90,7 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionSecure bool) 
 	rg.POST("/email/code", h.PostEmailCode)
 	rg.POST("/users", h.PostRegister)
 	rg.POST("/login", h.PostLogin)
+	rg.POST("/login/2fa", h.PostTwoFactorLogin)
 	rg.DELETE("/sessions/current", h.DeleteSession)
 	rg.POST("/password/reset/request", h.PostPasswordResetRequest)
 	rg.POST("/password/reset", h.PostPasswordReset)
@@ -105,6 +106,9 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionSecure bool) 
 		auth.GET("/me/invite", h.GetMeInvite)
 		auth.POST("/me/invite", h.PostMeInvite)
 		auth.PATCH("/password", h.PatchPassword)
+		auth.POST("/me/2fa/setup", h.PostTwoFactorSetup)
+		auth.POST("/me/2fa/enable", h.PostTwoFactorEnable)
+		auth.DELETE("/me/2fa", h.DeleteTwoFactor)
 	}
 
 	// Admin routes are authorized by Casbin RBAC permissions.
@@ -119,6 +123,7 @@ func RegisterIAMRoutes(rg *gin.RouterGroup, mod *IAMModule, sessionSecure bool) 
 		admin.DELETE("/users/:userId", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "operate"), h.DeleteAdminUser)
 		admin.GET("/users/:userId/invitations", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "read"), h.GetAdminUserInvitations)
 		admin.POST("/users/:userId/sessions/revoke", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "operate"), h.PostAdminRevokeSessions)
+		admin.DELETE("/users/:userId/2fa", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "operate"), h.DeleteAdminTwoFactor)
 		// Selection-based bulk actions. Static /users/<verb> paths coexist with the
 		// /users/:userId param routes above (gin supports static+param siblings).
 		admin.POST("/users/enable", middleware.PermissionRequired(mod.PermissionChecker, "iam:user", "operate"), h.PostAdminUsersEnable)

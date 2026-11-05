@@ -61,6 +61,7 @@ function Probe() {
     authenticationError,
     currentUser,
     loading,
+    login,
     logout,
     retryCurrentUser,
   } = useAuth();
@@ -79,6 +80,9 @@ function Probe() {
       <button onClick={() => void retryCurrentUser()} type="button">
         retry
       </button>
+      <button onClick={() => void login({ email: "user@example.com", password: "password" })} type="button">
+        login
+      </button>
     </>
   );
 }
@@ -86,6 +90,17 @@ function Probe() {
 describe("AuthProvider", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => cleanup());
+
+  it("keeps the user anonymous until a two-factor challenge is completed", async () => {
+    mocks.getMe.mockRejectedValue(new mocks.IamApiError(401));
+    mocks.login.mockResolvedValue({ twoFactorRequired: true });
+    render(<AuthProvider><Probe /></AuthProvider>);
+    expect(await screen.findByText("anonymous")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "login" }));
+    await waitFor(() => expect(mocks.login).toHaveBeenCalledOnce());
+    expect(screen.getByText("anonymous")).toBeInTheDocument();
+  });
 
   it("keeps transient profile failures retryable without becoming anonymous", async () => {
     mocks.getMe

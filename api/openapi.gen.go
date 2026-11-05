@@ -3011,13 +3011,13 @@ func (e DeleteProxiesRequest1All) Valid() bool {
 
 // Defines values for DisableProxiesRequestAll.
 const (
-	True DisableProxiesRequestAll = true
+	DisableProxiesRequestAllTrue DisableProxiesRequestAll = true
 )
 
 // Valid indicates whether the value is a known member of the DisableProxiesRequestAll enum.
 func (e DisableProxiesRequestAll) Valid() bool {
 	switch e {
-	case True:
+	case DisableProxiesRequestAllTrue:
 		return true
 	default:
 		return false
@@ -5178,6 +5178,21 @@ func (e TransactionItemTransactionType) Valid() bool {
 	case TransactionItemTransactionTypeTransfer:
 		return true
 	case TransactionItemTransactionTypeWithdrawal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TwoFactorRequiredResponseTwoFactorRequired.
+const (
+	TwoFactorRequiredResponseTwoFactorRequiredTrue TwoFactorRequiredResponseTwoFactorRequired = true
+)
+
+// Valid indicates whether the value is a known member of the TwoFactorRequiredResponseTwoFactorRequired enum.
+func (e TwoFactorRequiredResponseTwoFactorRequired) Valid() bool {
+	switch e {
+	case TwoFactorRequiredResponseTwoFactorRequiredTrue:
 		return true
 	default:
 		return false
@@ -14286,6 +14301,37 @@ type TurnstileConfigResponse struct {
 	SiteKey string `json:"siteKey"`
 }
 
+// TwoFactorCodeRequest defines model for TwoFactorCodeRequest.
+type TwoFactorCodeRequest struct {
+	Code string `json:"code"`
+}
+
+// TwoFactorLoginRequest defines model for TwoFactorLoginRequest.
+type TwoFactorLoginRequest struct {
+	Code string `json:"code"`
+}
+
+// TwoFactorRequiredResponse defines model for TwoFactorRequiredResponse.
+type TwoFactorRequiredResponse struct {
+	TwoFactorRequired TwoFactorRequiredResponseTwoFactorRequired `json:"twoFactorRequired"`
+}
+
+// TwoFactorRequiredResponseTwoFactorRequired defines model for TwoFactorRequiredResponse.TwoFactorRequired.
+type TwoFactorRequiredResponseTwoFactorRequired bool
+
+// TwoFactorSetupResponse defines model for TwoFactorSetupResponse.
+type TwoFactorSetupResponse struct {
+	ExpiresAt time.Time `json:"expiresAt"`
+
+	// OtpauthUri Secret-bearing otpauth URI for local frontend QR rendering. Available only during enrollment.
+	OtpauthUri string `json:"otpauthUri"`
+}
+
+// TwoFactorStatusResponse defines model for TwoFactorStatusResponse.
+type TwoFactorStatusResponse struct {
+	Enabled bool `json:"enabled"`
+}
+
 // UpdateCardRequest defines model for UpdateCardRequest.
 type UpdateCardRequest struct {
 	ExpireAt       *time.Time               `json:"expireAt,omitempty"`
@@ -14352,8 +14398,11 @@ type UserResponse struct {
 	QqNumber             *string                       `json:"qqNumber,omitempty"`
 	Role                 UserResponseRole              `json:"role"`
 	ThirdPartyIdentities *[]ThirdPartyIdentityResponse `json:"thirdPartyIdentities,omitempty"`
-	UpdatedAt            time.Time                     `json:"updatedAt"`
-	UserGroup            UserGroupResponse             `json:"userGroup"`
+
+	// TwoFactorEnabled Whether the user has confirmed a TOTP authenticator enrollment.
+	TwoFactorEnabled bool              `json:"twoFactorEnabled"`
+	UpdatedAt        time.Time         `json:"updatedAt"`
+	UserGroup        UserGroupResponse `json:"userGroup"`
 }
 
 // UserResponseRole defines model for UserResponse.Role.
@@ -14528,6 +14577,9 @@ type Conflict = Error
 // Forbidden defines model for Forbidden.
 type Forbidden = Error
 
+// InternalServerError defines model for InternalServerError.
+type InternalServerError = Error
+
 // NotFound defines model for NotFound.
 type NotFound = Error
 
@@ -14536,6 +14588,9 @@ type ServiceUnavailable = Error
 
 // TooManyRequests defines model for TooManyRequests.
 type TooManyRequests = Error
+
+// TwoFactorRequired defines model for TwoFactorRequired.
+type TwoFactorRequired = TwoFactorRequiredResponse
 
 // Unauthorized defines model for Unauthorized.
 type Unauthorized = Error
@@ -16762,6 +16817,12 @@ type PatchAdminUserParams struct {
 	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
+// DeleteAdminTwoFactorParams defines parameters for DeleteAdminTwoFactor.
+type DeleteAdminTwoFactorParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
 // GetAdminUserApiKeysParams defines parameters for GetAdminUserApiKeys.
 type GetAdminUserApiKeysParams struct {
 	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
@@ -17443,6 +17504,24 @@ type PostPublicLotteryEntryParams struct {
 
 	// XTurnstileToken Single-use Cloudflare Turnstile token. Required when captcha_enabled is on for low-frequency, high-damage writes (money movement, submissions entering a human review queue, bulk supplier imports). Each route expects a token minted for its own action string, so a token cannot be replayed across routes. Ignored when the captcha_enabled system setting is off. Not required on the API-key /v1/open surface.
 	XTurnstileToken *TurnstileToken `json:"X-Turnstile-Token,omitempty"`
+}
+
+// DeleteTwoFactorParams defines parameters for DeleteTwoFactor.
+type DeleteTwoFactorParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostTwoFactorEnableParams defines parameters for PostTwoFactorEnable.
+type PostTwoFactorEnableParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
+}
+
+// PostTwoFactorSetupParams defines parameters for PostTwoFactorSetup.
+type PostTwoFactorSetupParams struct {
+	// XCSRFToken CSRF token from the csrf_token SameSite cookie; required for authenticated state-changing requests.
+	XCSRFToken CsrfToken `json:"X-CSRF-Token"`
 }
 
 // PostMeInviteParams defines parameters for PostMeInvite.
@@ -18488,6 +18567,15 @@ type PostOwnedICloudValidationJSONRequestBody = OwnedICloudCommand
 
 // PostLoginJSONRequestBody defines body for PostLogin for application/json ContentType.
 type PostLoginJSONRequestBody = LoginRequest
+
+// PostTwoFactorLoginJSONRequestBody defines body for PostTwoFactorLogin for application/json ContentType.
+type PostTwoFactorLoginJSONRequestBody = TwoFactorLoginRequest
+
+// DeleteTwoFactorJSONRequestBody defines body for DeleteTwoFactor for application/json ContentType.
+type DeleteTwoFactorJSONRequestBody = TwoFactorCodeRequest
+
+// PostTwoFactorEnableJSONRequestBody defines body for PostTwoFactorEnable for application/json ContentType.
+type PostTwoFactorEnableJSONRequestBody = TwoFactorCodeRequest
 
 // PostGitHubCompleteJSONRequestBody defines body for PostGitHubComplete for application/json ContentType.
 type PostGitHubCompleteJSONRequestBody = GitHubCompleteRequest
@@ -20536,6 +20624,9 @@ type ServerInterface interface {
 	// Update a user's profile, status, role or group
 	// (PATCH /v1/admin/users/{userId})
 	PatchAdminUser(c *gin.Context, userId int, params PatchAdminUserParams)
+	// Manually reset a user's authenticator (super administrator only)
+	// (DELETE /v1/admin/users/{userId}/2fa)
+	DeleteAdminTwoFactor(c *gin.Context, userId int, params DeleteAdminTwoFactorParams)
 	// List a user's API keys (admin only)
 	// (GET /v1/admin/users/{userId}/apikeys)
 	GetAdminUserApiKeys(c *gin.Context, userId int, params GetAdminUserApiKeysParams)
@@ -20737,6 +20828,9 @@ type ServerInterface interface {
 	// Login and create a session
 	// (POST /v1/login)
 	PostLogin(c *gin.Context)
+	// Complete a pending login with an authenticator code
+	// (POST /v1/login/2fa)
+	PostTwoFactorLogin(c *gin.Context)
 	// Get enabled login methods and current binding state
 	// (GET /v1/login/config)
 	GetLoginConfig(c *gin.Context)
@@ -20749,6 +20843,15 @@ type ServerInterface interface {
 	// Get current authenticated user profile
 	// (GET /v1/me)
 	GetMe(c *gin.Context)
+	// Disable authenticator authentication
+	// (DELETE /v1/me/2fa)
+	DeleteTwoFactor(c *gin.Context, params DeleteTwoFactorParams)
+	// Confirm and enable authenticator authentication
+	// (POST /v1/me/2fa/enable)
+	PostTwoFactorEnable(c *gin.Context, params PostTwoFactorEnableParams)
+	// Prepare authenticator enrollment
+	// (POST /v1/me/2fa/setup)
+	PostTwoFactorSetup(c *gin.Context, params PostTwoFactorSetupParams)
 	// Get current user's referral invite code
 	// (GET /v1/me/invite)
 	GetMeInvite(c *gin.Context)
@@ -36806,6 +36909,60 @@ func (siw *ServerInterfaceWrapper) PatchAdminUser(c *gin.Context) {
 	siw.Handler.PatchAdminUser(c, userId, params)
 }
 
+// DeleteAdminTwoFactor operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAdminTwoFactor(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userId int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", c.Param("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAdminTwoFactorParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteAdminTwoFactor(c, userId, params)
+}
+
 // GetAdminUserApiKeys operation middleware
 func (siw *ServerInterfaceWrapper) GetAdminUserApiKeys(c *gin.Context) {
 
@@ -41082,6 +41239,19 @@ func (siw *ServerInterfaceWrapper) PostLogin(c *gin.Context) {
 	siw.Handler.PostLogin(c)
 }
 
+// PostTwoFactorLogin operation middleware
+func (siw *ServerInterfaceWrapper) PostTwoFactorLogin(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostTwoFactorLogin(c)
+}
+
 // GetLoginConfig operation middleware
 func (siw *ServerInterfaceWrapper) GetLoginConfig(c *gin.Context) {
 
@@ -41206,6 +41376,141 @@ func (siw *ServerInterfaceWrapper) GetMe(c *gin.Context) {
 	}
 
 	siw.Handler.GetMe(c)
+}
+
+// DeleteTwoFactor operation middleware
+func (siw *ServerInterfaceWrapper) DeleteTwoFactor(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteTwoFactorParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteTwoFactor(c, params)
+}
+
+// PostTwoFactorEnable operation middleware
+func (siw *ServerInterfaceWrapper) PostTwoFactorEnable(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostTwoFactorEnableParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostTwoFactorEnable(c, params)
+}
+
+// PostTwoFactorSetup operation middleware
+func (siw *ServerInterfaceWrapper) PostTwoFactorSetup(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	c.Set(string(CookieAuthScopes), []string{})
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostTwoFactorSetupParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken CsrfToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for X-CSRF-Token, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter X-CSRF-Token: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter X-CSRF-Token is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostTwoFactorSetup(c, params)
 }
 
 // GetMeInvite operation middleware
@@ -45744,6 +46049,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/admin/users/sessions/revoke", wrapper.PostAdminUsersRevokeSessions)
 	router.DELETE(options.BaseURL+"/v1/admin/users/:userId", wrapper.DeleteAdminUser)
 	router.PATCH(options.BaseURL+"/v1/admin/users/:userId", wrapper.PatchAdminUser)
+	router.DELETE(options.BaseURL+"/v1/admin/users/:userId/2fa", wrapper.DeleteAdminTwoFactor)
 	router.GET(options.BaseURL+"/v1/admin/users/:userId/apikeys", wrapper.GetAdminUserApiKeys)
 	router.POST(options.BaseURL+"/v1/admin/users/:userId/apikeys", wrapper.PostAdminUserApiKey)
 	router.GET(options.BaseURL+"/v1/admin/users/:userId/apikeys/realtime-usage", wrapper.GetAdminUserApiKeyRealtimeUsage)
@@ -45811,10 +46117,14 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/v1/icloud/resources/:resourceId/publish", wrapper.PostOwnedICloudPublish)
 	router.POST(options.BaseURL+"/v1/icloud/resources/:resourceId/validation", wrapper.PostOwnedICloudValidation)
 	router.POST(options.BaseURL+"/v1/login", wrapper.PostLogin)
+	router.POST(options.BaseURL+"/v1/login/2fa", wrapper.PostTwoFactorLogin)
 	router.GET(options.BaseURL+"/v1/login/config", wrapper.GetLoginConfig)
 	router.GET(options.BaseURL+"/v1/lotteries/:token", wrapper.GetPublicLottery)
 	router.POST(options.BaseURL+"/v1/lotteries/:token/entries", wrapper.PostPublicLotteryEntry)
 	router.GET(options.BaseURL+"/v1/me", wrapper.GetMe)
+	router.DELETE(options.BaseURL+"/v1/me/2fa", wrapper.DeleteTwoFactor)
+	router.POST(options.BaseURL+"/v1/me/2fa/enable", wrapper.PostTwoFactorEnable)
+	router.POST(options.BaseURL+"/v1/me/2fa/setup", wrapper.PostTwoFactorSetup)
 	router.GET(options.BaseURL+"/v1/me/invite", wrapper.GetMeInvite)
 	router.POST(options.BaseURL+"/v1/me/invite", wrapper.PostMeInvite)
 	router.GET(options.BaseURL+"/v1/notice", wrapper.GetSystemNotice)

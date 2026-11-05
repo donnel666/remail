@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/donnel666/remail/api/middleware"
+	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/iam/app"
 	"github.com/donnel666/remail/internal/iam/domain"
 	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
@@ -27,6 +28,13 @@ type IAMHandler struct {
 	module        *IAMModule
 	sessionSecure bool
 }
+
+const (
+	twoFactorSetupCookie = "remail_2fa_setup"
+	twoFactorLoginCookie = "remail_2fa_login"
+	twoFactorSetupMaxAge = 10 * 60
+	twoFactorLoginMaxAge = 5 * 60
+)
 
 // NewIAMHandler creates a new IAM handler.
 func NewIAMHandler(module *IAMModule, sessionSecure bool) *IAMHandler {
@@ -296,10 +304,143 @@ func (h *IAMHandler) PostLogin(c *gin.Context) {
 			slog.Warn("clear login abuse limit", "request_id", middleware.GetRequestID(c), "error", err.Error())
 		}
 	}
+	if h.writeTwoFactorChallenge(c, result) {
+		return
+	}
 
 	setAuthCookies(c, result.Session.ID, csrfToken, result.SessionMaxAge, h.sessionSecure)
 
 	c.JSON(http.StatusOK, LoginResponse{User: h.userResponseWithPermissions(c.Request.Context(), result.User)})
+}
+
+// POST /v1/login/2fa
+func (h *IAMHandler) PostTwoFactorLogin(c *gin.Context) {
+	var req TwoFactorLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "fields": validationErrors(err), "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	challenge, _ := c.Cookie(twoFactorLoginCookie)
+	result, err := h.module.LoginUseCase.CompleteTwoFactor(c.Request.Context(), challenge, req.Code, app.LoginMeta{ClientIP: c.ClientIP(), UserAgent: c.Request.UserAgent()})
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	csrfToken, err := newCSRFToken()
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	clearTwoFactorCookie(c, twoFactorLoginCookie, h.sessionSecure, "/v1/login/2fa")
+	setAuthCookies(c, result.Session.ID, csrfToken, result.SessionMaxAge, h.sessionSecure)
+	response := h.userResponseWithPermissions(c.Request.Context(), result.User)
+	response.TwoFactorEnabled = true
+	c.JSON(http.StatusOK, LoginResponse{User: response})
+}
+
+// POST /v1/me/2fa/setup
+func (h *IAMHandler) PostTwoFactorSetup(c *gin.Context) {
+	userID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		writeError(c, domain.ErrAuthenticationRequired)
+		return
+	}
+	user, err := h.module.UserRepo.FindByID(c.Request.Context(), userID)
+	if err != nil || user == nil {
+		if err != nil {
+			writeError(c, err)
+		} else {
+			writeError(c, domain.ErrAuthenticationRequired)
+		}
+		return
+	}
+	uri, token, err := h.module.TwoFactorService.Setup(c.Request.Context(), userID, user.Email, twoFactorSetupMaxAge*time.Second)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(twoFactorSetupCookie, token, twoFactorSetupMaxAge, "/v1/me/2fa", "", h.sessionSecure, true)
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, TwoFactorSetupResponse{OtpAuthURI: uri, ExpiresAt: time.Now().Add(twoFactorSetupMaxAge * time.Second).UTC()})
+}
+
+// POST /v1/me/2fa/enable
+func (h *IAMHandler) PostTwoFactorEnable(c *gin.Context) {
+	userID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		writeError(c, domain.ErrAuthenticationRequired)
+		return
+	}
+	var req TwoFactorCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "fields": validationErrors(err), "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	token, err := c.Cookie(twoFactorSetupCookie)
+	if err != nil || strings.TrimSpace(token) == "" {
+		writeError(c, domain.ErrTwoFactorSetupExpired)
+		return
+	}
+	if err := h.module.TwoFactorService.Enable(c.Request.Context(), userID, token, req.Code); err != nil {
+		writeError(c, err)
+		return
+	}
+	if err := h.module.SessionStore.DeleteByUserID(c.Request.Context(), userID); err != nil {
+		slog.Warn("two-factor session cleanup failed after enable", "request_id", middleware.GetRequestID(c), "user_id", userID, "error", err)
+	}
+	clearAuthCookies(c, h.sessionSecure)
+	clearTwoFactorCookie(c, twoFactorSetupCookie, h.sessionSecure, "/v1/me/2fa")
+	c.JSON(http.StatusOK, TwoFactorStatusResponse{Enabled: true})
+}
+
+// DELETE /v1/me/2fa
+func (h *IAMHandler) DeleteTwoFactor(c *gin.Context) {
+	userID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		writeError(c, domain.ErrAuthenticationRequired)
+		return
+	}
+	var req TwoFactorCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid request body.", "fields": validationErrors(err), "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	if err := h.module.TwoFactorService.Disable(c.Request.Context(), userID, req.Code); err != nil {
+		writeError(c, err)
+		return
+	}
+	if err := h.module.SessionStore.DeleteByUserID(c.Request.Context(), userID); err != nil {
+		slog.Warn("two-factor session cleanup failed after disable", "request_id", middleware.GetRequestID(c), "user_id", userID, "error", err)
+	}
+	clearAuthCookies(c, h.sessionSecure)
+	c.Status(http.StatusNoContent)
+}
+
+func clearTwoFactorCookie(c *gin.Context, name string, secure bool, path string) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(name, "", -1, path, "", secure, true)
+}
+
+func (h *IAMHandler) writeTwoFactorChallenge(c *gin.Context, result *app.LoginResult) bool {
+	if result == nil || !result.TwoFactorRequired {
+		return false
+	}
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(twoFactorLoginCookie, result.Challenge, twoFactorLoginMaxAge, "/v1/login/2fa", "", h.sessionSecure, true)
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusAccepted, gin.H{"twoFactorRequired": true})
+	return true
+}
+
+func (h *IAMHandler) redirectTwoFactorChallenge(c *gin.Context, result *app.LoginResult, target string) bool {
+	if result == nil || !result.TwoFactorRequired {
+		return false
+	}
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(twoFactorLoginCookie, result.Challenge, twoFactorLoginMaxAge, "/v1/login/2fa", "", h.sessionSecure, true)
+	c.Redirect(http.StatusSeeOther, target+"?mfa_required=1")
+	return true
 }
 
 func (h *IAMHandler) verifyTurnstile(c *gin.Context, token, action string) bool {
@@ -359,6 +500,8 @@ func (h *IAMHandler) DeleteSession(c *gin.Context) {
 		logoutErr = errors.Join(logoutErr, h.module.SessionUseCase.Logout(c.Request.Context(), cookie.Value))
 	}
 	clearAuthCookies(c, h.sessionSecure)
+	clearTwoFactorCookie(c, twoFactorLoginCookie, h.sessionSecure, "/v1/login/2fa")
+	clearTwoFactorCookie(c, twoFactorSetupCookie, h.sessionSecure, "/v1/me/2fa")
 	if logoutErr != nil {
 		writeError(c, logoutErr)
 		return
@@ -394,6 +537,13 @@ func (h *IAMHandler) GetMe(c *gin.Context) {
 	}
 
 	response := h.userResponseWithPermissions(c.Request.Context(), user)
+	if h.module.TwoFactorService != nil {
+		response.TwoFactorEnabled, err = h.module.TwoFactorService.Enabled(c.Request.Context(), user.ID)
+		if err != nil {
+			writeError(c, err)
+			return
+		}
+	}
 	if err := h.populateQQNumber(c.Request.Context(), user.ID, &response); err != nil {
 		writeError(c, err)
 		return
@@ -538,8 +688,21 @@ func (h *IAMHandler) GetAdminUsers(c *gin.Context) {
 	}
 
 	users := make([]UserResponse, len(result.Users))
+	var twoFactorUsers map[uint]bool
+	if h.module.TwoFactorService != nil {
+		ids := make([]uint, len(result.Users))
+		for i, user := range result.Users {
+			ids[i] = user.ID
+		}
+		twoFactorUsers, err = h.module.TwoFactorService.EnabledForUsers(c.Request.Context(), ids)
+		if err != nil {
+			writeError(c, err)
+			return
+		}
+	}
 	for i, u := range result.Users {
 		users[i] = toUserResponse(&u)
+		users[i].TwoFactorEnabled = twoFactorUsers[u.ID]
 	}
 
 	c.JSON(http.StatusOK, AdminUserListResponse{
@@ -1083,6 +1246,13 @@ func (h *IAMHandler) PatchAdminUser(c *gin.Context) {
 	}
 
 	updated := toUserResponse(user)
+	if h.module.TwoFactorService != nil {
+		updated.TwoFactorEnabled, err = h.module.TwoFactorService.Enabled(c.Request.Context(), user.ID)
+		if err != nil {
+			writeError(c, err)
+			return
+		}
+	}
 	updated.QQNumber = response.QQNumber
 	c.JSON(http.StatusOK, gin.H{"user": updated})
 }
@@ -1173,6 +1343,30 @@ func (h *IAMHandler) PostAdminRevokeSessions(c *gin.Context) {
 		return
 	}
 
+	c.Status(http.StatusNoContent)
+}
+
+// DELETE /v1/admin/users/:userId/2fa
+func (h *IAMHandler) DeleteAdminTwoFactor(c *gin.Context) {
+	role, _ := middleware.GetCurrentRole(c)
+	if role != domain.RoleSuperAdmin {
+		writeError(c, domain.ErrPermissionDenied)
+		return
+	}
+	target, err := strconv.ParseUint(strings.TrimSpace(c.Param("userId")), 10, 64)
+	if err != nil || target == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid user ID.", "requestId": middleware.GetRequestID(c)})
+		return
+	}
+	operatorID, _ := middleware.GetCurrentUserID(c)
+	audit := &governancedomain.OperationLog{OperatorUserID: operatorID, OperationType: "iam.user.two_factor.reset", ResourceType: "user", ResourceID: strconv.FormatUint(target, 10), Path: c.FullPath(), Result: "success", SafeSummary: "Two-factor authentication reset.", RequestID: middleware.GetRequestID(c)}
+	if err := h.module.TwoFactorService.ForceDisable(c.Request.Context(), uint(target), audit); err != nil {
+		writeError(c, err)
+		return
+	}
+	if err := h.module.SessionStore.DeleteByUserID(c.Request.Context(), uint(target)); err != nil {
+		slog.Warn("two-factor session cleanup failed after admin reset", "request_id", middleware.GetRequestID(c), "user_id", target, "error", err)
+	}
 	c.Status(http.StatusNoContent)
 }
 
@@ -1548,6 +1742,14 @@ func writeError(c *gin.Context, err error) {
 			"message":   "Authentication is required.",
 			"requestId": rid,
 		})
+	case errors.Is(err, domain.ErrTwoFactorCodeIncorrect):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Two-factor code is incorrect or expired.", "requestId": rid})
+	case errors.Is(err, domain.ErrTwoFactorSetupExpired):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Two-factor setup expired. Please start again.", "requestId": rid})
+	case errors.Is(err, domain.ErrTwoFactorAlreadyEnabled):
+		c.JSON(http.StatusConflict, gin.H{"message": "Two-factor authentication is already enabled.", "requestId": rid})
+	case errors.Is(err, domain.ErrTwoFactorNotEnabled):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Two-factor authentication is not enabled.", "requestId": rid})
 	case errors.Is(err, domain.ErrPermissionDenied):
 		c.JSON(http.StatusForbidden, gin.H{
 			"message":   "Permission denied.",
@@ -1630,6 +1832,10 @@ func writeError(c *gin.Context, err error) {
 
 func setAuthCookies(c *gin.Context, sessionID, csrfToken string, maxAge int, secure bool) {
 	c.SetSameSite(http.SameSiteLaxMode)
+	// A completed login invalidates any abandoned enrollment or login challenge
+	// left by an earlier account attempt in this browser.
+	clearTwoFactorCookie(c, twoFactorLoginCookie, secure, "/v1/login/2fa")
+	clearTwoFactorCookie(c, twoFactorSetupCookie, secure, "/v1/me/2fa")
 	c.SetCookie(middleware.SessionCookieName, sessionID, maxAge, "/", "", secure, true)
 	c.SetCookie(middleware.CSRFCookieName, csrfToken, maxAge, "/", "", secure, false)
 }

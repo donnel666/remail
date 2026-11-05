@@ -22,6 +22,13 @@ type LoginUseCase struct {
 	codeStore    EmailCodeStore
 	delivery     mailapp.DeliveryPort
 	rewardWallet RegistrationRewardWallet
+	twoFactor    TwoFactorService
+}
+
+// SetTwoFactorService wires optional TOTP authentication. Keeping it optional
+// preserves the small login test doubles and makes 2FA disabled by default.
+func (uc *LoginUseCase) SetTwoFactorService(service TwoFactorService) {
+	uc.twoFactor = service
 }
 
 // NewLoginUseCase creates a new LoginUseCase.
@@ -49,9 +56,11 @@ type LoginMeta struct {
 
 // LoginResult contains the outcome of a successful login.
 type LoginResult struct {
-	Session       *domain.Session
-	User          *domain.User
-	SessionMaxAge int
+	Session           *domain.Session
+	User              *domain.User
+	SessionMaxAge     int
+	TwoFactorRequired bool
+	Challenge         string
 }
 
 type LinuxDOProfile struct {
@@ -837,6 +846,46 @@ func linuxDONickname(profile LinuxDOProfile) string {
 }
 
 func (uc *LoginUseCase) finishLogin(ctx context.Context, user *domain.User, notify bool, metadata ...LoginMeta) (*LoginResult, error) {
+	if uc.twoFactor != nil {
+		enabled, err := uc.twoFactor.Enabled(ctx, user.ID)
+		if err != nil {
+			return nil, fmt.Errorf("check two-factor status: %w", err)
+		}
+		if enabled {
+			challenge, err := newCryptoID()
+			if err != nil {
+				return nil, fmt.Errorf("generate two-factor challenge: %w", err)
+			}
+			if err := uc.twoFactor.BeginLogin(ctx, challenge, domain.LoginChallenge{UserID: user.ID, TokenVersion: user.TokenVersion}, 5*time.Minute); err != nil {
+				return nil, fmt.Errorf("store two-factor challenge: %w", err)
+			}
+			return &LoginResult{User: user, TwoFactorRequired: true, Challenge: challenge}, nil
+		}
+	}
+	return uc.issueSession(ctx, user, notify, metadata...)
+}
+
+// CompleteTwoFactor consumes a pending first-factor challenge and creates the
+// regular session only after the TOTP code is valid.
+func (uc *LoginUseCase) CompleteTwoFactor(ctx context.Context, challenge, code string, metadata ...LoginMeta) (*LoginResult, error) {
+	if uc.twoFactor == nil {
+		return nil, domain.ErrTwoFactorNotEnabled
+	}
+	pending, err := uc.twoFactor.ConsumeLogin(ctx, challenge, code)
+	if err != nil {
+		return nil, err
+	}
+	user, err := uc.repo.FindByID(ctx, pending.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("load two-factor user: %w", err)
+	}
+	if user == nil || !user.IsActive() || user.TokenVersion != pending.TokenVersion {
+		return nil, domain.ErrTwoFactorCodeIncorrect
+	}
+	return uc.issueSession(ctx, user, true, metadata...)
+}
+
+func (uc *LoginUseCase) issueSession(ctx context.Context, user *domain.User, notify bool, metadata ...LoginMeta) (*LoginResult, error) {
 	now := time.Now()
 	sessionID, err := newCryptoID()
 	if err != nil {

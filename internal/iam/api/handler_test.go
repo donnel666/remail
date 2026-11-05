@@ -246,10 +246,10 @@ func (r *mockUserRepo) BindThirdPartyIdentity(_ context.Context, userID uint, pr
 	return nil
 }
 
-func (r *mockUserRepo) BindThirdPartyIdentityWithPasswordSnapshot(ctx context.Context, userID uint, expectedPasswordHash, provider, providerUserID string) error {
+func (r *mockUserRepo) BindThirdPartyIdentityWithPasswordSnapshot(ctx context.Context, userID uint, expectedTokenVersion int, expectedPasswordHash, provider, providerUserID string) error {
 	r.mu.Lock()
 	user := r.users[userID]
-	valid := user != nil && user.IsActive() && user.PasswordHash == expectedPasswordHash
+	valid := user != nil && user.IsActive() && user.PasswordHash == expectedPasswordHash && user.TokenVersion == expectedTokenVersion
 	r.mu.Unlock()
 	if !valid {
 		return domain.ErrAccountOrPasswordIncorrect
