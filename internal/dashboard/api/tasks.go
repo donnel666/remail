@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	dashboardapp "github.com/donnel666/remail/internal/dashboard/app"
@@ -95,17 +96,29 @@ func RegisterTaskHandlers(mux *asynq.ServeMux, module *Module) func(context.Cont
 }
 
 func acquireDashboardBackground(ctx context.Context, module *Module) (func(), bool) {
-	if module == nil || module.background == nil {
+	if module == nil {
 		return func() {}, true
 	}
-	return platform.AcquireBackgroundExecution(ctx, module.background)
+	if module.background != nil {
+		return platform.AcquireBackgroundExecution(ctx, module.background)
+	}
+	if module.dashboard == nil {
+		return func() {}, true
+	}
+	select {
+	case module.dashboard <- struct{}{}:
+		var once sync.Once
+		return func() { once.Do(func() { <-module.dashboard }) }, true
+	default:
+		return func() {}, false
+	}
 }
 
 func enqueueAdminDashboardRefresh(ctx context.Context, client *asynq.Client) {
 	_, err := client.EnqueueContext(
 		ctx,
 		asynq.NewTask(typeAdminDashboardRefresh, nil),
-		asynq.Queue(platform.QueueBackgroundInventory),
+		asynq.Queue(platform.QueueBackgroundDashboard),
 		asynq.Unique(adminDashboardRefreshUniqueTTL),
 		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(adminDashboardRefreshTaskTimeout),
@@ -120,7 +133,7 @@ func enqueueRankingRefresh(ctx context.Context, client *asynq.Client) {
 	_, err := client.EnqueueContext(
 		ctx,
 		asynq.NewTask(typeRankingRefresh, nil),
-		asynq.Queue(platform.QueueBackgroundInventory),
+		asynq.Queue(platform.QueueBackgroundDashboard),
 		asynq.Unique(max(3*rankingRefreshIntervalValue(), rankingRefreshTaskTimeout)),
 		asynq.MaxRetry(platform.BackgroundTaskMaxRetryValue()),
 		asynq.Timeout(rankingRefreshTaskTimeout),

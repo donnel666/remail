@@ -82,6 +82,7 @@ func reauthorizeAccountImpl(
 	if err != nil {
 		return result, err
 	}
+	defer pending.releaseCodeMailLease(ctx)
 	confirmedBindingAddress := pending.boundMailbox
 	observedBindingAddress := pending.observedBindingAddress
 	consentPage, _, consentBinding, err := loginMicrosoftConsentManageWithBinding(

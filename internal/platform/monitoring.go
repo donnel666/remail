@@ -152,7 +152,7 @@ func (p *Platform) MonitoringSnapshot(ctx context.Context) MonitoringSnapshot {
 	snapshot.Go = monitoringGo()
 	snapshot.MySQL = p.monitoringMySQL(ctx)
 	snapshot.Redis = p.monitoringRedis(ctx)
-	snapshot.Tasks = p.monitoringTasks()
+	snapshot.Tasks = p.monitoringTasks(ctx)
 	snapshot.Application = monitoringApplication()
 	return snapshot
 }
@@ -282,10 +282,13 @@ func (p *Platform) monitoringRedis(ctx context.Context) MonitoringRedis {
 	return result
 }
 
-func (p *Platform) monitoringTasks() MonitoringTasks {
+func (p *Platform) monitoringTasks(ctx context.Context) MonitoringTasks {
 	result := MonitoringTasks{Status: "unavailable", Queues: make([]MonitoringQueue, 0, len(AllQueueNames))}
 	if p == nil || p.Redis == nil {
 		return result
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	result.Status = "healthy"
 	result.WorkersReady = p.WorkersReady()
@@ -302,6 +305,13 @@ func (p *Platform) monitoringTasks() MonitoringTasks {
 			MemoryPercent:  stats.MemoryPercent,
 			MetricsHealthy: stats.CPUValid && stats.MemoryValid,
 		}
+	}
+	// Asynq treats this set as queue discovery metadata. Repair it on every
+	// monitoring sample so a Redis restore or manual cleanup cannot make a
+	// known queue look empty until the process restarts.
+	if err := p.Redis.SAdd(ctx, "asynq:queues", QueueRegistryMembers()...).Err(); err != nil {
+		result.Status = "degraded"
+		return result
 	}
 	inspector := asynq.NewInspectorFromRedisClient(p.Redis)
 	existingNames, err := inspector.Queues()

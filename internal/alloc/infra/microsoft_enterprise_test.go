@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
@@ -52,4 +53,51 @@ func TestMicrosoftEnterpriseInventoryAndAllocationIsolationMySQL(t *testing.T) {
 	require.Equal(t, "user@tenant.onmicrosoft.com", allocation.Email)
 	require.Equal(t, domain.AllocationTypeMicrosoftEnterprise, allocation.Type)
 	require.Equal(t, "main", allocation.Mailbox)
+}
+
+func TestMicrosoftEnterpriseSparseInventoryAllocationMySQL(t *testing.T) {
+	for _, scope := range []domain.SupplyScope{domain.SupplyScopeOwned, domain.SupplyScopePublic} {
+		t.Run(string(scope), func(t *testing.T) {
+			db := newAllocMySQLTestDB(t)
+			seedAllocBase(t, db, "microsoft_enterprise", 1, 0, 0)
+			ctx := context.Background()
+			const suffix = "tenant.onmicrosoft.com"
+			ownerID := 1
+			if scope == domain.SupplyScopeOwned {
+				ownerID = 2
+			}
+			// Keep eligible stock far outside the order's initial probe window.
+			for id := 1578; id <= 1597; id++ {
+				require.NoError(t, db.Exec("INSERT INTO email_resources(id,type,owner_user_id) VALUES(?,'microsoft_enterprise',?)", id, ownerID).Error)
+				require.NoError(t, db.Exec("INSERT INTO microsoft_enterprise_resources(id,email_address,email_domain,for_sale,status,alloc_bucket) VALUES(?,?,?,?,'normal',?)",
+					id, fmt.Sprintf("user%d@%s", id, suffix), suffix, scope == domain.SupplyScopePublic, id).Error)
+			}
+			// Another user's private stock in the first bucket must never be selected.
+			require.NoError(t, db.Exec("INSERT INTO email_resources(id,type,owner_user_id) VALUES(326,'microsoft_enterprise',3)").Error)
+			require.NoError(t, db.Exec("INSERT INTO microsoft_enterprise_resources(id,email_address,email_domain,for_sale,status,alloc_bucket) VALUES(326,'other@tenant.onmicrosoft.com',?,FALSE,'normal',326)", suffix).Error)
+			repo := NewRepo(db)
+			config, err := repo.LoadProductConfig(ctx, 20, 2, false)
+			require.NoError(t, err)
+			require.NotNil(t, config)
+			inventory, err := repo.ListProductSuffixInventory(ctx, *config, 2, scope)
+			require.NoError(t, err)
+			require.EqualValues(t, 20, inventory[suffix])
+
+			uc := allocapp.NewUseCase(repo)
+			for _, selector := range []string{suffix, coredomain.RandomMicrosoftEnterpriseSuffixSelector} {
+				orderNo := testmysql.AllocationOrderNo("enterprise-sparse-"+selector, 10, "main", 326, coredomain.MicrosoftAllocationBucketCount)
+				allocation, err := uc.Allocate(ctx, allocapp.AllocateCommand{
+					OrderNo: orderNo, BuyerUserID: 2, ProjectProductID: 20, SupplyScope: scope, EmailSuffix: selector,
+				})
+				require.NoError(t, err)
+				require.Equal(t, domain.AllocationTypeMicrosoftEnterprise, allocation.Type)
+				require.Equal(t, scope, allocation.SupplyScope)
+				require.GreaterOrEqual(t, allocation.ResourceID, uint(1578))
+				require.LessOrEqual(t, allocation.ResourceID, uint(1597))
+			}
+			inventory, err = repo.ListProductSuffixInventory(ctx, *config, 2, scope)
+			require.NoError(t, err)
+			require.EqualValues(t, 18, inventory[suffix])
+		})
+	}
 }

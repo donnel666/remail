@@ -700,6 +700,13 @@ func continueExplicitAliasLoginRelay(session *Session, page, currentURL string, 
 
 func followExplicitAliasTarget(session *Session, page, currentURL string, maxRounds int) (string, string, error) {
 	for round := 0; round < maxRounds; round++ {
+		if nextPage, nextURL, handled, err := continueMicrosoftTermsNotice(session, page, currentURL); handled {
+			if err != nil {
+				return "", "", err
+			}
+			page, currentURL = nextPage, nextURL
+			continue
+		}
 		lowURL := strings.ToLower(currentURL)
 		if isExplicitAliasTarget(lowURL) {
 			break

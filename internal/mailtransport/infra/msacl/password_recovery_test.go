@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -48,11 +49,13 @@ var ServerData={
 </script>`
 
 func TestExtractPasswordRecoveryServerDataBalancesNestedObjectsAndStrings(t *testing.T) {
-	data, err := extractPasswordRecoveryServerData(passwordRecoveryInitialFixture)
-	require.NoError(t, err)
-	require.Equal(t, "SignInName", asString(data["sResetPwdAction"]))
-	require.Equal(t, "initial-form-canary", asString(data["sCanary"]))
-	require.Equal(t, "https://login.live.com/logout.srf?fixture=1", asString(data["urlRU"]))
+	for _, marker := range []string{"var ServerData=", "var ServerData = ", "window.ServerData\t=\n"} {
+		data, err := extractPasswordRecoveryServerData(strings.Replace(passwordRecoveryInitialFixture, "var ServerData=", marker, 1))
+		require.NoError(t, err)
+		require.Equal(t, "SignInName", asString(data["sResetPwdAction"]))
+		require.Equal(t, "initial-form-canary", asString(data["sCanary"]))
+		require.Equal(t, "https://login.live.com/logout.srf?fixture=1", asString(data["urlRU"]))
+	}
 }
 
 func TestProbePasswordRecoveryUsesInitialGETPOSTAndReturnsNoSecrets(t *testing.T) {

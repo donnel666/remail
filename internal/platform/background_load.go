@@ -16,9 +16,10 @@ import (
 )
 
 const (
-	defaultBackgroundOverloadPercent = 50.0
-	backgroundLoadHysteresisPercent  = 10.0
-	backgroundLoadSampleInterval     = 2 * time.Second
+	defaultBackgroundOverloadPercent       = 50.0
+	defaultBackgroundMemoryOverloadPercent = 85.0
+	backgroundLoadHysteresisPercent        = 10.0
+	backgroundLoadSampleInterval           = 2 * time.Second
 
 	// The Asynq server owns the hard ceiling. The adaptive window starts
 	// conservatively, slow-starts and then probes upward additively while the
@@ -190,17 +191,19 @@ type BackgroundLoadSnapshot struct {
 // ceiling before its first burst. Asynq chooses work by queue weight; once a
 // queue is selected, the gate lets its first task break a saturated monopoly.
 type BackgroundLoadController struct {
-	systemLoad         systemLoadReader
-	gate               *adaptiveConcurrencyGate
-	minimum            int
-	maximum            int
-	increaseStep       int
-	slowStartThreshold int
-	sampleInterval     time.Duration
-	overloadPercent    float64
-	recoveryPercent    float64
-	recoverySamples    int
-	metricFailureLimit int
+	systemLoad            systemLoadReader
+	gate                  *adaptiveConcurrencyGate
+	minimum               int
+	maximum               int
+	increaseStep          int
+	slowStartThreshold    int
+	sampleInterval        time.Duration
+	overloadPercent       float64
+	recoveryPercent       float64
+	memoryOverloadPercent float64
+	memoryRecoveryPercent float64
+	recoverySamples       int
+	metricFailureLimit    int
 
 	tuneMu            sync.Mutex
 	sampleMu          sync.RWMutex
@@ -226,23 +229,26 @@ func newBackgroundLoadController(load systemLoadReader, maximum int) *Background
 	}
 	settings := runtimeconfig.Snapshot()
 	overloadPercent := float64(settings.Int("background_load_overload_percent", int(defaultBackgroundOverloadPercent), int(backgroundLoadHysteresisPercent)+1))
+	memoryOverloadPercent := float64(settings.Int("background_load_memory_overload_percent", int(defaultBackgroundMemoryOverloadPercent), int(backgroundLoadHysteresisPercent)+1))
 	minimum := min(settings.Int("background_worker_minimum", backgroundWorkerMinimum, 1), maximum)
 	initial := min(max(settings.Int("background_worker_initial", backgroundWorkerInitial, 1), minimum), maximum)
 	defaultIncreaseStep := min(max(backgroundWorkerMinimumIncreaseStep, maximum/16, 1), maximum)
 	increaseStep := min(settings.Int("background_worker_increase_step", defaultIncreaseStep, 1), maximum)
 	slowStartThreshold := min(maximum, max(initial, maximum/2))
 	return &BackgroundLoadController{
-		systemLoad:         load,
-		gate:               newAdaptiveConcurrencyGate(initial, maximum),
-		minimum:            minimum,
-		maximum:            maximum,
-		increaseStep:       increaseStep,
-		slowStartThreshold: slowStartThreshold,
-		sampleInterval:     backgroundLoadSampleInterval,
-		overloadPercent:    overloadPercent,
-		recoveryPercent:    overloadPercent - backgroundLoadHysteresisPercent,
-		recoverySamples:    settings.Int("background_recovery_samples", backgroundRecoverySamples, 1),
-		metricFailureLimit: settings.Int("background_metric_failure_limit", backgroundMetricFailureLimit, 1),
+		systemLoad:            load,
+		gate:                  newAdaptiveConcurrencyGate(initial, maximum),
+		minimum:               minimum,
+		maximum:               maximum,
+		increaseStep:          increaseStep,
+		slowStartThreshold:    slowStartThreshold,
+		sampleInterval:        backgroundLoadSampleInterval,
+		overloadPercent:       overloadPercent,
+		recoveryPercent:       overloadPercent - backgroundLoadHysteresisPercent,
+		memoryOverloadPercent: memoryOverloadPercent,
+		memoryRecoveryPercent: memoryOverloadPercent - backgroundLoadHysteresisPercent,
+		recoverySamples:       settings.Int("background_recovery_samples", backgroundRecoverySamples, 1),
+		metricFailureLimit:    settings.Int("background_metric_failure_limit", backgroundMetricFailureLimit, 1),
 	}
 }
 
@@ -337,10 +343,10 @@ func (c *BackgroundLoadController) sampleAndTune(ctx context.Context) {
 	next := current
 	reason := "hysteresis"
 	high := (sample.cpuValid && sample.cpuPercent >= c.overloadPercent) ||
-		(sample.memoryValid && sample.memoryPercent >= c.overloadPercent)
+		(sample.memoryValid && sample.memoryPercent >= c.memoryOverloadPercent)
 	low := sample.cpuValid && sample.memoryValid &&
 		sample.cpuPercent < c.recoveryPercent &&
-		sample.memoryPercent < c.recoveryPercent
+		sample.memoryPercent < c.memoryRecoveryPercent
 	healthy := sample.cpuValid && sample.memoryValid
 	if healthy {
 		c.metricFailures = 0
@@ -399,6 +405,8 @@ func (c *BackgroundLoadController) sampleAndTune(ctx context.Context) {
 			"memory_valid", sample.memoryValid,
 			"overload_percent", c.overloadPercent,
 			"recovery_percent", c.recoveryPercent,
+			"memory_overload_percent", c.memoryOverloadPercent,
+			"memory_recovery_percent", c.memoryRecoveryPercent,
 		)
 	}
 
@@ -423,8 +431,11 @@ func (c *BackgroundLoadController) sampleAndTune(ctx context.Context) {
 func (c *BackgroundLoadController) refreshRuntimeConfiguration() {
 	settings := runtimeconfig.Snapshot()
 	overload := float64(settings.Int("background_load_overload_percent", int(defaultBackgroundOverloadPercent), int(backgroundLoadHysteresisPercent)+1))
+	memoryOverload := float64(settings.Int("background_load_memory_overload_percent", int(defaultBackgroundMemoryOverloadPercent), int(backgroundLoadHysteresisPercent)+1))
 	c.overloadPercent = overload
 	c.recoveryPercent = overload - backgroundLoadHysteresisPercent
+	c.memoryOverloadPercent = memoryOverload
+	c.memoryRecoveryPercent = memoryOverload - backgroundLoadHysteresisPercent
 	c.minimum = min(settings.Int("background_worker_minimum", backgroundWorkerMinimum, 1), c.maximum)
 	defaultIncreaseStep := min(max(backgroundWorkerMinimumIncreaseStep, c.maximum/16, 1), c.maximum)
 	c.increaseStep = min(settings.Int("background_worker_increase_step", defaultIncreaseStep, 1), c.maximum)

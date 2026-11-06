@@ -65,6 +65,9 @@ func asBool(value any) bool {
 		return v != 0
 	case int:
 		return v != 0
+	case json.Number:
+		n, err := v.Float64()
+		return err == nil && n != 0
 	default:
 		return false
 	}

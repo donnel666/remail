@@ -32,6 +32,15 @@ type pendingAccountAuthorization struct {
 	boundMailbox           string
 	observedBindingAddress string
 	hasEmailProof          bool
+	codeMailLease          *codeMailLease
+}
+
+func (p *pendingAccountAuthorization) releaseCodeMailLease(ctx context.Context) {
+	if p == nil || p.codeMailLease == nil {
+		return
+	}
+	releaseCompletedCodeMailLease(ctx, p.codeMailLease)
+	p.codeMailLease = nil
 }
 
 func requestDeviceCode(session *Session) (string, string, error) {
@@ -303,7 +312,9 @@ func getCredentialType(session *Session, email, ppft, uaid, opid string) ([]Proo
 			ClearDigits: asString(p["clearDigits"]),
 		})
 	}
-	if asInt(creds["HasRemoteNGC"]) == 1 || asInt(creds["HasFido"]) == 1 {
+	if (asInt(creds["HasRemoteNGC"]) == 1 || asInt(creds["HasFido"]) == 1) && !asBool(creds["HasPassword"]) {
+		_, passwordReported := creds["HasPassword"]
+		logWarning("Microsoft password capability unavailable: reported=%t password_numeric=%d fido=%d remote_ngc=%d", passwordReported, asInt(creds["HasPassword"]), asInt(creds["HasFido"]), asInt(creds["HasRemoteNGC"]))
 		return nil, newAuthError("需要通行密钥或安全密钥", AuthStatusPasskeyRequired)
 	}
 	if len(proofs) > 0 {
@@ -518,24 +529,8 @@ func handleJSPollingPage(session *Session, page, rawURL string) (string, string,
 	if asBoolDefault(sd["fPollingDisabled"], true) {
 		return page, rawURL, nil
 	}
-	for _, rawProof := range asSlice(sd["arrUserProofs"]) {
-		proof := asMap(rawProof)
-		ptype := asInt(proof["type"])
-		display := asString(proof["display"])
-		isSADef := asBool(proof["isSADef"])
-		if ptype == 10 && isSADef {
-			logWarning("检测到 2FA 强认证 (Authenticator)")
-			return "", "", newAuthError("需要两步验证 (Authenticator)", AuthStatusMFARequired)
-		}
-		if (ptype == 2 || ptype == 3) && isSADef {
-			return "", "", newAuthError(fmt.Sprintf("需要手机验证 (%s)", display), AuthStatusPhoneVerification)
-		}
-		if ptype == 1 && display != "" && strings.Contains(display, "@") {
-			domain := strings.ToLower(strings.SplitN(display, "@", 2)[1])
-			if !domainInProject(domain) {
-				return "", "", &AuthError{Message: fmt.Sprintf("已绑定辅助邮箱(%s)", display), Status: AuthStatusAlreadyBound, BoundMailbox: display}
-			}
-		}
+	if err := unsupportedPollingProof(sd); err != nil {
+		return "", "", err
 	}
 	pollURL := asString(sd["urlPost"])
 	sft := asString(sd["sFT"])
@@ -595,6 +590,27 @@ func handleJSPollingPage(session *Session, page, rawURL string) (string, string,
 	}
 	logWarning("步骤6.5: JS 轮询超时 (%ds, %d 次)", timeout, pollCount)
 	return page, rawURL, nil
+}
+
+func unsupportedPollingProof(sd map[string]any) error {
+	var strongProof error
+	for _, raw := range asSlice(sd["arrUserProofs"]) {
+		proof := asMap(raw)
+		kind := asInt(proof["type"])
+		display := asString(proof["display"])
+		if kind == 1 && strings.Contains(display, "@") && !UsesActiveAuxiliaryDomain(display) {
+			return alreadyBoundError(display, display)
+		}
+		if asBool(proof["isSADef"]) {
+			if kind == 10 {
+				strongProof = newAuthError("需要两步验证 (Authenticator)", AuthStatusMFARequired)
+			}
+			if kind == 2 || kind == 3 {
+				strongProof = newAuthError(fmt.Sprintf("需要手机验证 (%s)", display), AuthStatusPhoneVerification)
+			}
+		}
+	}
+	return strongProof
 }
 
 func handleSessionApprovalPolling(session *Session, page, rawURL string, sd map[string]any) (string, string, error) {
@@ -676,12 +692,18 @@ func handleSessionApprovalPolling(session *Session, page, rawURL string, sd map[
 		case 1:
 			return "", "", newAuthError("Microsoft session approval was denied.", AuthStatusVerifyCodeError)
 		default:
+			if proofErr := unsupportedPollingProof(sd); proofErr != nil {
+				return "", "", proofErr
+			}
 			return "", "", newExplicitAliasStageError(
-				"Microsoft session approval did not complete.",
+				fmt.Sprintf("Microsoft session approval did not complete (state %d).", authorizationState),
 				AuthStatusAuthTimeout,
 				explicitAliasStageAccountPageIncomplete,
 			)
 		}
+	}
+	if proofErr := unsupportedPollingProof(sd); proofErr != nil {
+		return "", "", proofErr
 	}
 	return page, rawURL, newExplicitAliasStageError(
 		"Microsoft session approval timed out.",
@@ -847,6 +869,21 @@ func beginAccountAuthorizationWithSession(session *Session, email, password, pro
 	if err != nil {
 		return nil, err
 	}
+	var codeLease *codeMailLease
+	leaseTransferred := false
+	defer func() {
+		if !leaseTransferred {
+			releaseCompletedCodeMailLease(session.context(), codeLease)
+		}
+	}()
+	if emailCodeApprovalOffered(page, preferredBindingAddress) {
+		logInfo("Microsoft session approval: verifying the offered email code")
+		// Keep the sent-code lease until the caller persists the authorized credentials.
+		page, currentURL, codeLease, err = submitPasswordEmailProof(session, page, currentURL, uaid, email, proxy, preferredBindingAddress, "https://login.live.com/GetOneTimeCode.srf?id=293577&client_id=0000000040C8F39E")
+		if err != nil {
+			return nil, err
+		}
+	}
 	page, currentURL, err = handleJSPollingPage(session, page, currentURL)
 	if err != nil {
 		return nil, err
@@ -860,7 +897,7 @@ func beginAccountAuthorizationWithSession(session *Session, email, password, pro
 		return nil, err
 	}
 	boundMailbox := firstNonEmpty(bound1, bound2)
-	return &pendingAccountAuthorization{
+	pending := &pendingAccountAuthorization{
 		session:                session,
 		page:                   page,
 		currentURL:             currentURL,
@@ -868,13 +905,22 @@ func beginAccountAuthorizationWithSession(session *Session, email, password, pro
 		boundMailbox:           boundMailbox,
 		observedBindingAddress: firstEmailProofDisplay(proofData),
 		hasEmailProof:          hasEmailProof,
-	}, nil
+		codeMailLease:          codeLease,
+	}
+	leaseTransferred = true
+	return pending, nil
 }
 
 func completeAccountAuthorization(pending *pendingAccountAuthorization) (*AuthSuccess, error) {
 	if pending == nil || pending.session == nil {
 		return nil, newAuthError("Microsoft authorization session is unavailable.", AuthStatusRequestError)
 	}
+	leaseTransferred := false
+	defer func() {
+		if !leaseTransferred {
+			pending.releaseCodeMailLease(pending.session.context())
+		}
+	}()
 	page, currentURL, err := handleConsent(pending.session, pending.page, pending.currentURL)
 	if err != nil {
 		return nil, err
@@ -887,6 +933,10 @@ func completeAccountAuthorization(pending *pendingAccountAuthorization) (*AuthSu
 	}
 	refreshToken := asString(tokens["refresh_token"])
 	accessToken := asString(tokens["access_token"])
+	// Keep the consumed-code lease in the protocol context until the caller has
+	// committed the refreshed credentials. RecoveryLeaseReleaser performs that
+	// post-persistence cleanup.
+	leaseTransferred = true
 	return &AuthSuccess{
 		ClientID:               clientID,
 		AccessToken:            accessToken,

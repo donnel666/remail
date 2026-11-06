@@ -81,7 +81,8 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 		}
 		limit := backgroundValidationWindowLimit(module.BackgroundExecution, min(runtimeconfig.Int("validation_dispatch_maximum", resourceValidationDispatchMaximum, 1), 10000))
 		if limit <= 0 {
-			return nil
+			slog.Info("resource validation dispatcher deferred", "reason", "background_capacity")
+			return platform.ErrBackgroundExecutionDeferred
 		}
 		result, err := module.ValidationUseCase.DispatchPending(ctx, limit, payload.Enterprise)
 		if err != nil {
@@ -379,13 +380,7 @@ func backgroundValidationWindowLimit(gate BackgroundExecutionGate, maximum int) 
 	if gate == nil {
 		return maximum
 	}
-	snapshotter, ok := gate.(interface {
-		Snapshot() platform.BackgroundLoadSnapshot
-	})
-	if !ok {
-		return backgroundDispatchLimit(gate, maximum)
-	}
-	return min(maximum, max(0, snapshotter.Snapshot().Limit))
+	return backgroundDispatchLimit(gate, maximum)
 }
 
 func queueMicrosoftImportValidations(ctx context.Context, module *CoreModule, result *coreapp.MicrosoftImportProcessResult) (int, error) {

@@ -760,6 +760,9 @@ func handleCredentialActionInterrupt(session *Session, page, rawURL, proxy, acco
 			!strings.HasPrefix(strings.ToLower(parsed.Path), "/api/v1.0/auth/") {
 			return nil, newAuthError("Microsoft credential-action target is invalid.", AuthStatusRequestError, mailbox)
 		}
+		if err := beforeRecoveryMailboxAdd(session.context(), mailbox); err != nil {
+			return nil, err
+		}
 		resp, requestErr := session.Post(target, requestOptions{JSON: payload, Headers: headers})
 		if requestErr != nil {
 			return nil, wrapAuthError(fmt.Sprintf("%s 请求异常: %s", label, requestErr), AuthStatusRequestError, requestErr, mailbox)
@@ -961,6 +964,9 @@ func bindAuxiliaryEmail(session *Session, page, rawURL, proxy, accountEmail stri
 	addProofFields["action"] = "AddProof"
 	addProofFields["PhoneNumber"] = ""
 	addProofFields["PhoneCountryISO"] = ""
+	if err := beforeRecoveryMailboxAdd(session.context(), tempMail); err != nil {
+		return "", "", "", err
+	}
 	resp, err := session.Post(action, requestOptions{
 		Data: addProofFields,
 		Headers: navHeaders(session, map[string]string{
@@ -1412,6 +1418,31 @@ func handleAutoSubmit(session *Session, page, rawURL, action string) (string, st
 	return resp.Body, resp.URL, nil
 }
 
+func continueMicrosoftTermsNotice(session *Session, page, rawURL string) (string, string, bool, error) {
+	const pageID = "Account_TOUAccrualInterruptPage_Client"
+	if !strings.EqualFold(extractConfigString(page, "sPageId"), pageID) {
+		return page, rawURL, false, nil
+	}
+	target := extractConfigString(page, "urlRU")
+	canary := extractConfigString(page, "sCanary")
+	u, err := url.Parse(target)
+	if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Hostname(), "account.live.com") || !strings.EqualFold(u.Path, "/tou/accrue") || canary == "" {
+		return "", "", true, newAuthError("Microsoft terms notice continuation is invalid.", AuthStatusRequestError)
+	}
+	resp, err := session.Post(target, requestOptions{
+		Data:           map[string]string{"canary": canary},
+		Headers:        navHeaders(session, map[string]string{"Content-Type": "application/x-www-form-urlencoded", "Origin": "https://account.live.com", "Referer": rawURL}),
+		AllowRedirects: true, HasAllowRedirects: true,
+	})
+	if err != nil {
+		return "", "", true, wrapAuthError("Microsoft terms notice continuation failed.", AuthStatusRequestError, err)
+	}
+	if resp.StatusCode != 200 || strings.EqualFold(extractConfigString(resp.Body, "sPageId"), pageID) {
+		return "", "", true, newAuthError("Microsoft terms notice did not continue.", AuthStatusAuthTimeout)
+	}
+	return resp.Body, resp.URL, true, nil
+}
+
 func handleAccountPages(session *Session, page, rawURL, proxy string, maxRounds int, email string, proofData []ProofData, preferredBindingAddress string) (string, string, string, error) {
 	return handleAccountPagesWithOptions(session, page, rawURL, proxy, maxRounds, email, proofData, false, preferredBindingAddress)
 }
@@ -1422,6 +1453,12 @@ func handleAccountPagesWithOptions(session *Session, page, rawURL, proxy string,
 	}
 	boundMailbox := ""
 	for roundNum := 1; roundNum <= maxRounds; roundNum++ {
+		if nextPage, nextURL, handled, err := continueMicrosoftTermsNotice(session, page, rawURL); err != nil {
+			return "", "", "", err
+		} else if handled {
+			page, rawURL = nextPage, nextURL
+			continue
+		}
 		low := strings.ToLower(rawURL)
 		action := extractFormAction(page)
 		isIdentity, isProofs := accountVerificationPageKinds(page, rawURL, action)

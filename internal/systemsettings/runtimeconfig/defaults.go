@@ -325,6 +325,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "legacy_alias_retry_delay_seconds", Value: "30"},
 
 	{Key: "background_load_overload_percent", Value: "50"},
+	{Key: "background_load_memory_overload_percent", Value: "85"},
 	{Key: "background_worker_minimum", Value: "8"},
 	{Key: "background_worker_initial", Value: "16"},
 	{Key: "background_worker_increase_step", Value: "32"},
@@ -358,6 +359,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "asynq_queue_background_proto_history_weight", Value: "1"},
 	{Key: "asynq_queue_background_daum_history_weight", Value: "1"},
 	{Key: "asynq_queue_background_inventory_weight", Value: "1"},
+	{Key: "asynq_queue_background_dashboard_weight", Value: "1"},
 	{Key: "asynq_shutdown_timeout_seconds", Value: "5"},
 	{Key: "validation_dispatch_maximum", Value: "128"},
 	{Key: "default_inbound_smtp_max_connections", Value: "200"},

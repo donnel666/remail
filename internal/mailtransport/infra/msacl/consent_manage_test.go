@@ -1,6 +1,7 @@
 package msacl
 
 import (
+	"encoding/json"
 	"io"
 	"net/url"
 	"testing"
@@ -9,6 +10,67 @@ import (
 	http "github.com/bogdanfinn/fhttp"
 	"github.com/stretchr/testify/require"
 )
+
+func TestTermsNoticeContinuesBothLoginPathsAndRejectsUntrustedTargets(t *testing.T) {
+	const target = "https://account.live.com/tou/accrue?ru=test"
+	fixture := func(destination string) string {
+		data, err := json.Marshal(map[string]string{"sPageId": "Account_TOUAccrualInterruptPage_Client", "urlRU": destination, "sCanary": "notice-canary"})
+		require.NoError(t, err)
+		return "<script>var ServerData=" + string(data) + ";</script>"
+	}
+	finished := `<a href="/consent/Edit?client_id=0000000040C8F39E">test application</a>`
+	for _, consentManage := range []bool{false, true} {
+		s, client := newScriptedSession(t, func(req *http.Request, follow bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, target)
+			require.True(t, follow)
+			require.NoError(t, req.ParseForm())
+			require.Equal(t, url.Values{"canary": {"notice-canary"}}, req.PostForm)
+			return scriptedResponse(req, 200, microsoftConsentManageURL, finished, nil), nil
+		})
+		var page, currentURL string
+		var err error
+		if consentManage {
+			page, currentURL, _, err = convergeMicrosoftConsentManage(s, fixture(target), target, "owner@outlook.com", "", "owner@recovery.test")
+		} else {
+			page, currentURL, _, err = handleAccountPagesWithOptions(s, fixture(target), target, "", 10, "owner@outlook.com", nil, true, "owner@recovery.test")
+		}
+		require.NoError(t, err)
+		require.Equal(t, finished, page)
+		require.Equal(t, microsoftConsentManageURL, currentURL)
+		client.requireDone()
+	}
+	for _, invalid := range []string{"https://outside.test/tou/accrue", "http://account.live.com/tou/accrue", "https://account.live.com/password/reset", ""} {
+		s, client := newScriptedSession(t)
+		_, _, handled, err := continueMicrosoftTermsNotice(s, fixture(invalid), target)
+		require.True(t, handled)
+		require.Error(t, err)
+		client.requireDone()
+	}
+}
+
+func TestAliasLoginCompletesTermsRelayAndNoticeBeforeRetryingEntry(t *testing.T) {
+	const target = "https://account.live.com/tou/accrue?ru=alias"
+	relay := `<form id="fmHF" action="` + target + `" method="post"><input type="hidden" name="ipt" value="relay-proof"><input type="hidden" name="pprid" value="relay-id"></form><script>DoSubmit()</script>`
+	notice := `<script>var ServerData={"sPageId":"Account_TOUAccrualInterruptPage_Client","urlRU":"` + target + `","sCanary":"notice-canary"};</script>`
+	s, client := newScriptedSession(t,
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, target)
+			require.NoError(t, req.ParseForm())
+			require.Equal(t, "relay-proof", req.PostForm.Get("ipt"))
+			return scriptedResponse(req, 200, target, notice, nil), nil
+		},
+		func(req *http.Request, _ bool) (*http.Response, error) {
+			requireRequest(t, req, http.MethodPost, target)
+			require.NoError(t, req.ParseForm())
+			require.Equal(t, url.Values{"canary": {"notice-canary"}}, req.PostForm)
+			return scriptedResponse(req, 200, addAssocIDURL, `<html>alias management</html>`, nil), nil
+		},
+	)
+	_, currentURL, err := convergeExplicitAliasToAddAssocID(s, relay, "https://login.live.com/oauth20_authorize.srf")
+	require.NoError(t, err)
+	require.Equal(t, addAssocIDURL, currentURL)
+	client.requireDone()
+}
 
 func TestParseMicrosoftConsentClientIDsDeduplicatesSafeEntries(t *testing.T) {
 	page := `<a href="/consent/Edit?client_id=0000000040C8F39E">one</a>
@@ -29,15 +91,24 @@ func TestMicrosoftConsentManageRecognizesLocalizedEmptyState(t *testing.T) {
 }
 
 func TestHandleAccountPagesCompletesCredentialActionEmailEnrollment(t *testing.T) {
+	testCredentialActionEmailEnrollment(t, false)
+}
+
+func TestConsentManageCompletesCredentialActionEmailEnrollment(t *testing.T) {
+	testCredentialActionEmailEnrollment(t, true)
+}
+
+func testCredentialActionEmailEnrollment(t *testing.T, consentManage bool) {
+	t.Helper()
 	const (
 		currentURL  = "https://account.live.com/interrupt/credentialaction"
 		enrollURL   = "https://account.live.com/api/v1.0/auth/methods/email"
 		activateURL = "https://account.live.com/api/v1.0/auth/methods/email/method-id/activate"
 		continueURL = "https://login.live.com/ppsecure/post.srf"
-		returnURL   = "https://login.live.com/oauth20_remoteconnect.srf"
+		returnURL   = microsoftConsentManageURL
 	)
 	page := `<script>var ServerData={"sPageId":"Account_CredentialActionInterruptPage_Client","hpgid":123,"hpgact":0,"acmaInitialConfig":{"canary":"api-canary","navigation":{"baseRouteUri":"https://account.live.com"},"request":{"correlationId":"correlation-id","sessionId":"session-id"}},"acmaInitialResponse":{"continuationToken":"initial-token","state":"interactionRequired","action":"enroll","infoType":"email","_embedded":{"methods":[{"id":"","type":"email","hint":"","_links":{"enroll":{"href":"/api/v1.0/auth/methods/email"}}}],"user":[{"displayName":"owner"}]}}};</script>`
-	finishedPage := `<html>finished</html>`
+	finishedPage := `<a href="/consent/Edit?client_id=0000000040C8F39E">test application</a>`
 	previousReader := activeMailboxReader()
 	reader := &sequencedMailboxReader{watcherStarted: make(chan struct{}), sendStarted: make(chan struct{})}
 	SetMailboxReader(reader)
@@ -86,7 +157,13 @@ func TestHandleAccountPagesCompletesCredentialActionEmailEnrollment(t *testing.T
 		},
 	)
 
-	gotPage, gotURL, mailbox, err := handleAccountPagesWithOptions(session, page, currentURL, "", 10, "owner@outlook.com", nil, false, "proof@recovery.test")
+	var gotPage, gotURL, mailbox string
+	var err error
+	if consentManage {
+		gotPage, gotURL, mailbox, err = convergeMicrosoftConsentManage(session, page, currentURL, "owner@outlook.com", "", "proof@recovery.test")
+	} else {
+		gotPage, gotURL, mailbox, err = handleAccountPagesWithOptions(session, page, currentURL, "", 10, "owner@outlook.com", nil, false, "proof@recovery.test")
+	}
 
 	require.NoError(t, err)
 	require.Equal(t, finishedPage, gotPage)

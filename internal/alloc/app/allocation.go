@@ -2011,11 +2011,17 @@ func (uc *UseCase) allocateMicrosoft(ctx context.Context, cmd AllocateCommand, c
 	preferences := microsoftMailboxPreferences(cmd.OrderNo, config)
 	now := time.Now().UTC()
 	resourceBusy := false
+	directEnterpriseSuffixLookup := config.ProductType == coredomain.ProductTypeMicrosoftEnterprise && cmd.EmailSuffix != ""
 	for _, mailbox := range preferences {
 		key := [2]string{string(cmd.SupplyScope), string(mailbox)}
 		window := probes[key]
 		if window == nil {
 			window = newBucketProbeWindow(cmd.OrderNo, config.ProjectID, string(mailbox), MicrosoftBucketCount, MicrosoftExpansionBuckets)
+			if directEnterpriseSuffixLookup && len(window.batches) > 1 {
+				// The enterprise repository resolves a concrete tenant suffix through
+				// its suffix index; one broad candidate query is enough.
+				window.batches = window.batches[:1]
+			}
 			probes[key] = window
 		}
 		// ponytail: stock outside this window, or beyond its candidate limits,
@@ -2045,7 +2051,7 @@ func (uc *UseCase) allocateMicrosoft(ctx context.Context, cmd AllocateCommand, c
 
 func (uc *UseCase) tryMicrosoftBuckets(ctx context.Context, cmd AllocateCommand, config ProductAllocationConfig, mailbox domain.MicrosoftMailbox, buckets []uint16, now time.Time) (*domain.UnifiedAllocation, bool, error) {
 	limit := candidateWindowSizeValue()
-	if len(buckets) > 1 {
+	if len(buckets) > 1 || (config.ProductType == coredomain.ProductTypeMicrosoftEnterprise && cmd.EmailSuffix != "") {
 		limit = globalCandidateWindowValue()
 	}
 	candidates, err := uc.repo.ListMicrosoftSourceCandidates(ctx, config.ProjectID, cmd.BuyerUserID, cmd.SupplyScope, mailbox, buckets, limit, cmd.EmailSuffix, config.ProductType == coredomain.ProductTypeMicrosoftEnterprise)

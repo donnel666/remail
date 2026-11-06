@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -735,17 +736,14 @@ func validateRecoveryPassword(password string) error {
 	return nil
 }
 
+var recoveryServerDataMarker = regexp.MustCompile(`\bServerData\s*=\s*`)
+
 func extractPasswordRecoveryServerData(page string) (map[string]any, error) {
-	markers := []string{"var ServerData=", "window.ServerData=", "ServerData="}
-	start := -1
-	for _, marker := range markers {
-		if index := strings.Index(page, marker); index >= 0 && (start < 0 || index < start) {
-			start = index + len(marker)
-		}
-	}
-	if start < 0 {
+	marker := recoveryServerDataMarker.FindStringIndex(page)
+	if marker == nil {
 		return nil, fmt.Errorf("ServerData marker not found")
 	}
+	start := marker[1]
 	relativeObjectStart := strings.IndexByte(page[start:], '{')
 	if relativeObjectStart < 0 {
 		return nil, fmt.Errorf("ServerData object not found")

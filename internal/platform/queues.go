@@ -94,6 +94,9 @@ const (
 	QueueBackgroundDaumImport     = "background_daum_import"
 	QueueBackgroundDaumValidation = "background_daum_validation"
 	QueueBackgroundDaumHistory    = "background_daum_history"
+	// QueueBackgroundDashboard refreshes dashboard read models separately from
+	// long-running inventory scans.
+	QueueBackgroundDashboard = "background_dashboard"
 	// QueueBackgroundInventory refreshes Redis read models such as inventory and dashboard rankings.
 	QueueBackgroundInventory = "background_inventory"
 )
@@ -123,5 +126,16 @@ var AllQueueNames = []string{
 	QueueBackgroundDaumImport,
 	QueueBackgroundDaumValidation,
 	QueueBackgroundDaumHistory,
+	QueueBackgroundDashboard,
 	QueueBackgroundInventory,
+}
+
+// QueueRegistryMembers returns the queue names in the form accepted by Redis
+// SADD. The set is discovery metadata; the worker topology remains static.
+func QueueRegistryMembers() []any {
+	members := make([]any, len(AllQueueNames))
+	for i, name := range AllQueueNames {
+		members[i] = name
+	}
+	return members
 }

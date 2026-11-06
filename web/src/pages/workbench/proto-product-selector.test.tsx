@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { IamApiError } from "@/lib/api-client";
 import type { ProjectInventoryTotalResponse, ProjectItem, ProjectProductSummary } from "@/lib/projects-api";
 import Dashboard, { filterProducts, mergeProjectInventory, toWorkbenchProducts } from "../Dashboard";
 import { ProductPickerPanel } from "./product-picker-panel";
@@ -277,4 +278,35 @@ it("uses a separate selector and tenant suffixes for Microsoft enterprise produc
   expect(products[0].emailSuffix).toBe("microsoft_enterprise");
   expect(products[0].productType).toBe("microsoft_enterprise");
   expect(products[1].emailSuffix).toBe("tenant.onmicrosoft.com");
+});
+
+it.each([
+  { name: "enterprise inventory failure", type: "microsoft_enterprise", error: new IamApiError(422, { message: "Insufficient inventory." }), fresh: true },
+  { name: "enterprise network failure", type: "microsoft_enterprise", error: new TypeError("Failed to fetch"), fresh: false },
+  { name: "enterprise server failure", type: "microsoft_enterprise", error: new IamApiError(500, { message: "Insufficient inventory." }), fresh: false },
+  { name: "personal inventory failure", type: "microsoft", error: new IamApiError(422, { message: "Insufficient inventory." }), fresh: false },
+] as const)("retries $name with the appropriate checkout identity", async ({ type, error, fresh }) => {
+  const suffix = type === "microsoft_enterprise" ? "tenant.onmicrosoft.com" : "outlook.com";
+  const suffixes = [{ suffix, totalAvailable: 20, publicAvailable: 0 }];
+  const fixture = { ...product, type, suffixes };
+  mocks.listProjects.mockResolvedValue({ items: [{ ...project, products: [fixture] }] });
+  mocks.inventory.mockResolvedValue({ projectId: 1, totalAvailable: 20, products: [
+    { productType: type, totalAvailable: 20, publicAvailable: 0, suffixes },
+  ] });
+  mocks.createOrder.mockRejectedValueOnce(error);
+  const { container } = render(<Dashboard />);
+  await waitFor(() => expect(productRows(container)).toHaveLength(2));
+  fireEvent.click(productRows(container)[1]);
+  const create = screen.getByRole("button", { name: "Create fixture order" });
+  fireEvent.click(create);
+  await waitFor(() => expect(mocks.toastError).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(create).toBeEnabled());
+  const firstKey = mocks.createOrder.mock.calls[0][1].idempotencyKey;
+  fireEvent.click(create);
+  await waitFor(() => expect(mocks.createOrder).toHaveBeenCalledTimes(2));
+  const nextOptions = mocks.createOrder.mock.calls[1][1];
+  expect(nextOptions.supply).toBe("private_first");
+  expect(mocks.createOrder.mock.calls[1][0]).toEqual({ projectId: 1, emailSuffix: suffix });
+  expect(nextOptions.idempotencyKey === firstKey).toBe(!fresh);
+  await waitFor(() => expect(create).toBeEnabled());
 });

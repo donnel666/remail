@@ -20,6 +20,7 @@ type Module struct {
 	view       *infra.ViewRepo
 	asynq      *asynq.Client
 	background BackgroundExecutionGate
+	dashboard  chan struct{}
 }
 
 type BackgroundExecutionGate interface {
@@ -40,6 +41,16 @@ func NewModule(db *gorm.DB, redisClient redis.UniversalClient, asynqClient *asyn
 		adminCache: newAdminDashboardCache(redisClient),
 		view:       view,
 		asynq:      asynqClient,
+		dashboard:  make(chan struct{}, 1),
+	}
+}
+
+// SetDashboardRefreshGate is only used by tests and embedded workers that want
+// to observe admission decisions. Production dashboard refreshes use the
+// dedicated one-slot gate above, so they cannot consume inventory capacity.
+func (m *Module) SetDashboardRefreshGate(gate BackgroundExecutionGate) {
+	if m != nil {
+		m.background = gate
 	}
 }
 

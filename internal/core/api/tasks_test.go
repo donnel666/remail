@@ -43,10 +43,10 @@ func TestBackgroundDispatchLimitUsesOnlyUnusedCapacity(t *testing.T) {
 	require.Zero(t, backgroundDispatchLimit(gate, resourceValidationDispatchMaximum))
 }
 
-func TestBackgroundValidationWindowLimitUsesTotalWindow(t *testing.T) {
+func TestBackgroundValidationWindowLimitUsesUnusedCapacity(t *testing.T) {
 	gate := &coreBackgroundExecutionGateStub{available: 7, limit: 32}
 
-	require.Equal(t, 32, backgroundValidationWindowLimit(gate, resourceValidationDispatchMaximum))
+	require.Equal(t, 7, backgroundValidationWindowLimit(gate, resourceValidationDispatchMaximum))
 }
 
 func TestMicrosoftEnterpriseDispatcherWorksWithPersonalWindowFull(t *testing.T) {
@@ -66,7 +66,7 @@ func TestMicrosoftEnterpriseDispatcherWorksWithPersonalWindowFull(t *testing.T) 
 	queue := &mockValidationQueue{}
 	module := &CoreModule{
 		ValidationUseCase:   coreapp.NewResourceValidationUseCase(resources, newMockValidationRepo(resources), queue, nil),
-		BackgroundExecution: &coreBackgroundExecutionGateStub{limit: 1},
+		BackgroundExecution: &coreBackgroundExecutionGateStub{available: 1, limit: 1},
 	}
 	mux := asynq.NewServeMux()
 	RegisterCoreTaskHandlers(mux, module)
@@ -103,6 +103,19 @@ func TestResourceValidationAdmissionDenialDefersInAsynqWithoutDatabaseMutation(t
 	require.ErrorIs(t, err, platform.ErrBackgroundExecutionDeferred)
 	require.Equal(t, coredomain.MicrosoftStatusValidating, resources.microsoft[root.ID].Status)
 	require.False(t, gate.released.Load(), "a denied task never owns a permit")
+}
+
+func TestResourceValidationDispatcherDefersWhenCapacityIsZero(t *testing.T) {
+	module := &CoreModule{
+		ValidationUseCase:   coreapp.NewResourceValidationUseCase(nil, nil, &mockValidationQueue{}, nil),
+		BackgroundExecution: &coreBackgroundExecutionGateStub{available: 0},
+	}
+	mux := asynq.NewServeMux()
+	RegisterCoreTaskHandlers(mux, module)
+
+	err := mux.ProcessTask(context.Background(), asynq.NewTask(coreinfra.TypeResourceValidationDispatcher, nil))
+
+	require.ErrorIs(t, err, platform.ErrBackgroundExecutionDeferred)
 }
 
 type dispatcherCountingQueue struct {

@@ -183,7 +183,7 @@ func TestBackgroundLoadControllerMultiplicativelyBacksOffAtCPULine(t *testing.T)
 }
 
 func TestBackgroundLoadControllerMultiplicativelyBacksOffAtMemoryLine(t *testing.T) {
-	controller, _ := newBackgroundLoadControllerTestHarness(20, 50)
+	controller, _ := newBackgroundLoadControllerTestHarness(20, 85)
 	controller.gate.Resize(96)
 
 	controller.sampleAndTune(context.Background())
@@ -253,7 +253,7 @@ func TestBackgroundLoadControllerHoldsWhenMetricsCannotProveHeadroom(t *testing.
 	// other metric is temporarily unavailable.
 	load.setErrors(errors.New("cpu unavailable"), nil)
 	load.mu.Lock()
-	load.memory = 75
+	load.memory = 90
 	load.mu.Unlock()
 	controller.sampleAndTune(context.Background())
 	require.Equal(t, 32, controller.Snapshot().Limit)

@@ -302,6 +302,12 @@ func convergeMicrosoftConsentManage(session *Session, page, currentURL, email, p
 		if isVerifiedMicrosoftConsentManagePage(page, currentURL) {
 			return page, currentURL, boundMailbox, nil
 		}
+		if nextPage, nextURL, handled, err := continueMicrosoftTermsNotice(session, page, currentURL); err != nil {
+			return "", "", "", err
+		} else if handled {
+			page, currentURL = nextPage, nextURL
+			continue
+		}
 		logInfo("Microsoft 授权管理中继 #%d: url=%s page_id=%s action=%s", round+1, currentURL, extractPageID(page), extractFormAction(page))
 
 		if nextPage, nextURL, handled, err := cancelMicrosoftConsentPasskey(session, page, currentURL); err != nil {
@@ -343,7 +349,7 @@ func convergeMicrosoftConsentManage(session *Session, page, currentURL, email, p
 			page, currentURL = nextPage, nextURL
 			continue
 		}
-		if isIdentity || isProofs {
+		if isIdentity || isProofs || strings.EqualFold(extractConfigString(page, "sPageId"), "Account_CredentialActionInterruptPage_Client") {
 			nextPage, nextURL, verifiedMailbox, err := handleAccountPagesWithOptions(
 				session,
 				page,

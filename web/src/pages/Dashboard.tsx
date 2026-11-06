@@ -781,6 +781,15 @@ export default function Dashboard() {
       void refreshOrders();
       void loadProjectInventory(selectedProject.id);
     } catch (err) {
+      if (
+        selectedProduct.productType === "microsoft_enterprise" &&
+        err instanceof IamApiError &&
+        err.status === 422 &&
+        err.message === "Insufficient inventory."
+      ) {
+        clearCheckoutAttempt(attempt);
+        checkoutAttemptRef.current = null;
+      }
       void refreshOrders();
       void loadProjectInventory(selectedProject.id);
       Toast.error(getIamErrorMessage(t, err, "Order creation failed."));

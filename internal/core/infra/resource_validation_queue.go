@@ -30,6 +30,10 @@ const (
 	validationBatchCleanupTimeout        = 5 * time.Second
 )
 
+func validationDispatcherMaxRetryValue() int {
+	return max(1, platform.BackgroundTaskMaxRetryValue())
+}
+
 type ResourceValidationQueue struct {
 	client *asynq.Client
 	redis  redis.UniversalClient
@@ -207,7 +211,7 @@ func (q *ResourceValidationQueue) enqueueValidationDispatcher(ctx context.Contex
 	if q == nil || q.client == nil {
 		return fmt.Errorf("resource validation queue is unavailable")
 	}
-	queueName := platform.QueueDefault
+	queueName := platform.QueueBackgroundValidation
 	var payload []byte
 	if enterprise {
 		queueName = platform.QueueBackgroundMicrosoftEnterpriseValidation
@@ -224,7 +228,7 @@ func (q *ResourceValidationQueue) enqueueValidationDispatcher(ctx context.Contex
 		// Keeping the lease for the full task timeout prevents a slow scan from
 		// spawning overlapping dispatcher tasks every two seconds.
 		asynq.Unique(uniqueTTL),
-		asynq.MaxRetry(0),
+		asynq.MaxRetry(validationDispatcherMaxRetryValue()),
 		asynq.Timeout(validationDispatcherTaskTimeout),
 		asynq.Retention(0),
 	}

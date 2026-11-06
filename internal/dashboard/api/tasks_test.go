@@ -28,7 +28,7 @@ func (s *dashboardBackgroundGateStub) TryAcquire() (func(), bool) {
 	return func() {}, false
 }
 
-func TestDashboardRefreshesUseBackgroundQueueAndDeduplicate(t *testing.T) {
+func TestDashboardRefreshesUseDedicatedQueueAndDeduplicate(t *testing.T) {
 	server := miniredis.RunT(t)
 	redisOptions := asynq.RedisClientOpt{Addr: server.Addr()}
 	client := asynq.NewClient(redisOptions)
@@ -41,7 +41,7 @@ func TestDashboardRefreshesUseBackgroundQueueAndDeduplicate(t *testing.T) {
 
 	inspector := asynq.NewInspector(redisOptions)
 	t.Cleanup(func() { require.NoError(t, inspector.Close()) })
-	tasks, err := inspector.ListPendingTasks(platform.QueueBackgroundInventory)
+	tasks, err := inspector.ListPendingTasks(platform.QueueBackgroundDashboard)
 	require.NoError(t, err)
 	require.Len(t, tasks, 2)
 	timeouts := map[string]time.Duration{}
@@ -55,7 +55,7 @@ func TestDashboardRefreshesUseBackgroundQueueAndDeduplicate(t *testing.T) {
 func TestDashboardRefreshDefersWhenAdaptiveBackgroundWindowIsFull(t *testing.T) {
 	gate := &dashboardBackgroundGateStub{}
 	module := NewModule(nil, nil, nil)
-	module.SetBackgroundExecutionGate(gate)
+	module.SetDashboardRefreshGate(gate)
 	mux := asynq.NewServeMux()
 	cleanup := RegisterTaskHandlers(mux, module)
 	t.Cleanup(func() { cleanup(context.Background()) })
@@ -63,4 +63,13 @@ func TestDashboardRefreshDefersWhenAdaptiveBackgroundWindowIsFull(t *testing.T) 
 	err := mux.ProcessTask(context.Background(), asynq.NewTask(typeRankingRefresh, nil))
 	require.ErrorIs(t, err, platform.ErrBackgroundExecutionDeferred)
 	require.Equal(t, 1, gate.calls)
+}
+
+func TestDashboardRefreshUsesDedicatedSlot(t *testing.T) {
+	module := NewModule(nil, nil, nil)
+	firstRelease, firstAdmitted := acquireDashboardBackground(context.Background(), module)
+	require.True(t, firstAdmitted)
+	defer firstRelease()
+	_, secondAdmitted := acquireDashboardBackground(context.Background(), module)
+	require.False(t, secondAdmitted)
 }

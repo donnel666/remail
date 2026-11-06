@@ -56,10 +56,14 @@ func microsoftEnterpriseCandidateQuery(db *gorm.DB, projectID, buyerID uint, sco
 func (r *Repo) listMicrosoftEnterpriseCandidates(ctx context.Context, projectID, buyerID uint, scope domain.SupplyScope, buckets []uint16, limit int, suffix string) ([]allocapp.MicrosoftCandidate, error) {
 	query := microsoftEnterpriseCandidateQuery(r.dbFor(ctx), projectID, buyerID, scope).
 		Select("ms.id AS resource_id, ms.email_address, ms.quality_score").
-		Where("ms.alloc_bucket IN ?", buckets).
 		Order("ms.last_allocated_at ASC, ms.quality_score DESC, ms.id ASC").Limit(limit)
 	if suffix != "" {
+		// Enterprise inventory has a stable suffix index. Once the allocator has
+		// selected a tenant suffix, use it directly instead of probing every
+		// allocation bucket when stock is sparse.
 		query = query.Where("ms.email_domain = ?", suffix)
+	} else {
+		query = query.Where("ms.alloc_bucket IN ?", buckets)
 	}
 	var rows []allocapp.MicrosoftCandidate
 	if err := query.Scan(&rows).Error; err != nil {

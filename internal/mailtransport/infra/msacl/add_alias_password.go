@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -34,6 +36,23 @@ import (
 // arrUserProofsRE matches the ServerData.arrUserProofs array embedded in the
 // identity-verification page. Non-greedy up to the closing "}]" of the array.
 var arrUserProofsRE = regexp.MustCompile(`"arrUserProofs"\s*:\s*(\[.*?\}\s*\])`)
+
+func emailCodeApprovalOffered(page, mailbox string) bool {
+	sd, err := extractPasswordRecoveryServerData(page)
+	if err != nil || asString(sd["sPageId"]) != "i5600" || normalizeRecoveryMailbox(mailbox) == "" || !UsesActiveAuxiliaryDomain(mailbox) {
+		return false
+	}
+	proofs := asSlice(sd["arrUserProofs"])
+	if len(proofs) != 1 {
+		return false
+	}
+	proof := asMap(proofs[0])
+	offered := asInt(sd["iSAMode"]) == 2 && asBool(sd["fAllowManualTFA"]) && asInt(proof["type"]) == 1 &&
+		asBool(proof["otcEnabled"]) && !asBool(proof["isLost"]) && !asBool(proof["pushEnabled"]) &&
+		asString(proof["data"]) != "" && mailboxMatchesMasked(asString(proof["display"]), mailbox)
+	logInfo("Microsoft email approval options: mode=%d manual=%t otc=%t push=%t offered=%t", asInt(sd["iSAMode"]), asBool(sd["fAllowManualTFA"]), asBool(proof["otcEnabled"]), asBool(proof["pushEnabled"]), offered)
+	return offered
+}
 
 type userProof struct {
 	Data    string `json:"data"`
@@ -165,6 +184,17 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 		return "", "", err
 	}
 
+	sendURL := fmt.Sprintf("https://login.live.com/GetOneTimeCode.srf?id=%s&client_id=%s", otcLoginID, otcLoginClientID)
+	page, currentURL, lease, err := submitPasswordEmailProof(session, page, currentURL, uaid, email, proxy, bindingAddress, sendURL)
+	if err != nil {
+		return "", "", err
+	}
+	defer releaseCompletedCodeMailLease(session.context(), lease)
+	page, currentURL, err = convergeExplicitAliasToAddAssocID(session, page, currentURL)
+	return page, currentURL, err
+}
+
+func submitPasswordEmailProof(session *Session, page, currentURL, uaid, email, proxy, bindingAddress, sendURL string) (string, string, *codeMailLease, error) {
 	// 身份验证页内嵌 arrUserProofs。若未直接出现 (JS 轮询页), 尝试推进一步再取。
 	proofData, proofDisplay := extractMatchingUserProof(page, bindingAddress)
 	if proofData == "" {
@@ -177,12 +207,20 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 	idPPFT := extractPPFT(page)
 	verifyPostURL := firstNonEmpty(extractPostURL(page), currentURL)
 	uaid = firstNonEmpty(getQueryParam(verifyPostURL, "uaid"), getQueryParam(currentURL, "uaid"), uaid)
+	for _, target := range [][2]string{{sendURL, "/GetOneTimeCode.srf"}, {verifyPostURL, "/ppsecure/post.srf"}} {
+		u, err := url.Parse(target[0])
+		if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Host, "login.live.com") || u.User != nil || !strings.EqualFold(u.Path, target[1]) {
+			return "", "", nil, newAuthError("Microsoft email verification target is invalid.", AuthStatusRequestError)
+		}
+	}
 	if proofData == "" || idPPFT == "" {
 		if proofData == "" && proofDisplay != "" {
-			return "", "", &AuthError{Message: "Microsoft 当前辅助邮箱与本地 Binding 不一致", Status: AuthStatusAlreadyBound, BoundMailbox: proofDisplay}
+			return "", "", nil, &AuthError{Message: "Microsoft 当前辅助邮箱与本地 Binding 不一致", Status: AuthStatusAlreadyBound, BoundMailbox: proofDisplay}
 		}
-		_ = os.WriteFile("/tmp/msacl_pwd_identity_stuck.html", []byte("<!-- final="+currentURL+" pageID="+extractPageID(page)+" -->\n"+page), 0o644)
-		return "", "", newExplicitAliasStageError(
+		if msaclDebugLogs {
+			_ = os.WriteFile("/tmp/msacl_pwd_identity_stuck.html", []byte("<!-- final="+currentURL+" pageID="+extractPageID(page)+" -->\n"+page), 0o600)
+		}
+		return "", "", nil, newExplicitAliasStageError(
 			"密码登录未到达身份验证页 (缺 arrUserProofs/PPFT)",
 			AuthStatusAuthTimeout,
 			explicitAliasStageAccountPageIncomplete,
@@ -195,19 +233,24 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 	defer cancel()
 	lease, err := claimCodeMailLease(ctx, firstNonEmpty(normalizeRecoveryMask(proofDisplay), recoveryMaskFromContext(ctx)), bindingAddress)
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 	defer lease.releaseIfUnsent(ctx)
+	leaseCompleted := false
+	defer func() {
+		if !leaseCompleted {
+			releaseCompletedCodeMailLease(session.context(), lease)
+		}
+	}()
 	seen, err := snapshotMailboxKeys(ctx, bindingAddress, proxy)
 	if err != nil {
-		logWarning("PWD snapshotMailboxKeys 失败: %v", err)
+		return "", "", nil, wrapAuthError("password email baseline could not be read", AuthStatusRequestError, err, bindingAddress)
 	}
 
 	// ---- 步骤5: GetOneTimeCode purpose=eOTT_OneTimePassword & UIMode=11 ----
 	logInfo("PWD 步骤5: GetOneTimeCode (eOTT_OneTimePassword) 发码到 %s", bindingAddress)
-	sendURL := fmt.Sprintf("https://login.live.com/GetOneTimeCode.srf?id=%s&client_id=%s", otcLoginID, otcLoginClientID)
 	if err := lease.markSent(ctx); err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 	sendResp, err := session.Post(sendURL, requestOptions{
 		Data: map[string]string{
@@ -233,7 +276,7 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 		}),
 	})
 	if err != nil {
-		return "", "", wrapAuthError(fmt.Sprintf("GetOneTimeCode 请求异常: %s", err), AuthStatusRequestError, err)
+		return "", "", nil, wrapAuthError(fmt.Sprintf("GetOneTimeCode 请求异常: %s", err), AuthStatusRequestError, err)
 	}
 	var sendData map[string]any
 	if err := sendResp.JSON(&sendData); err != nil {
@@ -241,10 +284,10 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 		if len(body) > 200 {
 			body = body[:200]
 		}
-		return "", "", wrapAuthError(fmt.Sprintf("GetOneTimeCode 返回非 JSON: %s", body), AuthStatusRequestError, err)
+		return "", "", nil, wrapAuthError(fmt.Sprintf("GetOneTimeCode 返回非 JSON: %s", body), AuthStatusRequestError, err)
 	}
 	if asInt(sendData["State"]) != 201 {
-		return "", "", newAuthError(fmt.Sprintf("GetOneTimeCode 未返回 State=201: %v", sendData), AuthStatusRequestError)
+		return "", "", nil, newAuthError(fmt.Sprintf("GetOneTimeCode 未返回 State=201: %v", sendData), AuthStatusRequestError)
 	}
 	logInfo("PWD 发码成功 State=201 (无 FlowToken, 验码用页面 PPFT)")
 
@@ -252,15 +295,20 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 	logInfo("PWD 步骤6: 读辅助邮箱验证码")
 	code, err := mailWaitCode(ctx, bindingAddress, proxy, 90, seen)
 	if err != nil {
-		return "", "", wrapAuthError(fmt.Sprintf("读取验证码超时: %v", err), AuthStatusCodeTimeout, err)
+		return "", "", nil, wrapAuthError(fmt.Sprintf("读取验证码超时: %v", err), AuthStatusCodeTimeout, err)
 	}
 	if code == "" {
-		return "", "", newAuthError("未收到辅助邮箱验证码", AuthStatusCodeTimeout)
+		return "", "", nil, newAuthError("未收到辅助邮箱验证码", AuthStatusCodeTimeout)
 	}
-	logInfo("PWD 验证码=%s", code)
+	logInfo("PWD 已收到验证码")
 
 	// ---- 步骤7: 提交验证码 (type=18) ----
 	logInfo("PWD 步骤7: 提交验证码 (type=18)")
+	sd, _ := extractPasswordRecoveryServerData(page)
+	infoPageShown := "0"
+	if asBool(sd["fIsInfoPageShown"]) {
+		infoPageShown = "1"
+	}
 	resp, err := session.Post(verifyPostURL, requestOptions{
 		Data: map[string]string{
 			"AddTD":              "true",
@@ -268,12 +316,12 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 			"GeneralVerify":      "false",
 			"PPFT":               idPPFT,
 			"canary":             "",
-			"sacxt":              "0",
+			"sacxt":              strconv.Itoa(asInt(sd["iSAContext"])),
 			"hpgrequestid":       "",
-			"hideSmsInMfaProofs": "false",
+			"hideSmsInMfaProofs": strconv.FormatBool(asBool(sd["fHideSmsInMfaProofs"])),
 			"type":               "18",
 			"login":              email,
-			"infoPageShown":      "0",
+			"infoPageShown":      infoPageShown,
 			"ProofConfirmation":  bindingAddress,
 			"otc":                code,
 		},
@@ -286,16 +334,13 @@ func loginForExplicitAliasPassword(session *Session, email, password, proxy, bin
 		HasAllowRedirects: true,
 	})
 	if err != nil {
-		return "", "", wrapAuthError(fmt.Sprintf("提交验证码异常: %s", err), AuthStatusRequestError, err)
+		return "", "", nil, wrapAuthError(fmt.Sprintf("提交验证码异常: %s", err), AuthStatusRequestError, err)
 	}
 	page, currentURL = resp.Body, resp.URL
 	logDebug("PWD type=18 验码后落 %s pageID=%s", currentURL, extractPageID(page))
 
-	// ---- 步骤8: 收敛到 AddAssocId (KMSI/passkey 等中断) ----
-	logInfo("PWD 步骤8: 收敛到 AddAssocId")
-	page, currentURL, err = convergeExplicitAliasToAddAssocID(session, page, currentURL)
-	releaseCompletedCodeMailLease(session.context(), lease)
-	return page, currentURL, err
+	leaseCompleted = true
+	return page, currentURL, lease, nil
 }
 
 // convergeExplicitAliasToAddAssocID drives the post-verify interrupt chain
@@ -343,8 +388,10 @@ func convergeExplicitAliasToAddAssocID(session *Session, page, currentURL string
 		logInfo("显式别名收敛 第%d轮兜底GET后=%s pageID=%s", round+1, currentURL, extractPageID(page))
 	}
 	if !strings.Contains(strings.ToLower(currentURL), "account.live.com/addassocid") {
-		_ = os.WriteFile("/tmp/msacl_converge_stuck.html", []byte("<!-- final="+currentURL+" pageID="+extractPageID(page)+" -->\n"+page), 0o644)
-		logWarning("显式别名收敛卡住未到 addassocid: url=%s pageID=%s 已dump /tmp/msacl_converge_stuck.html", currentURL, extractPageID(page))
+		if msaclDebugLogs {
+			_ = os.WriteFile("/tmp/msacl_converge_stuck.html", []byte("<!-- final="+currentURL+" pageID="+extractPageID(page)+" -->\n"+page), 0o600)
+		}
+		logWarning("显式别名收敛卡住未到 addassocid: url=%s pageID=%s", currentURL, extractPageID(page))
 		return "", "", newExplicitAliasStageError(
 			"未能进入 Microsoft 别名管理页",
 			AuthStatusAuthTimeout,

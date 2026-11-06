@@ -71,6 +71,7 @@ func backgroundQueueConfig() map[string]int {
 		QueueBackgroundDaumImport:                    runtimeconfig.Int("asynq_queue_background_daum_import_weight", 1, 1),
 		QueueBackgroundDaumValidation:                runtimeconfig.Int("asynq_queue_background_daum_validation_weight", 1, 1),
 		QueueBackgroundDaumHistory:                   runtimeconfig.Int("asynq_queue_background_daum_history_weight", 1, 1),
+		QueueBackgroundDashboard:                     runtimeconfig.Int("asynq_queue_background_dashboard_weight", 1, 1),
 		QueueBackgroundInventory:                     runtimeconfig.Int("asynq_queue_background_inventory_weight", 1, 1),
 		// Admin resource bulk operations (validate/publish/unpublish/delete) are
 		// enqueued to the resource queue; without it here no server consumes them
@@ -123,6 +124,11 @@ func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 		return nil, nil, fmt.Errorf("redis init: %w", err)
 	}
 	p.Redis = rdb
+	if err := p.Redis.SAdd(ctx, "asynq:queues", QueueRegistryMembers()...).Err(); err != nil {
+		rdb.Close()
+		sqlDB.Close()
+		return nil, nil, fmt.Errorf("repair asynq queue registry: %w", err)
+	}
 
 	mc, err := initMinIO(cfg.MinIO)
 	if err != nil {
@@ -135,6 +141,11 @@ func New(ctx context.Context, cfg *Config) (*Platform, func(), error) {
 
 	p.Asynq = initAsynq(cfg.Redis)
 	p.redisConfig = cfg.Redis
+	if err := migrateLegacyDashboardTasks(ctx, p.Asynq, p.Redis); err != nil {
+		// A migration failure must not prevent the service from starting. The old
+		// tasks remain in their original queue and can be retried on the next boot.
+		slog.Warn("migrate legacy dashboard refresh tasks failed", "error", err)
+	}
 	p.SMTP = cfg.SMTP
 	p.TrustedProxies = append([]string(nil), cfg.Server.TrustedProxies...)
 

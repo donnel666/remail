@@ -72,8 +72,9 @@ var osPool = []osProfile{
 
 var browserPool = []browserProfile{
 	{
-		name:           "Chrome",
-		versions:       []string{"104", "107", "110", "116", "120", "124", "131"},
+		name: "Chrome",
+		// Chrome 116 PSK fails Microsoft's HelloRetryRequest in the installed uTLS.
+		versions:       []string{"104", "107", "110", "117", "120", "124", "131"},
 		impersonateTpl: "chrome%s",
 		uaTpl:          "Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s.0.0.0 Safari/537.36",
 		secCH:          chromeSecCHUA,
@@ -209,8 +210,6 @@ func profileForBrowser(name, version string) profiles.ClientProfile {
 			return profiles.Chrome_107
 		case "110":
 			return profiles.Chrome_110
-		case "116":
-			return profiles.Chrome_116_PSK
 		case "117":
 			return profiles.Chrome_117
 		case "120":

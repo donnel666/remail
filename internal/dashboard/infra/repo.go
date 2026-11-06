@@ -26,7 +26,11 @@ type ViewRepo struct {
 const (
 	leaderboardCacheKey = "dashboard:leaderboards:v4"
 	leaderboardCacheTTL = 15 * time.Minute
-	historyOrderExclude = "order_no NOT LIKE 'HIST-%'"
+	// Keep the last successful snapshot through a missed refresh. Requests use
+	// it while the dedicated refresh queue catches up instead of running the
+	// unbounded historical ranking query synchronously.
+	leaderboardCacheStaleTTL = 24 * time.Hour
+	historyOrderExclude      = "order_no NOT LIKE 'HIST-%'"
 )
 
 // ponytail: one JSON value keeps the two rankings atomic; use ZSETs only if the
@@ -332,7 +336,11 @@ func (r *ViewRepo) RefreshLeaderboardCache(ctx context.Context, todayStart time.
 	if err != nil {
 		return err
 	}
-	return r.redis.Set(ctx, leaderboardCacheKey, payload, runtimeconfig.Duration("leaderboard_cache_ttl_minutes", leaderboardCacheTTL, time.Minute, 1)).Err()
+	ttl := runtimeconfig.Duration("leaderboard_cache_ttl_minutes", leaderboardCacheTTL, time.Minute, 1)
+	if ttl < leaderboardCacheStaleTTL {
+		ttl = leaderboardCacheStaleTTL
+	}
+	return r.redis.Set(ctx, leaderboardCacheKey, payload, ttl).Err()
 }
 
 func (r *ViewRepo) cachedLeaderboard(ctx context.Context, since *time.Time) ([]dashboardapp.LeaderRow, bool) {

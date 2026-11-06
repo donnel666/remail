@@ -57,10 +57,12 @@ func TestMicrosoftEnterpriseValidationQueueAndDispatcherAreIndependent(t *testin
 	var payload coreapp.ResourceValidationDispatcherTask
 	require.NoError(t, json.Unmarshal(dispatchers[0].Payload, &payload))
 	require.True(t, payload.Enterprise)
-	legacy, err := inspector.ListPendingTasks(platform.QueueDefault)
+	require.Equal(t, platform.BackgroundTaskMaxRetry, dispatchers[0].MaxRetry)
+	personal, err := inspector.ListPendingTasks(MicrosoftResourceValidationQueueName)
 	require.NoError(t, err)
-	require.Len(t, legacy, 1)
-	require.Empty(t, legacy[0].Payload)
+	require.Len(t, personal, 1)
+	require.Equal(t, TypeResourceValidationDispatcher, personal[0].Type)
+	require.Equal(t, platform.BackgroundTaskMaxRetry, personal[0].MaxRetry)
 }
 
 func TestResourceValidationQueueReportsOnlyNewEnqueueAsAccepted(t *testing.T) {

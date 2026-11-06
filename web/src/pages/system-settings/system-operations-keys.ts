@@ -1,5 +1,6 @@
 export const BACKGROUND_JOB_KEYS = [
   "background_load_overload_percent",
+  "background_load_memory_overload_percent",
   "background_worker_minimum",
   "background_worker_initial",
   "background_worker_increase_step",
@@ -34,6 +35,7 @@ export const BACKGROUND_JOB_KEYS = [
   "asynq_queue_background_proto_history_weight",
   "asynq_queue_background_daum_history_weight",
   "asynq_queue_background_inventory_weight",
+  "asynq_queue_background_dashboard_weight",
   "asynq_shutdown_timeout_seconds",
   "validation_dispatch_maximum",
   "default_inbound_smtp_max_connections",

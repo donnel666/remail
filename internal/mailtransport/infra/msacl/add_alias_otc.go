@@ -2,12 +2,15 @@ package msacl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"strings"
 	"time"
 )
+
+var errNoOTCEmailProof = errors.New("microsoft has no email proof eligible for code login")
 
 // OTC login constants — the GetOneTimeCode endpoint uses a different client_id
 // from the AddAssocId OAuth flow.
@@ -139,8 +142,8 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 	if err != nil {
 		return "", "", err
 	}
-	if len(proofData) == 0 {
-		return "", "", newExplicitAliasStageError("GetCredentialType 未返回邮箱 proof", AuthStatusAuthTimeout, explicitAliasStageAccountPageIncomplete)
+	if firstEmailProofDisplay(proofData) == "" {
+		return "", "", errors.Join(errNoOTCEmailProof, newExplicitAliasStageError("GetCredentialType 未返回邮箱 proof", AuthStatusAuthTimeout, explicitAliasStageAccountPageIncomplete))
 	}
 	var proofDataToken string
 	var proofDisplay string
@@ -152,7 +155,7 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 		}
 	}
 	if proofDataToken == "" {
-		return "", "", &AuthError{Message: "Microsoft 当前辅助邮箱与本地 Binding 不一致", Status: AuthStatusAlreadyBound, BoundMailbox: firstEmailProofDisplay(proofData)}
+		return "", "", &AuthError{Message: fmt.Sprintf("Microsoft 当前辅助邮箱与可用接码地址不匹配 (%s)", firstEmailProofDisplay(proofData)), Status: AuthStatusAlreadyBound, BoundMailbox: firstEmailProofDisplay(proofData)}
 	}
 	logInfo("OTC 选中邮箱 proof 辅助=%s", bindingAddress)
 
@@ -162,7 +165,11 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 	// OTP is not swallowed into the "seen" snapshot. This matches the Python
 	// reference (records base_id before GetOneTimeCode) and the existing
 	// bindAuxiliaryEmail pattern (starts the watcher before SendOtt).
-	ctx, cancel := context.WithTimeout(session.context(), 100*time.Second)
+	codeWaitSeconds := 90
+	if configured, ok := session.context().Value(recoveryCodeWaitSecondsKey{}).(int); ok && configured >= 90 && configured <= 300 {
+		codeWaitSeconds = configured
+	}
+	ctx, cancel := context.WithTimeout(session.context(), time.Duration(codeWaitSeconds+10)*time.Second)
 	defer cancel()
 	lease, err := claimCodeMailLease(ctx, firstNonEmpty(normalizeRecoveryMask(proofDisplay), recoveryMaskFromContext(ctx)), bindingAddress)
 	if err != nil {
@@ -222,14 +229,14 @@ func loginForExplicitAliasOTC(session *Session, email, proxy, bindingAddress str
 
 	// 4. Read OTP from the recovery mailbox (baseline already snapshotted above)
 	logInfo("OTC 步骤5: 读辅助邮箱验证码")
-	code, err := mailWaitCode(ctx, bindingAddress, proxy, 90, seen)
+	code, err := mailWaitCode(ctx, bindingAddress, proxy, codeWaitSeconds, seen)
 	if err != nil {
 		return "", "", wrapAuthError(fmt.Sprintf("读取验证码超时: %v", err), AuthStatusCodeTimeout, err)
 	}
 	if code == "" {
 		return "", "", newAuthError("未收到辅助邮箱验证码", AuthStatusCodeTimeout)
 	}
-	logInfo("OTC 验证码=%s", code)
+	logInfo("OTC 已收到验证码")
 
 	// 5. Submit the OTP — type=27 (verified via CDP capture)
 	logInfo("OTC 步骤6: 提交验证码 (type=27)")
@@ -469,7 +476,7 @@ func explicitAliasAttemptFailure(alias string, attempted bool, err error) Explic
 // alias-flow pair (f6061517-... / 293577). The JSON body is the same.
 func getOTCCredentialType(session *Session, email, ppft, uaid, opid, referer string) ([]ProofData, error) {
 	if uaid == "" {
-		return nil, nil
+		return nil, newAuthError("Microsoft credential discovery is missing its session ID", AuthStatusAuthTimeout)
 	}
 	endpoint := fmt.Sprintf(
 		"https://login.live.com/GetCredentialType.srf?opid=%s&id=%s&client_id=%s&mkt=ZH-CN&lc=2052&uaid=%s",

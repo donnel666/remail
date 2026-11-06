@@ -8420,8 +8420,16 @@ class Main(Star):
                 if score > 0:
                     ranked.append((score, str(path), method.upper(), operation))
 
+        flow_primary_ids = (
+            {"createorder", "pickupmessages"}
+            if re.search(r"下单|createorder", normalized)
+            and re.search(r"取件|收件|读取邮件|pickup", normalized)
+            else set()
+        )
         ranked.sort(key=lambda item: (
             str(item[3].get("operationId") or "").casefold() != normalized,
+            bool(flow_primary_ids)
+            and str(item[3].get("operationId") or "").casefold() not in flow_primary_ids,
             -item[0], item[1], item[2],
         ))
         info = spec.get("info") if isinstance(spec.get("info"), dict) else {}
