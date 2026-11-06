@@ -125,6 +125,7 @@ var booleanKeys = map[string]struct{}{
 	"default_project_icloud_code_enabled": {}, "default_project_icloud_purchase_enabled": {},
 	"default_project_proto_code_enabled": {}, "default_project_proto_purchase_enabled": {},
 	"default_project_daum_code_enabled": {}, "default_project_daum_purchase_enabled": {},
+	"project_history_auto_scan_enabled": {},
 }
 
 func Validate(key, value string) error {

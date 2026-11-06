@@ -52,6 +52,7 @@ export const MAILMATCH_KEYS = [
   "mailmatch_fetch_timeout_minutes",
   "pickup_request_fetch_timeout_minutes",
   "project_history_timeout_minutes",
+  "project_history_auto_scan_enabled",
   "fetch_dispatcher_interval_seconds",
   "fetch_dispatcher_timeout_seconds",
   "resource_fetch_dispatch_limit",

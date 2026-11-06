@@ -6,9 +6,9 @@ import { useTranslation } from "react-i18next";
 import { invalidNumericKeys, parseSettingsList, selectOptions, serializeOptions } from "@/lib/system-settings-api";
 
 import type { SectionProps } from "./index";
-import { SettingsCardHeader, SettingsFormGrid, SettingsInvalidValuesNotice, SettingsNumberField, SettingsSection, SettingsTextareaField } from "./settings-layout";
+import { SettingsCardHeader, SettingsFormGrid, SettingsInvalidValuesNotice, SettingsNumberField, SettingsSection, SettingsSwitchField, SettingsTextareaField } from "./settings-layout";
 import { MAILMATCH_KEYS } from "./email-service-keys";
-const NUMERIC_KEYS = MAILMATCH_KEYS.filter((key) => key !== "verification_code_pattern");
+const NUMERIC_KEYS = MAILMATCH_KEYS.filter((key) => !["verification_code_pattern", "project_history_auto_scan_enabled"].includes(key));
 
 export default function MailmatchSection({ options, onBulkSave }: SectionProps) {
   const { t } = useTranslation();
@@ -57,6 +57,12 @@ export default function MailmatchSection({ options, onBulkSave }: SectionProps) 
       {field("拉取任务超时（分钟）", "mailmatch_fetch_timeout_minutes")}
       {field("接码请求超时（分钟）", "pickup_request_fetch_timeout_minutes")}
       {field("项目历史超时（分钟）", "project_history_timeout_minutes")}
+      <SettingsSwitchField
+        checked={String(form.project_history_auto_scan_enabled ?? "false") === "true"}
+        onChange={(value) => update("project_history_auto_scan_enabled", value)}
+        label={t("自动触发旧项目识别")}
+        description={t("关闭后项目上架或审批不会自动扫描历史资源，可通过显式重扫流程触发")}
+      />
       {field("拉取调度间隔（秒）", "fetch_dispatcher_interval_seconds")}
       {field("拉取调度任务超时（秒）", "fetch_dispatcher_timeout_seconds", 3600)}
       {field("资源收件每轮投递上限", "resource_fetch_dispatch_limit", 10000)}

@@ -253,6 +253,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "mailmatch_fetch_timeout_minutes", Value: "20"},
 	{Key: "pickup_request_fetch_timeout_minutes", Value: "2"},
 	{Key: "project_history_timeout_minutes", Value: "20"},
+	{Key: "project_history_auto_scan_enabled", Value: "false"},
 	{Key: "fetch_dispatcher_interval_seconds", Value: "15"},
 	{Key: "fetch_dispatcher_timeout_seconds", Value: "300"},
 	{Key: "resource_fetch_dispatch_limit", Value: "10000"},

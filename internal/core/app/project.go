@@ -287,6 +287,10 @@ type ProjectUseCase struct {
 	applicationNotifier   func(context.Context, domain.Project, string) error
 }
 
+// Automatic project history scans are a staged feature; absent configuration
+// keeps project publishing cheap while explicit rescan commands remain usable.
+const projectHistoryAutoScanEnabledKey = "project_history_auto_scan_enabled"
+
 func NewProjectUseCase(projects ProjectRepository) *ProjectUseCase {
 	return &ProjectUseCase{projects: projects}
 }
@@ -541,10 +545,7 @@ func (uc *ProjectUseCase) AdminCreateListed(ctx context.Context, operatorUserID 
 	if err := uc.projects.CreateWithLog(ctx, detail, log); err != nil {
 		return nil, err
 	}
-	uc.scheduleHistoryScan(ctx, detail, requestID)
-	uc.scheduleGmailHistoryScan(ctx, detail, requestID)
-	uc.scheduleProtoHistoryScan(ctx, detail, requestID)
-	uc.scheduleDaumHistoryScan(ctx, detail, requestID)
+	uc.scheduleAutomaticHistoryScans(ctx, detail, requestID)
 	return detail, nil
 }
 
@@ -598,8 +599,10 @@ func (uc *ProjectUseCase) AdminUpdate(ctx context.Context, operatorUserID, proje
 	if err := uc.projects.UpdateWithLog(ctx, detail, log); err != nil {
 		return nil, err
 	}
-	uc.scheduleProtoHistoryScan(ctx, detail, requestID)
-	uc.scheduleDaumHistoryScan(ctx, detail, requestID)
+	if uc.projectHistoryAutoScanEnabled() {
+		uc.scheduleProtoHistoryScan(ctx, detail, requestID)
+		uc.scheduleDaumHistoryScan(ctx, detail, requestID)
+	}
 	return detail, nil
 }
 
@@ -627,10 +630,7 @@ func (uc *ProjectUseCase) AdminApprove(ctx context.Context, operatorUserID, proj
 	if err != nil {
 		return nil, err
 	}
-	uc.scheduleHistoryScan(ctx, detail, requestID)
-	uc.scheduleGmailHistoryScan(ctx, detail, requestID)
-	uc.scheduleProtoHistoryScan(ctx, detail, requestID)
-	uc.scheduleDaumHistoryScan(ctx, detail, requestID)
+	uc.scheduleAutomaticHistoryScans(ctx, detail, requestID)
 	return detail, nil
 }
 
@@ -675,10 +675,7 @@ func (uc *ProjectUseCase) AdminApproveWithConfig(ctx context.Context, operatorUs
 	if err := uc.projects.ApproveWithConfigAndLog(ctx, detail, log); err != nil {
 		return nil, err
 	}
-	uc.scheduleHistoryScan(ctx, detail, requestID)
-	uc.scheduleGmailHistoryScan(ctx, detail, requestID)
-	uc.scheduleProtoHistoryScan(ctx, detail, requestID)
-	uc.scheduleDaumHistoryScan(ctx, detail, requestID)
+	uc.scheduleAutomaticHistoryScans(ctx, detail, requestID)
 	return detail, nil
 }
 
@@ -872,7 +869,7 @@ func (uc *ProjectUseCase) AdminBulkUpdateProducts(ctx context.Context, operatorU
 	if err != nil {
 		return nil, err
 	}
-	if affected > 0 && uc.protoHistoryScan != nil {
+	if affected > 0 && uc.projectHistoryAutoScanEnabled() && uc.protoHistoryScan != nil {
 		for _, product := range products {
 			if product.Type != domain.ProductTypeProto {
 				continue
@@ -889,7 +886,7 @@ func (uc *ProjectUseCase) AdminBulkUpdateProducts(ctx context.Context, operatorU
 			break
 		}
 	}
-	if affected > 0 && uc.daumHistoryScan != nil {
+	if affected > 0 && uc.projectHistoryAutoScanEnabled() && uc.daumHistoryScan != nil {
 		for _, product := range products {
 			if product.Type != domain.ProductTypeDaum {
 				continue
@@ -907,6 +904,20 @@ func (uc *ProjectUseCase) AdminBulkUpdateProducts(ctx context.Context, operatorU
 		}
 	}
 	return &ProjectBulkResult{Affected: affected}, nil
+}
+
+func (uc *ProjectUseCase) projectHistoryAutoScanEnabled() bool {
+	return runtimeconfig.Bool(projectHistoryAutoScanEnabledKey, false)
+}
+
+func (uc *ProjectUseCase) scheduleAutomaticHistoryScans(ctx context.Context, detail *domain.ProjectDetail, requestID string) {
+	if !uc.projectHistoryAutoScanEnabled() {
+		return
+	}
+	uc.scheduleHistoryScan(ctx, detail, requestID)
+	uc.scheduleGmailHistoryScan(ctx, detail, requestID)
+	uc.scheduleProtoHistoryScan(ctx, detail, requestID)
+	uc.scheduleDaumHistoryScan(ctx, detail, requestID)
 }
 
 func (uc *ProjectUseCase) AdminListAccesses(ctx context.Context, projectID uint) ([]domain.ProjectAccess, error) {

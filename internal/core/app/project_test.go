@@ -21,6 +21,19 @@ type fakeProjectRepo struct {
 	log              *governancedomain.OperationLog
 }
 
+func enableProjectHistoryAutoScan(t *testing.T) {
+	t.Helper()
+	previous, existed := runtimeconfig.Snapshot()[projectHistoryAutoScanEnabledKey]
+	runtimeconfig.Set(projectHistoryAutoScanEnabledKey, "true")
+	t.Cleanup(func() {
+		if existed {
+			runtimeconfig.Set(projectHistoryAutoScanEnabledKey, previous)
+		} else {
+			runtimeconfig.Delete(projectHistoryAutoScanEnabledKey)
+		}
+	})
+}
+
 type projectOwnerQueryStub struct {
 	owner AdminOwnerSummary
 }
@@ -380,6 +393,7 @@ func TestNormalizeMailRuleRequestsAllowsTenThousandCharacterBodies(t *testing.T)
 }
 
 func TestProjectUseCaseAdminCreateListedCreatesCompleteProjectAndLog(t *testing.T) {
+	enableProjectHistoryAutoScan(t)
 	repo := &fakeProjectRepo{}
 	uc := NewProjectUseCase(repo)
 	var scannedProjectID uint
@@ -419,6 +433,30 @@ func TestProjectUseCaseSkipsHistoryScanWithoutMicrosoftProduct(t *testing.T) {
 	require.False(t, scanned)
 }
 
+func TestProjectUseCaseDoesNotAutomaticallyScanProjectHistoryByDefault(t *testing.T) {
+	previous, existed := runtimeconfig.Snapshot()[projectHistoryAutoScanEnabledKey]
+	runtimeconfig.Delete(projectHistoryAutoScanEnabledKey)
+	t.Cleanup(func() {
+		if existed {
+			runtimeconfig.Set(projectHistoryAutoScanEnabledKey, previous)
+		}
+	})
+	repo := &fakeProjectRepo{}
+	uc := NewProjectUseCase(repo)
+	scans := 0
+	uc.SetGmailHistoryScan(func(context.Context, uint, string) error {
+		scans++
+		return nil
+	})
+	req := validProjectCreateRequest()
+	req.Products[0].Type = "gmail"
+
+	_, err := uc.AdminCreateListed(context.Background(), 9, req, "req-gmail-create", "/v1/admin/projects")
+
+	require.NoError(t, err)
+	require.Zero(t, scans)
+}
+
 func TestMicrosoftEnterpriseProjectSchedulesOnlyItsOwnHistory(t *testing.T) {
 	uc := &ProjectUseCase{}
 	personal, enterprise := 0, 0
@@ -435,6 +473,7 @@ func TestMicrosoftEnterpriseProjectSchedulesOnlyItsOwnHistory(t *testing.T) {
 }
 
 func TestProjectUseCaseGmailHistoryScanRunsAfterCreateButNotUpdate(t *testing.T) {
+	enableProjectHistoryAutoScan(t)
 	repo := &fakeProjectRepo{}
 	uc := NewProjectUseCase(repo)
 	scans := 0
@@ -457,6 +496,7 @@ func TestProjectUseCaseGmailHistoryScanRunsAfterCreateButNotUpdate(t *testing.T)
 }
 
 func TestProjectUseCaseProtoHistoryUsesIndependentHook(t *testing.T) {
+	enableProjectHistoryAutoScan(t)
 	uc := NewProjectUseCase(&fakeProjectRepo{})
 	var requests []string
 	uc.SetProtoHistoryScan(func(_ context.Context, projectID uint, requestID string) error {
@@ -482,6 +522,7 @@ func TestProjectUseCaseProtoHistoryUsesIndependentHook(t *testing.T) {
 }
 
 func TestProjectUseCaseGmailHistoryScanRunsAfterApprove(t *testing.T) {
+	enableProjectHistoryAutoScan(t)
 	detail := validProjectDetailForUseCase()
 	detail.Products[0].Type = domain.ProductTypeGmail
 	uc := NewProjectUseCase(&fakeProjectRepo{detail: detail})
@@ -500,6 +541,7 @@ func TestProjectUseCaseGmailHistoryScanRunsAfterApprove(t *testing.T) {
 }
 
 func TestProjectUseCaseGmailHistoryScanRunsAfterApproveWithConfig(t *testing.T) {
+	enableProjectHistoryAutoScan(t)
 	uc := NewProjectUseCase(&fakeProjectRepo{})
 	scans := 0
 	uc.SetGmailHistoryScan(func(_ context.Context, projectID uint, requestID string) error {
@@ -726,6 +768,7 @@ func TestProjectUseCaseResubmitNormalizesApplicationAndLog(t *testing.T) {
 }
 
 func TestProjectUseCaseAdminReviewTransitions(t *testing.T) {
+	enableProjectHistoryAutoScan(t)
 	repo := &fakeProjectRepo{detail: validProjectDetailForUseCase()}
 	uc := NewProjectUseCase(repo)
 	scanned := uint(0)
@@ -821,6 +864,7 @@ func (r *protoBulkHistoryRepo) List(ctx context.Context, filter ProjectListFilte
 }
 
 func TestProjectUseCaseProtoBulkProductsScheduleIndependentHistory(t *testing.T) {
+	enableProjectHistoryAutoScan(t)
 	for _, status := range []string{"enabled", "disabled"} {
 		t.Run(status, func(t *testing.T) {
 			repo := &protoBulkHistoryRepo{fakeProjectRepo: &fakeProjectRepo{items: []ProjectSummary{
@@ -854,6 +898,7 @@ func TestProjectUseCaseProtoBulkProductsScheduleIndependentHistory(t *testing.T)
 }
 
 func TestProjectUseCaseProtoBulkHistorySkipsOtherProductsAndFailures(t *testing.T) {
+	enableProjectHistoryAutoScan(t)
 	failure := errors.New("injected repository failure")
 	for _, tc := range []struct {
 		name, productType string
@@ -896,6 +941,7 @@ func TestProjectUseCaseAdminBulkUpdateProductsRejectsTooManyIDs(t *testing.T) {
 }
 
 func TestProjectUseCaseAdminApproveWithConfig(t *testing.T) {
+	enableProjectHistoryAutoScan(t)
 	repo := &fakeProjectRepo{}
 	uc := NewProjectUseCase(repo)
 	scanned := uint(0)
