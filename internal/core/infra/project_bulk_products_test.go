@@ -8,6 +8,7 @@ import (
 	"github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	governanceinfra "github.com/donnel666/remail/internal/governance/infra"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -54,6 +55,15 @@ func TestProjectRepoBulkUpsertProductsPreservesIDs(t *testing.T) {
 }
 
 func TestProtoBulkProductsHistoryUsesTheUpdatedProjectRange(t *testing.T) {
+	previous, existed := runtimeconfig.Snapshot()["project_history_auto_scan_enabled"]
+	runtimeconfig.Set("project_history_auto_scan_enabled", "true")
+	t.Cleanup(func() {
+		if existed {
+			runtimeconfig.Set("project_history_auto_scan_enabled", previous)
+		} else {
+			runtimeconfig.Delete("project_history_auto_scan_enabled")
+		}
+	})
 	db, err := gorm.Open(sqlite.Open("file:proto-bulk-history-projects?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&ProjectModel{}, &ProjectProductModel{}, &ProjectMailRuleModel{}, &governanceinfra.OperationLogModel{}))
