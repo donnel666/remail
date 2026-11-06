@@ -95,7 +95,6 @@ func migrateLegacyDashboardTasks(ctx context.Context, client *asynq.Client, rdb 
 func migrateDashboardTask(ctx context.Context, client *asynq.Client, inspector *asynq.Inspector, info *asynq.TaskInfo) error {
 	options := []asynq.Option{
 		asynq.Queue(QueueBackgroundDashboard),
-		asynq.TaskID(info.ID),
 		asynq.MaxRetry(max(0, info.MaxRetry-info.Retried)),
 		asynq.Unique(dashboardTaskUniqueTTL(info.Type)),
 	}
@@ -114,7 +113,7 @@ func migrateDashboardTask(ctx context.Context, client *asynq.Client, inspector *
 		}
 	}
 	_, err := client.EnqueueContext(ctx, asynq.NewTask(info.Type, info.Payload), options...)
-	if err != nil && !errors.Is(err, asynq.ErrTaskIDConflict) {
+	if err != nil && !errors.Is(err, asynq.ErrDuplicateTask) {
 		return err
 	}
 	if err := inspector.DeleteTask(QueueBackgroundInventory, info.ID); err != nil && !errors.Is(err, asynq.ErrTaskNotFound) {
