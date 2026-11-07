@@ -54,6 +54,84 @@ func TestInventoryCacheVersionSmoke(t *testing.T) {
 	require.Equal(t, "v8", inventoryCacheVersion)
 }
 
+func TestInventoryOrderActivityRefreshPolicy(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	ctx := context.Background()
+	now := time.Date(2026, time.November, 7, 7, 30, 0, 0, time.UTC)
+	key := inventoryCacheKey(allocapp.InventoryCacheStats, 10)
+	require.NoError(t, client.Set(ctx, inventoryProjectOrderActivitySampledKey, "1", 0).Err())
+	require.NoError(t, client.ZAdd(ctx, inventoryProjectOrderActivityKey, redis.Z{
+		Score: float64(now.Add(-30 * time.Minute).UnixMilli()), Member: "10",
+	}).Err())
+	next, err := inventoryNextRefreshAt(ctx, client, key, now)
+	require.NoError(t, err)
+	require.Equal(t, now.Add(time.Hour), next)
+
+	require.NoError(t, client.ZAdd(ctx, inventoryProjectOrderActivityKey, redis.Z{
+		Score: float64(now.Add(-2 * time.Hour).UnixMilli()), Member: "10",
+	}).Err())
+	next, err = inventoryNextRefreshAt(ctx, client, key, now)
+	require.NoError(t, err)
+	require.Equal(t, time.Date(2026, time.November, 7, 16, 0, 0, 0, time.UTC), next)
+}
+
+func TestRecordInventoryOrderActivityOnlyWakesNewerOrders(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	cache := NewInventoryCache(client)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	activity := []allocapp.InventoryProjectOrderActivity{{ProjectID: 10, OrderedAt: now.Add(-30 * time.Minute)}}
+	require.NoError(t, cache.RecordInventoryOrderActivity(ctx, activity))
+	score, err := client.ZScore(ctx, inventoryProjectOrderActivityKey, "10").Result()
+	require.NoError(t, err)
+	require.Equal(t, activity[0].OrderedAt.UnixMilli(), int64(score))
+	key := inventoryCacheKey(allocapp.InventoryCacheStats, 10)
+	future := float64(now.Add(time.Hour).UnixMilli())
+	require.NoError(t, client.ZAdd(ctx, inventoryCacheScheduleKey, redis.Z{Score: future, Member: key}).Err())
+	require.NoError(t, cache.RecordInventoryOrderActivity(ctx, activity))
+	require.Equal(t, future, client.ZScore(ctx, inventoryCacheScheduleKey, key).Val())
+	require.NoError(t, cache.RecordInventoryOrderActivity(ctx, []allocapp.InventoryProjectOrderActivity{{
+		ProjectID: 10, OrderedAt: now.Add(-10 * time.Minute),
+	}}))
+	require.LessOrEqual(t, client.ZScore(ctx, inventoryCacheScheduleKey, key).Val(), float64(time.Now().Add(time.Second).UnixMilli()))
+}
+
+func TestRecordInventoryOrderActivityTrimsOlderProjects(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	ctx := context.Background()
+	cache := NewInventoryCache(client)
+	require.NoError(t, client.ZAdd(ctx, inventoryProjectOrderActivityKey,
+		redis.Z{Score: float64(time.Now().Add(-48 * time.Hour).UnixMilli()), Member: "9"},
+	).Err())
+	require.NoError(t, cache.RecordInventoryOrderActivity(ctx, []allocapp.InventoryProjectOrderActivity{{
+		ProjectID: 10, OrderedAt: time.Now().UTC(),
+	}}))
+	require.ErrorIs(t, client.ZScore(ctx, inventoryProjectOrderActivityKey, "9").Err(), redis.Nil)
+	require.NoError(t, client.ZScore(ctx, inventoryProjectOrderActivityKey, "10").Err())
+}
+
+func TestRefreshInventoryCacheKeepsEarlierWakeup(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	ctx := context.Background()
+	cache := NewInventoryCache(client)
+	require.NoError(t, cache.RecordInventoryOrderActivity(ctx, []allocapp.InventoryProjectOrderActivity{{
+		ProjectID: 10, OrderedAt: time.Now().UTC().Add(-2 * time.Hour),
+	}}))
+	key := inventoryCacheKey(allocapp.InventoryCacheStats, 10)
+	earlier := float64(time.Now().Add(-time.Minute).UnixMilli())
+	require.NoError(t, client.ZAdd(ctx, inventoryCacheScheduleKey, redis.Z{Score: earlier, Member: key}).Err())
+	require.NoError(t, cache.RefreshInventoryStats(ctx, 10, &allocapp.InventoryStats{ProjectID: 10}, time.Hour))
+	require.Equal(t, earlier, client.ZScore(ctx, inventoryCacheScheduleKey, key).Val())
+}
+
 func (q *inventoryRefreshQueueStub) EnqueueInventoryRefresh(context.Context) error {
 	q.calls++
 	return q.err
@@ -586,7 +664,7 @@ func TestInventoryRefreshDiscoversAndRestoresBackendSchedule(t *testing.T) {
 	result, err = useCase.RefreshInventoryCache(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 2, result.Updated, "backend discovery must restore lost schedule entries")
-	require.Equal(t, 2, repo.projectCalls)
+	require.Equal(t, 1, repo.projectCalls, "project discovery is throttled while cached IDs restore missing schedule entries")
 }
 
 func TestInventoryCacheV8DoesNotServeV7InventorySemantics(t *testing.T) {

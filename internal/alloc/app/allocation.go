@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -22,8 +23,12 @@ import (
 )
 
 const (
-	inventoryCacheHardTTL   = 24 * time.Hour
-	inventoryRefreshLockTTL = 10 * time.Minute
+	inventoryCacheHardTTL             = 24 * time.Hour
+	inventoryRefreshLockTTL           = 10 * time.Minute
+	inventoryOrderActivitySampleSize  = 100
+	inventoryProjectDiscoveryInterval = 30 * time.Minute
+	// InventoryRefreshConcurrency protects MySQL from concurrent inventory aggregates.
+	InventoryRefreshConcurrency = 3
 	// ponytail: five cold keys bound each aggregate burst; raise only when the
 	// refresh p99 stays below one interval without affecting checkout/pickup.
 	inventoryRefreshBatchSize = 5
@@ -34,6 +39,7 @@ func InventoryRefreshParametersValue() InventoryRefreshParameters {
 		RefreshInterval: InventoryRefreshIntervalValue(),
 		CacheHardTTL:    inventoryCacheHardTTLValue(),
 		BatchSize:       inventoryRefreshBatchSize,
+		Concurrency:     InventoryRefreshConcurrency,
 	}
 }
 
@@ -108,6 +114,9 @@ type UseCase struct {
 	gmailVariantCooldown       GmailVariantCooldownPort
 	inventoryCache             InventoryCache
 	privateInventoryCache      *platform.HourlySnapshotCache[PrivateInventoryTotals]
+	inventoryProjectIDsMu      sync.Mutex
+	inventoryProjectIDs        []uint
+	inventoryProjectIDsAt      time.Time
 	protoProtocolReady         atomic.Bool
 	daumProtocolReady          atomic.Bool
 }
@@ -1466,11 +1475,10 @@ func (uc *UseCase) EnsureInventoryRefreshSchedule(ctx context.Context) error {
 	if uc == nil || uc.repo == nil || uc.inventoryCache == nil {
 		return nil
 	}
-	projectIDs, err := uc.repo.ListInventoryProjectIDs(ctx)
+	projectIDs, err := uc.listInventoryProjectIDsForSchedule(ctx)
 	if err != nil {
 		return fmt.Errorf("list inventory projects: %w", err)
 	}
-	projectIDs = uniqueInventoryProjectIDs(projectIDs)
 	entries := make([]InventoryCacheEntry, 0, len(projectIDs)*2)
 	for _, projectID := range projectIDs {
 		entries = append(entries,
@@ -1485,6 +1493,21 @@ func (uc *UseCase) EnsureInventoryRefreshSchedule(ctx context.Context) error {
 		return fmt.Errorf("initialize inventory refresh schedule: %w", err)
 	}
 	return nil
+}
+
+func (uc *UseCase) listInventoryProjectIDsForSchedule(ctx context.Context) ([]uint, error) {
+	uc.inventoryProjectIDsMu.Lock()
+	defer uc.inventoryProjectIDsMu.Unlock()
+	if !uc.inventoryProjectIDsAt.IsZero() && time.Since(uc.inventoryProjectIDsAt) < inventoryProjectDiscoveryInterval {
+		return append([]uint(nil), uc.inventoryProjectIDs...), nil
+	}
+	projectIDs, err := uc.repo.ListInventoryProjectIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	uc.inventoryProjectIDs = uniqueInventoryProjectIDs(projectIDs)
+	uc.inventoryProjectIDsAt = time.Now()
+	return append([]uint(nil), uc.inventoryProjectIDs...), nil
 }
 
 func (uc *UseCase) ListInventoryRefreshes(ctx context.Context) ([]InventoryRefreshItem, error) {
@@ -1655,6 +1678,27 @@ func (uc *UseCase) ScheduleInventoryRefresh(ctx context.Context) error {
 		return nil
 	}
 	return uc.queue.EnqueueInventoryRefresh(ctx)
+}
+
+// RefreshInventoryOrderActivity samples recent orders from the background
+// worker. Keeping this out of checkout avoids adding Redis work to every order.
+func (uc *UseCase) RefreshInventoryOrderActivity(ctx context.Context) error {
+	if uc == nil || uc.repo == nil || uc.inventoryCache == nil {
+		return nil
+	}
+	repo, ok := uc.repo.(InventoryOrderActivityRepository)
+	if !ok {
+		return nil
+	}
+	cache, ok := uc.inventoryCache.(InventoryOrderActivityCache)
+	if !ok {
+		return nil
+	}
+	activity, err := repo.ListRecentInventoryOrderActivity(ctx, inventoryOrderActivitySampleSize)
+	if err != nil {
+		return fmt.Errorf("list recent inventory order activity: %w", err)
+	}
+	return cache.RecordInventoryOrderActivity(ctx, activity)
 }
 
 func (uc *UseCase) ScheduleInventoryRefreshContinuation(ctx context.Context) error {

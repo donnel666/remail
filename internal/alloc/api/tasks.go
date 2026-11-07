@@ -15,8 +15,12 @@ import (
 )
 
 const inventoryRefreshMaxEntriesPerTask = 50
+const inventoryOrderActivityRefreshInterval = 30 * time.Minute
 
 func RegisterAllocationTaskHandlers(mux *asynq.ServeMux, module *Module) func(context.Context) {
+	if module != nil && module.InventoryRefreshExecution == nil {
+		module.InventoryRefreshExecution = newInventoryRefreshGate(allocapp.InventoryRefreshConcurrency)
+	}
 	mux.HandleFunc(allocinfra.TypePrivateInventoryRefresh, func(ctx context.Context, task *asynq.Task) error {
 		if module == nil || module.UseCase == nil {
 			return nil
@@ -118,6 +122,9 @@ func startInventoryRefreshSeeder(module *Module, interval func() time.Duration) 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		if err := module.UseCase.RefreshInventoryOrderActivity(ctx); err != nil {
+			slog.Warn("sample recent inventory order activity failed", "error", err)
+		}
 		if err := module.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
 			slog.Warn("enqueue initial inventory cache refresh failed", "error", err)
 		}
@@ -126,10 +133,16 @@ func startInventoryRefreshSeeder(module *Module, interval func() time.Duration) 
 		}
 		timer := time.NewTimer(pollInterval())
 		defer timer.Stop()
+		activityTimer := time.NewTicker(inventoryOrderActivityRefreshInterval)
+		defer activityTimer.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-activityTimer.C:
+				if err := module.UseCase.RefreshInventoryOrderActivity(ctx); err != nil {
+					slog.Warn("sample recent inventory order activity failed", "error", err)
+				}
 			case <-timer.C:
 				if err := module.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
 					slog.Warn("enqueue inventory cache refresh failed", "error", err)
@@ -148,8 +161,30 @@ func startInventoryRefreshSeeder(module *Module, interval func() time.Duration) 
 }
 
 func acquireInventoryRefreshCapacity(ctx context.Context, module *Module) (func(), bool) {
-	if module == nil || module.BackgroundExecution == nil {
+	if module == nil {
 		return func() {}, true
 	}
-	return platform.AcquireBackgroundExecution(ctx, module.BackgroundExecution)
+	var releases []func()
+	if module.InventoryRefreshExecution != nil {
+		release, admitted := platform.AcquireBackgroundExecution(ctx, module.InventoryRefreshExecution)
+		if !admitted {
+			return func() {}, false
+		}
+		releases = append(releases, release)
+	}
+	if module.BackgroundExecution != nil {
+		release, admitted := platform.AcquireBackgroundExecution(ctx, module.BackgroundExecution)
+		if !admitted {
+			for _, release := range releases {
+				release()
+			}
+			return func() {}, false
+		}
+		releases = append(releases, release)
+	}
+	return func() {
+		for _, release := range releases {
+			release()
+		}
+	}, true
 }

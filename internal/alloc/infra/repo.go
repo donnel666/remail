@@ -2121,6 +2121,42 @@ func (r *Repo) ListInventoryProjectIDs(ctx context.Context) ([]uint, error) {
 	return projectIDs, nil
 }
 
+func (r *Repo) ListRecentInventoryOrderActivity(ctx context.Context, limit int) ([]allocapp.InventoryProjectOrderActivity, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	// Order IDs are monotonic for newly created orders; walking the primary key
+	// keeps this sampler bounded instead of sorting the full orders table.
+	var rows []struct {
+		ProjectID uint      `gorm:"column:project_id"`
+		CreatedAt time.Time `gorm:"column:created_at"`
+	}
+	if err := r.dbFor(ctx).
+		Table("orders").
+		Select("project_id, created_at").
+		Order("id DESC").
+		Limit(limit).
+		Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list recent inventory order activity: %w", err)
+	}
+	latest := make(map[uint]time.Time, len(rows))
+	for _, row := range rows {
+		if row.ProjectID == 0 || row.CreatedAt.IsZero() {
+			continue
+		}
+		createdAt := row.CreatedAt.UTC()
+		if previous, ok := latest[row.ProjectID]; ok && !createdAt.After(previous) {
+			continue
+		}
+		latest[row.ProjectID] = createdAt
+	}
+	activity := make([]allocapp.InventoryProjectOrderActivity, 0, len(latest))
+	for projectID, orderedAt := range latest {
+		activity = append(activity, allocapp.InventoryProjectOrderActivity{ProjectID: projectID, OrderedAt: orderedAt})
+	}
+	return activity, nil
+}
+
 func (r *Repo) ListInventoryProjects(ctx context.Context) ([]allocapp.InventoryProject, error) {
 	var projects []allocapp.InventoryProject
 	if err := r.dbFor(ctx).

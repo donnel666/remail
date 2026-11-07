@@ -35,6 +35,25 @@ type allocationBackgroundGateStub struct {
 	released atomic.Bool
 }
 
+func TestInventoryRefreshGateCapsAtThree(t *testing.T) {
+	gate := newInventoryRefreshGate(3)
+	releases := make([]func(), 0, 3)
+	for i := 0; i < 3; i++ {
+		release, admitted := gate.TryAcquire()
+		require.True(t, admitted)
+		releases = append(releases, release)
+	}
+	_, admitted := gate.TryAcquire()
+	require.False(t, admitted)
+	releases[0]()
+	release, admitted := gate.TryAcquire()
+	require.True(t, admitted)
+	release()
+	for _, release := range releases[1:] {
+		release()
+	}
+}
+
 type failingInventoryTaskRepo struct {
 	allocapp.Repository
 	calls    atomic.Int32

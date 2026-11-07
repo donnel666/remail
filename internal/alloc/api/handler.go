@@ -203,6 +203,7 @@ func (h *Handler) GetInventoryRefreshes(c *gin.Context) {
 			RefreshIntervalMinutes: int64(params.RefreshInterval / time.Minute),
 			CacheHardTTLHours:      int64(params.CacheHardTTL / time.Hour),
 			BatchSize:              params.BatchSize,
+			Concurrency:            params.Concurrency,
 		},
 	})
 }

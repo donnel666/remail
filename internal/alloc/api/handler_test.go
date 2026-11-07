@@ -98,6 +98,7 @@ func TestInventoryRefreshAdminRoutes(t *testing.T) {
 	require.Nil(t, state.Items[0].LastAttemptAt)
 	require.Empty(t, state.Items[0].LastError)
 	require.Positive(t, state.Parameters.RefreshIntervalMinutes)
+	require.Equal(t, 3, state.Parameters.Concurrency)
 
 	response = performAllocAPIJSONRequest(router, "/v1/admin/inventory/refreshes", `{"projectId":2}`)
 	require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())

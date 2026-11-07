@@ -117,6 +117,7 @@ type InventoryRefreshParameters struct {
 	RefreshIntervalMinutes int64 `json:"refreshIntervalMinutes"`
 	CacheHardTTLHours      int64 `json:"cacheHardTtlHours"`
 	BatchSize              int   `json:"batchSize"`
+	Concurrency            int   `json:"concurrency"`
 }
 
 type InventoryRefreshAcceptedResponse struct {

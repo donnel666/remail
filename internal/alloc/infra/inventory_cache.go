@@ -22,6 +22,11 @@ const (
 	// The Redis name is retained for compatibility; scores are backend-owned
 	// next-refresh times, not client activity times.
 	inventoryCacheScheduleKey = inventoryCacheKeyPrefix + "active"
+	// Temporary order activity is kept in the existing cache namespace; it is
+	// deliberately not a cache-version change or a durable schema change.
+	inventoryProjectOrderActivityKey        = inventoryCacheKeyPrefix + "order-activity"
+	inventoryProjectOrderActivitySampledKey = inventoryCacheKeyPrefix + "order-activity-sampled"
+	inventoryProjectOrderActivityRetention  = 24 * time.Hour
 )
 
 type InventoryCache struct {
@@ -30,6 +35,36 @@ type InventoryCache struct {
 
 func NewInventoryCache(client redis.UniversalClient) *InventoryCache {
 	return &InventoryCache{redis: client}
+}
+
+func (c *InventoryCache) RecordInventoryOrderActivity(ctx context.Context, activity []allocapp.InventoryProjectOrderActivity) error {
+	args := make([]any, 0, 2+len(activity)*2)
+	args = append(args, strconv.FormatInt(time.Now().UnixMilli(), 10), inventoryCacheKeyPrefix)
+	for _, item := range activity {
+		if item.ProjectID == 0 || item.OrderedAt.IsZero() {
+			continue
+		}
+		args = append(args,
+			strconv.FormatUint(uint64(item.ProjectID), 10),
+			strconv.FormatInt(item.OrderedAt.UTC().UnixMilli(), 10),
+		)
+	}
+	if len(args) > 2 {
+		if err := recordInventoryOrderActivityScript.Run(ctx, c.redis, []string{
+			inventoryProjectOrderActivityKey,
+			inventoryCacheScheduleKey,
+		}, args...).Err(); err != nil {
+			return fmt.Errorf("record inventory order activity: %w", err)
+		}
+	}
+	cutoff := strconv.FormatInt(time.Now().Add(-inventoryProjectOrderActivityRetention).UnixMilli(), 10)
+	if err := c.redis.ZRemRangeByScore(ctx, inventoryProjectOrderActivityKey, "-inf", cutoff).Err(); err != nil {
+		return fmt.Errorf("trim inventory order activity: %w", err)
+	}
+	if err := c.redis.Set(ctx, inventoryProjectOrderActivitySampledKey, time.Now().UnixMilli(), 0).Err(); err != nil {
+		return fmt.Errorf("mark inventory order activity sampled: %w", err)
+	}
+	return nil
 }
 
 func (c *InventoryCache) GetInventoryStats(ctx context.Context, projectID uint) (*allocapp.InventoryStats, error) {
@@ -666,16 +701,62 @@ func refreshInventoryCache(ctx context.Context, client redis.UniversalClient, ke
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", key, err)
 	}
-	nextRefresh := float64(time.Now().Add(allocapp.InventoryRefreshIntervalValue()).UnixMilli())
+	nextRefreshAt, err := inventoryNextRefreshAt(ctx, client, key, time.Now())
+	if err != nil {
+		return err
+	}
+	nextRefresh := float64(nextRefreshAt.UnixMilli())
 	_, err = client.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 		pipe.Set(ctx, key, payload, ttl)
-		pipe.ZAdd(ctx, inventoryCacheScheduleKey, redis.Z{Score: nextRefresh, Member: key})
+		pipe.ZAddArgs(ctx, inventoryCacheScheduleKey, redis.ZAddArgs{LT: true, Members: []redis.Z{{Score: nextRefresh, Member: key}}})
 		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("refresh %s: %w", key, err)
 	}
 	return nil
+}
+
+func inventoryNextRefreshAt(ctx context.Context, client redis.UniversalClient, key string, now time.Time) (time.Time, error) {
+	entry, ok := parseInventoryCacheKey(key)
+	if !ok {
+		return now.Add(allocapp.InventoryRefreshIntervalValue()), nil
+	}
+	score, err := client.ZScore(ctx, inventoryProjectOrderActivityKey, strconv.FormatUint(uint64(entry.ProjectID), 10)).Result()
+	if err != nil && err != redis.Nil {
+		return time.Time{}, fmt.Errorf("load inventory order activity for project %d: %w", entry.ProjectID, err)
+	}
+	if err == nil {
+		lastOrderAt := time.UnixMilli(int64(score))
+		if !lastOrderAt.Before(now.Add(-time.Hour)) {
+			return now.Add(time.Hour), nil
+		}
+	} else {
+		sampled, sampleErr := client.Exists(ctx, inventoryProjectOrderActivitySampledKey).Result()
+		if sampleErr != nil {
+			return time.Time{}, fmt.Errorf("check inventory order activity sample: %w", sampleErr)
+		}
+		if sampled == 0 {
+			// Keep pre-sampler cold starts compatible until the first background sample.
+			return now.Add(allocapp.InventoryRefreshIntervalValue()), nil
+		}
+	}
+	// Only projects with an order in the last hour stay on the hourly path;
+	// every older activity marker uses the low-frequency midnight path.
+	return nextInventoryMidnight(now), nil
+}
+
+func nextInventoryMidnight(now time.Time) time.Time {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		location = time.FixedZone("Asia/Shanghai", 8*60*60)
+	}
+	localNow := now.In(location)
+	next := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location)
+	if !next.After(localNow) {
+		next = next.Add(24 * time.Hour)
+	}
+	return next.UTC()
 }
 
 func cloneProductInventoryTotalsForCache(source *allocapp.ProjectProductInventoryTotals) *allocapp.ProjectProductInventoryTotals {
@@ -729,4 +810,20 @@ if #entries > 0 then
   redis.call("ZREM", KEYS[1], unpack(entries))
 end
 return entries
+`)
+
+var recordInventoryOrderActivityScript = redis.NewScript(`
+local changed = 0
+for i = 3, #ARGV, 2 do
+  local project = ARGV[i]
+  local score = tonumber(ARGV[i + 1])
+  local current = redis.call("ZSCORE", KEYS[1], project)
+  if (not current) or score > tonumber(current) then
+    redis.call("ZADD", KEYS[1], score, project)
+    redis.call("ZADD", KEYS[2], ARGV[1], ARGV[2] .. "stats:" .. project)
+    redis.call("ZADD", KEYS[2], ARGV[1], ARGV[2] .. "products:" .. project)
+    changed = changed + 1
+  end
+end
+return changed
 `)

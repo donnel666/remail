@@ -296,6 +296,25 @@ type InventoryProject struct {
 	Name string
 }
 
+// InventoryProjectOrderActivity is sampled by the inventory worker so order
+// creation never needs to perform an extra Redis write on the checkout path.
+type InventoryProjectOrderActivity struct {
+	ProjectID uint
+	OrderedAt time.Time
+}
+
+// InventoryOrderActivityRepository is optional so existing allocation test
+// repositories and adapters do not need a new required method.
+type InventoryOrderActivityRepository interface {
+	ListRecentInventoryOrderActivity(ctx context.Context, limit int) ([]InventoryProjectOrderActivity, error)
+}
+
+// InventoryOrderActivityCache is optional for the same reason as the reader
+// above; the production Redis cache implements it.
+type InventoryOrderActivityCache interface {
+	RecordInventoryOrderActivity(ctx context.Context, activity []InventoryProjectOrderActivity) error
+}
+
 type InventoryRefreshStatus string
 
 const (
@@ -324,6 +343,7 @@ type InventoryRefreshParameters struct {
 	RefreshInterval time.Duration
 	CacheHardTTL    time.Duration
 	BatchSize       int
+	Concurrency     int
 }
 
 type InventoryCache interface {
