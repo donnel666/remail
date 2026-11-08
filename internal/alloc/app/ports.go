@@ -315,6 +315,12 @@ type InventoryOrderActivityCache interface {
 	RecordInventoryOrderActivity(ctx context.Context, activity []InventoryProjectOrderActivity) error
 }
 
+// InventoryScheduleNormalizer lets startup move legacy due entries onto the
+// current activity-based schedule without changing the required cache port.
+type InventoryScheduleNormalizer interface {
+	NormalizeInventoryRefreshSchedule(ctx context.Context, now time.Time, projectIDs []uint) error
+}
+
 type InventoryRefreshStatus string
 
 const (

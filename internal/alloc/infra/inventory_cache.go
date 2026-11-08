@@ -27,6 +27,8 @@ const (
 	inventoryProjectOrderActivityKey        = inventoryCacheKeyPrefix + "order-activity"
 	inventoryProjectOrderActivitySampledKey = inventoryCacheKeyPrefix + "order-activity-sampled"
 	inventoryProjectOrderActivityRetention  = 24 * time.Hour
+	inventoryWeeklyRefreshInterval          = 7 * 24 * time.Hour
+	inventoryWeeklyRefreshSlots             = 7 * 24 * 60
 )
 
 type InventoryCache struct {
@@ -63,6 +65,58 @@ func (c *InventoryCache) RecordInventoryOrderActivity(ctx context.Context, activ
 	}
 	if err := c.redis.Set(ctx, inventoryProjectOrderActivitySampledKey, time.Now().UnixMilli(), 0).Err(); err != nil {
 		return fmt.Errorf("mark inventory order activity sampled: %w", err)
+	}
+	return nil
+}
+
+func (c *InventoryCache) NormalizeInventoryRefreshSchedule(ctx context.Context, now time.Time, projectIDs []uint) error {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	allowed := make(map[uint]struct{}, len(projectIDs))
+	for _, projectID := range projectIDs {
+		if projectID > 0 {
+			allowed[projectID] = struct{}{}
+		}
+	}
+	members, err := c.redis.ZRange(ctx, inventoryCacheScheduleKey, 0, -1).Result()
+	if err != nil {
+		return fmt.Errorf("list inventory refresh schedule: %w", err)
+	}
+	if len(members) == 0 {
+		return nil
+	}
+	updated := make([]redis.Z, 0, len(members))
+	removed := make([]string, 0)
+	for _, member := range members {
+		entry, ok := parseInventoryCacheKey(member)
+		if !ok {
+			removed = append(removed, member)
+			continue
+		}
+		if _, ok := allowed[entry.ProjectID]; !ok {
+			removed = append(removed, member)
+			continue
+		}
+		next, err := inventoryNextRefreshAt(ctx, c.redis, member, now)
+		if err != nil {
+			return err
+		}
+		updated = append(updated, redis.Z{Score: float64(next.UnixMilli()), Member: member})
+	}
+	if len(removed) > 0 {
+		members := make([]any, len(removed))
+		for i, member := range removed {
+			members[i] = member
+		}
+		if err := c.redis.ZRem(ctx, inventoryCacheScheduleKey, members...).Err(); err != nil {
+			return fmt.Errorf("remove stale inventory refresh schedule: %w", err)
+		}
+	}
+	if len(updated) > 0 {
+		if err := c.redis.ZAdd(ctx, inventoryCacheScheduleKey, updated...).Err(); err != nil {
+			return fmt.Errorf("normalize inventory refresh schedule: %w", err)
+		}
 	}
 	return nil
 }
@@ -729,7 +783,7 @@ func inventoryNextRefreshAt(ctx context.Context, client redis.UniversalClient, k
 	if err == nil {
 		lastOrderAt := time.UnixMilli(int64(score))
 		if !lastOrderAt.Before(now.Add(-time.Hour)) {
-			return now.Add(time.Hour), nil
+			return nextInventoryHourly(now, entry.ProjectID), nil
 		}
 	} else {
 		sampled, sampleErr := client.Exists(ctx, inventoryProjectOrderActivitySampledKey).Result()
@@ -742,19 +796,39 @@ func inventoryNextRefreshAt(ctx context.Context, client redis.UniversalClient, k
 		}
 	}
 	// Only projects with an order in the last hour stay on the hourly path;
-	// every older activity marker uses the low-frequency midnight path.
-	return nextInventoryMidnight(now), nil
+	// every older activity marker uses a stable weekly slot.
+	return nextInventoryWeekly(now, entry.ProjectID), nil
 }
 
-func nextInventoryMidnight(now time.Time) time.Time {
+func inventoryShanghaiLocation() *time.Location {
 	location, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
 		location = time.FixedZone("Asia/Shanghai", 8*60*60)
 	}
+	return location
+}
+
+func nextInventoryHourly(now time.Time, projectID uint) time.Time {
+	location := inventoryShanghaiLocation()
 	localNow := now.In(location)
-	next := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location)
+	base := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), localNow.Hour(), 0, 0, 0, location).Add(time.Hour)
+	next := base.Add(time.Duration(projectID%60) * time.Minute)
+	if next.Before(localNow.Add(time.Hour)) {
+		next = next.Add(time.Hour)
+	}
+	return next.UTC()
+}
+
+func nextInventoryWeekly(now time.Time, projectID uint) time.Time {
+	location := inventoryShanghaiLocation()
+	localNow := now.In(location)
+	daysSinceMonday := (int(localNow.Weekday()) + 6) % 7
+	weekStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location).
+		Add(-time.Duration(daysSinceMonday) * 24 * time.Hour)
+	slot := time.Duration(projectID%inventoryWeeklyRefreshSlots) * time.Minute
+	next := weekStart.Add(slot)
 	if !next.After(localNow) {
-		next = next.Add(24 * time.Hour)
+		next = next.Add(inventoryWeeklyRefreshInterval)
 	}
 	return next.UTC()
 }

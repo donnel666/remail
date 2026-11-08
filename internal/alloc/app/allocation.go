@@ -1701,6 +1701,21 @@ func (uc *UseCase) RefreshInventoryOrderActivity(ctx context.Context) error {
 	return cache.RecordInventoryOrderActivity(ctx, activity)
 }
 
+func (uc *UseCase) NormalizeInventoryRefreshSchedule(ctx context.Context) error {
+	if uc == nil || uc.inventoryCache == nil {
+		return nil
+	}
+	normalizer, ok := uc.inventoryCache.(InventoryScheduleNormalizer)
+	if !ok {
+		return nil
+	}
+	projectIDs, err := uc.listInventoryProjectIDsForSchedule(ctx)
+	if err != nil {
+		return fmt.Errorf("list inventory projects for schedule normalization: %w", err)
+	}
+	return normalizer.NormalizeInventoryRefreshSchedule(ctx, time.Now(), projectIDs)
+}
+
 func (uc *UseCase) ScheduleInventoryRefreshContinuation(ctx context.Context) error {
 	if uc == nil || uc.queue == nil {
 		return nil
