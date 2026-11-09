@@ -2,9 +2,11 @@ package infra
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -16,12 +18,17 @@ import (
 )
 
 const (
-	fastInventoryBaseKey       = inventoryCacheKeyPrefix + "estimate:base:public"
-	fastInventoryBaseLockKey   = inventoryCacheKeyPrefix + "estimate:base:lock"
-	fastInventoryHistoryPrefix = inventoryCacheKeyPrefix + "estimate:history:"
-	fastInventoryBaseTTL       = 7 * 24 * time.Hour
-	fastInventoryHistoryTTL    = 14 * 24 * time.Hour
-	fastInventoryMinRefresh    = 6 * time.Hour
+	fastInventoryBaseKey          = inventoryCacheKeyPrefix + "estimate:base:public"
+	fastInventoryBaseLockKey      = inventoryCacheKeyPrefix + "estimate:base:lock"
+	fastInventoryHistoryPrefix    = inventoryCacheKeyPrefix + "estimate:history:"
+	fastInventoryBaseTTL          = 7 * 24 * time.Hour
+	fastInventoryHistoryTTL       = 14 * 24 * time.Hour
+	fastInventoryMinRefresh       = 6 * time.Hour
+	fastInventoryBuildTimeout     = 30 * time.Second
+	fastInventoryHistoryLockTTL   = 10 * time.Minute
+	fastInventoryHistoryBatchSize = 5000
+	fastInventoryHLLRelativeError = 0.0082
+	fastInventoryMaxErrorBound    = 100000
 )
 
 type fastInventoryBase struct {
@@ -33,13 +40,18 @@ type fastInventoryBase struct {
 }
 
 type fastInventoryHistory struct {
-	ComputedAt      time.Time        `json:"computedAt"`
-	MaxAllocationID uint             `json:"maxAllocationId"`
-	MainUsed        int64            `json:"mainUsed"`
-	DotUsed         int64            `json:"dotUsed"`
-	PlusUsed        int64            `json:"plusUsed"`
-	AliasBySuffix   map[string]int64 `json:"aliasBySuffix"`
+	ComputedAt             time.Time        `json:"computedAt"`
+	MaxAllocationCreatedAt time.Time        `json:"maxAllocationCreatedAt"`
+	MaxAllocationID        uint             `json:"maxAllocationId"`
+	MainUsed               int64            `json:"mainUsed"`
+	DotUsed                int64            `json:"dotUsed"`
+	PlusUsed               int64            `json:"plusUsed"`
+	AliasBySuffix          map[string]int64 `json:"aliasBySuffix"`
+	ErrorBound             int64            `json:"errorBound"`
 }
+
+var errFastInventoryUnavailable = errors.New("fast inventory estimate is temporarily unavailable")
+var errFastInventoryRestrictedProject = errors.New("project has Microsoft inventory restrictions")
 
 func (r *Repo) GetFastInventoryStats(ctx context.Context, projectID uint) (*allocapp.InventoryStats, error) {
 	if r.redis == nil {
@@ -57,10 +69,10 @@ func (r *Repo) GetFastInventoryStats(ctx context.Context, projectID uint) (*allo
 		return nil, err
 	}
 	if err := r.assertFastProjectScope(ctx, projectID); err != nil {
-		if previous != nil {
-			return previous, nil
+		if errors.Is(err, errFastInventoryRestrictedProject) {
+			return r.GetInventoryStats(ctx, projectID)
 		}
-		return r.GetInventoryStats(ctx, projectID)
+		return nil, err
 	}
 	unsupported := false
 	for _, row := range rows {
@@ -75,17 +87,14 @@ func (r *Repo) GetFastInventoryStats(ctx context.Context, projectID uint) (*allo
 	}
 	base, err := r.loadFastInventoryBase(ctx)
 	if err != nil {
-		if previous != nil {
-			return previous, nil
-		}
-		return nil, err
+		return nil, errors.Join(errFastInventoryUnavailable, err)
 	}
 	history, err := r.loadFastInventoryHistory(ctx, projectID)
 	if err != nil {
-		if previous != nil {
-			return previous, nil
-		}
-		return nil, err
+		return nil, errors.Join(errFastInventoryUnavailable, err)
+	}
+	if history.ErrorBound > fastInventoryMaxErrorBound {
+		return nil, fmt.Errorf("%w: error bound %d exceeds %d", errFastInventoryUnavailable, history.ErrorBound, fastInventoryMaxErrorBound)
 	}
 	if previous == nil {
 		previous = &allocapp.InventoryStats{ProjectID: projectID}
@@ -102,9 +111,6 @@ func (r *Repo) GetFastInventoryStats(ctx context.Context, projectID uint) (*allo
 			stats.Microsoft.PlusEnabled = stats.Microsoft.PlusEnabled || row.PlusWeight > 0
 		case coredomain.ProductTypeMicrosoftEnterprise:
 			// The public fast baseline intentionally excludes enterprise resources.
-			if previous != nil {
-				return previous, nil
-			}
 			return r.GetInventoryStats(ctx, projectID)
 		}
 	}
@@ -118,10 +124,7 @@ func (r *Repo) GetFastInventoryStats(ctx context.Context, projectID uint) (*allo
 	stats.Microsoft.PlusDailyLimit = base.PlusDailyLimit
 	plusUsed, err := r.fastPlusDailyUsed(ctx)
 	if err != nil {
-		if previous != nil {
-			return previous, nil
-		}
-		return nil, err
+		return nil, errors.Join(errFastInventoryUnavailable, err)
 	}
 	stats.Microsoft.PlusDailyUsed = plusUsed
 	stats.Microsoft.PlusDailyAvailable = max(0, base.PlusDailyLimit-plusUsed)
@@ -137,8 +140,8 @@ func (r *Repo) GetFastInventoryStats(ctx context.Context, projectID uint) (*allo
 	}
 	stats.TotalAvailable = max(0, stats.TotalAvailable-oldTotal+stats.Microsoft.TotalAvailable)
 	stats.ActiveMicrosoftAllocations, err = r.fastActiveMicrosoftAllocations(ctx, projectID)
-	if err != nil && previous != nil {
-		stats.ActiveMicrosoftAllocations = previous.ActiveMicrosoftAllocations
+	if err != nil {
+		return nil, errors.Join(errFastInventoryUnavailable, err)
 	}
 	return &stats, nil
 }
@@ -173,7 +176,8 @@ func (r *Repo) GetFastProductInventoryTotals(ctx context.Context, projectID uint
 	if len(rows) == 0 {
 		return nil, domain.ErrProjectNotAllocatable
 	}
-	if previous, err := r.loadCachedFastTotals(ctx, projectID); err == nil && previous == nil {
+	previous, err := r.loadCachedFastTotals(ctx, projectID)
+	if err == nil && previous == nil {
 		for _, row := range rows {
 			if coredomain.ProductType(row.Type) != coredomain.ProductTypeMicrosoft {
 				return r.GetProductInventoryTotals(ctx, projectID)
@@ -186,9 +190,16 @@ func (r *Repo) GetFastProductInventoryTotals(ctx context.Context, projectID uint
 	if err != nil {
 		return nil, err
 	}
-	previous, err := r.loadCachedFastTotals(ctx, projectID)
+	base, err := r.loadFastInventoryBase(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(errFastInventoryUnavailable, err)
+	}
+	history, err := r.loadFastInventoryHistory(ctx, projectID)
+	if err != nil {
+		return nil, errors.Join(errFastInventoryUnavailable, err)
+	}
+	if history.ErrorBound > fastInventoryMaxErrorBound {
+		return nil, fmt.Errorf("%w: error bound %d exceeds %d", errFastInventoryUnavailable, history.ErrorBound, fastInventoryMaxErrorBound)
 	}
 	if previous == nil {
 		previous = &allocapp.ProjectProductInventoryTotals{ProjectID: projectID}
@@ -213,6 +224,7 @@ func (r *Repo) GetFastProductInventoryTotals(ctx context.Context, projectID uint
 		item.CodePublicAvailable = int64Ptr(item.PublicAvailable)
 		item.PurchaseAvailable = int64Ptr(item.TotalAvailable)
 		item.PurchasePublicAvailable = int64Ptr(item.PublicAvailable)
+		item.Suffixes = fastInventorySuffixes(base, history)
 	}
 	return &result, nil
 }
@@ -244,7 +256,7 @@ SELECT (
 		return fmt.Errorf("check fast inventory project scope: %w", err)
 	}
 	if restricted != 0 {
-		return errors.New("project has Microsoft inventory restrictions")
+		return errFastInventoryRestrictedProject
 	}
 	return nil
 }
@@ -266,13 +278,15 @@ func (r *Repo) loadFastInventoryBase(ctx context.Context) (*fastInventoryBase, e
 		return nil, errors.New("fast inventory base is being rebuilt")
 	}
 	defer r.redis.Del(context.WithoutCancel(ctx), fastInventoryBaseLockKey)
+	buildCtx, cancel := context.WithTimeout(ctx, fastInventoryBuildTimeout)
+	defer cancel()
 	var capacity struct {
 		EligibleResources int64
 		DotCapacity       int64
 		PlusDailyLimit    int64
 	}
 	public := "ms.for_sale = TRUE AND u.status = 'active' AND u.role IN ('supplier', 'admin', 'super_admin')"
-	if err := r.dbFor(ctx).Raw(`SELECT COUNT(*) AS eligible_resources,
+	if err := r.dbFor(buildCtx).Raw(`SELECT /*+ SET_VAR(max_execution_time=30000) */ COUNT(*) AS eligible_resources,
 COALESCE(SUM(` + microsoftDotCapacityExpression("ms") + `),0) AS dot_capacity,
 COALESCE(SUM(ms.plus_daily_limit),0) AS plus_daily_limit
 FROM microsoft_resources ms
@@ -286,7 +300,7 @@ WHERE ms.status = 'normal' AND ` + microsoftNotUnderBlockingMaintenanceCondition
 		Suffix string
 		Count  int64
 	}
-	if err := r.dbFor(ctx).Raw(`SELECT ea.email_domain AS suffix, COUNT(*) AS count
+	if err := r.dbFor(buildCtx).Raw(`SELECT /*+ SET_VAR(max_execution_time=30000) */ ea.email_domain AS suffix, COUNT(*) AS count
 FROM explicit_aliases ea
 JOIN microsoft_resources ms ON ms.id = ea.resource_id
 JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
@@ -321,39 +335,130 @@ func (r *Repo) loadFastInventoryHistory(ctx context.Context, projectID uint) (*f
 	} else if err != redis.Nil {
 		return nil, err
 	}
-	var maxID uint
-	if err := r.dbFor(ctx).Raw("SELECT COALESCE(MAX(id),0) FROM microsoft_allocations WHERE project_id = ?", projectID).Scan(&maxID).Error; err != nil {
-		return nil, fmt.Errorf("load fast inventory allocation watermark: %w", err)
+	lockKey := key + ":lock"
+	locked, err := r.redis.SetNX(ctx, lockKey, time.Now().UnixMilli(), fastInventoryHistoryLockTTL).Result()
+	if err != nil {
+		return nil, fmt.Errorf("claim fast inventory history: %w", err)
 	}
-	if history.MaxAllocationID == maxID && !history.ComputedAt.IsZero() {
-		return &history, nil
+	if !locked {
+		return nil, errors.New("fast inventory history is being rebuilt")
 	}
-	var counts struct {
-		MainUsed int64
-		DotUsed  int64
-		PlusUsed int64
+	defer r.redis.Del(context.WithoutCancel(ctx), lockKey)
+	buildCtx, cancel := context.WithTimeout(ctx, fastInventoryBuildTimeout)
+	defer cancel()
+	cursorKey := key + ":cursor"
+	var cursor struct {
+		CreatedAt time.Time `json:"createdAt"`
+		ID        uint      `json:"id"`
 	}
-	if err := r.dbFor(ctx).Raw(`SELECT
-COUNT(DISTINCT CASE WHEN mailbox = 'main' THEN resource_id END) AS main_used,
-COUNT(DISTINCT CASE WHEN mailbox = 'dot' THEN dot_alias_id END) AS dot_used,
-COUNT(DISTINCT CASE WHEN mailbox = 'plus' THEN plus_alias_id END) AS plus_used
-FROM microsoft_allocations WHERE project_id = ?`, projectID).Scan(&counts).Error; err != nil {
-		return nil, fmt.Errorf("build fast inventory allocation history: %w", err)
+	if payload, err := r.redis.Get(buildCtx, cursorKey).Bytes(); err == nil {
+		_ = json.Unmarshal(payload, &cursor)
+	} else if err != redis.Nil {
+		return nil, err
 	}
-	var aliases []struct {
-		Suffix string
-		Count  int64
-	}
-	if err := r.dbFor(ctx).Raw(`SELECT ea.email_domain AS suffix, COUNT(DISTINCT ma.explicit_alias_id) AS count
+	mainKey := key + ":hll:main"
+	dotKey := key + ":hll:dot"
+	plusKey := key + ":hll:plus"
+	suffixKey := key + ":suffixes"
+	for {
+		var rows []struct {
+			ID            uint           `gorm:"column:id"`
+			CreatedAt     time.Time      `gorm:"column:created_at"`
+			Mailbox       string         `gorm:"column:mailbox"`
+			ResourceID    sql.NullInt64  `gorm:"column:resource_id"`
+			ExplicitAlias sql.NullInt64  `gorm:"column:explicit_alias_id"`
+			DotAlias      sql.NullInt64  `gorm:"column:dot_alias_id"`
+			PlusAlias     sql.NullInt64  `gorm:"column:plus_alias_id"`
+			EmailDomain   sql.NullString `gorm:"column:email_domain"`
+		}
+		if err := r.dbFor(buildCtx).Raw(`SELECT /*+ SET_VAR(max_execution_time=30000) */
+ma.id, ma.created_at, ma.mailbox, ma.resource_id, ma.explicit_alias_id,
+ma.dot_alias_id, ma.plus_alias_id, ea.email_domain
 FROM microsoft_allocations ma
-JOIN explicit_aliases ea ON ea.id = ma.explicit_alias_id
-WHERE ma.project_id = ? AND ma.mailbox = 'alias' AND ma.explicit_alias_id IS NOT NULL
-GROUP BY ea.email_domain`, projectID).Scan(&aliases).Error; err != nil {
-		return nil, fmt.Errorf("build fast inventory alias history: %w", err)
+LEFT JOIN explicit_aliases ea ON ea.id = ma.explicit_alias_id
+WHERE ma.project_id = ?
+  AND (ma.created_at > ? OR (ma.created_at = ? AND ma.id > ?))
+ORDER BY ma.created_at ASC, ma.id ASC
+LIMIT ?`, projectID, cursor.CreatedAt, cursor.CreatedAt, cursor.ID, fastInventoryHistoryBatchSize).Scan(&rows).Error; err != nil {
+			return nil, fmt.Errorf("scan fast inventory allocation history: %w", err)
+		}
+		if len(rows) == 0 {
+			break
+		}
+		pipe := r.redis.Pipeline()
+		for _, row := range rows {
+			switch row.Mailbox {
+			case "main":
+				if row.ResourceID.Valid {
+					pipe.PFAdd(buildCtx, mainKey, strconv.FormatInt(row.ResourceID.Int64, 10))
+				}
+			case "dot":
+				if row.DotAlias.Valid {
+					pipe.PFAdd(buildCtx, dotKey, strconv.FormatInt(row.DotAlias.Int64, 10))
+				}
+			case "plus":
+				if row.PlusAlias.Valid {
+					pipe.PFAdd(buildCtx, plusKey, strconv.FormatInt(row.PlusAlias.Int64, 10))
+				}
+			case "alias":
+				if row.ExplicitAlias.Valid && row.EmailDomain.Valid {
+					suffix := strings.ToLower(strings.TrimSpace(row.EmailDomain.String))
+					if suffix != "" {
+						aliasKey := fastInventoryAliasHLLKey(key, suffix)
+						pipe.PFAdd(buildCtx, aliasKey, strconv.FormatInt(row.ExplicitAlias.Int64, 10))
+						pipe.SAdd(buildCtx, suffixKey, suffix)
+					}
+				}
+			}
+		}
+		if _, err := pipe.Exec(buildCtx); err != nil {
+			return nil, fmt.Errorf("store fast inventory history batch: %w", err)
+		}
+		last := rows[len(rows)-1]
+		cursor = struct {
+			CreatedAt time.Time `json:"createdAt"`
+			ID        uint      `json:"id"`
+		}{CreatedAt: last.CreatedAt, ID: last.ID}
+		cursorPayload, _ := json.Marshal(cursor)
+		if err := r.redis.Set(buildCtx, cursorKey, cursorPayload, fastInventoryHistoryTTL).Err(); err != nil {
+			return nil, fmt.Errorf("store fast inventory history cursor: %w", err)
+		}
 	}
-	history = fastInventoryHistory{ComputedAt: time.Now().UTC(), MaxAllocationID: maxID, MainUsed: counts.MainUsed, DotUsed: counts.DotUsed, PlusUsed: counts.PlusUsed, AliasBySuffix: make(map[string]int64, len(aliases))}
-	for _, row := range aliases {
-		history.AliasBySuffix[strings.ToLower(strings.TrimSpace(row.Suffix))] = row.Count
+	mainUsed, err := r.redis.PFCount(buildCtx, mainKey).Result()
+	if err != nil {
+		return nil, err
+	}
+	dotUsed, err := r.redis.PFCount(buildCtx, dotKey).Result()
+	if err != nil {
+		return nil, err
+	}
+	plusUsed, err := r.redis.PFCount(buildCtx, plusKey).Result()
+	if err != nil {
+		return nil, err
+	}
+	suffixes, err := r.redis.SMembers(buildCtx, suffixKey).Result()
+	if err != nil {
+		return nil, err
+	}
+	aliasBySuffix := make(map[string]int64, len(suffixes))
+	var aliasTotal int64
+	for _, suffix := range suffixes {
+		count, countErr := r.redis.PFCount(buildCtx, fastInventoryAliasHLLKey(key, suffix)).Result()
+		if countErr != nil {
+			return nil, countErr
+		}
+		aliasBySuffix[suffix] = count
+		aliasTotal += count
+	}
+	history = fastInventoryHistory{
+		ComputedAt:             time.Now().UTC(),
+		MaxAllocationCreatedAt: cursor.CreatedAt,
+		MaxAllocationID:        cursor.ID,
+		MainUsed:               mainUsed,
+		DotUsed:                dotUsed,
+		PlusUsed:               plusUsed,
+		AliasBySuffix:          aliasBySuffix,
+		ErrorBound:             int64(float64(mainUsed+dotUsed+plusUsed+aliasTotal) * fastInventoryHLLRelativeError),
 	}
 	payload, err := json.Marshal(&history)
 	if err != nil {
@@ -363,6 +468,10 @@ GROUP BY ea.email_domain`, projectID).Scan(&aliases).Error; err != nil {
 		return nil, fmt.Errorf("store fast inventory history: %w", err)
 	}
 	return &history, nil
+}
+
+func fastInventoryAliasHLLKey(historyKey, suffix string) string {
+	return historyKey + ":hll:alias:" + strconv.FormatUint(uint64(len(suffix)), 10) + ":" + suffix
 }
 
 func (r *Repo) loadCachedFastStats(ctx context.Context, projectID uint) (*allocapp.InventoryStats, error) {
@@ -410,6 +519,23 @@ func sumFastInventoryAliases(values map[string]int64) int64 {
 		total += value
 	}
 	return total
+}
+
+func fastInventorySuffixes(base *fastInventoryBase, history *fastInventoryHistory) []allocapp.ProductInventorySuffixTotal {
+	if base == nil || history == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(base.AliasesBySuffix))
+	for suffix := range base.AliasesBySuffix {
+		keys = append(keys, suffix)
+	}
+	sort.Strings(keys)
+	result := make([]allocapp.ProductInventorySuffixTotal, 0, len(keys))
+	for _, suffix := range keys {
+		available := max(0, base.AliasesBySuffix[suffix]-history.AliasBySuffix[suffix])
+		result = append(result, allocapp.ProductInventorySuffixTotal{Suffix: suffix, TotalAvailable: available, PublicAvailable: available})
+	}
+	return result
 }
 
 func int64Ptr(value int64) *int64 { return &value }
