@@ -315,6 +315,14 @@ type InventoryOrderActivityCache interface {
 	RecordInventoryOrderActivity(ctx context.Context, activity []InventoryProjectOrderActivity) error
 }
 
+// FastInventoryRepository provides a deliberately stale, bounded-cost read
+// model for background inventory refreshes. The authoritative allocator keeps
+// using the normal repository checks.
+type FastInventoryRepository interface {
+	GetFastInventoryStats(ctx context.Context, projectID uint) (*InventoryStats, error)
+	GetFastProductInventoryTotals(ctx context.Context, projectID uint) (*ProjectProductInventoryTotals, error)
+}
+
 // InventoryScheduleNormalizer lets startup move legacy due entries onto the
 // current activity-based schedule without changing the required cache port.
 type InventoryScheduleNormalizer interface {

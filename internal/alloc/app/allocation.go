@@ -1611,7 +1611,13 @@ func (uc *UseCase) RefreshInventoryCacheBefore(ctx context.Context, before time.
 		removed := false
 		switch entry.Kind {
 		case InventoryCacheStats:
-			stats, refreshErr := uc.repo.GetInventoryStats(ctx, entry.ProjectID)
+			var stats *InventoryStats
+			var refreshErr error
+			if fast, ok := uc.repo.(FastInventoryRepository); ok {
+				stats, refreshErr = fast.GetFastInventoryStats(ctx, entry.ProjectID)
+			} else {
+				stats, refreshErr = uc.repo.GetInventoryStats(ctx, entry.ProjectID)
+			}
 			err = refreshErr
 			if errors.Is(err, domain.ErrProjectNotAllocatable) || (err == nil && stats == nil) {
 				err = uc.inventoryCache.DeleteInventory(ctx, entry)
@@ -1620,7 +1626,13 @@ func (uc *UseCase) RefreshInventoryCacheBefore(ctx context.Context, before time.
 				err = uc.inventoryCache.RefreshInventoryStats(ctx, entry.ProjectID, stats, inventoryCacheHardTTLValue())
 			}
 		case InventoryCacheProducts:
-			totals, refreshErr := uc.repo.GetProductInventoryTotals(ctx, entry.ProjectID)
+			var totals *ProjectProductInventoryTotals
+			var refreshErr error
+			if fast, ok := uc.repo.(FastInventoryRepository); ok {
+				totals, refreshErr = fast.GetFastProductInventoryTotals(ctx, entry.ProjectID)
+			} else {
+				totals, refreshErr = uc.repo.GetProductInventoryTotals(ctx, entry.ProjectID)
+			}
 			err = refreshErr
 			if errors.Is(err, domain.ErrProjectNotAllocatable) || (err == nil && totals == nil) {
 				err = uc.inventoryCache.DeleteInventory(ctx, entry)

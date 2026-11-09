@@ -64,7 +64,7 @@ func (m *Module) SetBackgroundExecutionGate(gate BackgroundExecutionGate) {
 }
 
 func NewModule(db *gorm.DB, redisClient redis.UniversalClient, asynqClient *asynq.Client) *Module {
-	repo := allocinfra.NewRepo(db)
+	repo := allocinfra.NewRepo(db, redisClient)
 	queue := allocinfra.NewInventoryRefreshQueue(asynqClient)
 	useCase := allocapp.NewUseCase(repo, queue)
 	if redisClient != nil {

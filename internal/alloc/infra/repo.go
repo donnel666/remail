@@ -16,6 +16,7 @@ import (
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/go-sql-driver/mysql"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -107,6 +108,7 @@ func microsoftCanonicalDomainExpression(domainColumn string) string {
 
 type Repo struct {
 	db                   *gorm.DB
+	redis                redis.UniversalClient
 	gmailVariantCooldown allocapp.GmailVariantCooldownPort
 }
 
@@ -125,8 +127,12 @@ func (r *Repo) gmailCoolingResourceIDs(ctx context.Context, projectID uint, quer
 	return r.gmailVariantCooldown.CoolingResourceIDs(ctx, projectID, resourceIDs)
 }
 
-func NewRepo(db *gorm.DB) *Repo {
-	return &Repo{db: db}
+func NewRepo(db *gorm.DB, clients ...redis.UniversalClient) *Repo {
+	var client redis.UniversalClient
+	if len(clients) > 0 {
+		client = clients[0]
+	}
+	return &Repo{db: db, redis: client}
 }
 
 func (r *Repo) WithTx(ctx context.Context, fn func(context.Context) error) error {
