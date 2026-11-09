@@ -1072,7 +1072,7 @@ func TestAllocationRuntimeSettingsApplyToNewWork(t *testing.T) {
 		"candidate_retry_count":              "2",
 		"dot_alias_capacity_per_resource":    "2",
 		"inventory_refresh_interval_minutes": "4",
-		"inventory_cache_hard_ttl_hours":     "6",
+		"inventory_cache_hard_ttl_hours":     "192",
 	}
 	for key, value := range settings {
 		runtimeconfig.Set(key, value)
@@ -1088,8 +1088,18 @@ func TestAllocationRuntimeSettingsApplyToNewWork(t *testing.T) {
 	if got := len(dotAliasVariants("username@example.com")); got != 2 {
 		t.Fatalf("got %d dot aliases, want 2", got)
 	}
-	if InventoryRefreshIntervalValue() != 4*time.Minute || inventoryCacheHardTTLValue() != 6*time.Hour {
+	if InventoryRefreshIntervalValue() != 4*time.Minute || inventoryCacheHardTTLValue() != 192*time.Hour {
 		t.Fatal("inventory runtime settings were not applied")
+	}
+}
+
+func TestInventoryCacheRetainsSnapshotsForAWeekWithLegacySettings(t *testing.T) {
+	defer runtimeconfig.Delete("inventory_cache_hard_ttl_hours")
+	for _, value := range []string{"", "24", "6", "168"} {
+		runtimeconfig.Set("inventory_cache_hard_ttl_hours", value)
+		if got := inventoryCacheHardTTLValue(); got != 7*24*time.Hour {
+			t.Fatalf("TTL for %q = %s, want 7 days", value, got)
+		}
 	}
 }
 

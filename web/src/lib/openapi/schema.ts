@@ -16132,7 +16132,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Workbench-compatible project list. Inventory totals are null while the snapshot is missing, still preparing, or older than two configured refresh intervals; null never means zero inventory. */
+            /** @description Workbench-compatible project list. Completed inventory snapshots up to seven days old are accepted even when a refresh is due. Inventory totals are null while the snapshot is missing, still preparing, or older than seven days; null never means zero inventory. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -16212,7 +16212,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Fresh project product inventory totals. Bot responses always include the source observation time; snapshots older than two configured refresh intervals are rejected. */
+            /** @description Cached project product inventory totals. Bot responses always include the source observation time; completed snapshots up to seven days old are accepted even when a refresh is due. */
             200: {
                 headers: {
                     [name: string]: unknown;

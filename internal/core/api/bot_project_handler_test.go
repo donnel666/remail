@@ -243,7 +243,7 @@ func TestBotProjectColdInventoryIsUnknownInListsAndRetryableInDetails(t *testing
 func TestBotProjectStaleInventoryIsUnknownInListsAndRetryableInDetails(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	product := coredomain.Product{ID: 70, ProjectID: 7, Type: coredomain.ProductTypeMicrosoft, Status: coredomain.ProductStatusEnabled}
-	stale := time.Now().UTC().Add(-2*allocapp.InventoryRefreshIntervalValue() - time.Second)
+	stale := time.Now().UTC().Add(-allocapp.InventorySnapshotMaxAge - time.Second)
 	repo := &botProjectRepoStub{
 		items: []coreapp.ProjectSummary{{
 			Project:  coredomain.Project{ID: 7, Status: coredomain.ProjectStatusListed, AccessType: coredomain.ProjectAccessPublic},

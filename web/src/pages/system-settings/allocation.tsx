@@ -38,7 +38,7 @@ export default function AllocationSection({ options, onBulkSave }: SectionProps)
       {field("候选获取重试次数", "candidate_retry_count")}
       {field("点别名生成位置窗口", "dot_alias_capacity_per_resource")}
       {field("库存刷新间隔（分钟）", "inventory_refresh_interval_minutes")}
-      {field("库存缓存硬过期（小时）", "inventory_cache_hard_ttl_hours")}
+      <SettingsNumberField label={t("库存缓存硬过期（小时）")} value={number(form.inventory_cache_hard_ttl_hours)} onChange={(value) => update("inventory_cache_hard_ttl_hours", value)} min={168} max={8760} />
     </SettingsFormGrid>
     <SettingsInvalidValuesNotice keys={invalidKeys} message={t("检测到无效数字配置，请修正后再保存")} />
     <Button icon={<Save size={14} />} disabled={invalidKeys.length > 0} loading={saving} onClick={() => void save().catch(() => undefined)} theme="solid" type="primary" className="mt-5">{t("保存设置")}</Button>

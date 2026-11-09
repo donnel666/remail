@@ -161,6 +161,14 @@ describe("Proto product hierarchy", () => {
     }
   });
 
+  it("shows unknown inventory instead of zero while a project snapshot is missing", () => {
+    const products = toWorkbenchProducts(1, { ...product, totalAvailable: null, publicAvailable: null, suffixes: undefined });
+    const view = render(<ProductPickerPanel inventoryScope="private_first" onInventoryScopeChange={vi.fn()}
+      onProductSearchChange={vi.fn()} onSelectProduct={vi.fn()} onServiceModeChange={vi.fn()} priceMultiplier={1}
+      productSearch="" products={products} selectedProductId="proto" selectedProject={{ ...({ products } as WorkbenchProject), inventoryLoaded: false }} serviceMode="purchase" />);
+    expect(productRows(view.container)[0]).toHaveTextContent("--");
+  });
+
   it.each(["purchase", "code"] as ServiceMode[])("submits parent and child selectors through the actual %s checkout handler", async (serviceMode) => {
     const { container } = render(<Dashboard />);
     await waitFor(() => expect(productRows(container)).toHaveLength(3));
@@ -198,6 +206,10 @@ describe("Proto product hierarchy", () => {
     mocks.inventory.mockResolvedValue({ projectId: 1, totalAvailable: 5, products: [{
       productType: "proto", totalAvailable: 5, publicAvailable: 3,
       suffixes: [{ suffix: "proton.me", totalAvailable: 5, publicAvailable: 3 }],
+    }] });
+    mocks.listProjects.mockResolvedValue({ items: [{
+      ...project,
+      products: [{ ...product, totalAvailable: null, publicAvailable: null, suffixes: undefined }],
     }] });
     const { container } = render(<Dashboard />);
     let row: HTMLButtonElement | undefined;

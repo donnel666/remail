@@ -153,6 +153,7 @@ function toWorkbenchSuffixProducts(
 
 const maxCreateOrderQuantity = 100;
 const orderPageLimit = 100;
+const inventoryPollIntervalMs = 15_000;
 const initialOrderCursors: Record<ServiceMode, number | undefined> = {
   code: undefined,
   purchase: undefined,
@@ -169,13 +170,17 @@ function toWorkbenchProject(
   const inventoryByProductType = new Map(
     (inventory?.products ?? []).map((item) => [item.productType, item]),
   );
+  const products = (project.products ?? []).filter((product) => product.status === "enabled");
   return {
     description: project.description ?? "",
     id: String(project.id),
-    inventoryLoaded: true,
+    inventoryLoaded: products.length > 0 && products.every((product) => {
+      const item = inventoryByProductType.get(product.type) ?? product;
+      return item.totalAvailable != null && item.publicAvailable != null;
+    }),
     logoUrl: project.logoUrl,
     name: project.name,
-    products: (project.products ?? []).flatMap((product) =>
+    products: products.flatMap((product) =>
       toWorkbenchProducts(
         project.id,
         product,
@@ -281,7 +286,8 @@ export function mergeProjectInventory(
   );
   return {
     ...project,
-    inventoryLoaded: true,
+    inventoryLoaded: project.inventoryLoaded || (baseProducts.length > 0 &&
+      baseProducts.every((product) => inventoryByProductType.has(product.productType))),
     products: baseProducts.flatMap((product) => {
       const inventoryItem = inventoryByProductType.get(product.productType);
       if (!inventoryItem) {
@@ -442,12 +448,17 @@ export default function Dashboard() {
   const [productSearch, setProductSearch] = useState("");
   const [projectSearch, setProjectSearch] = useState("");
   const [projects, setProjects] = useState<WorkbenchProject[]>([]);
+  const [inventoryPending, setInventoryPending] = useState(false);
   const [quantity, setQuantity] = useState(1);
   const [selectedOrderNo, setSelectedOrderNo] = useState("");
   const [selectedProductId, setSelectedProductId] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [serviceMode, setServiceMode] = useState<ServiceMode>("purchase");
   const selectedProjectIdRef = useRef("");
+  const projectRequestsRef = useRef<AbortController | null>(null);
+  const projectListInFlightRef = useRef<Promise<void> | null>(null);
+  const inventoryInFlightRef = useRef(new Map<string, Promise<void>>());
+  const projectInventoriesRef = useRef(new Map<string, ProjectInventoryTotalResponse>());
   const fetchInFlightRef = useRef(new Map<string, Promise<number | void>>());
   const fetchSeqRef = useRef(new Map<string, number>());
   const refreshOrdersSeqRef = useRef(new Map<ServiceMode, number>());
@@ -478,6 +489,8 @@ export default function Dashboard() {
   );
 
   useEffect(() => {
+    const controller = new AbortController();
+    projectRequestsRef.current = controller;
     void loadWorkbenchProjects();
 
     const refreshProjects = async () => {
@@ -487,8 +500,23 @@ export default function Dashboard() {
       });
     };
     window.addEventListener("focus", refreshProjects);
-    return () => window.removeEventListener("focus", refreshProjects);
+    return () => {
+      controller.abort();
+      projectListInFlightRef.current = null;
+      inventoryInFlightRef.current.clear();
+      projectInventoriesRef.current.clear();
+      window.removeEventListener("focus", refreshProjects);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!inventoryPending) return;
+    // Poll the batch cache read, not every detail endpoint (which schedules private aggregates).
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void loadWorkbenchProjects({ silent: true });
+    }, inventoryPollIntervalMs);
+    return () => window.clearInterval(timer);
+  }, [inventoryPending]);
 
   useEffect(() => {
     selectedProjectIdRef.current = selectedProjectId;
@@ -588,19 +616,33 @@ export default function Dashboard() {
     : undefined;
   const hasMoreOrders = orderHasMore[serviceMode];
 
-  async function loadWorkbenchProjects() {
+  async function loadWorkbenchProjects({ silent = false }: { silent?: boolean } = {}) {
+    if (projectListInFlightRef.current) return projectListInFlightRef.current;
+    const signal = projectRequestsRef.current?.signal;
+    if (!signal || signal.aborted) return;
+    const request = (async () => {
+      try {
+        const list = await listProjects({ scope: "visible", status: "listed" }, 0, 100, signal);
+        if (signal.aborted) return;
+        const listed = list.items.filter((project) => project.status === "listed");
+        setInventoryPending(listed.some((project) => {
+          const summary = toWorkbenchProject(project);
+          return summary.products.length > 0 && !summary.inventoryLoaded;
+        }));
+        setProjects(listed.map((project) =>
+          toWorkbenchProject(project, projectInventoriesRef.current.get(String(project.id))),
+        ));
+      } catch (err) {
+        if (!signal.aborted && !silent) {
+          Toast.error(getIamErrorMessage(t, err, "An unexpected error occurred."));
+        }
+      }
+    })();
+    projectListInFlightRef.current = request;
     try {
-      const list = await listProjects(
-        { scope: "visible", status: "listed" },
-        0,
-        100,
-      );
-      const listed = list.items.filter(
-        (project) => project.status === "listed",
-      );
-      setProjects(listed.map((project) => toWorkbenchProject(project)));
-    } catch (err) {
-      Toast.error(getIamErrorMessage(t, err, "An unexpected error occurred."));
+      await request;
+    } finally {
+      if (projectListInFlightRef.current === request) projectListInFlightRef.current = null;
     }
   }
 
@@ -610,19 +652,28 @@ export default function Dashboard() {
   ) {
     const numericProjectId = Number(projectId);
     if (!Number.isInteger(numericProjectId) || numericProjectId <= 0) return;
-    try {
-      const inventory = await getProjectInventory(numericProjectId);
-      setProjects((prev) =>
-        prev.map((project) =>
-          project.id === projectId
-            ? mergeProjectInventory(project, inventory)
-            : project,
-        ),
-      );
-    } catch (err) {
-      if (!silent) {
-        Toast.error(getIamErrorMessage(t, err, "An unexpected error occurred."));
+    const existing = inventoryInFlightRef.current.get(projectId);
+    if (existing) return existing;
+    const signal = projectRequestsRef.current?.signal;
+    if (!signal || signal.aborted) return;
+    const request = (async () => {
+      try {
+        const inventory = await getProjectInventory(numericProjectId, signal);
+        if (signal.aborted) return;
+        if (inventory.products.length > 0) projectInventoriesRef.current.set(projectId, inventory);
+        setProjects((prev) => prev.map((project) => project.id === projectId
+          ? mergeProjectInventory(project, inventory) : project));
+      } catch (err) {
+        if (!signal.aborted && !silent) {
+          Toast.error(getIamErrorMessage(t, err, "An unexpected error occurred."));
+        }
       }
+    })();
+    inventoryInFlightRef.current.set(projectId, request);
+    try {
+      await request;
+    } finally {
+      if (inventoryInFlightRef.current.get(projectId) === request) inventoryInFlightRef.current.delete(projectId);
     }
   }
 

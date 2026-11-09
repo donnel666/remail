@@ -71,6 +71,7 @@ export function ProductPickerPanel({
   selectedProject?: WorkbenchProject;
 }) {
   const { t } = useTranslation();
+  const inventoryKnown = selectedProject?.inventoryLoaded !== false;
   const isGmailProduct = (product: WorkbenchProduct) =>
     product.productType === "gmail" || product.productType === "gmail_variant";
   const gmailProducts = products.filter(isGmailProduct).sort((left, right) => {
@@ -212,7 +213,7 @@ export function ProductPickerPanel({
                       </span>
                     </span>
                     <span className="workbench-product-stock">
-                      {t("Stock")} {formatCompactNumber(inventory)}
+                      {inventoryKnown ? `${t("Stock")} ${formatCompactNumber(inventory)}` : "--"}
                     </span>
                   </span>
                 </button>

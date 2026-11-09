@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	inventoryCacheHardTTL             = 24 * time.Hour
+	inventoryCacheHardTTL             = InventorySnapshotMaxAge
 	inventoryRefreshLockTTL           = 10 * time.Minute
 	inventoryOrderActivitySampleSize  = 100
 	inventoryProjectDiscoveryInterval = 30 * time.Minute

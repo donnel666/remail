@@ -48,7 +48,7 @@ var integerRanges = map[string]integerRange{
 	ICloudPhoneHourlySMSLimitKey: positive(1000), ICloudPhoneCooldownBaseSecondsKey: positive(3600), ICloudPhoneCooldownMaxSecondsKey: positive(86400), ICloudPhoneSendFailureThresholdKey: positive(100), ICloudPhoneBlacklistHoursKey: positive(8760), ICloudOnboardingMaxAttemptsKey: positive(100),
 	"resource_import_max_bytes": positive(512 << 20), "max_project_logo_bytes": positive(20 << 20), "project_name_max": positive(120), "project_description_max": positive(1000), "project_target_platform_max": positive(120),
 	"candidate_window_size": positive(100), "global_candidate_window": positive(100), "bucket_probe_count": positive(64), "alias_generation_window": positive(1000),
-	"candidate_retry_count": positive(20), "dot_alias_capacity_per_resource": positive(64), "inventory_refresh_interval_minutes": positive(1440), "inventory_cache_hard_ttl_hours": positive(8760),
+	"candidate_retry_count": positive(20), "dot_alias_capacity_per_resource": positive(64), "inventory_refresh_interval_minutes": positive(1440), "inventory_cache_hard_ttl_hours": {min: 168, max: 8760},
 	"fetch_lookback_window_days": positive(3650), "read_window_skew_minutes": positive(1440), "code_read_limit": positive(100), "purchase_read_limit": positive(500), ICloudMailmatchScanLimitKey: positive(10000), ICloudAdminReadLimitKey: positive(5000),
 	"pickup_fetch_reserve_ttl_minutes": positive(30), "pickup_fetch_lease_ttl_minutes": positive(10), "pickup_message_cache_ttl_seconds": positive(300),
 	"pickup_message_cache_limit": positive(100), "pickup_fetch_heartbeat_seconds": positive(300), "mailmatch_fetch_timeout_minutes": positive(60), "pickup_request_fetch_timeout_minutes": positive(30),

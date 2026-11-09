@@ -33,6 +33,9 @@ func TestDefaultSettingsAreValidAndIndependent(t *testing.T) {
 		}
 	}
 	require.Equal(t, "32", keys["background_worker_increase_step"])
+	require.Equal(t, "168", keys["inventory_cache_hard_ttl_hours"])
+	require.NoError(t, Validate("inventory_cache_hard_ttl_hours", "168"))
+	require.Error(t, Validate("inventory_cache_hard_ttl_hours", "167"))
 	require.Equal(t, "0", keys["registration_reward_amount"])
 	require.Equal(t, "0", keys["invitation_reward_amount"])
 	require.Equal(t, "86400", keys["session_max_age_seconds"])

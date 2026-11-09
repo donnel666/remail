@@ -735,7 +735,7 @@ func projectInventorySnapshotReady(totals *allocapp.ProjectProductInventoryTotal
 		return false
 	}
 	age := now.UTC().Sub(totals.RefreshedAt.UTC())
-	return age >= 0 && age <= 2*allocapp.InventoryRefreshIntervalValue()
+	return age >= 0 && age <= allocapp.InventorySnapshotMaxAge
 }
 
 func hasEnabledProjectProduct(products []coredomain.Product) bool {

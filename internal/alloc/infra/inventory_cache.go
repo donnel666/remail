@@ -114,7 +114,19 @@ func (c *InventoryCache) NormalizeInventoryRefreshSchedule(ctx context.Context, 
 		}
 	}
 	if len(updated) > 0 {
-		if err := c.redis.ZAdd(ctx, inventoryCacheScheduleKey, updated...).Err(); err != nil {
+		ttl := allocapp.InventoryRefreshParametersValue().CacheHardTTL
+		_, err := c.redis.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.ZAdd(ctx, inventoryCacheScheduleKey, updated...)
+			for _, member := range updated {
+				key, ok := member.Member.(string)
+				if !ok {
+					continue
+				}
+				pipe.Expire(ctx, key, ttl)
+			}
+			return nil
+		})
+		if err != nil {
 			return fmt.Errorf("normalize inventory refresh schedule: %w", err)
 		}
 	}
@@ -243,6 +255,9 @@ func (c *InventoryCache) InitializeInventory(ctx context.Context, entries []allo
 			}
 			key := inventoryCacheKey(entry.Kind, entry.ProjectID)
 			pipe.SetNX(ctx, key, payload, ttl)
+			// Extend legacy keys without replacing a warm snapshot. Older v8 keys
+			// were written with a 24-hour TTL before the weekly snapshot policy.
+			pipe.Expire(ctx, key, ttl)
 			pipe.ZAddArgs(ctx, inventoryCacheScheduleKey, redis.ZAddArgs{NX: true, Members: []redis.Z{{Score: now, Member: key}}})
 		}
 		return nil
@@ -283,7 +298,7 @@ func (c *InventoryCache) IsProductUnavailable(ctx context.Context, req allocapp.
 // MarkProductUnavailable immediately corrects the cached read model after the
 // authoritative allocator proves that a scope has no candidate. WATCH prevents
 // this correction from overwriting a concurrent background refresh, and
-// KEEPTTL preserves the 24-hour hard expiry.
+// KEEPTTL preserves the snapshot's hard expiry.
 func (c *InventoryCache) MarkProductUnavailable(ctx context.Context, req allocapp.ProductInventoryAvailabilityRequest) (bool, error) {
 	key := inventoryCacheKey(allocapp.InventoryCacheProducts, req.ProjectID)
 	markerKey := productUnavailableMarkerKey(req)
@@ -504,7 +519,15 @@ func (c *InventoryCache) AdvanceInventory(ctx context.Context, entries []allocap
 	for i, entry := range entries {
 		members[i] = redis.Z{Score: now, Member: inventoryCacheKey(entry.Kind, entry.ProjectID)}
 	}
-	if err := c.redis.ZAddArgs(ctx, inventoryCacheScheduleKey, redis.ZAddArgs{LT: true, Members: members}).Err(); err != nil {
+	ttl := allocapp.InventoryRefreshParametersValue().CacheHardTTL
+	_, err := c.redis.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+		pipe.ZAddArgs(ctx, inventoryCacheScheduleKey, redis.ZAddArgs{LT: true, Members: members})
+		for _, member := range members {
+			pipe.Expire(ctx, member.Member.(string), ttl)
+		}
+		return nil
+	})
+	if err != nil {
 		return fmt.Errorf("advance inventory cache refresh: %w", err)
 	}
 	return nil
@@ -515,9 +538,12 @@ func (c *InventoryCache) RequeueInventory(ctx context.Context, entries []allocap
 		return nil
 	}
 	now := float64(time.Now().UnixMilli())
+	ttl := allocapp.InventoryRefreshParametersValue().CacheHardTTL
 	_, err := c.redis.Pipelined(ctx, func(pipe redis.Pipeliner) error {
 		for _, entry := range entries {
-			pipe.ZAdd(ctx, inventoryCacheScheduleKey, redis.Z{Score: now, Member: inventoryCacheKey(entry.Kind, entry.ProjectID)})
+			key := inventoryCacheKey(entry.Kind, entry.ProjectID)
+			pipe.ZAdd(ctx, inventoryCacheScheduleKey, redis.Z{Score: now, Member: key})
+			pipe.Expire(ctx, key, ttl)
 		}
 		return nil
 	})

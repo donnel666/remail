@@ -147,10 +147,12 @@ func TestNormalizeInventoryRefreshScheduleRemovesUnlistedProjects(t *testing.T) 
 		redis.Z{Score: 1, Member: inventoryCacheKey(allocapp.InventoryCacheStats, 10)},
 		redis.Z{Score: 1, Member: inventoryCacheKey(allocapp.InventoryCacheStats, 99)},
 	).Err())
+	require.NoError(t, client.Set(ctx, inventoryCacheKey(allocapp.InventoryCacheStats, 10), "{}", time.Hour).Err())
 
 	require.NoError(t, cache.NormalizeInventoryRefreshSchedule(ctx, now, []uint{10}))
 	require.ErrorIs(t, client.ZScore(ctx, inventoryCacheScheduleKey, inventoryCacheKey(allocapp.InventoryCacheStats, 99)).Err(), redis.Nil)
 	require.Equal(t, float64(time.Date(2026, time.November, 7, 9, 10, 0, 0, time.UTC).UnixMilli()), client.ZScore(ctx, inventoryCacheScheduleKey, inventoryCacheKey(allocapp.InventoryCacheStats, 10)).Val())
+	require.Equal(t, 7*24*time.Hour, client.TTL(ctx, inventoryCacheKey(allocapp.InventoryCacheStats, 10)).Val())
 }
 
 func (q *inventoryRefreshQueueStub) EnqueueInventoryRefresh(context.Context) error {
@@ -261,8 +263,8 @@ func TestInventoryCacheServesRedisAndRefreshesScheduledEntries(t *testing.T) {
 	result, err = useCase.RefreshInventoryCacheBefore(context.Background(), time.Now().Add(allocapp.InventoryRefreshIntervalValue()+time.Second))
 	require.NoError(t, err)
 	require.Equal(t, 2, result.Updated)
-	require.Equal(t, 24*time.Hour, server.TTL(inventoryCacheKey(allocapp.InventoryCacheStats, 10)))
-	require.Equal(t, 24*time.Hour, server.TTL(inventoryCacheKey(allocapp.InventoryCacheProducts, 10)))
+	require.Equal(t, 7*24*time.Hour, server.TTL(inventoryCacheKey(allocapp.InventoryCacheStats, 10)))
+	require.Equal(t, 7*24*time.Hour, server.TTL(inventoryCacheKey(allocapp.InventoryCacheProducts, 10)))
 
 	stats, err = useCase.GetInventoryStats(context.Background(), 10)
 	require.NoError(t, err)
@@ -328,6 +330,24 @@ func TestInitializeInventoryDoesNotOverwriteWarmSnapshots(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 8, totals.TotalAvailable)
 	require.False(t, totals.Cold)
+}
+
+func TestInitializeInventoryExtendsLegacySnapshotTTL(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	cache := NewInventoryCache(client)
+	key := inventoryCacheKey(allocapp.InventoryCacheProducts, 10)
+	require.NoError(t, cache.SetProductInventoryTotals(context.Background(), 10, &allocapp.ProjectProductInventoryTotals{
+		ProjectID: 10, TotalAvailable: 8,
+	}, time.Hour))
+	require.NoError(t, cache.InitializeInventory(context.Background(), []allocapp.InventoryCacheEntry{{
+		Kind: allocapp.InventoryCacheProducts, ProjectID: 10,
+	}}, 7*24*time.Hour))
+	require.Equal(t, 7*24*time.Hour, client.TTL(context.Background(), key).Val())
+	totals, err := cache.GetProductInventoryTotals(context.Background(), 10)
+	require.NoError(t, err)
+	require.EqualValues(t, 8, totals.TotalAvailable)
 }
 
 func TestColdInventoryRemainsUnknownWhenImmediateRefreshEnqueueFails(t *testing.T) {

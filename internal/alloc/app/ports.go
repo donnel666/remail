@@ -22,6 +22,7 @@ const (
 	GeneratedMailboxBucketCount = coredomain.GeneratedMailboxBucketCount
 	DotAliasCapacityPerResource = 10
 	InventoryRefreshInterval    = 10 * time.Minute
+	InventorySnapshotMaxAge     = 7 * 24 * time.Hour
 	candidateWindowSize         = 4
 	globalCandidateWindow       = 8
 	bucketProbeCount            = 4
@@ -66,7 +67,8 @@ func InventoryRefreshIntervalValue() time.Duration {
 }
 
 func inventoryCacheHardTTLValue() time.Duration {
-	return min(runtimeconfig.Duration("inventory_cache_hard_ttl_hours", inventoryCacheHardTTL, time.Hour, 1), maxInventoryCacheHardTTL)
+	// Older installations store 24 hours; weekly refreshes need at least seven days.
+	return min(runtimeconfig.Duration("inventory_cache_hard_ttl_hours", inventoryCacheHardTTL, time.Hour, 168), maxInventoryCacheHardTTL)
 }
 
 type ProductAllocationConfig struct {

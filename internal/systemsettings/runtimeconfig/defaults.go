@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	DefaultSettingsCount                         = 327
+	DefaultSettingsCount                         = 330
 	ICloudDeviceBaseURLKey                       = "icloud_device_base_url"
 	ICloudDeviceAPIKey                           = "icloud_device_api_key"
 	ICloudDeviceSMSBaseURLKey                    = "icloud_device_sms_base_url"
@@ -237,7 +237,7 @@ var defaultSettings = []domain.Setting{
 	{Key: "candidate_retry_count", Value: "5"},
 	{Key: "dot_alias_capacity_per_resource", Value: "10"},
 	{Key: "inventory_refresh_interval_minutes", Value: "10"},
-	{Key: "inventory_cache_hard_ttl_hours", Value: "24"},
+	{Key: "inventory_cache_hard_ttl_hours", Value: "168"},
 
 	{Key: "fetch_lookback_window_days", Value: "90"},
 	{Key: "read_window_skew_minutes", Value: "2"},

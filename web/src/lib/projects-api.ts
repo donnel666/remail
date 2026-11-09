@@ -87,10 +87,12 @@ function filterSelection(filter: ProjectListFilter) {
 export async function listProjects(
   filter: ProjectListFilter = {},
   offset = 0,
-  limit = 20
+  limit = 20,
+  signal?: AbortSignal,
 ) {
   return unwrap<ProjectListResponse>(
     await client.GET("/v1/projects", {
+      ...(signal ? { signal } : {}),
       params: {
         query: {
           ...filter,
@@ -110,9 +112,10 @@ export async function getProject(projectId: number) {
   );
 }
 
-export async function getProjectInventory(projectId: number) {
+export async function getProjectInventory(projectId: number, signal?: AbortSignal) {
   return unwrap<ProjectInventoryTotalResponse>(
     await client.GET("/v1/projects/{projectId}/inventory", {
+      ...(signal ? { signal } : {}),
       params: { path: { projectId } },
     })
   );
