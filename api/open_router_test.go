@@ -121,7 +121,7 @@ func TestPublicOpenAPISDKContract(t *testing.T) {
 		t.Fatalf("public OpenAPI version = %v, want 3.0.3", got)
 	}
 	servers := spec["servers"].([]any)
-	if len(servers) != 1 || servers[0].(map[string]any)["url"] != "https://remail.aishop6.com" {
+	if len(servers) != 1 || servers[0].(map[string]any)["url"] != "https://remail.best" {
 		t.Fatalf("public OpenAPI servers = %v", servers)
 	}
 

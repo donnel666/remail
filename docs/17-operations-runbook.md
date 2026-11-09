@@ -34,7 +34,7 @@
 
 ## Cloudflare Turnstile
 
-1. Cloudflare 控制台进入 **Turnstile**，创建 widget，hostname 只填写 `remail.aishop6.com`。
+1. Cloudflare 控制台进入 **Turnstile**，创建 widget，hostname 填写 `remail.best` 和 `remail.aishop6.com`（迁移期间后端明确允许这两个域名）。
 2. Widget mode 选择 **Managed**；前端分别使用 `login`、`register_email_code`、`password_reset_code` action。
 3. 把 Site Key 和 Secret Key 分别写入 GitHub Actions secrets：`TURNSTILE_SITE_KEY`、`TURNSTILE_SECRET_KEY`。
 4. 后端只返回公开 Site Key；Secret Key 只存在于生产环境变量，不进入前端、响应或日志。

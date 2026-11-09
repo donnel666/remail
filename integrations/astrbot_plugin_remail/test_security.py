@@ -4154,7 +4154,7 @@ def test_openapi_search_keeps_referenced_fields_and_public_boundary() -> None:
     result = excerpt(spec, "emailSuffix")
     encoded = json.dumps(result, ensure_ascii=False)
     assert "emailSuffix" in encoded
-    assert result["servers"][0]["url"] == "https://remail.aishop6.com"
+    assert result["servers"][0]["url"] == "https://remail.best"
     assert result["info"]["version"]
     assert len(encoded) <= 11_000
     assert all(

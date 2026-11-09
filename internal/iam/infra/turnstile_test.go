@@ -21,7 +21,13 @@ func TestTurnstileVerifierValidatesTokenActionAndHostname(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"success":  true,
 				"action":   "login",
-				"hostname": turnstileExpectedHostname,
+				"hostname": "remail.best",
+			})
+		case "legacy-hostname":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success":  true,
+				"action":   "login",
+				"hostname": "remail.aishop6.com",
 			})
 		case "wrong-hostname":
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -49,6 +55,8 @@ func TestTurnstileVerifierValidatesTokenActionAndHostname(t *testing.T) {
 	verifier.verifyURL = server.URL
 
 	require.NoError(t, verifier.Verify(context.Background(), "valid", "203.0.113.7", "login"))
+	require.NoError(t, verifier.Verify(context.Background(), "legacy-hostname", "203.0.113.7", "login"))
+	require.ErrorIs(t, verifier.Verify(context.Background(), "legacy-hostname", "203.0.113.7", "register_email_code"), domain.ErrTurnstileInvalid)
 	require.NoError(t, verifier.Verify(context.Background(), "testing-key", "203.0.113.7", "login"))
 	require.ErrorIs(t, verifier.Verify(context.Background(), "valid", "203.0.113.7", "register_email_code"), domain.ErrTurnstileInvalid)
 	require.ErrorIs(t, verifier.Verify(context.Background(), "wrong-hostname", "203.0.113.7", "login"), domain.ErrTurnstileInvalid)

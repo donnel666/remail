@@ -1262,7 +1262,7 @@ const spec = {
     title: "ReMail 开放 API",
     version: "1.0.0",
   },
-  servers: [{ url: "https://remail.aishop6.com", description: "生产环境" }],
+  servers: [{ url: "https://remail.best", description: "生产环境" }],
   tags: [
     { name: "Core", description: "高频集成接口，覆盖 API Key 状态、项目查询、统一下单、订单查询和邮件取件。" },
     { name: "Resources", description: "自有微软邮箱、域名邮箱、邮件服务器和资源检测接口。" },

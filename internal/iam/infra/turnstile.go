@@ -15,7 +15,7 @@ import (
 
 const (
 	turnstileVerifyURL        = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
-	turnstileExpectedHostname = "remail.aishop6.com"
+	turnstileExpectedHostname = "remail.best"
 )
 
 // TurnstileVerifier validates single-use Cloudflare Turnstile tokens.
@@ -93,7 +93,7 @@ func (v *TurnstileVerifier) Verify(ctx context.Context, token, remoteIP, expecte
 	if result.Metadata.ResultWithTestingKey {
 		return nil
 	}
-	if result.Action != expectedAction || result.Hostname != turnstileExpectedHostname {
+	if result.Action != expectedAction || (result.Hostname != turnstileExpectedHostname && result.Hostname != "remail.aishop6.com") {
 		return domain.ErrTurnstileInvalid
 	}
 	return nil
