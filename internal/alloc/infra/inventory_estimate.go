@@ -116,8 +116,15 @@ func (r *Repo) GetFastInventoryStats(ctx context.Context, projectID uint) (*allo
 	stats.Microsoft.ActiveDotAllocations = history.DotUsed
 	stats.Microsoft.DotAvailable = max(0, base.DotCapacity-history.DotUsed)
 	stats.Microsoft.PlusDailyLimit = base.PlusDailyLimit
-	stats.Microsoft.PlusDailyUsed = history.PlusUsed
-	stats.Microsoft.PlusDailyAvailable = max(0, base.PlusDailyLimit-history.PlusUsed)
+	plusUsed, err := r.fastPlusDailyUsed(ctx)
+	if err != nil {
+		if previous != nil {
+			return previous, nil
+		}
+		return nil, err
+	}
+	stats.Microsoft.PlusDailyUsed = plusUsed
+	stats.Microsoft.PlusDailyAvailable = max(0, base.PlusDailyLimit-plusUsed)
 	stats.Microsoft.TotalAvailable = 0
 	if stats.Microsoft.MainEnabled {
 		stats.Microsoft.TotalAvailable += stats.Microsoft.MainAvailable + stats.Microsoft.ExplicitAliasAvailable
@@ -129,8 +136,30 @@ func (r *Repo) GetFastInventoryStats(ctx context.Context, projectID uint) (*allo
 		stats.Microsoft.TotalAvailable += stats.Microsoft.PlusDailyAvailable
 	}
 	stats.TotalAvailable = max(0, stats.TotalAvailable-oldTotal+stats.Microsoft.TotalAvailable)
-	stats.ActiveMicrosoftAllocations = history.MainUsed + history.DotUsed + history.PlusUsed
+	stats.ActiveMicrosoftAllocations, err = r.fastActiveMicrosoftAllocations(ctx, projectID)
+	if err != nil && previous != nil {
+		stats.ActiveMicrosoftAllocations = previous.ActiveMicrosoftAllocations
+	}
 	return &stats, nil
+}
+
+func (r *Repo) fastPlusDailyUsed(ctx context.Context) (int64, error) {
+	var used int64
+	date := time.Now().UTC().Format("2006-01-02")
+	if err := r.dbFor(ctx).Raw(`SELECT COALESCE(SUM(used_count), 0)
+FROM allocation_daily_usages
+WHERE usage_date = ? AND resource_type = 'microsoft' AND usage_kind = 'plus'`, date).Scan(&used).Error; err != nil {
+		return 0, fmt.Errorf("load fast Microsoft plus usage: %w", err)
+	}
+	return used, nil
+}
+
+func (r *Repo) fastActiveMicrosoftAllocations(ctx context.Context, projectID uint) (int64, error) {
+	var active int64
+	if err := r.dbFor(ctx).Raw("SELECT COUNT(*) FROM microsoft_allocations WHERE project_id = ? AND status = 'allocated'", projectID).Scan(&active).Error; err != nil {
+		return 0, fmt.Errorf("load fast Microsoft active allocations: %w", err)
+	}
+	return active, nil
 }
 
 func (r *Repo) GetFastProductInventoryTotals(ctx context.Context, projectID uint) (*allocapp.ProjectProductInventoryTotals, error) {
