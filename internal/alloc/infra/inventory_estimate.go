@@ -84,16 +84,18 @@ func (r *Repo) GetFastInventoryStats(ctx context.Context, projectID uint) (*allo
 		}
 		return nil, err
 	}
-	unsupported := false
+	hasMicrosoft := false
 	for _, row := range rows {
 		switch coredomain.ProductType(row.Type) {
 		case coredomain.ProductTypeMicrosoft:
-		default:
-			unsupported = true
+			hasMicrosoft = true
 		}
 	}
-	if unsupported && previous == nil {
-		return r.GetInventoryStats(ctx, projectID)
+	if !hasMicrosoft {
+		if previous != nil {
+			return previous, nil
+		}
+		return &allocapp.InventoryStats{ProjectID: projectID, Cold: true}, nil
 	}
 	base, err := r.loadFastInventoryBase(ctx)
 	if err != nil {
@@ -121,7 +123,7 @@ func (r *Repo) GetFastInventoryStats(ctx context.Context, projectID uint) (*allo
 			stats.Microsoft.PlusEnabled = stats.Microsoft.PlusEnabled || row.PlusWeight > 0
 		case coredomain.ProductTypeMicrosoftEnterprise:
 			// The public fast baseline intentionally excludes enterprise resources.
-			return r.GetInventoryStats(ctx, projectID)
+			continue
 		}
 	}
 	oldTotal := stats.Microsoft.TotalAvailable
@@ -187,13 +189,7 @@ func (r *Repo) GetFastProductInventoryTotals(ctx context.Context, projectID uint
 		return nil, domain.ErrProjectNotAllocatable
 	}
 	previous, err := r.loadCachedFastTotals(ctx, projectID)
-	if err == nil && previous == nil {
-		for _, row := range rows {
-			if coredomain.ProductType(row.Type) != coredomain.ProductTypeMicrosoft {
-				return r.GetProductInventoryTotals(ctx, projectID)
-			}
-		}
-	} else if err != nil {
+	if err != nil {
 		return nil, err
 	}
 	stats, err := r.GetFastInventoryStats(ctx, projectID)
