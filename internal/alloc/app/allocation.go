@@ -1728,6 +1728,17 @@ func (uc *UseCase) NormalizeInventoryRefreshSchedule(ctx context.Context) error 
 	return normalizer.NormalizeInventoryRefreshSchedule(ctx, time.Now(), projectIDs)
 }
 
+func (uc *UseCase) WarmFastInventoryBase(ctx context.Context) error {
+	if uc == nil || uc.repo == nil {
+		return nil
+	}
+	warmer, ok := uc.repo.(FastInventoryBaseWarmer)
+	if !ok {
+		return nil
+	}
+	return warmer.WarmFastInventoryBase(ctx)
+}
+
 func (uc *UseCase) ScheduleInventoryRefreshContinuation(ctx context.Context) error {
 	if uc == nil || uc.queue == nil {
 		return nil

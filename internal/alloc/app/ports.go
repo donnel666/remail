@@ -323,6 +323,10 @@ type FastInventoryRepository interface {
 	GetFastProductInventoryTotals(ctx context.Context, projectID uint) (*ProjectProductInventoryTotals, error)
 }
 
+type FastInventoryBaseWarmer interface {
+	WarmFastInventoryBase(ctx context.Context) error
+}
+
 // InventoryScheduleNormalizer lets startup move legacy due entries onto the
 // current activity-based schedule without changing the required cache port.
 type InventoryScheduleNormalizer interface {

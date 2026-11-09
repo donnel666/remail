@@ -20,6 +20,8 @@ import (
 const (
 	fastInventoryBaseKey          = inventoryCacheKeyPrefix + "estimate:base:public"
 	fastInventoryBaseLockKey      = inventoryCacheKeyPrefix + "estimate:base:lock"
+	fastInventoryBaseStateKey     = inventoryCacheKeyPrefix + "estimate:base:state"
+	fastInventoryBaseAliasesKey   = inventoryCacheKeyPrefix + "estimate:base:aliases"
 	fastInventoryHistoryPrefix    = inventoryCacheKeyPrefix + "estimate:history:"
 	fastInventoryBaseTTL          = 7 * 24 * time.Hour
 	fastInventoryHistoryTTL       = 14 * 24 * time.Hour
@@ -27,6 +29,7 @@ const (
 	fastInventoryBuildTimeout     = 30 * time.Second
 	fastInventoryHistoryLockTTL   = 10 * time.Minute
 	fastInventoryHistoryBatchSize = 5000
+	fastInventoryBaseSuffixBatch  = 8
 	fastInventoryHLLRelativeError = 0.0082
 	fastInventoryMaxErrorBound    = 100000
 )
@@ -37,6 +40,13 @@ type fastInventoryBase struct {
 	DotCapacity       int64            `json:"dotCapacity"`
 	PlusDailyLimit    int64            `json:"plusDailyLimit"`
 	AliasesBySuffix   map[string]int64 `json:"aliasesBySuffix"`
+}
+
+type fastInventoryBaseState struct {
+	Cursor            string `json:"cursor"`
+	EligibleResources int64  `json:"eligibleResources"`
+	DotCapacity       int64  `json:"dotCapacity"`
+	PlusDailyLimit    int64  `json:"plusDailyLimit"`
 }
 
 type fastInventoryHistory struct {
@@ -275,46 +285,84 @@ func (r *Repo) loadFastInventoryBase(ctx context.Context) (*fastInventoryBase, e
 		return nil, fmt.Errorf("claim fast inventory base: %w", err)
 	}
 	if !locked {
-		return nil, errors.New("fast inventory base is being rebuilt")
+		return nil, errors.Join(errFastInventoryUnavailable, errors.New("fast inventory base is being rebuilt"))
 	}
 	defer r.redis.Del(context.WithoutCancel(ctx), fastInventoryBaseLockKey)
 	buildCtx, cancel := context.WithTimeout(ctx, fastInventoryBuildTimeout)
 	defer cancel()
-	var capacity struct {
-		EligibleResources int64
-		DotCapacity       int64
-		PlusDailyLimit    int64
+
+	state := fastInventoryBaseState{}
+	if payload, stateErr := r.redis.Get(buildCtx, fastInventoryBaseStateKey).Bytes(); stateErr == nil {
+		_ = json.Unmarshal(payload, &state)
+	} else if stateErr != redis.Nil {
+		return nil, stateErr
+	}
+	var suffixes []string
+	if err := r.dbFor(buildCtx).Raw(`SELECT email_domain
+FROM microsoft_resources
+WHERE email_domain IS NOT NULL AND email_domain <> '' AND email_domain > ?
+GROUP BY email_domain ORDER BY email_domain LIMIT ?`, state.Cursor, fastInventoryBaseSuffixBatch).Scan(&suffixes).Error; err != nil {
+		return nil, errors.Join(errFastInventoryUnavailable, fmt.Errorf("load fast inventory base suffix batch: %w", err))
+	}
+	if len(suffixes) == 0 {
+		return r.finishFastInventoryBase(buildCtx, state)
 	}
 	public := "ms.for_sale = TRUE AND u.status = 'active' AND u.role IN ('supplier', 'admin', 'super_admin')"
-	if err := r.dbFor(buildCtx).Raw(`SELECT /*+ SET_VAR(max_execution_time=30000) */ COUNT(*) AS eligible_resources,
-COALESCE(SUM(` + microsoftDotCapacityExpression("ms") + `),0) AS dot_capacity,
+	for _, suffix := range suffixes {
+		var capacity struct {
+			EligibleResources int64
+			DotCapacity       int64
+			PlusDailyLimit    int64
+		}
+		if err := r.dbFor(buildCtx).Raw(`SELECT COUNT(*) AS eligible_resources,
+COALESCE(SUM(`+microsoftDotCapacityExpression("ms")+`),0) AS dot_capacity,
 COALESCE(SUM(ms.plus_daily_limit),0) AS plus_daily_limit
 FROM microsoft_resources ms
-JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
-JOIN users u ON u.id = er.owner_user_id
-WHERE ms.status = 'normal' AND ` + microsoftNotUnderBlockingMaintenanceCondition + `
-  AND ` + public + ` AND ms.email_domain NOT LIKE '%.onmicrosoft.com'`).Scan(&capacity).Error; err != nil {
-		return nil, fmt.Errorf("build fast inventory resource base: %w", err)
-	}
-	var aliases []struct {
-		Suffix string
-		Count  int64
-	}
-	if err := r.dbFor(buildCtx).Raw(`SELECT /*+ SET_VAR(max_execution_time=30000) */ ea.email_domain AS suffix, COUNT(*) AS count
+JOIN email_resources er ON er.id=ms.id AND er.type='microsoft'
+JOIN users u ON u.id=er.owner_user_id
+WHERE ms.email_domain = ? AND ms.status='normal' AND `+microsoftNotUnderBlockingMaintenanceCondition+`
+  AND `+public+` AND ms.email_domain NOT LIKE '%.onmicrosoft.com'`, suffix).Scan(&capacity).Error; err != nil {
+			return nil, errors.Join(errFastInventoryUnavailable, fmt.Errorf("build fast inventory resource suffix %s: %w", suffix, err))
+		}
+		var aliasCount int64
+		if err := r.dbFor(buildCtx).Raw(`SELECT COUNT(*)
 FROM explicit_aliases ea
-JOIN microsoft_resources ms ON ms.id = ea.resource_id
-JOIN email_resources er ON er.id = ms.id AND er.type = 'microsoft'
-JOIN users u ON u.id = er.owner_user_id
-WHERE ea.status = 'normal' AND ms.status = 'normal'
-  AND ` + microsoftNotUnderBlockingMaintenanceCondition + ` AND ` + public + `
-  AND ms.email_domain NOT LIKE '%.onmicrosoft.com'
-GROUP BY ea.email_domain`).Scan(&aliases).Error; err != nil {
-		return nil, fmt.Errorf("build fast inventory alias base: %w", err)
+JOIN microsoft_resources ms ON ms.id=ea.resource_id
+JOIN email_resources er ON er.id=ms.id AND er.type='microsoft'
+JOIN users u ON u.id=er.owner_user_id
+WHERE ea.email_domain = ? AND ea.status='normal' AND ms.status='normal'
+  AND `+microsoftNotUnderBlockingMaintenanceCondition+` AND `+public+``, suffix).Scan(&aliasCount).Error; err != nil {
+			return nil, errors.Join(errFastInventoryUnavailable, fmt.Errorf("build fast inventory alias suffix %s: %w", suffix, err))
+		}
+		state.EligibleResources += capacity.EligibleResources
+		state.DotCapacity += capacity.DotCapacity
+		state.PlusDailyLimit += capacity.PlusDailyLimit
+		if err := r.redis.HIncrBy(buildCtx, fastInventoryBaseAliasesKey, suffix, aliasCount).Err(); err != nil {
+			return nil, err
+		}
+		state.Cursor = suffix
 	}
-	base := &fastInventoryBase{ComputedAt: time.Now().UTC(), EligibleResources: capacity.EligibleResources, DotCapacity: capacity.DotCapacity, PlusDailyLimit: capacity.PlusDailyLimit, AliasesBySuffix: make(map[string]int64, len(aliases))}
-	for _, row := range aliases {
-		base.AliasesBySuffix[strings.ToLower(strings.TrimSpace(row.Suffix))] = row.Count
+	statePayload, _ := json.Marshal(&state)
+	if err := r.redis.Set(buildCtx, fastInventoryBaseStateKey, statePayload, fastInventoryBaseTTL).Err(); err != nil {
+		return nil, err
 	}
+	return nil, errors.Join(errFastInventoryUnavailable, errors.New("fast inventory base is still warming"))
+}
+
+func (r *Repo) finishFastInventoryBase(ctx context.Context, state fastInventoryBaseState) (*fastInventoryBase, error) {
+	values, err := r.redis.HGetAll(ctx, fastInventoryBaseAliasesKey).Result()
+	if err != nil {
+		return nil, err
+	}
+	aliases := make(map[string]int64, len(values))
+	for suffix, raw := range values {
+		value, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		aliases[suffix] = value
+	}
+	base := &fastInventoryBase{ComputedAt: time.Now().UTC(), EligibleResources: state.EligibleResources, DotCapacity: state.DotCapacity, PlusDailyLimit: state.PlusDailyLimit, AliasesBySuffix: aliases}
 	payload, err := json.Marshal(base)
 	if err != nil {
 		return nil, err
@@ -322,7 +370,16 @@ GROUP BY ea.email_domain`).Scan(&aliases).Error; err != nil {
 	if err := r.redis.Set(ctx, fastInventoryBaseKey, payload, fastInventoryBaseTTL).Err(); err != nil {
 		return nil, fmt.Errorf("store fast inventory base: %w", err)
 	}
+	_ = r.redis.Del(ctx, fastInventoryBaseStateKey, fastInventoryBaseAliasesKey).Err()
 	return base, nil
+}
+
+func (r *Repo) WarmFastInventoryBase(ctx context.Context) error {
+	_, err := r.loadFastInventoryBase(ctx)
+	if errors.Is(err, errFastInventoryUnavailable) {
+		return nil
+	}
+	return err
 }
 
 func (r *Repo) loadFastInventoryHistory(ctx context.Context, projectID uint) (*fastInventoryHistory, error) {
@@ -371,15 +428,22 @@ func (r *Repo) loadFastInventoryHistory(ctx context.Context, projectID uint) (*f
 			PlusAlias     sql.NullInt64  `gorm:"column:plus_alias_id"`
 			EmailDomain   sql.NullString `gorm:"column:email_domain"`
 		}
-		if err := r.dbFor(buildCtx).Raw(`SELECT /*+ SET_VAR(max_execution_time=30000) */
+		query := `SELECT /*+ SET_VAR(max_execution_time=30000) */
 ma.id, ma.created_at, ma.mailbox, ma.resource_id, ma.explicit_alias_id,
 ma.dot_alias_id, ma.plus_alias_id, ea.email_domain
 FROM microsoft_allocations ma
 LEFT JOIN explicit_aliases ea ON ea.id = ma.explicit_alias_id
-WHERE ma.project_id = ?
-  AND (ma.created_at > ? OR (ma.created_at = ? AND ma.id > ?))
-ORDER BY ma.created_at ASC, ma.id ASC
-LIMIT ?`, projectID, cursor.CreatedAt, cursor.CreatedAt, cursor.ID, fastInventoryHistoryBatchSize).Scan(&rows).Error; err != nil {
+`
+
+		var args []any
+		if cursor.CreatedAt.IsZero() {
+			query += "WHERE ma.project_id = ? ORDER BY ma.created_at ASC, ma.id ASC LIMIT ?"
+			args = []any{projectID, fastInventoryHistoryBatchSize}
+		} else {
+			query += "WHERE ma.project_id = ? AND (ma.created_at > ? OR (ma.created_at = ? AND ma.id > ?)) ORDER BY ma.created_at ASC, ma.id ASC LIMIT ?"
+			args = []any{projectID, cursor.CreatedAt, cursor.CreatedAt, cursor.ID, fastInventoryHistoryBatchSize}
+		}
+		if err := r.dbFor(buildCtx).Raw(query, args...).Scan(&rows).Error; err != nil {
 			return nil, fmt.Errorf("scan fast inventory allocation history: %w", err)
 		}
 		if len(rows) == 0 {

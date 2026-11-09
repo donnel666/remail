@@ -128,6 +128,9 @@ func startInventoryRefreshSeeder(module *Module, interval func() time.Duration) 
 		if err := module.UseCase.NormalizeInventoryRefreshSchedule(ctx); err != nil {
 			slog.Warn("normalize inventory refresh schedule failed", "error", err)
 		}
+		if err := module.UseCase.WarmFastInventoryBase(ctx); err != nil {
+			slog.Warn("warm fast inventory base failed", "error", err)
+		}
 		if err := module.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
 			slog.Warn("enqueue initial inventory cache refresh failed", "error", err)
 		}
@@ -143,10 +146,16 @@ func startInventoryRefreshSeeder(module *Module, interval func() time.Duration) 
 			case <-ctx.Done():
 				return
 			case <-activityTimer.C:
+				if err := module.UseCase.WarmFastInventoryBase(ctx); err != nil {
+					slog.Warn("warm fast inventory base failed", "error", err)
+				}
 				if err := module.UseCase.RefreshInventoryOrderActivity(ctx); err != nil {
 					slog.Warn("sample recent inventory order activity failed", "error", err)
 				}
 			case <-timer.C:
+				if err := module.UseCase.WarmFastInventoryBase(ctx); err != nil {
+					slog.Warn("warm fast inventory base failed", "error", err)
+				}
 				if err := module.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
 					slog.Warn("enqueue inventory cache refresh failed", "error", err)
 				}
