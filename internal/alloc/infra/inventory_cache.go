@@ -510,6 +510,7 @@ func (c *InventoryCache) ClaimDueInventory(ctx context.Context, before time.Time
 
 // AdvanceInventory makes request-side refreshes due without delaying work
 // already eligible for a running worker's fixed cutoff. LT also adds missing keys.
+// Scheduling does not produce a new snapshot, so it must not renew its TTL.
 func (c *InventoryCache) AdvanceInventory(ctx context.Context, entries []allocapp.InventoryCacheEntry) error {
 	if len(entries) == 0 {
 		return nil
@@ -519,15 +520,7 @@ func (c *InventoryCache) AdvanceInventory(ctx context.Context, entries []allocap
 	for i, entry := range entries {
 		members[i] = redis.Z{Score: now, Member: inventoryCacheKey(entry.Kind, entry.ProjectID)}
 	}
-	ttl := allocapp.InventoryRefreshParametersValue().CacheHardTTL
-	_, err := c.redis.Pipelined(ctx, func(pipe redis.Pipeliner) error {
-		pipe.ZAddArgs(ctx, inventoryCacheScheduleKey, redis.ZAddArgs{LT: true, Members: members})
-		for _, member := range members {
-			pipe.Expire(ctx, member.Member.(string), ttl)
-		}
-		return nil
-	})
-	if err != nil {
+	if err := c.redis.ZAddArgs(ctx, inventoryCacheScheduleKey, redis.ZAddArgs{LT: true, Members: members}).Err(); err != nil {
 		return fmt.Errorf("advance inventory cache refresh: %w", err)
 	}
 	return nil
@@ -538,12 +531,10 @@ func (c *InventoryCache) RequeueInventory(ctx context.Context, entries []allocap
 		return nil
 	}
 	now := float64(time.Now().UnixMilli())
-	ttl := allocapp.InventoryRefreshParametersValue().CacheHardTTL
 	_, err := c.redis.Pipelined(ctx, func(pipe redis.Pipeliner) error {
 		for _, entry := range entries {
 			key := inventoryCacheKey(entry.Kind, entry.ProjectID)
 			pipe.ZAdd(ctx, inventoryCacheScheduleKey, redis.Z{Score: now, Member: key})
-			pipe.Expire(ctx, key, ttl)
 		}
 		return nil
 	})

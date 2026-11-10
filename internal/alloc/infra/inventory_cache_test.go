@@ -675,6 +675,41 @@ func TestInventoryWorkerFailureAndLockBusyRequeuePastFixedCutoff(t *testing.T) {
 	}
 }
 
+func TestInventorySchedulingPreservesSnapshotExpiry(t *testing.T) {
+	for name, schedule := range map[string]func(*InventoryCache, context.Context, []allocapp.InventoryCacheEntry) error{
+		"advance": (*InventoryCache).AdvanceInventory,
+		"requeue": (*InventoryCache).RequeueInventory,
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := miniredis.RunT(t)
+			client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+			t.Cleanup(func() { require.NoError(t, client.Close()) })
+			cache, ctx := NewInventoryCache(client), context.Background()
+			entries := []allocapp.InventoryCacheEntry{
+				{Kind: allocapp.InventoryCacheStats, ProjectID: 10},
+				{Kind: allocapp.InventoryCacheProducts, ProjectID: 10},
+			}
+			const payload = `{"ProjectID":10,"TotalAvailable":7}`
+			for _, entry := range entries {
+				require.NoError(t, client.Set(ctx, inventoryCacheKey(entry.Kind, entry.ProjectID), payload, time.Hour).Err())
+			}
+			for remaining := 2; remaining >= 0; remaining-- {
+				server.FastForward(20 * time.Minute)
+				require.NoError(t, schedule(cache, ctx, entries))
+				for _, entry := range entries {
+					key := inventoryCacheKey(entry.Kind, entry.ProjectID)
+					if remaining == 0 {
+						require.False(t, server.Exists(key), "scheduling must not resurrect an expired snapshot")
+						continue
+					}
+					require.Equal(t, time.Duration(remaining)*20*time.Minute, server.TTL(key))
+					require.Equal(t, payload, client.Get(ctx, key).Val())
+				}
+			}
+		})
+	}
+}
+
 func TestInventoryRefreshDiscoversAndRestoresBackendSchedule(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
