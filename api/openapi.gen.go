@@ -13035,7 +13035,7 @@ type ProjectInventoryResponse struct {
 	TotalAvailable             int                 `json:"totalAvailable"`
 }
 
-// ProjectInventoryTotalResponse defines model for ProjectInventoryTotalResponse.
+// ProjectInventoryTotalResponse Cached inventory hints. A product omitted from products is not yet known; it must not be interpreted as zero. totalAvailable sums the available product snapshots and is not a reservation.
 type ProjectInventoryTotalResponse struct {
 	// ObservedAt Time the ready inventory snapshot was observed by the system; omitted when the source does not provide an observation time.
 	ObservedAt     *time.Time                     `json:"observedAt,omitempty"`

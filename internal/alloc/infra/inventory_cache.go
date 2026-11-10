@@ -86,6 +86,27 @@ func (c *InventoryCache) NormalizeInventoryRefreshSchedule(ctx context.Context, 
 	if len(members) == 0 {
 		return nil
 	}
+	productKeys := make([]string, len(projectIDs))
+	for i, id := range projectIDs {
+		productKeys[i] = inventoryCacheKey(allocapp.InventoryCacheProducts, id)
+	}
+	var payloads []any
+	if len(productKeys) > 0 {
+		payloads, err = c.redis.MGet(ctx, productKeys...).Result()
+		if err != nil {
+			return fmt.Errorf("read inventory repair state: %w", err)
+		}
+	}
+	repair := make(map[uint]bool, len(projectIDs))
+	for i, payload := range payloads {
+		var totals allocapp.ProjectProductInventoryTotals
+		if payload != nil {
+			if err := json.Unmarshal([]byte(fmt.Sprint(payload)), &totals); err != nil {
+				return fmt.Errorf("decode inventory repair state: %w", err)
+			}
+		}
+		repair[projectIDs[i]] = inventorySnapshotNeedsRepair(&totals, now)
+	}
 	updated := make([]redis.Z, 0, len(members))
 	removed := make([]string, 0)
 	for _, member := range members {
@@ -101,6 +122,9 @@ func (c *InventoryCache) NormalizeInventoryRefreshSchedule(ctx context.Context, 
 		next, err := inventoryNextRefreshAt(ctx, c.redis, member, now)
 		if err != nil {
 			return err
+		}
+		if repair[entry.ProjectID] {
+			next = now.Add(time.Duration(entry.ProjectID%60) * time.Second)
 		}
 		updated = append(updated, redis.Z{Score: float64(next.UnixMilli()), Member: member})
 	}
@@ -167,6 +191,7 @@ func (c *InventoryCache) GetProductInventorySnapshots(ctx context.Context, proje
 		return nil, fmt.Errorf("load product inventory snapshots: %w", err)
 	}
 	loadedKeys := make([]redis.Z, 0, len(keys))
+	repairKeys := make([]redis.Z, 0)
 	requests := make([]allocapp.ProductInventoryAvailabilityRequest, 0)
 	requestTotals := make([]*allocapp.ProjectProductInventoryTotals, 0)
 	for i, payload := range payloads {
@@ -177,6 +202,11 @@ func (c *InventoryCache) GetProductInventorySnapshots(ctx context.Context, proje
 		if err := json.Unmarshal([]byte(fmt.Sprint(payload)), &totals); err != nil {
 			return nil, fmt.Errorf("decode %s: %w", keys[i], err)
 		}
+		now := time.Now()
+		if inventorySnapshotNeedsRepair(&totals, now) {
+			repairKeys = append(repairKeys, redis.Z{Score: float64(now.UnixMilli()), Member: keys[i]})
+		}
+		removeUnknownOtherInventory(&totals, now)
 		// Gmail, iCloud, and Proto products share one inventory pool across both service modes.
 		// Tolerate snapshots written without the mode-specific fields.
 		for itemIndex := range totals.Items {
@@ -228,7 +258,53 @@ func (c *InventoryCache) GetProductInventorySnapshots(ctx context.Context, proje
 			return nil, fmt.Errorf("schedule product inventory snapshots: %w", err)
 		}
 	}
+	if len(repairKeys) > 0 {
+		if err := c.redis.ZAddArgs(ctx, inventoryCacheScheduleKey, redis.ZAddArgs{LT: true, Members: repairKeys}).Err(); err != nil {
+			return nil, fmt.Errorf("schedule incomplete inventory repair: %w", err)
+		}
+	}
 	return result, nil
+}
+
+func isOtherInventoryProduct(kind coredomain.ProductType) bool {
+	switch kind {
+	case coredomain.ProductTypeICloud, coredomain.ProductTypeDomain, coredomain.ProductTypeGmail,
+		coredomain.ProductTypeGmailVariant, coredomain.ProductTypeProto, coredomain.ProductTypeDaum,
+		coredomain.ProductTypeMicrosoftEnterprise:
+		return true
+	}
+	return false
+}
+
+func inventorySnapshotNeedsRepair(totals *allocapp.ProjectProductInventoryTotals, now time.Time) bool {
+	if totals.RefreshPending || totals.Cold || totals.RefreshedAt == nil || now.Sub(*totals.RefreshedAt) < 0 || now.Sub(*totals.RefreshedAt) > allocapp.InventorySnapshotMaxAge {
+		return true
+	}
+	for _, item := range totals.Items {
+		if observed, ok := totals.SourceRefreshedAt[item.ProductType]; isOtherInventoryProduct(item.ProductType) &&
+			(!ok || now.Sub(observed) < 0 || now.Sub(observed) > allocapp.InventorySnapshotMaxAge) {
+			return true
+		}
+	}
+	return false
+}
+
+func removeUnknownOtherInventory(totals *allocapp.ProjectProductInventoryTotals, now time.Time) {
+	items := totals.Items[:0]
+	for _, item := range totals.Items {
+		observed, measured := totals.SourceRefreshedAt[item.ProductType]
+		if !measured && totals.RefreshedAt != nil {
+			observed = *totals.RefreshedAt
+		}
+		expired := observed.IsZero() || now.Sub(observed) < 0 || now.Sub(observed) > allocapp.InventorySnapshotMaxAge
+		// Legacy fast snapshots fabricated zeroes for every uncomputed non-Microsoft product.
+		if isOtherInventoryProduct(item.ProductType) && (expired || (!measured && item.TotalAvailable == 0 && item.PublicAvailable == 0)) {
+			totals.TotalAvailable = max(0, totals.TotalAvailable-item.TotalAvailable)
+			continue
+		}
+		items = append(items, item)
+	}
+	totals.Items = items
 }
 
 // InitializeInventory seeds cold placeholders without overwriting a concurrent

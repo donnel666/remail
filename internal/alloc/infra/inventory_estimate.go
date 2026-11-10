@@ -74,28 +74,46 @@ func (r *Repo) GetFastInventoryStats(ctx context.Context, projectID uint) (*allo
 	if len(rows) == 0 {
 		return nil, domain.ErrProjectNotAllocatable
 	}
-	previous, err := r.loadCachedFastStats(ctx, projectID)
+	other, otherErr := r.otherInventory(ctx, projectID, rows)
+	if other == nil {
+		return nil, otherErr
+	}
+	stats, err := r.fastMicrosoftInventoryStats(ctx, projectID, rows, other.Stats)
 	if err != nil {
 		return nil, err
 	}
-	if err := r.assertFastProjectScope(ctx, projectID); err != nil {
-		if errors.Is(err, errFastInventoryRestrictedProject) {
-			return r.GetInventoryStats(ctx, projectID)
-		}
-		return nil, err
-	}
+	return stats, otherErr
+}
+
+func (r *Repo) fastMicrosoftInventoryStats(ctx context.Context, projectID uint, rows []productInventoryRow, stats allocapp.InventoryStats) (*allocapp.InventoryStats, error) {
 	hasMicrosoft := false
 	for _, row := range rows {
-		switch coredomain.ProductType(row.Type) {
-		case coredomain.ProductTypeMicrosoft:
+		if coredomain.ProductType(row.Type) == coredomain.ProductTypeMicrosoft {
 			hasMicrosoft = true
 		}
 	}
 	if !hasMicrosoft {
-		if previous != nil {
-			return previous, nil
+		return &stats, nil
+	}
+	stats.SourceRefreshedAt[coredomain.ProductTypeMicrosoft] = time.Now().UTC()
+	if err := r.assertFastProjectScope(ctx, projectID); err != nil {
+		if errors.Is(err, errFastInventoryRestrictedProject) {
+			var microsoftRows []productInventoryRow
+			for _, row := range rows {
+				if coredomain.ProductType(row.Type) == coredomain.ProductTypeMicrosoft {
+					microsoftRows = append(microsoftRows, row)
+				}
+			}
+			exact, err := r.inventoryStatsForProducts(ctx, projectID, microsoftRows)
+			if err != nil {
+				return nil, err
+			}
+			stats.Microsoft = exact.Microsoft
+			stats.ActiveMicrosoftAllocations = exact.ActiveMicrosoftAllocations
+			stats.TotalAvailable += exact.TotalAvailable
+			return &stats, nil
 		}
-		return &allocapp.InventoryStats{ProjectID: projectID, Cold: true}, nil
+		return nil, err
 	}
 	base, err := r.loadFastInventoryBase(ctx)
 	if err != nil {
@@ -108,10 +126,6 @@ func (r *Repo) GetFastInventoryStats(ctx context.Context, projectID uint) (*allo
 	if history.ErrorBound > fastInventoryMaxErrorBound {
 		return nil, fmt.Errorf("%w: error bound %d exceeds %d", errFastInventoryUnavailable, history.ErrorBound, fastInventoryMaxErrorBound)
 	}
-	if previous == nil {
-		previous = &allocapp.InventoryStats{ProjectID: projectID}
-	}
-	stats := *previous
 	stats.ProjectID = projectID
 	stats.Cold = false
 	for _, row := range rows {
@@ -126,7 +140,6 @@ func (r *Repo) GetFastInventoryStats(ctx context.Context, projectID uint) (*allo
 			continue
 		}
 	}
-	oldTotal := stats.Microsoft.TotalAvailable
 	stats.Microsoft.EligibleResources = max(0, base.EligibleResources-history.MainUsed)
 	stats.Microsoft.MainAvailable = stats.Microsoft.EligibleResources
 	stats.Microsoft.ExplicitAliasAvailable = max(0, sumFastInventoryAliases(base.AliasesBySuffix)-sumFastInventoryAliases(history.AliasBySuffix))
@@ -150,7 +163,7 @@ func (r *Repo) GetFastInventoryStats(ctx context.Context, projectID uint) (*allo
 	if stats.Microsoft.PlusEnabled {
 		stats.Microsoft.TotalAvailable += stats.Microsoft.PlusDailyAvailable
 	}
-	stats.TotalAvailable = max(0, stats.TotalAvailable-oldTotal+stats.Microsoft.TotalAvailable)
+	stats.TotalAvailable += stats.Microsoft.TotalAvailable
 	stats.ActiveMicrosoftAllocations, err = r.fastActiveMicrosoftAllocations(ctx, projectID)
 	if err != nil {
 		return nil, errors.Join(errFastInventoryUnavailable, err)
@@ -188,51 +201,55 @@ func (r *Repo) GetFastProductInventoryTotals(ctx context.Context, projectID uint
 	if len(rows) == 0 {
 		return nil, domain.ErrProjectNotAllocatable
 	}
-	previous, err := r.loadCachedFastTotals(ctx, projectID)
+	other, refreshErr := r.otherInventory(ctx, projectID, rows)
+	if other == nil {
+		return nil, refreshErr
+	}
+	stats, err := r.fastMicrosoftInventoryStats(ctx, projectID, rows, other.Stats)
 	if err != nil {
 		return nil, err
 	}
-	stats, err := r.GetFastInventoryStats(ctx, projectID)
-	if err != nil {
-		return nil, err
+	result := &allocapp.ProjectProductInventoryTotals{
+		ProjectID: projectID, SourceRefreshedAt: other.Stats.SourceRefreshedAt, RefreshPending: refreshErr != nil,
+		Items: append([]allocapp.ProductInventoryTotal(nil), other.Items...),
 	}
-	base, err := r.loadFastInventoryBase(ctx)
-	if err != nil {
-		return nil, errors.Join(errFastInventoryUnavailable, err)
-	}
-	history, err := r.loadFastInventoryHistory(ctx, projectID)
-	if err != nil {
-		return nil, errors.Join(errFastInventoryUnavailable, err)
-	}
-	if history.ErrorBound > fastInventoryMaxErrorBound {
-		return nil, fmt.Errorf("%w: error bound %d exceeds %d", errFastInventoryUnavailable, history.ErrorBound, fastInventoryMaxErrorBound)
-	}
-	if previous == nil {
-		previous = &allocapp.ProjectProductInventoryTotals{ProjectID: projectID}
-	}
-	result := *previous
-	result.ProjectID = projectID
-	result.Cold = false
-	result.TotalAvailable = stats.TotalAvailable
 	for _, row := range rows {
-		item := fastProductItem(&result, row.ProductID)
-		if item == nil {
-			result.Items = append(result.Items, allocapp.ProductInventoryTotal{ProductID: row.ProductID, ProductType: coredomain.ProductType(row.Type)})
-			item = &result.Items[len(result.Items)-1]
-		}
-		item.ProductType = coredomain.ProductType(row.Type)
-		if item.ProductType != coredomain.ProductTypeMicrosoft {
+		if coredomain.ProductType(row.Type) != coredomain.ProductTypeMicrosoft {
 			continue
 		}
-		item.TotalAvailable = productInventoryTotalFromStats(row, stats)
-		item.PublicAvailable = item.TotalAvailable
-		item.CodeAvailable = int64Ptr(item.TotalAvailable)
-		item.CodePublicAvailable = int64Ptr(item.PublicAvailable)
-		item.PurchaseAvailable = int64Ptr(item.TotalAvailable)
-		item.PurchasePublicAvailable = int64Ptr(item.PublicAvailable)
-		item.Suffixes = fastInventorySuffixes(base, history)
+		result.SourceRefreshedAt[coredomain.ProductTypeMicrosoft] = stats.SourceRefreshedAt[coredomain.ProductTypeMicrosoft]
+		var item allocapp.ProductInventoryTotal
+		if err := r.assertFastProjectScope(ctx, projectID); errors.Is(err, errFastInventoryRestrictedProject) {
+			item, err = r.productInventoryItem(ctx, projectID, row, stats)
+			if err != nil {
+				return nil, err
+			}
+		} else if err != nil {
+			return nil, err
+		} else {
+			base, err := r.loadFastInventoryBase(ctx)
+			if err != nil {
+				return nil, err
+			}
+			history, err := r.loadFastInventoryHistory(ctx, projectID)
+			if err != nil {
+				return nil, err
+			}
+			item = allocapp.ProductInventoryTotal{
+				ProductID: row.ProductID, ProductType: coredomain.ProductTypeMicrosoft,
+				TotalAvailable: productInventoryTotalFromStats(row, stats), PublicAvailable: productInventoryPublicTotalFromStats(row, stats),
+				Suffixes: fastInventorySuffixes(base, history),
+			}
+			item.CodeAvailable, item.PurchaseAvailable = int64Ptr(item.TotalAvailable), int64Ptr(item.TotalAvailable)
+			item.CodePublicAvailable, item.PurchasePublicAvailable = int64Ptr(item.PublicAvailable), int64Ptr(item.PublicAvailable)
+		}
+		result.Items = append(result.Items, item)
 	}
-	return &result, nil
+	sort.Slice(result.Items, func(i, j int) bool { return result.Items[i].ProductID < result.Items[j].ProductID })
+	for _, item := range result.Items {
+		result.TotalAvailable += item.TotalAvailable
+	}
+	return result, refreshErr
 }
 
 func (r *Repo) fastInventoryProductRows(ctx context.Context, projectID uint) ([]productInventoryRow, error) {
@@ -532,45 +549,6 @@ LEFT JOIN explicit_aliases ea ON ea.id = ma.explicit_alias_id
 
 func fastInventoryAliasHLLKey(historyKey, suffix string) string {
 	return historyKey + ":hll:alias:" + strconv.FormatUint(uint64(len(suffix)), 10) + ":" + suffix
-}
-
-func (r *Repo) loadCachedFastStats(ctx context.Context, projectID uint) (*allocapp.InventoryStats, error) {
-	payload, err := r.redis.Get(ctx, inventoryCacheKey(allocapp.InventoryCacheStats, projectID)).Bytes()
-	if errors.Is(err, redis.Nil) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var stats allocapp.InventoryStats
-	if err := json.Unmarshal(payload, &stats); err != nil {
-		return nil, fmt.Errorf("decode cached fast inventory stats: %w", err)
-	}
-	return &stats, nil
-}
-
-func (r *Repo) loadCachedFastTotals(ctx context.Context, projectID uint) (*allocapp.ProjectProductInventoryTotals, error) {
-	payload, err := r.redis.Get(ctx, inventoryCacheKey(allocapp.InventoryCacheProducts, projectID)).Bytes()
-	if errors.Is(err, redis.Nil) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var totals allocapp.ProjectProductInventoryTotals
-	if err := json.Unmarshal(payload, &totals); err != nil {
-		return nil, fmt.Errorf("decode cached fast inventory totals: %w", err)
-	}
-	return &totals, nil
-}
-
-func fastProductItem(totals *allocapp.ProjectProductInventoryTotals, productID uint) *allocapp.ProductInventoryTotal {
-	for i := range totals.Items {
-		if totals.Items[i].ProductID == productID {
-			return &totals.Items[i]
-		}
-	}
-	return nil
 }
 
 func sumFastInventoryAliases(values map[string]int64) int64 {

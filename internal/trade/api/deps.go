@@ -647,6 +647,8 @@ func mapBillingError(err error) error {
 
 func mapAllocationError(err error) error {
 	switch {
+	case errors.Is(err, allocdomain.ErrInventoryRefreshInProgress):
+		return domain.ErrCheckoutOverloaded
 	case errors.Is(err, allocdomain.ErrDefinitiveInventoryExhausted):
 		return domain.ErrDefinitiveInventoryExhausted
 	case errors.Is(err, allocdomain.ErrInsufficientInventory):

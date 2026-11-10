@@ -72,6 +72,7 @@ func (r *failingInventoryTaskRepo) GetInventoryStats(ctx context.Context, _ uint
 
 type failingInventoryTaskCache struct {
 	allocapp.InventoryCache
+	stored *allocapp.InventoryStats
 }
 
 type boundedInventoryTaskRepo struct {
@@ -129,6 +130,11 @@ func (*failingInventoryTaskCache) AcquireInventoryRefresh(context.Context, alloc
 }
 
 func (*failingInventoryTaskCache) ReleaseInventoryRefresh(context.Context, allocapp.InventoryCacheEntry, string) error {
+	return nil
+}
+
+func (c *failingInventoryTaskCache) RefreshInventoryStats(_ context.Context, _ uint, stats *allocapp.InventoryStats, _ time.Duration) error {
+	c.stored = stats
 	return nil
 }
 
@@ -191,6 +197,26 @@ func TestInventoryRefreshTaskReturnsAggregateFailure(t *testing.T) {
 	require.Equal(t, 1, result.Failed)
 	require.EqualValues(t, 1, repo.calls.Load())
 	require.Equal(t, wantDeadline, repo.deadline, "the Asynq task deadline is the refresh budget")
+}
+
+type warmingInventoryRepo struct{ boundedInventoryTaskRepo }
+
+func (*warmingInventoryRepo) GetInventoryStats(context.Context, uint) (*allocapp.InventoryStats, error) {
+	return &allocapp.InventoryStats{ProjectID: 1, TotalAvailable: 7, RefreshPending: true}, platform.ErrBackgroundExecutionDeferred
+}
+
+func TestInventoryWarmupDefersWithoutRecordingAggregateFailure(t *testing.T) {
+	useCase := allocapp.NewUseCase(&warmingInventoryRepo{})
+	cache := &failingInventoryTaskCache{}
+	useCase.SetInventoryCache(cache)
+	result, deferred, err := refreshInventoryTask(context.Background(), useCase)
+	require.NoError(t, err)
+	require.True(t, deferred)
+	require.Equal(t, 1, result.Skipped)
+	require.Zero(t, result.Failed)
+	require.NotNil(t, cache.stored, "publish usable results before deferring unfinished work")
+	require.EqualValues(t, 7, cache.stored.TotalAvailable)
+	require.True(t, cache.stored.RefreshPending)
 }
 
 func TestInventoryRefreshTaskStopsNormallyAtItsWorkLimit(t *testing.T) {

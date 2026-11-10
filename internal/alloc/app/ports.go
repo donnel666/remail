@@ -186,7 +186,9 @@ type InventoryStats struct {
 	ActiveProtoAllocations     int64
 	ActiveDaumAllocations      int64
 	// Cold distinguishes an unrefreshed placeholder from a real zero inventory.
-	Cold bool
+	Cold              bool
+	SourceRefreshedAt map[coredomain.ProductType]time.Time `json:"sourceRefreshedAt,omitempty"`
+	RefreshPending    bool                                 `json:"refreshPending,omitempty"`
 }
 
 type ProtoInventoryStats struct {
@@ -258,7 +260,9 @@ type ProjectProductInventoryTotals struct {
 	TotalAvailable int64
 	Items          []ProductInventoryTotal
 	// RefreshedAt is internal cache metadata, not part of the public API.
-	RefreshedAt *time.Time `json:"refreshedAt,omitempty"`
+	RefreshedAt       *time.Time                           `json:"refreshedAt,omitempty"`
+	SourceRefreshedAt map[coredomain.ProductType]time.Time `json:"sourceRefreshedAt,omitempty"`
+	RefreshPending    bool                                 `json:"refreshPending,omitempty"`
 	// Cold marks a deliberately seeded zero snapshot whose aggregate refresh
 	// has not completed yet. It makes every product/suffix a known zero without
 	// requiring synchronous aggregate SQL on a cache miss.
@@ -319,7 +323,8 @@ type InventoryOrderActivityCache interface {
 
 // FastInventoryRepository provides a deliberately stale, bounded-cost read
 // model for background inventory refreshes. The authoritative allocator keeps
-// using the normal repository checks.
+// using the normal repository checks. A non-nil result with an error preserves
+// usable providers while the worker retries unfinished providers.
 type FastInventoryRepository interface {
 	GetFastInventoryStats(ctx context.Context, projectID uint) (*InventoryStats, error)
 	GetFastProductInventoryTotals(ctx context.Context, projectID uint) (*ProjectProductInventoryTotals, error)

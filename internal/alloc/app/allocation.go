@@ -555,6 +555,13 @@ func (uc *UseCase) productSuffixInventoryForSelection(ctx context.Context, confi
 		}
 		return inventory, nil
 	}
+	if config.ProductType != coredomain.ProductTypeMicrosoft {
+		// Repair missing product snapshots in the worker, never with a request-time aggregate.
+		if err := uc.RequestInventoryRefresh(ctx, []uint{config.ProjectID}); err != nil {
+			return nil, err
+		}
+		return nil, domain.ErrInventoryRefreshInProgress
+	}
 	// A newly enabled or previously disabled product may not be present in the
 	// current shared snapshot yet. Keep that rare path authoritative.
 	return uc.repo.ListProductSuffixInventory(ctx, config, buyerUserID, scope)
@@ -1622,8 +1629,11 @@ func (uc *UseCase) RefreshInventoryCacheBefore(ctx context.Context, before time.
 			if errors.Is(err, domain.ErrProjectNotAllocatable) || (err == nil && stats == nil) {
 				err = uc.inventoryCache.DeleteInventory(ctx, entry)
 				removed = err == nil
-			} else if err == nil {
+			} else if stats != nil {
 				err = uc.inventoryCache.RefreshInventoryStats(ctx, entry.ProjectID, stats, inventoryCacheHardTTLValue())
+				if err == nil {
+					err = refreshErr
+				}
 			}
 		case InventoryCacheProducts:
 			var totals *ProjectProductInventoryTotals
@@ -1637,8 +1647,11 @@ func (uc *UseCase) RefreshInventoryCacheBefore(ctx context.Context, before time.
 			if errors.Is(err, domain.ErrProjectNotAllocatable) || (err == nil && totals == nil) {
 				err = uc.inventoryCache.DeleteInventory(ctx, entry)
 				removed = err == nil
-			} else if err == nil {
+			} else if totals != nil {
 				err = uc.inventoryCache.RefreshProductInventoryTotals(ctx, entry.ProjectID, totals, inventoryCacheHardTTLValue())
+				if err == nil {
+					err = refreshErr
+				}
 			}
 		default:
 			err = uc.inventoryCache.DeleteInventory(ctx, entry)
@@ -1653,6 +1666,13 @@ func (uc *UseCase) RefreshInventoryCacheBefore(ctx context.Context, before time.
 		cancel()
 		if err == nil {
 			err = errors.Join(releaseErr, clearErr)
+		}
+		if errors.Is(err, platform.ErrBackgroundExecutionDeferred) {
+			if err := requeueInventory(uc.inventoryCache, []InventoryCacheEntry{entry}); err != nil {
+				return result, err
+			}
+			result.Skipped++
+			continue
 		}
 		if err != nil {
 			result.Failed++
@@ -1690,6 +1710,25 @@ func (uc *UseCase) ScheduleInventoryRefresh(ctx context.Context) error {
 		return nil
 	}
 	return uc.queue.EnqueueInventoryRefresh(ctx)
+}
+
+// RequestInventoryRefresh schedules known configuration changes without reading inventory or renewing snapshots.
+func (uc *UseCase) RequestInventoryRefresh(ctx context.Context, projectIDs []uint) error {
+	if uc == nil || uc.inventoryCache == nil {
+		return nil
+	}
+	var entries []InventoryCacheEntry
+	for _, id := range uniqueInventoryProjectIDs(projectIDs) {
+		entries = append(entries, InventoryCacheEntry{Kind: InventoryCacheStats, ProjectID: id},
+			InventoryCacheEntry{Kind: InventoryCacheProducts, ProjectID: id})
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	if err := uc.inventoryCache.AdvanceInventory(ctx, entries); err != nil {
+		return err
+	}
+	return uc.ScheduleInventoryRefresh(ctx)
 }
 
 // RefreshInventoryOrderActivity samples recent orders from the background

@@ -10067,6 +10067,7 @@ export interface components {
         InventoryRefreshAcceptedResponse: {
             projectIds: number[];
         };
+        /** @description Cached inventory hints. A product omitted from products is not yet known; it must not be interpreted as zero. totalAvailable sums the available product snapshots and is not a reservation. */
         ProjectInventoryTotalResponse: {
             projectId: number;
             totalAvailable: number;

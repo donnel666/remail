@@ -126,6 +126,18 @@ it("keeps the selected project's loaded stock when a later list response has no 
   expect(row(view.container, 2)).toHaveTextContent("--");
 });
 
+it("replaces the selected detail's old zero when the batch snapshot becomes ready", async () => {
+  mocks.list.mockResolvedValueOnce({ items: [project(1, 0), project(2, null)] })
+    .mockResolvedValue({ items: [project(1, 40), project(2, 5)] });
+  mocks.inventory.mockResolvedValueOnce(inventory(1, 0)).mockResolvedValue(inventory(1, 40));
+  const view = await act(async () => render(<Dashboard />));
+  expect(row(view.container, 1)).toHaveTextContent("Stock 0");
+  await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+  expect(row(view.container, 1)).toHaveTextContent("Stock 40");
+  expect(row(view.container, 2)).toHaveTextContent("Stock 5");
+  expect(mocks.inventory.mock.calls.map(([id]) => id)).toEqual([1, 1]);
+});
+
 it("does not treat an empty cold detail response as loaded stock and retries batch reads after failure", async () => {
   mocks.list.mockResolvedValueOnce({ items: [project(1, null), project(2, null)] })
     .mockRejectedValueOnce(new Error("temporary cache read failure"))

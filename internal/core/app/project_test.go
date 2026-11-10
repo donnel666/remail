@@ -87,6 +87,9 @@ func (r *fakeProjectRepo) ResubmitWithLog(_ context.Context, _ uint, detail *dom
 }
 
 func (r *fakeProjectRepo) UpdateWithLog(_ context.Context, detail *domain.ProjectDetail, log *governancedomain.OperationLog) error {
+	if r.detail != nil {
+		detail.Project.Status = r.detail.Project.Status
+	}
 	assignProjectAccessesForTest(detail)
 	r.detail = detail
 	r.log = log
@@ -1052,4 +1055,39 @@ func validProjectDetailForUseCase() *domain.ProjectDetail {
 			{ID: 2, ProjectID: 1, RuleType: domain.MailRuleRecipient, Pattern: "exact", Enabled: true},
 		},
 	}
+}
+
+func TestProjectProductChangesScheduleInventoryWithoutHistoryScans(t *testing.T) {
+	previous := runtimeconfig.String(projectHistoryAutoScanEnabledKey, "false")
+	runtimeconfig.Set(projectHistoryAutoScanEnabledKey, "false")
+	t.Cleanup(func() { runtimeconfig.Set(projectHistoryAutoScanEnabledKey, previous) })
+	repo := &fakeProjectRepo{}
+	uc := NewProjectUseCase(repo)
+	var scheduled [][]uint
+	uc.SetInventoryRefresh(func(_ context.Context, ids []uint) error {
+		require.NotNil(t, repo.log, "only schedule after the mutation commits")
+		scheduled = append(scheduled, append([]uint(nil), ids...))
+		return nil
+	})
+	uc.SetHistoryScan(func(context.Context, uint, string) error {
+		t.Fatal("inventory refresh must not enable old-project scanning")
+		return nil
+	})
+	req := validProjectCreateRequest()
+	created, err := uc.AdminCreateListed(context.Background(), 9, req, "inventory", "/projects")
+	require.NoError(t, err)
+	require.Equal(t, [][]uint{{created.Project.ID}}, scheduled)
+	req.Products = append(req.Products, ProjectProductRequest{Type: "icloud", Status: "enabled", PurchaseEnabled: true, PurchasePrice: "1", ActivationWindowMinutes: 60, WarrantyMinutes: 60, MainWeight: 1})
+	_, err = uc.AdminUpdate(context.Background(), 9, created.Project.ID, req, "inventory", "/projects")
+	require.NoError(t, err)
+	require.Equal(t, [][]uint{{created.Project.ID}, {created.Project.ID}}, scheduled)
+	_, err = uc.AdminBulkUpdateProducts(context.Background(), 9, []uint{5, 6, 5}, []ProjectProductRequest{
+		{Type: "icloud", Status: "enabled", PurchaseEnabled: true, PurchasePrice: "1", ActivationWindowMinutes: 60, WarrantyMinutes: 60, MainWeight: 1},
+		{Type: "microsoft_enterprise", Status: "enabled", PurchaseEnabled: true, PurchasePrice: "1", ActivationWindowMinutes: 60, WarrantyMinutes: 60, MainWeight: 1},
+	}, "inventory", "/products")
+	require.NoError(t, err)
+	require.Equal(t, []uint{5, 6}, scheduled[2])
+	_, err = uc.AdminBulkUpdateProducts(context.Background(), 9, []uint{5}, []ProjectProductRequest{{Type: "invalid"}}, "inventory", "/products")
+	require.Error(t, err)
+	require.Len(t, scheduled, 3, "failed updates must not trigger work")
 }

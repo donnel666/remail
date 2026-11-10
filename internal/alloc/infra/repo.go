@@ -2178,33 +2178,27 @@ func (r *Repo) ListInventoryProjects(ctx context.Context) ([]allocapp.InventoryP
 }
 
 func (r *Repo) GetInventoryStats(ctx context.Context, projectID uint) (*allocapp.InventoryStats, error) {
-	stats := &allocapp.InventoryStats{ProjectID: projectID}
-	var productRows []struct {
-		Type            string
-		CodeEnabled     bool
-		PurchaseEnabled bool
-		MainWeight      int
-		DotWeight       int
-		PlusWeight      int
+	rows, err := r.fastInventoryProductRows(ctx, projectID)
+	if err != nil {
+		return nil, err
 	}
-	if err := r.dbFor(ctx).Raw(`
-SELECT pp.type AS type,
-       pp.code_enabled AS code_enabled,
-       pp.purchase_enabled AS purchase_enabled,
-       pp.main_weight AS main_weight,
-       pp.dot_weight AS dot_weight,
-       pp.plus_weight AS plus_weight
-FROM projects p
-JOIN project_products pp ON pp.project_id = p.id
-	WHERE p.id = ?
-	  AND p.status = 'listed'
-	  AND pp.status = 'enabled'
-	  AND pp.type IN ('microsoft', 'microsoft_enterprise', 'domain', 'gmail', 'gmail_variant', 'icloud', 'proto', 'daum')`, projectID).Scan(&productRows).Error; err != nil {
-		return nil, fmt.Errorf("load inventory project products: %w", err)
-	}
-	if len(productRows) == 0 {
+	if len(rows) == 0 {
 		return nil, domain.ErrProjectNotAllocatable
 	}
+	stats, err := r.inventoryStatsForProducts(ctx, projectID, rows)
+	if err != nil {
+		return nil, err
+	}
+	observed := time.Now().UTC()
+	stats.SourceRefreshedAt = make(map[coredomain.ProductType]time.Time, len(rows))
+	for _, row := range rows {
+		stats.SourceRefreshedAt[coredomain.ProductType(row.Type)] = observed
+	}
+	return stats, nil
+}
+
+func (r *Repo) inventoryStatsForProducts(ctx context.Context, projectID uint, productRows []productInventoryRow) (*allocapp.InventoryStats, error) {
+	stats := &allocapp.InventoryStats{ProjectID: projectID}
 	today := time.Now().UTC().Format("2006-01-02")
 	for _, row := range productRows {
 		switch coredomain.ProductType(row.Type) {
@@ -2482,7 +2476,7 @@ WHERE gr.status IN ('normal', 'available')
 				dotArgs = append(dotArgs, cooling, cooling)
 			}
 			if err := scan(&dot, `
-SELECT COALESCE(SUM(`+gmailDotCapacityExpression("gr")+`), 0) AS capacity,
+SELECT COALESCE(SUM(`+gmailDotCandidateCapacityExpression(r.dbFor(ctx), "gr")+`), 0) AS capacity,
        COALESCE((
            SELECT COUNT(*)
            FROM gmail_allocations history
@@ -2598,20 +2592,30 @@ WHERE pr.resource_type = 'proto'
 		stats.Proto.PublicAvailable = stats.Proto.MainAvailable
 		stats.Proto.TotalAvailable = stats.Proto.MainAvailable
 	}
-	if err := scan(&stats.ActiveMicrosoftAllocations, `SELECT COUNT(*) FROM microsoft_allocations WHERE project_id = ? AND status = 'allocated'`, projectID); err != nil {
-		return nil, err
+	if stats.Microsoft.Enabled {
+		if err := scan(&stats.ActiveMicrosoftAllocations, `SELECT COUNT(*) FROM microsoft_allocations WHERE project_id = ? AND status = 'allocated'`, projectID); err != nil {
+			return nil, err
+		}
 	}
-	if err := scan(&stats.ActiveDomainAllocations, `SELECT COUNT(*) FROM domain_allocations WHERE project_id = ? AND status = 'allocated'`, projectID); err != nil {
-		return nil, err
+	if stats.Domain.Enabled {
+		if err := scan(&stats.ActiveDomainAllocations, `SELECT COUNT(*) FROM domain_allocations WHERE project_id = ? AND status = 'allocated'`, projectID); err != nil {
+			return nil, err
+		}
 	}
-	if err := scan(&stats.ActiveGmailAllocations, `SELECT COUNT(*) FROM gmail_allocations WHERE source = 'local' AND project_id = ? AND status = 'allocated'`, projectID); err != nil {
-		return nil, err
+	if stats.Gmail.Enabled {
+		if err := scan(&stats.ActiveGmailAllocations, `SELECT COUNT(*) FROM gmail_allocations WHERE source = 'local' AND project_id = ? AND status = 'allocated'`, projectID); err != nil {
+			return nil, err
+		}
 	}
-	if err := scan(&stats.ActiveICloudAllocations, `SELECT COUNT(*) FROM icloud_allocations WHERE project_id = ? AND status = 'allocated'`, projectID); err != nil {
-		return nil, err
+	if stats.ICloud.Enabled {
+		if err := scan(&stats.ActiveICloudAllocations, `SELECT COUNT(*) FROM icloud_allocations WHERE project_id = ? AND status = 'allocated'`, projectID); err != nil {
+			return nil, err
+		}
 	}
-	if err := scan(&stats.ActiveProtoAllocations, `SELECT COUNT(*) FROM proto_allocations WHERE project_id = ? AND guard_type = 'proto' AND status = 'allocated'`, projectID); err != nil {
-		return nil, err
+	if stats.Proto.Enabled {
+		if err := scan(&stats.ActiveProtoAllocations, `SELECT COUNT(*) FROM proto_allocations WHERE project_id = ? AND guard_type = 'proto' AND status = 'allocated'`, projectID); err != nil {
+			return nil, err
+		}
 	}
 	if stats.Daum.Enabled {
 		suffixes, err := r.daumSuffixInventory(ctx, projectID, 0, domain.SupplyScopePublic)
@@ -2626,8 +2630,10 @@ WHERE pr.resource_type = 'proto'
 			return nil, err
 		}
 	}
-	if err := scan(&stats.ActiveDaumAllocations, `SELECT COUNT(*) FROM daum_allocations WHERE project_id = ? AND guard_type = 'daum' AND status = 'allocated'`, projectID); err != nil {
-		return nil, err
+	if stats.Daum.Enabled {
+		if err := scan(&stats.ActiveDaumAllocations, `SELECT COUNT(*) FROM daum_allocations WHERE project_id = ? AND guard_type = 'daum' AND status = 'allocated'`, projectID); err != nil {
+			return nil, err
+		}
 	}
 	if stats.MicrosoftEnterprise.Enabled {
 		scope, args := microsoftProjectInventoryScopeSQL(projectID, true)
@@ -2744,51 +2750,65 @@ JOIN project_products pp ON pp.project_id = p.id
 		Items:          make([]allocapp.ProductInventoryTotal, 0, len(productRows)),
 	}
 	for _, row := range productRows {
-		item := allocapp.ProductInventoryTotal{
-			ProductID:       row.ProductID,
-			ProductType:     coredomain.ProductType(row.Type),
-			TotalAvailable:  productInventoryTotalFromStats(row, stats),
-			PublicAvailable: productInventoryPublicTotalFromStats(row, stats),
-		}
-		switch coredomain.ProductType(row.Type) {
-		case coredomain.ProductTypeMicrosoft, coredomain.ProductTypeMicrosoftEnterprise:
-			item.Suffixes, err = r.microsoftProductInventorySuffixTotals(ctx, projectID, row)
-		case coredomain.ProductTypeDomain:
-			item.Suffixes, err = r.domainProductInventorySuffixTotals(ctx)
-		case coredomain.ProductTypeGmail, coredomain.ProductTypeGmailVariant, coredomain.ProductTypeICloud, coredomain.ProductTypeProto, coredomain.ProductTypeDaum:
-			if item.ProductType == coredomain.ProductTypeProto {
-				suffixes, suffixErr := r.protoSuffixInventory(ctx, projectID, 0, domain.SupplyScopePublic)
-				if suffixErr != nil {
-					return nil, suffixErr
-				}
-				for _, suffix := range []string{"proton.me", "protonmail.com"} {
-					item.Suffixes = append(item.Suffixes, allocapp.ProductInventorySuffixTotal{
-						Suffix: suffix, TotalAvailable: suffixes[suffix], PublicAvailable: suffixes[suffix],
-					})
-				}
-			}
-			if item.ProductType == coredomain.ProductTypeDaum {
-				suffixes, err := r.daumSuffixInventory(ctx, projectID, 0, domain.SupplyScopePublic)
-				if err != nil {
-					return nil, err
-				}
-				for _, suffix := range coredomain.DaumEmailDomains() {
-					item.Suffixes = append(item.Suffixes, allocapp.ProductInventorySuffixTotal{Suffix: suffix, TotalAvailable: suffixes[suffix], PublicAvailable: suffixes[suffix]})
-				}
-			}
-			codeAvailable, codePublicAvailable := item.TotalAvailable, item.PublicAvailable
-			purchaseAvailable, purchasePublicAvailable := item.TotalAvailable, item.PublicAvailable
-			item.CodeAvailable, item.CodePublicAvailable = &codeAvailable, &codePublicAvailable
-			item.PurchaseAvailable, item.PurchasePublicAvailable = &purchaseAvailable, &purchasePublicAvailable
-		default:
-			return nil, domain.ErrProjectNotAllocatable
-		}
+		item, err := r.productInventoryItem(ctx, projectID, row, stats)
 		if err != nil {
 			return nil, err
 		}
 		result.Items = append(result.Items, item)
 	}
+	observed := time.Now().UTC()
+	result.SourceRefreshedAt = make(map[coredomain.ProductType]time.Time, len(productRows))
+	for _, row := range productRows {
+		result.SourceRefreshedAt[coredomain.ProductType(row.Type)] = observed
+	}
 	return result, nil
+}
+
+func (r *Repo) productInventoryItem(ctx context.Context, projectID uint, row productInventoryRow, stats *allocapp.InventoryStats) (allocapp.ProductInventoryTotal, error) {
+	var err error
+	item := allocapp.ProductInventoryTotal{
+		ProductID:       row.ProductID,
+		ProductType:     coredomain.ProductType(row.Type),
+		TotalAvailable:  productInventoryTotalFromStats(row, stats),
+		PublicAvailable: productInventoryPublicTotalFromStats(row, stats),
+	}
+	switch coredomain.ProductType(row.Type) {
+	case coredomain.ProductTypeMicrosoft, coredomain.ProductTypeMicrosoftEnterprise:
+		item.Suffixes, err = r.microsoftProductInventorySuffixTotals(ctx, projectID, row)
+	case coredomain.ProductTypeDomain:
+		item.Suffixes, err = r.domainProductInventorySuffixTotals(ctx)
+	case coredomain.ProductTypeGmail, coredomain.ProductTypeGmailVariant, coredomain.ProductTypeICloud, coredomain.ProductTypeProto, coredomain.ProductTypeDaum:
+		if item.ProductType == coredomain.ProductTypeProto {
+			suffixes, suffixErr := r.protoSuffixInventory(ctx, projectID, 0, domain.SupplyScopePublic)
+			if suffixErr != nil {
+				return item, suffixErr
+			}
+			for _, suffix := range []string{"proton.me", "protonmail.com"} {
+				item.Suffixes = append(item.Suffixes, allocapp.ProductInventorySuffixTotal{
+					Suffix: suffix, TotalAvailable: suffixes[suffix], PublicAvailable: suffixes[suffix],
+				})
+			}
+		}
+		if item.ProductType == coredomain.ProductTypeDaum {
+			suffixes, err := r.daumSuffixInventory(ctx, projectID, 0, domain.SupplyScopePublic)
+			if err != nil {
+				return item, err
+			}
+			for _, suffix := range coredomain.DaumEmailDomains() {
+				item.Suffixes = append(item.Suffixes, allocapp.ProductInventorySuffixTotal{Suffix: suffix, TotalAvailable: suffixes[suffix], PublicAvailable: suffixes[suffix]})
+			}
+		}
+		codeAvailable, codePublicAvailable := item.TotalAvailable, item.PublicAvailable
+		purchaseAvailable, purchasePublicAvailable := item.TotalAvailable, item.PublicAvailable
+		item.CodeAvailable, item.CodePublicAvailable = &codeAvailable, &codePublicAvailable
+		item.PurchaseAvailable, item.PurchasePublicAvailable = &purchaseAvailable, &purchasePublicAvailable
+	default:
+		return item, domain.ErrProjectNotAllocatable
+	}
+	if err != nil {
+		return item, err
+	}
+	return item, nil
 }
 
 func productInventoryTotalFromStats(row productInventoryRow, stats *allocapp.InventoryStats) int64 {

@@ -238,6 +238,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		allocMod.SetBackgroundExecutionGate(p.BackgroundLoad)
 		cleanupFuncs = append(cleanupFuncs, allocapi.RegisterAllocationTaskHandlers(taskMux, allocMod))
 		coreMod.ProductInventory = allocMod.UseCase
+		coreMod.ProjectUseCase.SetInventoryRefresh(allocMod.UseCase.RequestInventoryRefresh)
 		mailMod.BindingQuery = daumBindingQuery{BindingQueryPort: mailMod.BindingQuery, db: p.DB}
 		coreMod.SetAdminResourcePorts(
 			iamMod.AdminResourceOwners,

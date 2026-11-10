@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -148,6 +149,8 @@ func TestNormalizeInventoryRefreshScheduleRemovesUnlistedProjects(t *testing.T) 
 		redis.Z{Score: 1, Member: inventoryCacheKey(allocapp.InventoryCacheStats, 99)},
 	).Err())
 	require.NoError(t, client.Set(ctx, inventoryCacheKey(allocapp.InventoryCacheStats, 10), "{}", time.Hour).Err())
+	payload := fmt.Sprintf(`{"ProjectID":10,"refreshedAt":%q,"Cold":false}`, now.Format(time.RFC3339Nano))
+	require.NoError(t, client.Set(ctx, inventoryCacheKey(allocapp.InventoryCacheProducts, 10), payload, time.Hour).Err())
 
 	require.NoError(t, cache.NormalizeInventoryRefreshSchedule(ctx, now, []uint{10}))
 	require.ErrorIs(t, client.ZScore(ctx, inventoryCacheScheduleKey, inventoryCacheKey(allocapp.InventoryCacheStats, 99)).Err(), redis.Nil)
@@ -772,14 +775,15 @@ func TestInventoryCacheBackfillsLegacySingletonModeInventory(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { require.NoError(t, client.Close()) })
 	cache := NewInventoryCache(client)
-	require.NoError(t, server.Set(inventoryCacheKey(allocapp.InventoryCacheProducts, 10), `{
+	require.NoError(t, server.Set(inventoryCacheKey(allocapp.InventoryCacheProducts, 10), fmt.Sprintf(`{
 		"ProjectID":10,
+		"refreshedAt":%q,
 		"TotalAvailable":10,
 		"Items":[
 			{"ProductID":20,"ProductType":"gmail","TotalAvailable":3,"PublicAvailable":2},
 			{"ProductID":21,"ProductType":"icloud","TotalAvailable":7,"PublicAvailable":5}
 		]
-	}`))
+	}`, time.Now().UTC().Format(time.RFC3339Nano))))
 
 	totals, err := cache.GetProductInventoryTotals(context.Background(), 10)
 	require.NoError(t, err)
@@ -1120,4 +1124,33 @@ func TestInventoryRefreshRunningStateHasNoNextRefresh(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, allocapp.InventoryRefreshRunning, states[10].Status)
 	require.Nil(t, states[10].NextRefreshAt)
+}
+
+func TestProductConfigChangeAdvancesWarmWeeklyInventoryWithoutRenewingSnapshot(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	ctx := context.Background()
+	cache := NewInventoryCache(client)
+	queue := &inventoryRefreshQueueStub{}
+	uc := allocapp.NewUseCase(&inventoryCacheRepoStub{}, queue)
+	uc.SetInventoryCache(cache)
+	for _, id := range []uint{10, 11} {
+		require.NoError(t, cache.SetProductInventoryTotals(ctx, id, &allocapp.ProjectProductInventoryTotals{
+			ProjectID: id, Items: []allocapp.ProductInventoryTotal{{ProductID: id, ProductType: coredomain.ProductTypeMicrosoft, TotalAvailable: 7}},
+		}, 6*24*time.Hour))
+		for _, kind := range []allocapp.InventoryCacheKind{allocapp.InventoryCacheStats, allocapp.InventoryCacheProducts} {
+			require.NoError(t, client.ZAdd(ctx, inventoryCacheScheduleKey, redis.Z{Member: inventoryCacheKey(kind, id), Score: float64(time.Now().Add(5 * 24 * time.Hour).UnixMilli())}).Err())
+		}
+	}
+	before := client.Get(ctx, inventoryCacheKey(allocapp.InventoryCacheProducts, 10)).Val()
+	require.NoError(t, uc.RequestInventoryRefresh(ctx, []uint{10, 11, 10}))
+	for _, id := range []uint{10, 11} {
+		for _, kind := range []allocapp.InventoryCacheKind{allocapp.InventoryCacheStats, allocapp.InventoryCacheProducts} {
+			require.LessOrEqual(t, client.ZScore(ctx, inventoryCacheScheduleKey, inventoryCacheKey(kind, id)).Val(), float64(time.Now().UnixMilli()))
+		}
+	}
+	require.Equal(t, before, client.Get(ctx, inventoryCacheKey(allocapp.InventoryCacheProducts, 10)).Val())
+	require.Equal(t, 6*24*time.Hour, client.TTL(ctx, inventoryCacheKey(allocapp.InventoryCacheProducts, 10)).Val())
+	require.Equal(t, 1, queue.calls)
 }

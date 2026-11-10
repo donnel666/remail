@@ -169,6 +169,27 @@ describe("Proto product hierarchy", () => {
     expect(productRows(view.container)[0]).toHaveTextContent("--");
   });
 
+  it("keeps a known product visible while iCloud is unknown, then accepts a measured iCloud zero", () => {
+    const products = [
+      ...toWorkbenchProducts(1, product),
+      ...toWorkbenchProducts(1, { ...product, type: "icloud", totalAvailable: null, publicAvailable: null, suffixes: undefined }),
+    ];
+    const selectedProject = { id: "1", products, inventoryLoaded: false } as WorkbenchProject;
+    const props = { inventoryScope: "private_first" as const, onInventoryScopeChange: vi.fn(),
+      onProductSearchChange: vi.fn(), onSelectProduct: vi.fn(), onServiceModeChange: vi.fn(), priceMultiplier: 1,
+      productSearch: "", selectedProductId: "icloud", serviceMode: "purchase" as const };
+    const view = render(<ProductPickerPanel {...props} products={products} selectedProject={selectedProject} />);
+    expect(productRows(view.container)[0]).toHaveTextContent("Stock 12");
+    expect(productRows(view.container).slice(-1)[0]).toHaveTextContent("--");
+    expect(productRows(view.container).slice(-1)[0]).not.toHaveTextContent("Stock 0");
+    const merged = mergeProjectInventory(selectedProject, { projectId: 1, totalAvailable: 0,
+      products: [{ productType: "icloud", totalAvailable: 0, publicAvailable: 0 }] });
+    expect(merged.inventoryLoaded).toBe(true);
+    view.rerender(<ProductPickerPanel {...props} products={merged.products} selectedProject={merged} />);
+    expect(productRows(view.container)[0]).toHaveTextContent("Stock 12");
+    expect(productRows(view.container).slice(-1)[0]).toHaveTextContent("Stock 0");
+  });
+
   it.each(["purchase", "code"] as ServiceMode[])("submits parent and child selectors through the actual %s checkout handler", async (serviceMode) => {
     const { container } = render(<Dashboard />);
     await waitFor(() => expect(productRows(container)).toHaveLength(3));
@@ -307,8 +328,12 @@ it.each([
   ] });
   mocks.createOrder.mockRejectedValueOnce(error);
   const { container } = render(<Dashboard />);
-  await waitFor(() => expect(productRows(container)).toHaveLength(2));
+  await waitFor(() => {
+    expect(productRows(container)).toHaveLength(2);
+    expect(productRows(container)[0]).toHaveTextContent("Stock 20");
+  });
   fireEvent.click(productRows(container)[1]);
+  expect(screen.getByTestId("selected-selector")).toHaveTextContent(suffix);
   const create = screen.getByRole("button", { name: "Create fixture order" });
   fireEvent.click(create);
   await waitFor(() => expect(mocks.toastError).toHaveBeenCalledTimes(1));

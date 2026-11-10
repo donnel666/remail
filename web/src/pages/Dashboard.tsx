@@ -240,6 +240,8 @@ export function toWorkbenchProducts(
               ? "icloud.com"
               : product.type === "daum" ? "daum" : "proto";
   const baseProduct: WorkbenchProduct = {
+    inventoryKnown: (inventory?.totalAvailable ?? product.totalAvailable) != null &&
+      (inventory?.publicAvailable ?? product.publicAvailable) != null,
     activationWindowMinutes: product.activationWindowMinutes,
     codeEnabled: product.codeEnabled,
     codeInventory: codeAvailable,
@@ -284,37 +286,34 @@ export function mergeProjectInventory(
   const baseProducts = project.products.filter(
     (product) => product.id === product.productType,
   );
+  const products = baseProducts.flatMap((product) => {
+    const inventoryItem = inventoryByProductType.get(product.productType);
+    if (!inventoryItem) {
+      return project.products.filter((item) => item.productType === product.productType);
+    }
+    const totalAvailable = inventoryItem.totalAvailable ?? 0;
+    const publicAvailable = inventoryItem.publicAvailable ?? 0;
+    const baseProduct: WorkbenchProduct = {
+      ...product,
+      inventoryKnown: true,
+      codeInventory: inventoryItem.codeAvailable ?? totalAvailable,
+      codePublicInventory:
+        inventoryItem.codePublicAvailable ?? publicAvailable,
+      id: product.productType,
+      purchaseInventory: inventoryItem.purchaseAvailable ?? totalAvailable,
+      purchasePublicInventory:
+        inventoryItem.purchasePublicAvailable ?? publicAvailable,
+    };
+    const suffixProducts =
+      product.productType === "microsoft" || product.productType === "microsoft_enterprise" || product.productType === "domain" || product.productType === "proto" || product.productType === "daum"
+        ? toWorkbenchSuffixProducts(baseProduct, inventoryItem.suffixes)
+        : [];
+    return [baseProduct, ...suffixProducts];
+  });
   return {
     ...project,
-    inventoryLoaded: project.inventoryLoaded || (baseProducts.length > 0 &&
-      baseProducts.every((product) => inventoryByProductType.has(product.productType))),
-    products: baseProducts.flatMap((product) => {
-      const inventoryItem = inventoryByProductType.get(product.productType);
-      if (!inventoryItem) {
-        if (product.productType === "proto" || product.productType === "daum") {
-          const children = project.products.filter((item) => item.productType === product.productType && item.id !== item.productType);
-          return [product, ...(children.length ? children : toWorkbenchSuffixProducts(product, undefined))];
-        }
-        return [product];
-      }
-      const totalAvailable = inventoryItem.totalAvailable ?? 0;
-      const publicAvailable = inventoryItem.publicAvailable ?? 0;
-      const baseProduct: WorkbenchProduct = {
-        ...product,
-        codeInventory: inventoryItem.codeAvailable ?? totalAvailable,
-        codePublicInventory:
-          inventoryItem.codePublicAvailable ?? publicAvailable,
-        id: product.productType,
-        purchaseInventory: inventoryItem.purchaseAvailable ?? totalAvailable,
-        purchasePublicInventory:
-          inventoryItem.purchasePublicAvailable ?? publicAvailable,
-      };
-      const suffixProducts =
-        product.productType === "microsoft" || product.productType === "microsoft_enterprise" || product.productType === "domain" || product.productType === "proto" || product.productType === "daum"
-          ? toWorkbenchSuffixProducts(baseProduct, inventoryItem.suffixes)
-          : [];
-      return [baseProduct, ...suffixProducts];
-    }),
+    inventoryLoaded: products.length > 0 && products.every((product) => product.inventoryKnown !== false),
+    products,
   };
 }
 
@@ -387,7 +386,7 @@ function getProductInventory(
   serviceMode: ServiceMode,
   inventoryScope: InventoryScope,
 ) {
-  if (!product) return 0;
+  if (!product || product.inventoryKnown === false) return 0;
   if (inventoryScope === "public_only") {
     return serviceMode === "code"
       ? product.codePublicInventory
@@ -632,6 +631,11 @@ export default function Dashboard() {
         setProjects(listed.map((project) =>
           toWorkbenchProject(project, projectInventoriesRef.current.get(String(project.id))),
         ));
+        const selectedId = selectedProjectIdRef.current;
+        if (silent && projectInventoriesRef.current.has(selectedId)) {
+          // A completed shared refresh must replace the selected detail's old zeroes too.
+          void loadProjectInventory(selectedId, { silent: true });
+        }
       } catch (err) {
         if (!signal.aborted && !silent) {
           Toast.error(getIamErrorMessage(t, err, "An unexpected error occurred."));

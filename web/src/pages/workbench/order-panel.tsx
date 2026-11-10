@@ -373,7 +373,8 @@ export function OrderPanel({
     totalPriceText !== totalPriceExactText ||
     originalTotalPriceText !== originalTotalPriceExactText;
   const inventory = selectedProductInventory;
-  const stockText = `${t("Stock")} ${formatCompactNumber(inventory)}`;
+  const stockText = selectedProduct?.inventoryKnown === false
+    ? "--" : `${t("Stock")} ${formatCompactNumber(inventory)}`;
   const createOrderLabel =
     serviceMode === "code" ? t("Order code now") : t("Buy now");
   const visibleOrders = useMemo(

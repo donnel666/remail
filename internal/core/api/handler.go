@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -725,6 +726,28 @@ func (h *CoreHandler) projectProductInventoryByID(ctx context.Context, summaries
 		}
 		for _, item := range totals.Items {
 			result[item.ProductID] = item
+		}
+	}
+	// Already-loaded product configuration also repairs missed/failed mutation notifications.
+	if refresher, ok := h.module.ProductInventory.(interface {
+		RequestInventoryRefresh(context.Context, []uint) error
+	}); ok {
+		var missing []uint
+		for _, summary := range summaries {
+			if summary.Project.Status != coredomain.ProjectStatusListed {
+				continue
+			}
+			for _, product := range summary.Products {
+				if _, known := result[product.ID]; product.Status == coredomain.ProductStatusEnabled && !known {
+					missing = append(missing, summary.Project.ID)
+					break
+				}
+			}
+		}
+		if len(missing) > 0 {
+			if err := refresher.RequestInventoryRefresh(ctx, missing); err != nil {
+				slog.Warn("schedule missing project inventory failed", "error", err)
+			}
 		}
 	}
 	return result, nil

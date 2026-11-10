@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 
 	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	coreapp "github.com/donnel666/remail/internal/core/app"
+	coredomain "github.com/donnel666/remail/internal/core/domain"
 	iamdomain "github.com/donnel666/remail/internal/iam/domain"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -68,4 +70,38 @@ func TestProjectListKeepsWeeklySnapshotWithoutDetailRequest(t *testing.T) {
 		require.EqualValues(t, 7489322, *list.Items[0].Products[0].TotalAvailable)
 	}
 	require.Equal(t, 2, calls, "one batched cache read per page load")
+}
+
+type repairingInventoryProvider struct {
+	projectInventoryProviderStub
+	refreshIDs []uint
+}
+
+func (p *repairingInventoryProvider) RequestInventoryRefresh(_ context.Context, ids []uint) error {
+	p.refreshIDs = append(p.refreshIDs, ids...)
+	return nil
+}
+
+func TestProjectListSchedulesNewlyEnabledProductInWarmSnapshot(t *testing.T) {
+	observed := time.Now().Add(-24 * time.Hour)
+	provider := &repairingInventoryProvider{projectInventoryProviderStub: projectInventoryProviderStub{
+		totals: &allocapp.ProjectProductInventoryTotals{ProjectID: 10, RefreshedAt: &observed,
+			Items: []allocapp.ProductInventoryTotal{{ProductID: 20, ProductType: coredomain.ProductTypeMicrosoft, TotalAvailable: 17}}},
+	}}
+	handler := NewCoreHandler(&CoreModule{ProductInventory: provider})
+	summaries := []coreapp.ProjectSummary{{Project: coredomain.Project{ID: 10, Status: coredomain.ProjectStatusListed}, Products: []coredomain.Product{
+		{ID: 20, Type: coredomain.ProductTypeMicrosoft, Status: coredomain.ProductStatusEnabled},
+		{ID: 21, Type: coredomain.ProductTypeICloud, Status: coredomain.ProductStatusEnabled},
+		{ID: 22, Type: coredomain.ProductTypeMicrosoftEnterprise, Status: coredomain.ProductStatusEnabled},
+	}}}
+	items, err := handler.projectProductInventoryByID(context.Background(), summaries)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.EqualValues(t, 17, items[20].TotalAvailable)
+	require.Equal(t, []uint{10}, provider.refreshIDs, "new SKUs must refresh even without orders")
+	provider.refreshIDs = nil
+	summaries[0].Products[1].Status, summaries[0].Products[2].Status = coredomain.ProductStatusDisabled, coredomain.ProductStatusDisabled
+	_, err = handler.projectProductInventoryByID(context.Background(), summaries)
+	require.NoError(t, err)
+	require.Empty(t, provider.refreshIDs, "disabled products must not cause repeated repairs")
 }

@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	allocapp "github.com/donnel666/remail/internal/alloc/app"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
@@ -61,4 +63,23 @@ func TestPrivateInventoryRefreshQueueDeduplicatesPerProjectAndViewer(t *testing.
 		seen[payload] = true
 	}
 	require.Len(t, seen, 3)
+}
+
+func TestRepeatedMissingInventoryReadsDeduplicateRefreshTask(t *testing.T) {
+	server := miniredis.RunT(t)
+	options := asynq.RedisClientOpt{Addr: server.Addr()}
+	client := asynq.NewClient(options)
+	t.Cleanup(func() { _ = client.Close() })
+	cacheClient := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = cacheClient.Close() })
+	uc := allocapp.NewUseCase(&inventoryCacheRepoStub{}, NewInventoryRefreshQueue(client))
+	uc.SetInventoryCache(NewInventoryCache(cacheClient))
+	for range 20 {
+		require.NoError(t, uc.RequestInventoryRefresh(context.Background(), []uint{10, 11}))
+	}
+	inspector := asynq.NewInspector(options)
+	t.Cleanup(func() { _ = inspector.Close() })
+	tasks, err := inspector.ListPendingTasks(platform.QueueBackgroundInventory)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
 }

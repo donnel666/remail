@@ -52,9 +52,25 @@ func TestProductInventorySnapshotPreservesMissingProjectErrorWithoutCache(t *tes
 	}
 }
 
+func TestMissingOtherSuffixSnapshotDoesNotRunCheckoutAggregate(t *testing.T) {
+	useCase := NewUseCase(&missingProductInventoryRepoStub{})
+	cache := &warmOnInitializeInventoryCache{initialized: true, totals: &ProjectProductInventoryTotals{ProjectID: 10}}
+	useCase.SetInventoryCache(cache)
+	for _, kind := range []coredomain.ProductType{coredomain.ProductTypeDomain, coredomain.ProductTypeMicrosoftEnterprise, coredomain.ProductTypeProto, coredomain.ProductTypeDaum} {
+		_, err := useCase.productSuffixInventoryForSelection(context.Background(), ProductAllocationConfig{ProjectID: 10, ProductID: 20, ProductType: kind}, 1, domain.SupplyScopePublic)
+		if !errors.Is(err, domain.ErrInventoryRefreshInProgress) {
+			t.Fatalf("%s: got %v", kind, err)
+		}
+	}
+	if len(cache.advanced) != 8 {
+		t.Fatalf("missing products did not schedule both inventory views: %v", cache.advanced)
+	}
+}
+
 type warmOnInitializeInventoryCache struct {
 	InventoryCache
 	initialized bool
+	advanced    []InventoryCacheEntry
 	totals      *ProjectProductInventoryTotals
 }
 
@@ -66,6 +82,11 @@ func (c *warmOnInitializeInventoryCache) GetProductInventorySnapshots(_ context.
 		}
 	}
 	return result, nil
+}
+
+func (c *warmOnInitializeInventoryCache) AdvanceInventory(_ context.Context, entries []InventoryCacheEntry) error {
+	c.advanced = append(c.advanced, entries...)
+	return nil
 }
 
 func (c *warmOnInitializeInventoryCache) InitializeInventory(context.Context, []InventoryCacheEntry, time.Duration) error {

@@ -285,6 +285,7 @@ type ProjectUseCase struct {
 	protoHistoryScan      func(context.Context, uint, string) error
 	daumHistoryScan       func(context.Context, uint, string) error
 	applicationNotifier   func(context.Context, domain.Project, string) error
+	inventoryRefresh      func(context.Context, []uint) error
 }
 
 // Automatic project history scans are a staged feature; absent configuration
@@ -313,6 +314,19 @@ func (uc *ProjectUseCase) SetProtoHistoryScan(scan func(context.Context, uint, s
 
 func (uc *ProjectUseCase) SetDaumHistoryScan(scan func(context.Context, uint, string) error) {
 	uc.daumHistoryScan = scan
+}
+
+func (uc *ProjectUseCase) SetInventoryRefresh(refresh func(context.Context, []uint) error) {
+	uc.inventoryRefresh = refresh
+}
+
+func (uc *ProjectUseCase) scheduleInventoryRefresh(ctx context.Context, projectIDs []uint) {
+	if uc.inventoryRefresh == nil || len(projectIDs) == 0 {
+		return
+	}
+	if err := uc.inventoryRefresh(ctx, projectIDs); err != nil {
+		slog.Warn("project inventory refresh enqueue failed", "project_ids", projectIDs, "error", err)
+	}
 }
 
 func (uc *ProjectUseCase) SetOwnerQueryPort(owners OwnerQueryPort) {
@@ -545,6 +559,7 @@ func (uc *ProjectUseCase) AdminCreateListed(ctx context.Context, operatorUserID 
 	if err := uc.projects.CreateWithLog(ctx, detail, log); err != nil {
 		return nil, err
 	}
+	uc.scheduleInventoryRefresh(ctx, []uint{detail.Project.ID})
 	uc.scheduleAutomaticHistoryScans(ctx, detail, requestID)
 	return detail, nil
 }
@@ -599,6 +614,9 @@ func (uc *ProjectUseCase) AdminUpdate(ctx context.Context, operatorUserID, proje
 	if err := uc.projects.UpdateWithLog(ctx, detail, log); err != nil {
 		return nil, err
 	}
+	if detail.Project.Status == domain.ProjectStatusListed {
+		uc.scheduleInventoryRefresh(ctx, []uint{projectID})
+	}
 	if uc.projectHistoryAutoScanEnabled() {
 		uc.scheduleProtoHistoryScan(ctx, detail, requestID)
 		uc.scheduleDaumHistoryScan(ctx, detail, requestID)
@@ -630,6 +648,7 @@ func (uc *ProjectUseCase) AdminApprove(ctx context.Context, operatorUserID, proj
 	if err != nil {
 		return nil, err
 	}
+	uc.scheduleInventoryRefresh(ctx, []uint{detail.Project.ID})
 	uc.scheduleAutomaticHistoryScans(ctx, detail, requestID)
 	return detail, nil
 }
@@ -675,6 +694,7 @@ func (uc *ProjectUseCase) AdminApproveWithConfig(ctx context.Context, operatorUs
 	if err := uc.projects.ApproveWithConfigAndLog(ctx, detail, log); err != nil {
 		return nil, err
 	}
+	uc.scheduleInventoryRefresh(ctx, []uint{detail.Project.ID})
 	uc.scheduleAutomaticHistoryScans(ctx, detail, requestID)
 	return detail, nil
 }
@@ -783,7 +803,11 @@ func (uc *ProjectUseCase) AdminDuplicate(ctx context.Context, operatorUserID, pr
 
 func (uc *ProjectUseCase) AdminRelist(ctx context.Context, operatorUserID, projectID uint, requestID, path string) (*domain.ProjectDetail, error) {
 	log := projectOperationLog(operatorUserID, requestID, path, "core.project.relist", "project", strconv.FormatUint(uint64(projectID), 10), "success", "Project relisted.")
-	return uc.projects.TransitionWithLog(ctx, projectID, domain.ProjectStatusDelisted, domain.ProjectStatusListed, "", log)
+	detail, err := uc.projects.TransitionWithLog(ctx, projectID, domain.ProjectStatusDelisted, domain.ProjectStatusListed, "", log)
+	if err == nil {
+		uc.scheduleInventoryRefresh(ctx, []uint{projectID})
+	}
+	return detail, err
 }
 
 func (uc *ProjectUseCase) AdminDelist(ctx context.Context, operatorUserID, projectID uint, requestID, path string) (*domain.ProjectDetail, error) {
@@ -804,10 +828,23 @@ func (uc *ProjectUseCase) AdminBulkRelist(ctx context.Context, operatorUserID ui
 	if err != nil {
 		return nil, err
 	}
+	var ids []uint
+	if uc.inventoryRefresh != nil {
+		projects, err := uc.projects.List(ctx, filter, 0, -1)
+		if err != nil {
+			return nil, err
+		}
+		for _, project := range projects {
+			ids = append(ids, project.Project.ID)
+		}
+	}
 	log := projectOperationLog(operatorUserID, requestID, path, "core.project.bulk_relist", "project", "bulk", "success", "Projects relisted.")
 	affected, err := uc.projects.BulkTransitionWithLog(ctx, filter, domain.ProjectStatusDelisted, domain.ProjectStatusListed, "", log)
 	if err != nil {
 		return nil, err
+	}
+	if affected > 0 {
+		uc.scheduleInventoryRefresh(ctx, ids)
 	}
 	return &ProjectBulkResult{Affected: affected}, nil
 }
@@ -902,6 +939,9 @@ func (uc *ProjectUseCase) AdminBulkUpdateProducts(ctx context.Context, operatorU
 			}
 			break
 		}
+	}
+	if affected > 0 {
+		uc.scheduleInventoryRefresh(ctx, filter.IDs)
 	}
 	return &ProjectBulkResult{Affected: affected}, nil
 }

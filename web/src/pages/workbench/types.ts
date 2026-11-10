@@ -45,6 +45,7 @@ export interface WorkbenchProject {
 }
 
 export interface WorkbenchProduct {
+  inventoryKnown?: boolean;
   activationWindowMinutes: number;
   codeEnabled: boolean;
   codeInventory: number;
