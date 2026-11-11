@@ -2,6 +2,7 @@ package infra
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
 )
 
 type otherInventorySnapshot struct {
@@ -19,6 +21,7 @@ type otherInventorySnapshot struct {
 }
 
 type otherInventoryGroup struct {
+	RequestID   string
 	Config      string
 	ComputedAt  time.Time
 	AttemptedAt time.Time
@@ -48,6 +51,11 @@ func (r *Repo) otherInventory(ctx context.Context, projectID uint, products []pr
 		SourceRefreshedAt: make(map[coredomain.ProductType]time.Time)}}
 	if len(groups) == 0 {
 		return result, nil
+	}
+
+	request, err := r.inventorySnapshotRequest(ctx, fmt.Sprintf("%sother:%d", inventoryCacheKeyPrefix, projectID))
+	if err != nil {
+		return nil, err
 	}
 
 	// At most one worker runs exact provider queries; each provider has its own deadline.
@@ -82,12 +90,19 @@ func (r *Repo) otherInventory(ctx context.Context, projectID uint, products []pr
 		if kind == coredomain.ProductTypeICloud {
 			snapshot, err := r.sharedICloudInventory(ctx)
 			groupErr = err
+			if snapshot != nil && snapshot.Used[projectID] > snapshot.Aliases {
+				groupErr = fmt.Errorf("iCloud inventory project %d: usage exceeds pool", projectID)
+				snapshot = nil
+			}
 			if snapshot != nil {
-				available := max(0, snapshot.Aliases-snapshot.Used[projectID])
+				available := snapshot.Aliases - snapshot.Used[projectID]
 				stats := &allocapp.InventoryStats{ProjectID: projectID, TotalAvailable: available,
 					ICloud: allocapp.ICloudInventoryStats{Enabled: true, EligibleResources: snapshot.EligibleResources,
 						AliasAvailable: available, TotalAvailable: available}, ActiveICloudAllocations: snapshot.Active[projectID]}
 				old.Stats, old.ComputedAt, old.Items = stats, snapshot.ComputedAt, nil
+				if !snapshot.StartedAt.IsZero() {
+					old.ComputedAt = snapshot.StartedAt
+				}
 				for _, row := range rows {
 					item, err := r.productInventoryItem(ctx, projectID, row, stats)
 					if err != nil {
@@ -96,7 +111,7 @@ func (r *Repo) otherInventory(ctx context.Context, projectID uint, products []pr
 					old.Items = append(old.Items, item)
 				}
 			}
-		} else if time.Since(old.AttemptedAt) >= 0 && time.Since(old.AttemptedAt) < time.Minute {
+		} else if (request == "" || request == old.RequestID) && time.Since(old.AttemptedAt) >= 0 && time.Since(old.AttemptedAt) < time.Minute {
 			if old.Error != "" {
 				groupErr = errors.New(old.Error)
 			}
@@ -115,21 +130,27 @@ func (r *Repo) otherInventory(ctx context.Context, projectID uint, products []pr
 			groupErr = lockErr
 			if locked {
 				countCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-				stats, err := r.inventoryStatsForProducts(countCtx, projectID, rows)
+				var stats *allocapp.InventoryStats
 				var items []allocapp.ProductInventoryTotal
-				if err == nil {
+				err := r.dbFor(countCtx).Transaction(func(tx *gorm.DB) error {
+					readCtx := platform.WithGormTx(countCtx, tx)
+					var err error
+					stats, err = r.inventoryStatsForProducts(readCtx, projectID, rows)
+					if err != nil {
+						return err
+					}
 					for _, row := range rows {
-						var item allocapp.ProductInventoryTotal
-						item, err = r.productInventoryItem(countCtx, projectID, row, stats)
+						item, err := r.productInventoryItem(readCtx, projectID, row, stats)
 						if err != nil {
-							break
+							return err
 						}
 						items = append(items, item)
 					}
-				}
+					return nil
+				}, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
 				cancel()
 				groupErr = err
-				old.AttemptedAt, old.Error = time.Now().UTC(), ""
+				old.AttemptedAt, old.Error, old.RequestID = time.Now().UTC(), "", request
 				if err == nil {
 					old.Stats, old.Items, old.ComputedAt = stats, items, old.AttemptedAt
 				} else {

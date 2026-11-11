@@ -101,7 +101,7 @@ INSERT INTO icloud_aliases SELECT id,1,'normal','x@forward.test' FROM n`).Error)
 	_, err := repo.advanceICloudInventory(context.Background(), condition, args, string(config))
 	require.ErrorIs(t, err, platform.ErrBackgroundExecutionDeferred)
 	var state iCloudInventoryBuild
-	data, err := repo.redis.Get(context.Background(), iCloudInventorySnapshotKey+":build").Bytes()
+	data, err := repo.redis.Get(context.Background(), iCloudInventoryBuildKey).Bytes()
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(data, &state))
 	require.EqualValues(t, 5000, state.AliasCursor)
@@ -111,7 +111,7 @@ INSERT INTO icloud_aliases SELECT id,1,'normal','x@forward.test' FROM n`).Error)
 	snapshot := warmICloudSnapshot(t, repo, server)
 	require.EqualValues(t, 5006, snapshot.Aliases)
 	require.EqualValues(t, 2, snapshot.Used[10])
-	require.False(t, server.Exists(iCloudInventorySnapshotKey+":build"))
+	require.False(t, server.Exists(iCloudInventoryBuildKey))
 }
 
 func TestICloudSnapshotPreservesLastGoodValueWhileRebuilding(t *testing.T) {
@@ -222,7 +222,7 @@ func TestFastMixedInventoryComputesEveryEnabledProduct(t *testing.T) {
 		`CREATE TABLE mailmatch_resource_fetch_states(email_resource_id INTEGER,operation_kind TEXT,status TEXT)`,
 		`INSERT INTO microsoft_enterprise_resources VALUES(102,'normal',1,'tenant.onmicrosoft.com','idle'),(103,'normal',1,'tenant.onmicrosoft.com','idle')`,
 		`INSERT INTO microsoft_enterprise_allocations VALUES(102,10,'released')`,
-		`CREATE TABLE project_microsoft_suffix_blacklists(project_id INTEGER)`,
+		`CREATE TABLE project_microsoft_suffix_blacklists(project_id INTEGER,suffix TEXT)`,
 		`CREATE TABLE microsoft_resource_project_matches(project_id INTEGER)`,
 		`CREATE TABLE daum_resources(id INTEGER PRIMARY KEY,resource_type TEXT,owner_user_id INTEGER,email_address TEXT,status TEXT,for_sale BOOLEAN,app_password TEXT)`,
 		`CREATE TABLE daum_explicit_aliases(id INTEGER PRIMARY KEY,resource_id INTEGER,email_address TEXT,email_domain TEXT,status TEXT)`,
@@ -246,11 +246,10 @@ func TestFastMixedInventoryComputesEveryEnabledProduct(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, client.Set(ctx, key, payload, 7*24*time.Hour).Err())
 	}
-	seed(fastInventoryBaseKey, fastInventoryBase{ComputedAt: time.Now().UTC(), EligibleResources: 20, AliasesBySuffix: map[string]int64{"outlook.com": 30}})
-	seed(fastInventoryHistoryPrefix+"10", fastInventoryHistory{ComputedAt: time.Now().UTC(), MainUsed: 2, AliasBySuffix: map[string]int64{"outlook.com": 3}})
+	seed(microsoftSnapshotKey, microsoftSnapshotFixture(20, 30, 2, 3))
 	_, args := iCloudForwardingDomainCondition("ia.forward_to_email")
 	config, _ := json.Marshal(args)
-	seed(iCloudInventorySnapshotKey, iCloudInventorySnapshot{ComputedAt: time.Now().UTC(), Forwarding: string(config), EligibleResources: 2, Aliases: 25, Used: map[uint]int64{10: 4}, Active: map[uint]int64{10: 1}})
+	seed(iCloudInventorySnapshotKey, iCloudInventorySnapshot{ScopePaired: true, ComputedAt: time.Now().UTC(), Forwarding: string(config), EligibleResources: 2, Aliases: 25, Used: map[uint]int64{10: 4}, Active: map[uint]int64{10: 1}})
 	cache := NewInventoryCache(client)
 	legacy := &allocapp.ProjectProductInventoryTotals{ProjectID: 10, Items: []allocapp.ProductInventoryTotal{{ProductID: 21, ProductType: coredomain.ProductTypeICloud}}}
 	require.NoError(t, cache.SetProductInventoryTotals(ctx, 10, legacy, 7*24*time.Hour))
@@ -285,8 +284,8 @@ func TestFastMixedInventoryComputesEveryEnabledProduct(t *testing.T) {
 	}
 	server.FastForward(time.Second)
 	require.NoError(t, db.Exec(`DROP TABLE proto_resources`).Error)
-	seed(fastInventoryBaseKey, fastInventoryBase{ComputedAt: time.Now().UTC(), EligibleResources: 30, AliasesBySuffix: map[string]int64{"outlook.com": 30}})
-	seed(iCloudInventorySnapshotKey, iCloudInventorySnapshot{ComputedAt: time.Now().UTC(), Forwarding: string(config), Aliases: 35, Used: map[uint]int64{10: 4}})
+	seed(microsoftSnapshotKey, microsoftSnapshotFixture(30, 30, 2, 3))
+	seed(iCloudInventorySnapshotKey, iCloudInventorySnapshot{ScopePaired: true, ComputedAt: time.Now().UTC(), Forwarding: string(config), Aliases: 35, Used: map[uint]int64{10: 4}})
 	useCase := allocapp.NewUseCase(repo)
 	useCase.SetInventoryCache(cache)
 	require.NoError(t, cache.AdvanceInventory(ctx, []allocapp.InventoryCacheEntry{{Kind: allocapp.InventoryCacheProducts, ProjectID: 10}}))
@@ -369,12 +368,12 @@ INSERT INTO icloud_aliases SELECT id,1,'normal','x@forward.test' FROM n`).Error)
 		require.Equal(t, 1, result.Skipped)
 		require.True(t, totals.RefreshPending)
 		require.EqualValues(t, 1, totals.TotalAvailable, "keep serving the completed snapshot until all pages finish")
-		require.True(t, previous.ComputedAt.Equal(totals.SourceRefreshedAt[coredomain.ProductTypeICloud]))
+		require.True(t, previous.StartedAt.Equal(totals.SourceRefreshedAt[coredomain.ProductTypeICloud]))
 		score := repo.redis.ZScore(ctx, inventoryCacheScheduleKey, inventoryCacheKey(entry.Kind, entry.ProjectID)).Val()
 		require.LessOrEqual(t, score, float64(time.Now().UnixMilli()))
 		if cycle == 0 {
 			var state iCloudInventoryBuild
-			data, err := repo.redis.Get(ctx, iCloudInventorySnapshotKey+":build").Bytes()
+			data, err := repo.redis.Get(ctx, iCloudInventoryBuildKey).Bytes()
 			require.NoError(t, err)
 			require.NoError(t, json.Unmarshal(data, &state))
 			require.EqualValues(t, 5000, state.AliasCursor)
@@ -382,12 +381,12 @@ INSERT INTO icloud_aliases SELECT id,1,'normal','x@forward.test' FROM n`).Error)
 			state.UpdatedAt = time.Now().Add(-5 * time.Minute)
 			data, err = json.Marshal(state)
 			require.NoError(t, err)
-			require.NoError(t, repo.redis.Set(ctx, iCloudInventorySnapshotKey+":build", data, 24*time.Hour).Err())
+			require.NoError(t, repo.redis.Set(ctx, iCloudInventoryBuildKey, data, 24*time.Hour).Err())
 			server.FastForward(65 * time.Minute)
 		}
 		if cycle == 1 {
 			var state iCloudInventoryBuild
-			data, err := repo.redis.Get(ctx, iCloudInventorySnapshotKey+":build").Bytes()
+			data, err := repo.redis.Get(ctx, iCloudInventoryBuildKey).Bytes()
 			require.NoError(t, err)
 			require.NoError(t, json.Unmarshal(data, &state))
 			require.EqualValues(t, 10000, state.AliasCursor, "a healthy build older than one hour must retain progress")
@@ -413,4 +412,61 @@ func TestPartialInventoryDoesNotRenewAnExpiredProvider(t *testing.T) {
 	require.Len(t, got.Items, 1)
 	require.Equal(t, coredomain.ProductTypeGmail, got.Items[0].ProductType)
 	require.EqualValues(t, 5, got.TotalAvailable)
+}
+
+func TestICloudRebuildPairsPoolWithItsOwnHistoryAfterSaleAndValidationChanges(t *testing.T) {
+	repo, server := iCloudSnapshotTestRepo(t)
+	first := warmICloudSnapshot(t, repo, server)
+	require.EqualValues(t, 3, first.Aliases)
+	require.EqualValues(t, 2, first.Used[10])
+	require.NoError(t, repo.db.Exec(`INSERT INTO icloud_allocations VALUES(4,4,10,'released'),(5,5,10,'released')`).Error)
+	require.NoError(t, repo.db.Exec(`UPDATE icloud_resources SET for_sale=TRUE,status='normal' WHERE id IN (2,3)`).Error)
+	first.ComputedAt = time.Now().Add(-2 * time.Hour)
+	payload, err := json.Marshal(first)
+	require.NoError(t, err)
+	require.NoError(t, repo.redis.Set(context.Background(), iCloudInventorySnapshotKey, payload, 7*24*time.Hour).Err())
+	second := warmICloudSnapshot(t, repo, server)
+	require.EqualValues(t, 5, second.Aliases)
+	require.EqualValues(t, 4, second.Used[10], "past private/released use stays occupied after publication")
+	require.EqualValues(t, 1, second.Aliases-second.Used[10])
+	require.NoError(t, repo.db.Exec(`UPDATE icloud_resources SET for_sale=FALSE WHERE id IN (2,3)`).Error)
+	second.ComputedAt = time.Now().Add(-2 * time.Hour)
+	payload, err = json.Marshal(second)
+	require.NoError(t, err)
+	require.NoError(t, repo.redis.Set(context.Background(), iCloudInventorySnapshotKey, payload, 7*24*time.Hour).Err())
+	third := warmICloudSnapshot(t, repo, server)
+	require.EqualValues(t, 3, third.Aliases)
+	require.EqualValues(t, 2, third.Used[10])
+	require.EqualValues(t, 1, third.Aliases-third.Used[10])
+}
+
+func TestICloudManualRefreshRebuildsBeforeItsNormalInterval(t *testing.T) {
+	repo, server := iCloudSnapshotTestRepo(t)
+	ctx := context.Background()
+	first := warmICloudSnapshot(t, repo, server)
+	require.NoError(t, repo.db.Exec(`UPDATE icloud_resources SET for_sale=TRUE WHERE id=2`).Error)
+	require.NoError(t, repo.RequestInventorySnapshotRebuild(ctx, nil))
+	second := warmICloudSnapshot(t, repo, server)
+	require.NotEqual(t, first.RequestID, second.RequestID)
+	require.EqualValues(t, 4, second.Aliases)
+}
+
+func TestPairedICloudBuildDoesNotReuseLegacyWorkerCursor(t *testing.T) {
+	repo, server := iCloudSnapshotTestRepo(t)
+	ctx := context.Background()
+	legacyKey := iCloudInventorySnapshotKey + ":build"
+	legacy := `{"ComputedAt":"2026-11-10T00:00:00Z","History":true,"Aliases":999,"HistoryCursor":2}`
+	require.NoError(t, repo.redis.Set(ctx, legacyKey, legacy, time.Hour).Err())
+	got := warmICloudSnapshot(t, repo, server)
+	require.EqualValues(t, 3, got.Aliases)
+	require.EqualValues(t, 2, got.Used[10])
+	require.Equal(t, legacy, repo.redis.Get(ctx, legacyKey).Val())
+}
+
+func TestICloudSnapshotAgeUsesObservationStart(t *testing.T) {
+	old := &iCloudInventorySnapshot{Forwarding: "allowed", ScopePaired: true, StartedAt: time.Now().Add(-8 * 24 * time.Hour), ComputedAt: time.Now()}
+	require.False(t, old.usable("allowed"), "completion must not renew old observations")
+	old.StartedAt = time.Now().Add(-time.Hour)
+	require.True(t, old.usable("allowed"))
+	require.False(t, old.usable("changed"))
 }

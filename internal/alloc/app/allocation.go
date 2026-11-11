@@ -1559,6 +1559,13 @@ func (uc *UseCase) TriggerInventoryRefresh(ctx context.Context, projectID uint) 
 	if projectID > 0 && len(projectIDs) == 0 {
 		return nil, domain.ErrProjectNotAllocatable
 	}
+	if len(projectIDs) > 0 {
+		if rebuilder, ok := uc.repo.(InventorySnapshotRebuilder); ok {
+			if err := rebuilder.RequestInventorySnapshotRebuild(ctx, projectIDs); err != nil {
+				return nil, err
+			}
+		}
+	}
 	entries := make([]InventoryCacheEntry, 0, len(projectIDs)*2)
 	for _, id := range projectIDs {
 		entries = append(entries,

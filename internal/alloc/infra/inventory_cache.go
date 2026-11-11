@@ -206,7 +206,7 @@ func (c *InventoryCache) GetProductInventorySnapshots(ctx context.Context, proje
 		if inventorySnapshotNeedsRepair(&totals, now) {
 			repairKeys = append(repairKeys, redis.Z{Score: float64(now.UnixMilli()), Member: keys[i]})
 		}
-		removeUnknownOtherInventory(&totals, now)
+		removeUnknownInventory(&totals, now)
 		// Gmail, iCloud, and Proto products share one inventory pool across both service modes.
 		// Tolerate snapshots written without the mode-specific fields.
 		for itemIndex := range totals.Items {
@@ -281,15 +281,14 @@ func inventorySnapshotNeedsRepair(totals *allocapp.ProjectProductInventoryTotals
 		return true
 	}
 	for _, item := range totals.Items {
-		if observed, ok := totals.SourceRefreshedAt[item.ProductType]; isOtherInventoryProduct(item.ProductType) &&
-			(!ok || now.Sub(observed) < 0 || now.Sub(observed) > allocapp.InventorySnapshotMaxAge) {
+		if observed, ok := totals.SourceRefreshedAt[item.ProductType]; (isOtherInventoryProduct(item.ProductType) && !ok) || (ok && (now.Sub(observed) < 0 || now.Sub(observed) > allocapp.InventorySnapshotMaxAge)) {
 			return true
 		}
 	}
 	return false
 }
 
-func removeUnknownOtherInventory(totals *allocapp.ProjectProductInventoryTotals, now time.Time) {
+func removeUnknownInventory(totals *allocapp.ProjectProductInventoryTotals, now time.Time) {
 	items := totals.Items[:0]
 	for _, item := range totals.Items {
 		observed, measured := totals.SourceRefreshedAt[item.ProductType]
@@ -298,7 +297,8 @@ func removeUnknownOtherInventory(totals *allocapp.ProjectProductInventoryTotals,
 		}
 		expired := observed.IsZero() || now.Sub(observed) < 0 || now.Sub(observed) > allocapp.InventorySnapshotMaxAge
 		// Legacy fast snapshots fabricated zeroes for every uncomputed non-Microsoft product.
-		if isOtherInventoryProduct(item.ProductType) && (expired || (!measured && item.TotalAvailable == 0 && item.PublicAvailable == 0)) {
+		if ((isOtherInventoryProduct(item.ProductType) || measured) && expired) ||
+			(isOtherInventoryProduct(item.ProductType) && !measured && item.TotalAvailable == 0 && item.PublicAvailable == 0) {
 			totals.TotalAvailable = max(0, totals.TotalAvailable-item.TotalAvailable)
 			continue
 		}
@@ -569,6 +569,8 @@ func (c *InventoryCache) ClaimDueInventory(ctx context.Context, before time.Time
 	items, err := claimDueInventoryScript.Run(ctx, c.redis, []string{inventoryCacheScheduleKey},
 		strconv.FormatInt(before.UnixMilli(), 10),
 		limit,
+		inventoryCacheKeyPrefix,
+		inventoryCacheFailureKeyPrefix,
 	).StringSlice()
 	if err != nil {
 		return nil, fmt.Errorf("claim due inventory cache keys: %w", err)
@@ -606,21 +608,20 @@ func (c *InventoryCache) RequeueInventory(ctx context.Context, entries []allocap
 	if len(entries) == 0 {
 		return nil
 	}
-	now := float64(time.Now().UnixMilli())
-	_, err := c.redis.Pipelined(ctx, func(pipe redis.Pipeliner) error {
-		for _, entry := range entries {
-			key := inventoryCacheKey(entry.Kind, entry.ProjectID)
-			pipe.ZAdd(ctx, inventoryCacheScheduleKey, redis.Z{Score: now, Member: key})
-		}
-		return nil
-	})
-	if err != nil {
+	keys := []string{inventoryCacheScheduleKey}
+	args := []any{time.Now().UnixMilli()}
+	for _, entry := range entries {
+		keys = append(keys, inventoryRefreshFailureKey(entry))
+		args = append(args, inventoryCacheKey(entry.Kind, entry.ProjectID))
+	}
+	if err := requeueInventoryScript.Run(ctx, c.redis, keys, args...).Err(); err != nil {
 		return fmt.Errorf("requeue inventory cache: %w", err)
 	}
 	return nil
 }
 
 type inventoryRefreshFailure struct {
+	RetryAfter    int64     `json:"retryAfter,omitempty"`
 	LastAttemptAt time.Time `json:"lastAttemptAt"`
 	LastError     string    `json:"lastError"`
 }
@@ -629,7 +630,8 @@ func (c *InventoryCache) RecordInventoryRefreshFailure(ctx context.Context, entr
 	if refreshErr == nil {
 		return nil
 	}
-	failure := inventoryRefreshFailure{LastAttemptAt: time.Now().UTC(), LastError: refreshErr.Error()}
+	now := time.Now().UTC()
+	failure := inventoryRefreshFailure{LastAttemptAt: now, LastError: refreshErr.Error(), RetryAfter: now.Add(time.Minute).UnixMilli()}
 	payload, err := json.Marshal(failure)
 	if err != nil {
 		return fmt.Errorf("encode inventory refresh failure: %w", err)
@@ -973,10 +975,35 @@ return redis.call("DEL", KEYS[1])
 
 var claimDueInventoryScript = redis.NewScript(`
 local entries = redis.call("ZRANGEBYSCORE", KEYS[1], "-inf", ARGV[1], "LIMIT", 0, ARGV[2])
-if #entries > 0 then
-  redis.call("ZREM", KEYS[1], unpack(entries))
+local claimed = {}
+for _,entry in ipairs(entries) do
+  local retryAt = 0
+  local raw = redis.call('GET', ARGV[4] .. string.sub(entry, string.len(ARGV[3])+1))
+  if raw then
+    local ok, failure = pcall(cjson.decode, raw)
+    if ok and type(failure) == 'table' then retryAt = tonumber(failure.retryAfter) or 0 end
+  end
+  if retryAt > tonumber(ARGV[1]) then
+    redis.call('ZADD', KEYS[1], retryAt, entry)
+  else
+    redis.call('ZREM', KEYS[1], entry)
+    table.insert(claimed, entry)
+  end
 end
-return entries
+return claimed
+`)
+
+var requeueInventoryScript = redis.NewScript(`
+for i=2,#KEYS do
+  local due = tonumber(ARGV[1])
+  local raw = redis.call('GET', KEYS[i])
+  if raw then
+    local ok, failure = pcall(cjson.decode, raw)
+    if ok and type(failure) == 'table' then due = math.max(due, tonumber(failure.retryAfter) or 0) end
+  end
+  redis.call('ZADD', KEYS[1], due, ARGV[i])
+end
+return 1
 `)
 
 var recordInventoryOrderActivityScript = redis.NewScript(`

@@ -621,9 +621,20 @@ export default function Dashboard() {
     if (!signal || signal.aborted) return;
     const request = (async () => {
       try {
-        const list = await listProjects({ scope: "visible", status: "listed" }, 0, 100, signal);
-        if (signal.aborted) return;
-        const listed = list.items.filter((project) => project.status === "listed");
+        const listedById = new Map<number, ProjectItem>();
+        let offset = 0;
+        let total: number;
+        do {
+          const page = await listProjects({ scope: "visible", status: "listed" }, offset, 100, signal);
+          if (signal.aborted) return;
+          for (const project of page.items) {
+            if (project.status === "listed") listedById.set(project.id, project);
+          }
+          offset += page.items.length;
+          total = page.total;
+          if (page.items.length === 0) break;
+        } while (offset < total);
+        const listed = [...listedById.values()];
         setInventoryPending(listed.some((project) => {
           const summary = toWorkbenchProject(project);
           return summary.products.length > 0 && !summary.inventoryLoaded;

@@ -271,3 +271,59 @@ func TestAllocationTaskSeedersStopOnCleanup(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	require.Equal(t, inventoryCalls, queue.inventoryCalls.Load())
 }
+
+type snapshotWarmingRepo struct {
+	boundedInventoryTaskRepo
+	warmCalls atomic.Int32
+}
+
+func (r *snapshotWarmingRepo) WarmFastInventoryBase(context.Context) error {
+	r.warmCalls.Add(1)
+	return platform.ErrBackgroundExecutionDeferred
+}
+
+type noDueInventoryCache struct{ allocapp.InventoryCache }
+
+func (*noDueInventoryCache) ClaimDueInventory(context.Context, time.Time, int) ([]allocapp.InventoryCacheEntry, error) {
+	return nil, nil
+}
+func TestSharedSnapshotQueuesContinuationWithoutDueProjects(t *testing.T) {
+	repo := &snapshotWarmingRepo{}
+	queue := &allocationTaskQueueStub{}
+	uc := allocapp.NewUseCase(repo, queue)
+	uc.SetInventoryCache(&noDueInventoryCache{})
+	mux := asynq.NewServeMux()
+	cleanup := RegisterAllocationTaskHandlers(mux, &Module{UseCase: uc})
+	t.Cleanup(func() { cleanup(context.Background()) })
+	require.NoError(t, mux.ProcessTask(context.Background(), asynq.NewTask(allocinfra.TypeInventoryRefresh, nil)))
+	require.EqualValues(t, 1, repo.warmCalls.Load())
+	require.EqualValues(t, 1, queue.continuationCalls.Load())
+}
+func TestSnapshotWarmupRunsOnlyAfterBackgroundAdmission(t *testing.T) {
+	repo := &snapshotWarmingRepo{}
+	uc := allocapp.NewUseCase(repo)
+	uc.SetInventoryCache(&noDueInventoryCache{})
+	mux := asynq.NewServeMux()
+	cleanup := RegisterAllocationTaskHandlers(mux, &Module{UseCase: uc, BackgroundExecution: &allocationBackgroundGateStub{admitted: false}})
+	t.Cleanup(func() { cleanup(context.Background()) })
+	require.ErrorIs(t, mux.ProcessTask(context.Background(), asynq.NewTask(allocinfra.TypeInventoryRefresh, nil)), platform.ErrBackgroundExecutionDeferred)
+	require.Zero(t, repo.warmCalls.Load())
+}
+
+type warmThenFailInventoryRepo struct{ failingInventoryTaskRepo }
+
+func (*warmThenFailInventoryRepo) WarmFastInventoryBase(context.Context) error {
+	return platform.ErrBackgroundExecutionDeferred
+}
+func TestSharedBuildContinuesDespiteProjectFailure(t *testing.T) {
+	repo := &warmThenFailInventoryRepo{}
+	queue := &allocationTaskQueueStub{}
+	uc := allocapp.NewUseCase(repo, queue)
+	uc.SetInventoryCache(&failingInventoryTaskCache{})
+	mux := asynq.NewServeMux()
+	cleanup := RegisterAllocationTaskHandlers(mux, &Module{UseCase: uc})
+	defer cleanup(context.Background())
+	err := mux.ProcessTask(context.Background(), asynq.NewTask(allocinfra.TypeInventoryRefresh, nil))
+	require.ErrorContains(t, err, "aggregate unavailable")
+	require.EqualValues(t, 1, queue.continuationCalls.Load(), "project failure must not stop continuation of a healthy global build")
+}

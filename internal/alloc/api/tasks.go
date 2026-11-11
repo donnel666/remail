@@ -46,6 +46,10 @@ func RegisterAllocationTaskHandlers(mux *asynq.ServeMux, module *Module) func(co
 		}
 		defer release()
 		result, deferred, err := refreshInventoryTask(ctx, module.UseCase)
+		// A provider failure must not move a healthy shared rebuild onto failure backoff.
+		if result != nil && result.SnapshotBuilding {
+			err = errors.Join(err, module.UseCase.ScheduleInventoryRefreshContinuation(ctx))
+		}
 		if err != nil {
 			slog.Warn("inventory cache refresh failed", "error", err)
 			return err
@@ -62,6 +66,9 @@ func RegisterAllocationTaskHandlers(mux *asynq.ServeMux, module *Module) func(co
 			)
 		} else if result != nil && result.Attempted > 0 {
 			slog.Info("inventory cache refresh finished", "attempted", result.Attempted, "updated", result.Updated, "removed", result.Removed, "skipped", result.Skipped)
+		}
+		if result != nil && result.SnapshotBuilding {
+			return nil
 		}
 		if deferred {
 			return platform.ErrBackgroundExecutionDeferred
@@ -84,6 +91,12 @@ func refreshInventoryTask(ctx context.Context, useCase *allocapp.UseCase) (*allo
 	if err := useCase.EnsureInventoryRefreshSchedule(ctx); err != nil {
 		return total, false, err
 	}
+	// Rebuild progress is independent of whether any project is due, and runs only inside worker admission.
+	warmErr := useCase.WarmFastInventoryBase(ctx)
+	total.SnapshotBuilding = errors.Is(warmErr, platform.ErrBackgroundExecutionDeferred)
+	if total.SnapshotBuilding {
+		warmErr = nil
+	}
 	dueBefore := time.Now()
 	for total.Attempted < inventoryRefreshMaxEntriesPerTask {
 		batch, err := useCase.RefreshInventoryCacheBefore(ctx, dueBefore)
@@ -91,7 +104,7 @@ func refreshInventoryTask(ctx context.Context, useCase *allocapp.UseCase) (*allo
 			return total, false, err
 		}
 		if batch == nil || batch.Attempted == 0 {
-			return total, false, nil
+			return total, false, warmErr
 		}
 		total.Attempted += batch.Attempted
 		total.Updated += batch.Updated
@@ -108,10 +121,10 @@ func refreshInventoryTask(ctx context.Context, useCase *allocapp.UseCase) (*allo
 			return total, false, batch.LastError
 		}
 		if batch.Skipped > 0 {
-			return total, true, nil
+			return total, true, warmErr
 		}
 	}
-	return total, false, nil
+	return total, false, warmErr
 }
 
 func startInventoryRefreshSeeder(module *Module, interval func() time.Duration) func(context.Context) {
@@ -128,9 +141,6 @@ func startInventoryRefreshSeeder(module *Module, interval func() time.Duration) 
 		if err := module.UseCase.NormalizeInventoryRefreshSchedule(ctx); err != nil {
 			slog.Warn("normalize inventory refresh schedule failed", "error", err)
 		}
-		if err := module.UseCase.WarmFastInventoryBase(ctx); err != nil {
-			slog.Warn("warm fast inventory base failed", "error", err)
-		}
 		if err := module.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
 			slog.Warn("enqueue initial inventory cache refresh failed", "error", err)
 		}
@@ -146,16 +156,10 @@ func startInventoryRefreshSeeder(module *Module, interval func() time.Duration) 
 			case <-ctx.Done():
 				return
 			case <-activityTimer.C:
-				if err := module.UseCase.WarmFastInventoryBase(ctx); err != nil {
-					slog.Warn("warm fast inventory base failed", "error", err)
-				}
 				if err := module.UseCase.RefreshInventoryOrderActivity(ctx); err != nil {
 					slog.Warn("sample recent inventory order activity failed", "error", err)
 				}
 			case <-timer.C:
-				if err := module.UseCase.WarmFastInventoryBase(ctx); err != nil {
-					slog.Warn("warm fast inventory base failed", "error", err)
-				}
 				if err := module.UseCase.ScheduleInventoryRefresh(ctx); err != nil {
 					slog.Warn("enqueue inventory cache refresh failed", "error", err)
 				}

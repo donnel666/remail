@@ -156,3 +156,33 @@ it("does not treat an empty cold detail response as loaded stock and retries bat
   expect(row(view.container, 2)).toHaveTextContent("Stock 15");
   expect(mocks.toast).not.toHaveBeenCalled();
 });
+
+it("loads later project pages so chatgpt remains visible beyond the first 100 rows", async () => {
+  const firstPage = Array.from({ length: 100 }, (_, i) => project(i + 100, 12));
+  const chatgpt = { ...project(2, 37), name: "chatgpt" };
+  const lastPage = [chatgpt, ...Array.from({ length: 5 }, (_, i) => project(i + 220, 12))];
+  mocks.list.mockImplementation((_filter, offset) => Promise.resolve({
+    items: offset === 0 ? firstPage : lastPage, total: 106, offset, limit: 100,
+  }));
+  const view = await act(async () => render(<Dashboard />));
+  expect(view.getByText("chatgpt")).toBeInTheDocument();
+  expect(view.container.querySelectorAll(".workbench-project-row")).toHaveLength(106);
+  expect(mocks.list.mock.calls.map(([, offset]) => offset)).toEqual([0, 100]);
+  expect(mocks.list.mock.calls.every(([filter, , limit, signal]) =>
+    filter.scope === "visible" && filter.status === "listed" && limit === 100 && !signal.aborted,
+  )).toBe(true);
+  expect(mocks.inventory).toHaveBeenCalledTimes(1);
+});
+
+it("keeps the complete previous list if a later refresh page fails", async () => {
+  const chatgpt = { ...project(2, 37), name: "chatgpt" };
+  mocks.list.mockResolvedValueOnce({ items: [chatgpt], total: 1, offset: 0, limit: 100 });
+  const view = await act(async () => render(<Dashboard />));
+  expect(view.getByText("chatgpt")).toBeInTheDocument();
+  mocks.list.mockResolvedValueOnce({
+    items: Array.from({ length: 100 }, (_, i) => project(i + 100, 12)), total: 106, offset: 0, limit: 100,
+  }).mockRejectedValueOnce(new Error("second page failed"));
+  await act(async () => { fireEvent.focus(window); });
+  expect(view.getByText("chatgpt")).toBeInTheDocument();
+  expect(view.container.querySelectorAll(".workbench-project-row")).toHaveLength(1);
+});

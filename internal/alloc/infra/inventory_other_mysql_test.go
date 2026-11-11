@@ -27,8 +27,7 @@ SELECT 'icloud-snapshot-history',10,20,resource_id,id,'public',email,'released' 
 	repo, ctx := NewRepo(db, client), context.Background()
 	warmICloudSnapshot(t, repo, server)
 	for key, value := range map[string]any{
-		fastInventoryBaseKey:              fastInventoryBase{ComputedAt: time.Now().UTC(), EligibleResources: 20, AliasesBySuffix: map[string]int64{"outlook.com": 30}},
-		fastInventoryHistoryPrefix + "10": fastInventoryHistory{ComputedAt: time.Now().UTC(), MainUsed: 2, AliasBySuffix: map[string]int64{"outlook.com": 3}},
+		microsoftSnapshotKey: microsoftSnapshotFixture(20, 30, 2, 3),
 	} {
 		payload, err := json.Marshal(value)
 		require.NoError(t, err)

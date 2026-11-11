@@ -330,6 +330,10 @@ type FastInventoryRepository interface {
 	GetFastProductInventoryTotals(ctx context.Context, projectID uint) (*ProjectProductInventoryTotals, error)
 }
 
+type InventorySnapshotRebuilder interface {
+	RequestInventorySnapshotRebuild(context.Context, []uint) error
+}
+
 type FastInventoryBaseWarmer interface {
 	WarmFastInventoryBase(ctx context.Context) error
 }
@@ -395,12 +399,13 @@ type InventoryCache interface {
 }
 
 type InventoryRefreshResult struct {
-	Attempted int
-	Updated   int
-	Removed   int
-	Skipped   int
-	Failed    int
-	LastError error
+	SnapshotBuilding bool
+	Attempted        int
+	Updated          int
+	Removed          int
+	Skipped          int
+	Failed           int
+	LastError        error
 }
 
 type MicrosoftInventoryStats struct {

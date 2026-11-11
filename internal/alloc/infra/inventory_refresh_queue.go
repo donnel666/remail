@@ -72,6 +72,8 @@ func (q *InventoryRefreshQueue) enqueueInventoryRefresh(ctx context.Context, uni
 	}
 	if unique {
 		options = append(options, asynq.Unique(inventoryRefreshTaskTimeout))
+	} else {
+		options = append(options, asynq.ProcessIn(time.Second))
 	}
 	_, err := q.client.EnqueueContext(ctx, asynq.NewTask(TypeInventoryRefresh, nil), options...)
 	if err != nil {

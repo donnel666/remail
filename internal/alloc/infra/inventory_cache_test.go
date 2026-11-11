@@ -671,7 +671,11 @@ func TestInventoryWorkerFailureAndLockBusyRequeuePastFixedCutoff(t *testing.T) {
 			claimed, err := cache.ClaimDueInventory(ctx, cutoff, 5)
 			require.NoError(t, err)
 			require.Empty(t, claimed, "the worker must not repeat failed/busy entries in the same round")
-			claimed, err = cache.ClaimDueInventory(ctx, time.Now(), 5)
+			retryCutoff := time.Now()
+			if !busy {
+				retryCutoff = retryCutoff.Add(time.Minute + time.Second)
+			}
+			claimed, err = cache.ClaimDueInventory(ctx, retryCutoff, 5)
 			require.NoError(t, err)
 			require.Equal(t, []allocapp.InventoryCacheEntry{entry}, claimed)
 		})
@@ -1153,4 +1157,27 @@ func TestProductConfigChangeAdvancesWarmWeeklyInventoryWithoutRenewingSnapshot(t
 	require.Equal(t, before, client.Get(ctx, inventoryCacheKey(allocapp.InventoryCacheProducts, 10)).Val())
 	require.Equal(t, 6*24*time.Hour, client.TTL(ctx, inventoryCacheKey(allocapp.InventoryCacheProducts, 10)).Val())
 	require.Equal(t, 1, queue.calls)
+}
+
+func TestProviderFailureBackoffSurvivesReadRepairWhileOtherProjectsContinue(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	cache, ctx := NewInventoryCache(client), context.Background()
+	failed := allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheProducts, ProjectID: 10}
+	healthy := allocapp.InventoryCacheEntry{Kind: allocapp.InventoryCacheProducts, ProjectID: 11}
+	require.NoError(t, cache.RecordInventoryRefreshFailure(ctx, failed, errors.New("provider unavailable")))
+	require.NoError(t, cache.RequeueInventory(ctx, []allocapp.InventoryCacheEntry{failed, healthy}))
+	// Page reads can mark missing inventory due, but cannot bypass a provider retry delay.
+	require.NoError(t, cache.AdvanceInventory(ctx, []allocapp.InventoryCacheEntry{failed}))
+	due, err := cache.ClaimDueInventory(ctx, time.Now(), 5)
+	require.NoError(t, err)
+	require.Equal(t, []allocapp.InventoryCacheEntry{healthy}, due)
+	retryAt := client.ZScore(ctx, inventoryCacheScheduleKey, inventoryCacheKey(failed.Kind, failed.ProjectID)).Val()
+	require.Greater(t, retryAt, float64(time.Now().Add(50*time.Second).UnixMilli()))
+	require.NoError(t, cache.ClearInventoryRefreshFailure(ctx, failed))
+	require.NoError(t, cache.RequeueInventory(ctx, []allocapp.InventoryCacheEntry{failed}))
+	due, err = cache.ClaimDueInventory(ctx, time.Now(), 5)
+	require.NoError(t, err)
+	require.Equal(t, []allocapp.InventoryCacheEntry{failed}, due)
 }
