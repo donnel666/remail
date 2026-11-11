@@ -1584,6 +1584,11 @@ func (r *mockValidationRepo) ClaimPendingValidations(_ context.Context, limit in
 	return result, nil
 }
 
+func (r *mockValidationRepo) StartValidation(ctx context.Context, task coreapp.ResourceValidationTask) error {
+	_, err := r.MarkValidationDispatched(ctx, task)
+	return err
+}
+
 func (r *mockValidationRepo) MarkValidationDispatched(_ context.Context, task coreapp.ResourceValidationTask) (bool, error) {
 	if r.markDispatchedErr != nil {
 		return false, r.markDispatchedErr

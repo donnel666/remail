@@ -765,6 +765,30 @@ func TestMicrosoftAliasProcessDefersRateLimitUntilNextCalendarWeek(t *testing.T)
 	assert.Equal(t, "Microsoft alias creation is rate limited.", store.deferredSafe)
 }
 
+func TestMicrosoftAliasProcessRetriesMailboxContentionWithoutWeeklyBackoff(t *testing.T) {
+	now := time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)
+	store := &fakeMicrosoftAliasStore{
+		claimed: true,
+		account: &MicrosoftAliasAccount{ResourceID: 42, EmailAddress: "owner@outlook.com", Password: "secret", ResourceStatus: "normal"},
+		reserveAttempts: []MicrosoftAliasAttempt{
+			{ID: 1, Alias: "first123456@outlook.com", Status: MicrosoftAliasAttemptRunning},
+		},
+		postCompleteUsage: &MicrosoftAliasUsage{},
+	}
+	creator := &fakeMicrosoftAliasCreator{result: MicrosoftAliasCreationResult{
+		Category: "recovery_mailbox_busy", SafeMessage: "Microsoft recovery mailbox is already processing another verification code.",
+	}}
+	service := NewMicrosoftAliasService(store, nil, creator)
+	service.now = func() time.Time { return now }
+
+	require.NoError(t, service.Process(context.Background(), microsoftAliasTestTask(42)))
+	require.Equal(t, now.Add(microsoftAliasRecoveryBusyDelay), store.deferredAt)
+	require.False(t, store.deferredFailed)
+	require.Len(t, store.outcomes, 1)
+	require.Equal(t, "recovery_mailbox_busy", store.outcomes[0].Category)
+	require.False(t, store.outcomes[0].Attempted)
+}
+
 func TestMicrosoftAliasProcessKeepsUncertainCandidateForReconciliation(t *testing.T) {
 	now := time.Date(2026, time.July, 10, 12, 0, 0, 0, time.UTC)
 	store := &fakeMicrosoftAliasStore{

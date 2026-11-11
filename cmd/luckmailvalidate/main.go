@@ -1465,7 +1465,7 @@ func openRuntime(ctx context.Context, proxyFilePath, proxyURL string, proxyBatch
 	msacl.SetMailboxReader(mailinfra.NewMSACLMailboxReaderWithContentWindow(p.DB, files, 90*24*time.Hour))
 	msacl.SetRecoveryLeaseStore(mailinfra.NewMicrosoftBindingRecoveryLeaseStore(p.DB))
 	bindingRepo := mailinfra.NewMicrosoftBindingRepo(p.DB)
-	aliasStore := mailinfra.NewMicrosoftAliasStore(p.DB)
+	aliasStore := mailinfra.NewMicrosoftAliasStore(p.DB, p.Redis)
 	var validationProxies *validationProxyLeasePool
 	switch {
 	case strings.TrimSpace(proxyFilePath) != "":

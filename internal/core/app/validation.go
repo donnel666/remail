@@ -22,6 +22,7 @@ type ResourceValidationRepository interface {
 	MarkValidationBatchPending(ctx context.Context, task ResourceValidationBatchTask, limit int) (*ResourceValidationBatchPageResult, error)
 	ClaimPendingValidations(ctx context.Context, limit int, enterprise bool) ([]ResourceValidationTask, error)
 	MarkValidationDispatched(ctx context.Context, task ResourceValidationTask) (bool, error)
+	StartValidation(ctx context.Context, task ResourceValidationTask) error
 	ReleaseValidation(ctx context.Context, task ResourceValidationTask) error
 	ApplyMicrosoftResult(ctx context.Context, task ResourceValidationTask, result MicrosoftValidationResult, systemLog *governancedomain.SystemLog) error
 	ApplyDomainResult(ctx context.Context, task ResourceValidationTask, result DomainValidationResult, systemLog *governancedomain.SystemLog) error
@@ -452,7 +453,7 @@ func (uc *ResourceValidationUseCase) Process(ctx context.Context, task ResourceV
 	if uc == nil || uc.resources == nil || uc.validations == nil || task.ResourceID == 0 || task.OwnerUserID == 0 || task.ValidationGeneration == 0 || !domain.IsValidResourceType(task.ResourceType) {
 		return domain.ErrInvalidResourceCommand
 	}
-	if _, err := uc.validations.MarkValidationDispatched(ctx, task); err != nil {
+	if err := uc.validations.StartValidation(ctx, task); err != nil {
 		return err
 	}
 	var processErr error

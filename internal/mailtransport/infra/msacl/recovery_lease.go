@@ -76,9 +76,8 @@ func WithRecoveryLeaseScope(ctx context.Context, resourceID uint, maskedProof st
 	})
 }
 
-// WithConcreteRecoveryLeaseKeys opts a validation flow into concrete-recipient
-// lease keys. The independent weekly alias workflow does not set this marker
-// and therefore keeps its historical masked-key scheduling behavior.
+// WithConcreteRecoveryLeaseKeys isolates validation and alias code delivery by
+// the resolved recipient; unrelated authorization flows keep masked keys.
 func WithConcreteRecoveryLeaseKeys(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -113,8 +112,7 @@ func claimCodeMailLease(ctx context.Context, maskedProof string, concreteMailbox
 	scope, _ := ctx.Value(recoveryLeaseContextKey{}).(*recoveryLeaseScope)
 	if !concreteRecoveryLeaseKeysEnabled(ctx) {
 		concreteMailbox = nil
-		// Preserve the legacy weekly/ordinary authorization boundary: a full
-		// proof address was never a lease key outside validation, only a mask.
+		// Legacy callers without a resolved recipient still serialize by mask.
 		maskedProof = normalizeRecoveryMask(maskedProof)
 	}
 	key := recoveryCodeMailLeaseKey(maskedProof, concreteMailbox...)
@@ -268,9 +266,8 @@ func (l *codeMailLease) releaseIfUnsent(ctx context.Context) {
 	}
 }
 
-// releaseCompletedCodeMailLease lets the validation-only flow reuse a consumed
-// concrete recipient immediately. Mask-only and independent alias leases keep
-// their post-persistence/TTL release boundary.
+// A consumed code no longer needs recipient exclusion. Unconsumed codes and
+// unresolved masks retain their lease until persistence or expiry.
 func releaseCompletedCodeMailLease(ctx context.Context, lease *codeMailLease) {
 	if lease == nil || !concreteRecoveryLeaseKeysEnabled(ctx) || normalizeRecoveryMailbox(lease.key) == "" {
 		return

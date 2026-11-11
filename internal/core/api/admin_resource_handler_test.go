@@ -203,6 +203,9 @@ func (*adminHandlerValidationRepo) ClaimPendingValidations(context.Context, int,
 func (*adminHandlerValidationRepo) MarkValidationDispatched(context.Context, coreapp.ResourceValidationTask) (bool, error) {
 	return true, nil
 }
+func (*adminHandlerValidationRepo) StartValidation(context.Context, coreapp.ResourceValidationTask) error {
+	return nil
+}
 func (*adminHandlerValidationRepo) ReleaseValidation(context.Context, coreapp.ResourceValidationTask) error {
 	return nil
 }

@@ -265,7 +265,7 @@ func TestCompletedCodeMailLeaseKeepsMaskedValidationLeaseUntilPersistence(t *tes
 	require.Equal(t, []string{"a*****b@recovery.test"}, store.released)
 }
 
-func TestCompletedCodeMailLeaseKeepsWeeklyAliasLeaseUntilPersistence(t *testing.T) {
+func TestCompletedCodeMailLeaseKeepsLegacyMaskedLeaseUntilPersistence(t *testing.T) {
 	store := &recoveryLeaseStoreStub{}
 	SetRecoveryLeaseStore(store)
 	defer SetRecoveryLeaseStore(nil)
@@ -276,9 +276,34 @@ func TestCompletedCodeMailLeaseKeepsWeeklyAliasLeaseUntilPersistence(t *testing.
 
 	releaseCompletedCodeMailLease(ctx, lease)
 
-	require.Empty(t, store.released, "the independent alias flow keeps its original post-persistence release boundary")
+	require.Empty(t, store.released, "callers without a resolved recipient keep their original release boundary")
 	releaser := RecoveryLeaseReleaser(ctx)
 	require.NotNil(t, releaser)
 	require.NoError(t, releaser(ctx))
 	require.Equal(t, []string{"a*****b@recovery.test"}, store.released)
+}
+
+func TestAliasConcreteLeaseDoesNotThrottleAnotherMailboxWithTheSameMask(t *testing.T) {
+	store := &recoveryLeaseStoreStub{}
+	SetRecoveryLeaseStore(store)
+	defer SetRecoveryLeaseStore(nil)
+	ctx := WithConcreteRecoveryLeaseKeys(WithRecoveryLeaseScope(context.Background(), 45, "o*****e@recovery.test"))
+	first, err := claimCodeMailLease(ctx, "o*****e@recovery.test", "owner-one@recovery.test")
+	require.NoError(t, err)
+	require.NoError(t, first.markSent(ctx))
+	second, err := claimCodeMailLease(ctx, "o*****e@recovery.test", "other-one@recovery.test")
+	require.NoError(t, err)
+	require.NoError(t, second.markSent(ctx))
+	_, err = claimCodeMailLease(ctx, "o*****e@recovery.test", "owner-one@recovery.test")
+	require.Error(t, err)
+	require.Equal(t, "recovery_mailbox_busy", mapExplicitAliasError(err).Category)
+
+	first.releaseIfUnsent(ctx)
+	require.Empty(t, store.released, "a sent but unconsumed code must retain its lock")
+	releaseCompletedCodeMailLease(ctx, first)
+	require.Equal(t, []string{"owner-one@recovery.test"}, store.released)
+	_, err = claimCodeMailLease(ctx, "o*****e@recovery.test", "owner-one@recovery.test")
+	require.NoError(t, err, "a consumed code must not retain the ten-minute lock")
+	_, err = claimCodeMailLease(ctx, "o*****e@recovery.test", "other-one@recovery.test")
+	require.Error(t, err, "releasing one recipient must not release another")
 }

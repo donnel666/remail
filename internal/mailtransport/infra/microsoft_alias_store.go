@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	coredomain "github.com/donnel666/remail/internal/core/domain"
@@ -15,6 +16,7 @@ import (
 	maildomain "github.com/donnel666/remail/internal/mailtransport/domain"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -77,8 +79,15 @@ func (MicrosoftAliasAttemptModel) TableName() string {
 
 type MicrosoftAliasStore struct {
 	db                           *gorm.DB
+	redis                        redis.UniversalClient
 	operationLogs                operationLogTxWriter
 	recoveredBindingScanPageSize int
+	recoveryMu                   sync.Mutex
+	lastRecoveryAt               time.Time
+	recoveryCursor               [2]struct {
+		updatedAt  time.Time
+		resourceID uint
+	}
 }
 
 const (
@@ -97,12 +106,16 @@ const (
 
 var errMicrosoftAliasGenerationStillRunning = errors.New("microsoft alias generation is still running")
 
-func NewMicrosoftAliasStore(db *gorm.DB) *MicrosoftAliasStore {
-	return &MicrosoftAliasStore{
+func NewMicrosoftAliasStore(db *gorm.DB, redisClients ...redis.UniversalClient) *MicrosoftAliasStore {
+	store := &MicrosoftAliasStore{
 		db:                           db,
 		operationLogs:                governanceinfra.NewOperationLogRepo(db),
 		recoveredBindingScanPageSize: microsoftAliasRecoveredBindingScanPageSize,
 	}
+	if len(redisClients) > 0 {
+		store.redis = redisClients[0]
+	}
+	return store
 }
 
 func (s *MicrosoftAliasStore) EnsureSchedules(ctx context.Context, now time.Time) (int64, error) {
@@ -494,6 +507,9 @@ func microsoftAliasScheduleWakeUpdates(now time.Time) map[string]any {
 }
 
 func (s *MicrosoftAliasStore) FindDispatchable(ctx context.Context, limit int, now, _ time.Time, _ time.Time) ([]mailapp.MicrosoftAliasTask, error) {
+	if err := s.recoverStaleDispatches(ctx, now); err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = 10
 	}
@@ -1429,11 +1445,20 @@ FOR SHARE`, resourceID).Scan(&resource).Error; err != nil {
 }
 
 func (s *MicrosoftAliasStore) MarkDispatchFailed(ctx context.Context, task mailapp.MicrosoftAliasTask, nextRunAt time.Time, safeError string) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	_, err := s.markDispatchFailed(ctx, task, nextRunAt, safeError, time.Time{})
+	return err
+}
+
+func (s *MicrosoftAliasStore) markDispatchFailed(ctx context.Context, task mailapp.MicrosoftAliasTask, nextRunAt time.Time, safeError string, staleBefore time.Time) (bool, error) {
+	changed := false
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var schedule MicrosoftAliasScheduleModel
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("resource_id = ? AND generation = ? AND status IN ?", task.ResourceID, task.Generation, []string{"queued", "running"}).
-			Take(&schedule).Error
+		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("resource_id = ? AND generation = ? AND status IN ?", task.ResourceID, task.Generation, []string{"queued", "running"})
+		if !staleBefore.IsZero() {
+			query = query.Where("updated_at < ?", staleBefore)
+		}
+		err := query.Take(&schedule).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
 		}
@@ -1468,8 +1493,10 @@ func (s *MicrosoftAliasStore) MarkDispatchFailed(ctx context.Context, task maila
 		if result.Error != nil {
 			return fmt.Errorf("mark microsoft alias dispatch failed: %w", result.Error)
 		}
+		changed = result.RowsAffected == 1
 		return nil
 	})
+	return changed, err
 }
 
 func updateMicrosoftAliasScheduleTx(tx *gorm.DB, resourceID uint, claimToken, status string, nextRunAt time.Time, safeError string, failed *bool) error {

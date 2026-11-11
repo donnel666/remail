@@ -97,7 +97,7 @@ func (a *MicrosoftAliasCreationAdapter) PrepareMicrosoftAliasBinding(ctx context
 }
 
 func (a *MicrosoftAliasCreationAdapter) authorizeAliasBinding(ctx context.Context, req mailapp.MicrosoftAliasCreationRequest, preferredAddress, recoveryMask string) (mailapp.MicrosoftAliasBindingPreparationResult, error) {
-	ctx = msacl.WithRecoveryLeaseScope(ctx, req.ResourceID, recoveryMask)
+	ctx = msacl.WithConcreteRecoveryLeaseKeys(msacl.WithRecoveryLeaseScope(ctx, req.ResourceID, recoveryMask))
 	var avoidServerIDs []uint
 	for attempt := 0; attempt <= maxAliasProxyAttempts; attempt++ {
 		proxyConfig, err := a.acquireAliasProxy(ctx, req, attempt, avoidServerIDs)
@@ -155,7 +155,7 @@ func (a *MicrosoftAliasCreationAdapter) authorizeAliasBinding(ctx context.Contex
 }
 
 func (a *MicrosoftAliasCreationAdapter) recoverAliasBindingViaPasswordRecovery(ctx context.Context, req mailapp.MicrosoftAliasCreationRequest, maskedAddress string) (mailapp.MicrosoftAliasBindingPreparationResult, error) {
-	ctx = msacl.WithRecoveryLeaseScope(ctx, req.ResourceID, maskedAddress)
+	ctx = msacl.WithConcreteRecoveryLeaseKeys(msacl.WithRecoveryLeaseScope(ctx, req.ResourceID, maskedAddress))
 	proxyConfig, err := a.acquireAliasProxy(ctx, req, 0, nil)
 	if err != nil {
 		return mailapp.MicrosoftAliasBindingPreparationResult{
@@ -322,7 +322,7 @@ func aliasBindingProbeFailure(err error) (mailapp.MicrosoftAliasBindingPreparati
 // CreateMicrosoftAliases lists remote aliases for local recovery and creates new
 // candidates, or performs a read-only check for previously uncertain candidates.
 func (a *MicrosoftAliasCreationAdapter) CreateMicrosoftAliases(ctx context.Context, req mailapp.MicrosoftAliasCreationRequest) (mailapp.MicrosoftAliasCreationResult, error) {
-	ctx = msacl.WithRecoveryLeaseScope(ctx, req.ResourceID, req.RecoveryMask)
+	ctx = msacl.WithConcreteRecoveryLeaseKeys(msacl.WithRecoveryLeaseScope(ctx, req.ResourceID, req.RecoveryMask))
 	var avoidServerIDs []uint
 	for attempt := 0; attempt <= maxAliasProxyAttempts; attempt++ {
 		proxyConfig, err := a.acquireAliasProxy(ctx, req, attempt, avoidServerIDs)

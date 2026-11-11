@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -26,6 +27,12 @@ type ResourceValidationRepo struct {
 	operationLogs            *governanceinfra.OperationLogRepo
 	microsoftBindingCommit   coreapp.MicrosoftValidationBindingCommitPort
 	validationDispatchCursor atomic.Uint32 // isolated-test fallback when Redis is omitted
+	validationRecoveryMu     sync.Mutex
+	validationRecovery       [3]struct {
+		afterID     uint
+		afterTime   time.Time
+		lastAttempt time.Time
+	}
 }
 
 const resourceValidationInsertSize = 1000

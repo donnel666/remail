@@ -291,6 +291,9 @@ func (r *ResourceValidationRepo) ClaimPendingValidations(ctx context.Context, wi
 	if r == nil || r.db == nil || windowLimit <= 0 {
 		return nil, nil
 	}
+	if err := r.recoverStaleValidations(ctx, time.Now().UTC(), enterprise); err != nil {
+		return nil, err
+	}
 	if enterprise {
 		var assigned int64
 		if err := r.db.WithContext(ctx).Model(&MicrosoftResourceModel{}).Table("microsoft_enterprise_resources").
@@ -387,6 +390,7 @@ func ensureValidationTypesPresent(tasks, microsoftTasks, domainTasks []coreapp.R
 
 type pendingValidationRow struct {
 	ID                   uint
+	UpdatedAt            time.Time
 	OwnerUserID          uint   `gorm:"column:owner_user_id"`
 	CredentialRevision   uint64 `gorm:"column:credential_revision"`
 	ValidationGeneration uint64 `gorm:"column:validation_generation"`
@@ -456,6 +460,23 @@ func interleaveValidationTasks(microsoftTasks, domainTasks []coreapp.ResourceVal
 }
 
 func (r *ResourceValidationRepo) MarkValidationDispatched(ctx context.Context, task coreapp.ResourceValidationTask) (bool, error) {
+	changed, err := r.markValidation(ctx, task, []string{"pending"})
+	if changed && domain.IsMicrosoftResourceType(task.ResourceType) {
+		invalidateMicrosoftFacets(task.ResourceType)
+	}
+	return changed, err
+}
+
+func (r *ResourceValidationRepo) StartValidation(ctx context.Context, task coreapp.ResourceValidationTask) error {
+	if _, err := r.MarkValidationDispatched(ctx, task); err != nil {
+		return err
+	}
+	// Refresh the execution age even when a task spent a long time in Redis.
+	_, err := r.markValidation(ctx, task, []string{"validating"})
+	return err
+}
+
+func (r *ResourceValidationRepo) markValidation(ctx context.Context, task coreapp.ResourceValidationTask, statuses []string) (bool, error) {
 	if r == nil || r.db == nil || task.ResourceID == 0 {
 		return false, nil
 	}
@@ -464,11 +485,11 @@ func (r *ResourceValidationRepo) MarkValidationDispatched(ctx context.Context, t
 	switch task.ResourceType {
 	case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
 		result = r.db.WithContext(ctx).Model(&MicrosoftResourceModel{}).Table(microsoftResourceTable(task.ResourceType)).
-			Where("id = ? AND status = ? AND validation_generation = ? AND credential_revision = ?", task.ResourceID, string(domain.MicrosoftStatusPending), task.ValidationGeneration, task.ExpectedCredentialRevision).
+			Where("id = ? AND status IN ? AND validation_generation = ? AND credential_revision = ?", task.ResourceID, statuses, task.ValidationGeneration, task.ExpectedCredentialRevision).
 			Updates(map[string]any{"status": string(domain.MicrosoftStatusValidating), "updated_at": now})
 	case domain.ResourceTypeDomain:
 		result = r.db.WithContext(ctx).Model(&DomainResourceModel{}).
-			Where("id = ? AND status = ? AND validation_generation = ?", task.ResourceID, string(domain.DomainStatusPending), task.ValidationGeneration).
+			Where("id = ? AND status IN ? AND validation_generation = ?", task.ResourceID, statuses, task.ValidationGeneration).
 			Updates(map[string]any{"status": string(domain.DomainStatusValidating), "updated_at": now})
 	default:
 		return false, domain.ErrInvalidResourceType
@@ -476,38 +497,43 @@ func (r *ResourceValidationRepo) MarkValidationDispatched(ctx context.Context, t
 	if result.Error != nil {
 		return false, fmt.Errorf("activate Redis validation assignment: %w", result.Error)
 	}
-	changed := result.RowsAffected == 1
-	if changed && domain.IsMicrosoftResourceType(task.ResourceType) {
-		invalidateMicrosoftFacets(task.ResourceType)
-	}
-	return changed, nil
+	return result.RowsAffected == 1, nil
 }
 
 func (r *ResourceValidationRepo) ReleaseValidation(ctx context.Context, task coreapp.ResourceValidationTask) error {
+	_, err := r.releaseValidation(ctx, task, time.Time{})
+	return err
+}
+
+func (r *ResourceValidationRepo) releaseValidation(ctx context.Context, task coreapp.ResourceValidationTask, staleBefore time.Time) (bool, error) {
 	if r == nil || r.db == nil || task.ResourceID == 0 {
-		return nil
+		return false, nil
 	}
 	now := time.Now().UTC()
+	db := r.db.WithContext(ctx)
+	if !staleBefore.IsZero() {
+		db = db.Where("updated_at < ?", staleBefore)
+	}
 	var result *gorm.DB
 	switch task.ResourceType {
 	case domain.ResourceTypeMicrosoft, domain.ResourceTypeMicrosoftEnterprise:
-		result = r.db.WithContext(ctx).Model(&MicrosoftResourceModel{}).Table(microsoftResourceTable(task.ResourceType)).
+		result = db.Model(&MicrosoftResourceModel{}).Table(microsoftResourceTable(task.ResourceType)).
 			Where("id = ? AND status = ? AND validation_generation = ? AND credential_revision = ?", task.ResourceID, string(domain.MicrosoftStatusValidating), task.ValidationGeneration, task.ExpectedCredentialRevision).
 			Updates(map[string]any{"status": string(domain.MicrosoftStatusPending), "validation_generation": gorm.Expr("validation_generation + 1"), "updated_at": now})
 	case domain.ResourceTypeDomain:
-		result = r.db.WithContext(ctx).Model(&DomainResourceModel{}).
+		result = db.Model(&DomainResourceModel{}).
 			Where("id = ? AND status = ? AND validation_generation = ?", task.ResourceID, string(domain.DomainStatusValidating), task.ValidationGeneration).
 			Updates(map[string]any{"status": string(domain.DomainStatusPending), "validation_generation": gorm.Expr("validation_generation + 1"), "updated_at": now})
 	default:
-		return domain.ErrInvalidResourceType
+		return false, domain.ErrInvalidResourceType
 	}
 	if result.Error != nil {
-		return fmt.Errorf("release Redis validation assignment: %w", result.Error)
+		return false, fmt.Errorf("release Redis validation assignment: %w", result.Error)
 	}
 	if result.RowsAffected == 1 && domain.IsMicrosoftResourceType(task.ResourceType) {
 		invalidateMicrosoftFacets(task.ResourceType)
 	}
-	return nil
+	return result.RowsAffected == 1, nil
 }
 
 func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, task coreapp.ResourceValidationTask, result coreapp.MicrosoftValidationResult, systemLog *governancedomain.SystemLog) error {

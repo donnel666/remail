@@ -142,7 +142,7 @@ func run(ctx context.Context, cfg config) error {
 	}
 	log.Printf("aliasworker attached queue=%s paused=true pending=%d scheduled=%d retry=%d concurrency=%d max_tasks=%d", queue, info.Pending, info.Scheduled, info.Retry, cfg.concurrency, cfg.maxTasks)
 
-	store := mailinfra.NewMicrosoftAliasStore(p.DB)
+	store := mailinfra.NewMicrosoftAliasStore(p.DB, p.Redis)
 	proxyModule, err := proxyapi.NewProxyModule(p.DB, p.Asynq)
 	if err != nil {
 		return fmt.Errorf("initialize proxy module: %w", err)

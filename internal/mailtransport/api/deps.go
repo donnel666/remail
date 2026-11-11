@@ -230,7 +230,7 @@ func NewMailTransportModule(
 	bindingRepo := mailinfra.NewMicrosoftBindingRepo(db)
 	recoveryLeaseStore := mailinfra.NewMicrosoftBindingRecoveryLeaseStore(db)
 	auxiliaryMailRepo := mailinfra.NewAuxiliaryMailRepo(db)
-	aliasStore := mailinfra.NewMicrosoftAliasStore(db)
+	aliasStore := mailinfra.NewMicrosoftAliasStore(db, redisClient)
 	aliasQueue := mailinfra.NewMicrosoftAliasQueue(asynqClient)
 	tokenRefreshRepo := mailinfra.NewMicrosoftTokenRefreshRepo(db)
 	tokenRefreshQueue := mailinfra.NewMicrosoftTokenRefreshQueue(asynqClient)
