@@ -51,6 +51,7 @@ type MailTransportModule struct {
 	SubmitSMTP          *mailinfra.SubmissionSMTPServer
 	SubmitSMTPEnabled   bool
 	BackgroundExecution BackgroundExecutionGate
+	AliasExecution      BackgroundExecutionGate
 	AliasDispatch       MicrosoftAliasDispatchReleaser
 	tokenRefreshRepo    *mailinfra.MicrosoftTokenRefreshRepo
 	bindingDomains      bindingDomainLister
@@ -61,6 +62,12 @@ type MailTransportModule struct {
 func (m *MailTransportModule) SetBackgroundExecutionGate(gate BackgroundExecutionGate) {
 	if m != nil {
 		m.BackgroundExecution = gate
+	}
+}
+
+func (m *MailTransportModule) SetAliasExecutionGate(gate BackgroundExecutionGate) {
+	if m != nil {
+		m.AliasExecution = gate
 	}
 }
 

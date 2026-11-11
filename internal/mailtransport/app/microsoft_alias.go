@@ -181,6 +181,7 @@ type MicrosoftAliasTask struct {
 type MicrosoftAliasDispatchResult struct {
 	Ensured   int64
 	Attempted int
+	Accepted  int
 	Queued    int
 	Failed    int
 }
@@ -247,6 +248,7 @@ func (s *MicrosoftAliasService) DispatchPending(ctx context.Context, limit int) 
 		if !accepted {
 			continue
 		}
+		result.Accepted++
 		queued, err := s.store.MarkQueued(ctx, task, now)
 		if err != nil {
 			result.Failed++

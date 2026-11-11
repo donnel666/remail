@@ -79,12 +79,21 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 				return nil
 			}
 		}
-		limit := backgroundValidationWindowLimit(module.BackgroundExecution, min(runtimeconfig.Int("validation_dispatch_maximum", resourceValidationDispatchMaximum, 1), 10000))
+		validationGate := module.ValidationExecution
+		if validationGate == nil {
+			validationGate = module.BackgroundExecution
+		}
+		limit, releaseReservation := platform.ReserveBackgroundDispatch(validationGate, min(runtimeconfig.Int("validation_dispatch_maximum", resourceValidationDispatchMaximum, 1), 10000))
 		if limit <= 0 {
 			slog.Info("resource validation dispatcher deferred", "reason", "background_capacity")
 			return platform.ErrBackgroundExecutionDeferred
 		}
 		result, err := module.ValidationUseCase.DispatchPending(ctx, limit, payload.Enterprise)
+		if result != nil {
+			defer releaseReservation(result.Accepted)
+		} else {
+			defer releaseReservation(0)
+		}
 		if err != nil {
 			slog.Warn("resource validation dispatcher failed", "error", err)
 			return nil
@@ -192,7 +201,11 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 			slog.Warn("discard resource validation task without identity")
 			return nil
 		}
-		release, admitted, err := tryAcquireBackgroundExecution(ctx, module.BackgroundExecution)
+		validationGate := module.ValidationExecution
+		if validationGate == nil {
+			validationGate = module.BackgroundExecution
+		}
+		release, admitted, err := tryAcquireBackgroundExecution(ctx, validationGate)
 		if err != nil {
 			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
 				releaseResourceValidationDispatch(ctx, module, payload)

@@ -190,6 +190,7 @@ type ResourceValidationBatchPageResult struct {
 
 type DispatchResourceValidationsResult struct {
 	Attempted int
+	Accepted  int
 	Queued    int
 	Failed    int
 }
@@ -507,6 +508,7 @@ func (uc *ResourceValidationUseCase) DispatchPending(ctx context.Context, limit 
 		if !accepted {
 			continue
 		}
+		result.Accepted++
 		activated, err := uc.validations.MarkValidationDispatched(ctx, task)
 		if err != nil {
 			result.Failed++

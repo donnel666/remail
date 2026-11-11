@@ -39,6 +39,7 @@ type CoreModule struct {
 	AdminDomainCommands  *coreapp.AdminDomainCommandService
 	MicrosoftCredentials coreapp.MicrosoftCredentialPort
 	BackgroundExecution  BackgroundExecutionGate
+	ValidationExecution  BackgroundExecutionGate
 	validationRepo       *coreinfra.ResourceValidationRepo
 	resourceRepo         *coreinfra.ResourceRepo
 }
@@ -60,6 +61,12 @@ func (m *CoreModule) EnforceDomainSaleQuality(ctx context.Context) (int, error) 
 func (m *CoreModule) SetBackgroundExecutionGate(gate BackgroundExecutionGate) {
 	if m != nil {
 		m.BackgroundExecution = gate
+	}
+}
+
+func (m *CoreModule) SetValidationExecutionGate(gate BackgroundExecutionGate) {
+	if m != nil {
+		m.ValidationExecution = gate
 	}
 }
 

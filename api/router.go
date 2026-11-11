@@ -146,6 +146,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 			return nil, cleanup, err
 		}
 		mailMod.SetBackgroundExecutionGate(p.BackgroundLoad)
+		mailMod.SetAliasExecutionGate(p.AliasLoad)
 		mailapi.RegisterMailTransportTaskHandlers(taskMux, mailMod)
 
 		iamMod, err := iamapi.NewIAMModule(
@@ -189,6 +190,7 @@ func SetupRouter(p *platform.Platform, feFS fs.FS) (*gin.Engine, func(context.Co
 		mailMod.SetMicrosoftCredentialPort(coreMod.MicrosoftCredentials)
 		coreMod.SetMicrosoftValidationBindingCommitPort(mailMod.ValidationBinding)
 		coreMod.SetBackgroundExecutionGate(p.BackgroundLoad)
+		coreMod.SetValidationExecutionGate(p.ValidationLoad)
 		coreMod.SetAdminProxyBindingQueryPort(proxyapi.NewAdminResourceProxyBindingQueryAdapter(proxyMod.AdminResourceBindings))
 		coreMod.SetMicrosoftAliasScheduleTrigger(mailapi.NewMicrosoftAliasValidationAdapter(mailMod))
 		coreapi.RegisterCoreTaskHandlers(taskMux, coreMod)

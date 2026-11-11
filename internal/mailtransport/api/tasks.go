@@ -107,11 +107,20 @@ func RegisterMailTransportTaskHandlers(mux *asynq.ServeMux, module *MailTranspor
 		if module == nil || module.MicrosoftAliases == nil {
 			return nil
 		}
-		limit := backgroundDispatchLimit(module.BackgroundExecution, microsoftAliasDispatchMaximum)
+		aliasGate := module.AliasExecution
+		if aliasGate == nil {
+			aliasGate = module.BackgroundExecution
+		}
+		limit, releaseReservation := platform.ReserveBackgroundDispatch(aliasGate, microsoftAliasDispatchMaximum)
 		if limit <= 0 {
 			return nil
 		}
 		result, err := module.MicrosoftAliases.DispatchPending(ctx, limit)
+		if result != nil {
+			defer releaseReservation(result.Accepted)
+		} else {
+			defer releaseReservation(0)
+		}
 		if err != nil {
 			slog.Warn("microsoft alias dispatcher failed", "error", err)
 			return nil
@@ -141,7 +150,11 @@ func RegisterMailTransportTaskHandlers(mux *asynq.ServeMux, module *MailTranspor
 		if payload.ResourceID == 0 || payload.Generation == 0 {
 			return fmt.Errorf("decode microsoft alias task: identity is missing: %w", asynq.SkipRetry)
 		}
-		release, admitted, err := tryAcquireBackgroundExecution(ctx, module.BackgroundExecution)
+		aliasGate := module.AliasExecution
+		if aliasGate == nil {
+			aliasGate = module.BackgroundExecution
+		}
+		release, admitted, err := tryAcquireBackgroundExecution(ctx, aliasGate)
 		if err != nil {
 			if !platform.BackgroundTaskHasRetryHeadroom(ctx) {
 				return releaseMicrosoftAliasDispatch(ctx, module, payload)
