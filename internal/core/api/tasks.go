@@ -79,34 +79,31 @@ func RegisterCoreTaskHandlers(mux *asynq.ServeMux, module *CoreModule) {
 				return nil
 			}
 		}
+		if queue, ok := asynq.GetQueueName(ctx); ok && queue != platform.QueueDefault {
+			module.ValidationUseCase.ScheduleDispatcher(ctx, 0)
+			return nil
+		}
 		validationGate := module.ValidationExecution
 		if validationGate == nil {
 			validationGate = module.BackgroundExecution
 		}
-		limit, releaseReservation := platform.ReserveBackgroundDispatch(validationGate, min(runtimeconfig.Int("validation_dispatch_maximum", resourceValidationDispatchMaximum, 1), 10000))
-		if limit <= 0 {
-			slog.Info("resource validation dispatcher deferred", "reason", "background_capacity")
-			return platform.ErrBackgroundExecutionDeferred
-		}
-		result, err := module.ValidationUseCase.DispatchPending(ctx, limit, payload.Enterprise)
-		if result != nil {
-			defer releaseReservation(result.Accepted)
-		} else {
-			defer releaseReservation(0)
-		}
-		if err != nil {
-			slog.Warn("resource validation dispatcher failed", "error", err)
+		maximum := min(runtimeconfig.Int("validation_dispatch_maximum", resourceValidationDispatchMaximum, 1), 10000)
+		return platform.DispatchBackgroundTasks(ctx, validationGate, maximum, func(ctx context.Context, limit int) error {
+			result, err := module.ValidationUseCase.DispatchPending(ctx, limit, payload.Enterprise)
+			if err != nil {
+				slog.Warn("resource validation dispatcher failed", "error", err)
+				return nil
+			}
+			if result != nil && result.Attempted > 0 {
+				slog.Info(
+					"resource validation dispatcher finished",
+					"attempted", result.Attempted,
+					"queued", result.Queued,
+					"failed", result.Failed,
+				)
+			}
 			return nil
-		}
-		if result != nil && result.Attempted > 0 {
-			slog.Info(
-				"resource validation dispatcher finished",
-				"attempted", result.Attempted,
-				"queued", result.Queued,
-				"failed", result.Failed,
-			)
-		}
-		return nil
+		})
 	})
 	mux.HandleFunc(coreinfra.TypeResourceValidationBatch, func(ctx context.Context, task *asynq.Task) error {
 		if module == nil || module.ValidationUseCase == nil {
@@ -367,6 +364,11 @@ func tryAcquireBackgroundExecution(ctx context.Context, gate BackgroundExecution
 	}
 	if gate == nil {
 		return func() {}, true, nil
+	}
+	if fixed, ok := gate.(interface {
+		TryAcquireContext(context.Context) (func(), bool, error)
+	}); ok {
+		return fixed.TryAcquireContext(ctx)
 	}
 	release, admitted := platform.AcquireBackgroundExecution(ctx, gate)
 	return release, admitted, nil

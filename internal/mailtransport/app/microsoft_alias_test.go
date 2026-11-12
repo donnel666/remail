@@ -419,6 +419,18 @@ func TestMicrosoftAliasDispatchThrottlesCompletedScheduleSweeps(t *testing.T) {
 	require.Equal(t, 2, store.ensureCalls)
 }
 
+func TestMicrosoftAliasCanceledDispatchCannotEnqueueSelectedTasks(t *testing.T) {
+	store := &fakeMicrosoftAliasStore{dispatchTasks: []MicrosoftAliasTask{microsoftAliasTestTask(42)}, markQueued: true}
+	service := NewMicrosoftAliasService(store, &fakeMicrosoftAliasAdminQueue{accepted: true}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := service.DispatchPending(ctx, 1)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 1, result.Attempted)
+	require.Zero(t, result.Accepted)
+	require.Zero(t, store.markQueuedCalls)
+}
+
 func TestMicrosoftAliasValidationEnsuresOnlyTheValidatedSchedule(t *testing.T) {
 	store := &fakeMicrosoftAliasStore{ensureResourceOK: true}
 	queue := &fakeMicrosoftAliasAdminQueue{}

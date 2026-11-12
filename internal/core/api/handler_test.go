@@ -1536,21 +1536,7 @@ func (r *mockValidationRepo) ClaimPendingValidations(_ context.Context, limit in
 	if r.resources == nil {
 		return result, nil
 	}
-	assigned := 0
-	for _, resource := range r.resources.microsoft {
-		if coredomain.IsMicrosoftEnterpriseEmail(resource.EmailAddress) == enterprise && resource.Status == coredomain.MicrosoftStatusValidating {
-			assigned++
-		}
-	}
-	if !enterprise {
-		for _, resource := range r.resources.domains {
-			if resource.Status == coredomain.DomainStatusValidating {
-				assigned++
-			}
-		}
-	}
-	limit = max(0, limit-assigned)
-	if limit == 0 {
+	if limit <= 0 {
 		return result, nil
 	}
 	for id, resource := range r.resources.microsoft {
@@ -2444,7 +2430,23 @@ func TestResourceValidationUseCase_DispatchClaimsOnlyPendingResources(t *testing
 	require.Equal(t, uint64(7), queue.tasks[0].ExpectedCredentialRevision)
 }
 
-func TestResourceValidationUseCase_DispatchSubtractsAlreadyAssignedResources(t *testing.T) {
+func TestResourceValidationUseCase_CanceledDispatchCannotEnqueueSelectedTasks(t *testing.T) {
+	resources := newMockResourceRepo()
+	require.NoError(t, resources.CreateMicrosoft(context.Background(), &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}, &coredomain.MicrosoftResource{
+		EmailAddress: "expired-dispatch@example.com", Status: coredomain.MicrosoftStatusPending, CredentialRevision: 1,
+	}))
+	queue := &mockValidationQueue{}
+	uc := coreapp.NewResourceValidationUseCase(resources, newMockValidationRepo(resources), queue, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := uc.DispatchPending(ctx, 1, false)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 1, result.Attempted)
+	require.Zero(t, result.Accepted)
+	require.Empty(t, queue.tasks)
+}
+
+func TestResourceValidationUseCase_DispatchUsesFreeSlotBudget(t *testing.T) {
 	resourceRepo := newMockResourceRepo()
 	validationRepo := newMockValidationRepo(resourceRepo)
 	queue := &mockValidationQueue{}
@@ -2464,14 +2466,14 @@ func TestResourceValidationUseCase_DispatchSubtractsAlreadyAssignedResources(t *
 
 	result, err := uc.DispatchPending(context.Background(), 3, false)
 	require.NoError(t, err)
-	require.Equal(t, 1, result.Attempted)
-	require.Equal(t, 1, result.Queued)
-	require.Len(t, queue.tasks, 1)
+	require.Equal(t, 2, result.Attempted)
+	require.Equal(t, 2, result.Queued)
+	require.Len(t, queue.tasks, 2)
 
 	result, err = uc.DispatchPending(context.Background(), 3, false)
 	require.NoError(t, err)
 	require.Zero(t, result.Attempted)
-	require.Len(t, queue.tasks, 1)
+	require.Len(t, queue.tasks, 2)
 }
 
 func TestResourceValidationUseCase_DispatchFailureReturnsResourcePending(t *testing.T) {

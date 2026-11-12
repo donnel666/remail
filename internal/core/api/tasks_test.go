@@ -3,16 +3,19 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	coreapp "github.com/donnel666/remail/internal/core/app"
 	coredomain "github.com/donnel666/remail/internal/core/domain"
 	coreinfra "github.com/donnel666/remail/internal/core/infra"
 	"github.com/donnel666/remail/internal/platform"
 	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
@@ -105,7 +108,7 @@ func TestResourceValidationAdmissionDenialDefersInAsynqWithoutDatabaseMutation(t
 	require.False(t, gate.released.Load(), "a denied task never owns a permit")
 }
 
-func TestResourceValidationDispatcherDefersWhenCapacityIsZero(t *testing.T) {
+func TestResourceValidationDispatcherSkipsWhenCapacityIsZero(t *testing.T) {
 	module := &CoreModule{
 		ValidationUseCase:   coreapp.NewResourceValidationUseCase(nil, nil, &mockValidationQueue{}, nil),
 		BackgroundExecution: &coreBackgroundExecutionGateStub{available: 0},
@@ -115,7 +118,94 @@ func TestResourceValidationDispatcherDefersWhenCapacityIsZero(t *testing.T) {
 
 	err := mux.ProcessTask(context.Background(), asynq.NewTask(coreinfra.TypeResourceValidationDispatcher, nil))
 
-	require.ErrorIs(t, err, platform.ErrBackgroundExecutionDeferred)
+	require.NoError(t, err, "a full pool is not a failed task")
+}
+
+func TestValidationDispatcherFillsOnlyFreeFixedSlots(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	options := asynq.RedisClientOpt{Addr: server.Addr()}
+	asynqClient := asynq.NewClient(options)
+	inspector := asynq.NewInspector(options)
+	t.Cleanup(func() {
+		require.NoError(t, inspector.Close())
+		require.NoError(t, asynqClient.Close())
+		require.NoError(t, client.Close())
+	})
+	gate := platform.NewFixedBackgroundExecutionGate(10, client, "validation-test", platform.QueueBackgroundValidation)
+	ctx := context.Background()
+	resources := newMockResourceRepo()
+	var activeIDs []string
+	const prefix = "asynq:{" + platform.QueueBackgroundValidation + "}:"
+	for i := range 12 {
+		status := coredomain.MicrosoftStatusPending
+		if i < 6 {
+			status = coredomain.MicrosoftStatusValidating
+			info, err := asynqClient.Enqueue(asynq.NewTask(coreinfra.TypeResourceValidation, nil), asynq.Queue(platform.QueueBackgroundValidation))
+			require.NoError(t, err)
+			require.NoError(t, client.RPopLPush(ctx, prefix+"pending", prefix+"active").Err())
+			require.NoError(t, client.HSet(ctx, prefix+"t:"+info.ID, "state", "active").Err())
+			activeIDs = append(activeIDs, info.ID)
+		}
+		require.NoError(t, resources.CreateMicrosoft(ctx, &coredomain.EmailResource{Type: coredomain.ResourceTypeMicrosoft, OwnerUserID: 1}, &coredomain.MicrosoftResource{
+			EmailAddress: fmt.Sprintf("free-slot-%d@outlook.com", i), Password: "secret", Status: status, CredentialRevision: 1,
+		}))
+	}
+	queue := coreinfra.NewResourceValidationQueue(asynqClient, client)
+	module := &CoreModule{
+		ValidationUseCase:   coreapp.NewResourceValidationUseCase(resources, newMockValidationRepo(resources), queue, nil),
+		ValidationExecution: gate,
+	}
+	zero, err := module.ValidationUseCase.DispatchPending(ctx, 0, false)
+	require.NoError(t, err)
+	require.Zero(t, zero.Accepted)
+	require.Zero(t, client.ZCard(ctx, prefix+"scheduled").Val(), "zero free slots must not turn into a default batch")
+	mux := asynq.NewServeMux()
+	RegisterCoreTaskHandlers(mux, module)
+	dispatcher := asynq.NewTask(coreinfra.TypeResourceValidationDispatcher, nil)
+	require.NoError(t, mux.ProcessTask(ctx, dispatcher))
+	scheduled, err := inspector.ListScheduledTasks(platform.QueueBackgroundValidation)
+	require.NoError(t, err)
+	require.Len(t, scheduled, 4, "six active tasks leave four slots to fill")
+	require.NoError(t, mux.ProcessTask(ctx, dispatcher))
+	require.EqualValues(t, 4, client.ZCard(ctx, prefix+"scheduled").Val())
+	resources.microsoft[1].Status = coredomain.MicrosoftStatusNormal
+	require.NoError(t, client.LRem(ctx, prefix+"active", 0, activeIDs[0]).Err())
+	require.NoError(t, client.Del(ctx, prefix+"t:"+activeIDs[0]).Err())
+	require.NoError(t, mux.ProcessTask(ctx, dispatcher))
+	scheduled, err = inspector.ListScheduledTasks(platform.QueueBackgroundValidation)
+	require.NoError(t, err)
+	require.Len(t, scheduled, 5, "one completed task must admit exactly one replacement")
+}
+
+func TestLegacyValidationDispatcherMovesOutOfBusinessQueue(t *testing.T) {
+	server := miniredis.RunT(t)
+	options := asynq.RedisClientOpt{Addr: server.Addr()}
+	client := asynq.NewClient(options)
+	inspector := asynq.NewInspector(options)
+	t.Cleanup(func() {
+		require.NoError(t, inspector.Close())
+		require.NoError(t, client.Close())
+	})
+	queue := coreinfra.NewResourceValidationQueue(client, nil)
+	mux := asynq.NewServeMux()
+	RegisterCoreTaskHandlers(mux, &CoreModule{ValidationUseCase: coreapp.NewResourceValidationUseCase(nil, nil, queue, nil)})
+	_, err := client.Enqueue(asynq.NewTask(coreinfra.TypeResourceValidationDispatcher, nil), asynq.Queue(platform.QueueBackgroundValidation))
+	require.NoError(t, err)
+	workers := asynq.NewServer(options, asynq.Config{
+		Concurrency: 1, Queues: map[string]int{platform.QueueBackgroundValidation: 1},
+		TaskCheckInterval: 10 * time.Millisecond, ShutdownTimeout: time.Second,
+	})
+	require.NoError(t, workers.Start(mux))
+	t.Cleanup(workers.Shutdown)
+	require.Eventually(t, func() bool {
+		dispatchers, err := inspector.ListScheduledTasks(platform.QueueDefault)
+		if err != nil || len(dispatchers) != 2 {
+			return false
+		}
+		info, err := inspector.GetQueueInfo(platform.QueueBackgroundValidation)
+		return err == nil && info.Size == 0
+	}, 5*time.Second, 10*time.Millisecond)
 }
 
 type dispatcherCountingQueue struct {

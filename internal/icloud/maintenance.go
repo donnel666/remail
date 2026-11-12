@@ -66,9 +66,9 @@ func cancelActiveICloudMaintenanceRunsTx(ctx context.Context, tx *gorm.DB, resou
 	if exceptGeneration > 0 {
 		query = query.Where("kind <> ? OR validation_generation <> ?", iCloudMaintenanceValidation, exceptGeneration)
 	}
-	return query.Updates(map[string]any{
+	return updateICloudMaintenanceRunsByID(query, map[string]any{
 		"status": iCloudMaintenanceCanceled, "finished_at": now, "updated_at": now,
-	}).Error
+	})
 }
 
 func clearICloudMaintenanceAtAliasLimitTx(ctx context.Context, tx *gorm.DB, resourceID uint, now time.Time) error {
@@ -94,12 +94,11 @@ func clearICloudMaintenanceAtAliasLimitTx(ctx context.Context, tx *gorm.DB, reso
 		Updates(map[string]any{"next_keepalive_at": nil, "updated_at": now}).Error; err != nil {
 		return err
 	}
-	if err := tx.WithContext(ctx).Model(&iCloudMaintenanceRunModel{}).
-		Where("resource_id IN ? AND kind = ? AND status IN ?", resourceIDs, iCloudMaintenanceValidation, []string{iCloudMaintenanceQueued, iCloudMaintenanceRunning}).
-		Updates(map[string]any{
-			"status": iCloudMaintenanceCanceled, "last_safe_error": "Validation canceled because the iCloud alias limit has been reached.",
-			"finished_at": now, "updated_at": now,
-		}).Error; err != nil {
+	if err := updateICloudMaintenanceRunsByID(tx.WithContext(ctx).Model(&iCloudMaintenanceRunModel{}).
+		Where("resource_id IN ? AND kind = ? AND status IN ?", resourceIDs, iCloudMaintenanceValidation, []string{iCloudMaintenanceQueued, iCloudMaintenanceRunning}), map[string]any{
+		"status": iCloudMaintenanceCanceled, "last_safe_error": "Validation canceled because the iCloud alias limit has been reached.",
+		"finished_at": now, "updated_at": now,
+	}); err != nil {
 		return err
 	}
 	return tx.WithContext(ctx).Model(&iCloudResourceModel{}).
@@ -181,11 +180,32 @@ func recoverStaleICloudProvisionRunsTx(ctx context.Context, tx *gorm.DB, resourc
 			iCloudMaintenanceAlias, iCloudMaintenanceRunning, now.Add(-iCloudProvisionLease))
 	if resourceID > 0 {
 		query = query.Where("resource_id = ?", resourceID)
+	} else {
+		query = query.Limit(100)
 	}
-	return query.Updates(map[string]any{
+	return updateICloudMaintenanceRunsByID(query, map[string]any{
 		"status": iCloudMaintenanceFailed, "last_safe_error": "Provision worker lease expired.",
 		"finished_at": now, "updated_at": now,
-	}).Error
+	})
+}
+
+// Resolve IDs without range locks, then recheck the predicates on primary-key
+// updates. Empty status ranges must not lock gaps needed by another resource's INSERT.
+func updateICloudMaintenanceRunsByID(query *gorm.DB, updates map[string]any) error {
+	var ids []uint64
+	if err := query.Session(&gorm.Session{}).Order("id ASC").Pluck("id", &ids).Error; err != nil {
+		return err
+	}
+	for offset := 0; offset < len(ids); offset += 100 {
+		update := query.Session(&gorm.Session{}).Where("id IN ?", ids[offset:min(offset+100, len(ids))])
+		if query.Name() == "mysql" {
+			update = update.Table("icloud_maintenance_runs FORCE INDEX (PRIMARY)")
+		}
+		if err := update.Updates(updates).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) finishICloudProvisionRun(ctx context.Context, runID uint64, status, safeError string, now time.Time) error {

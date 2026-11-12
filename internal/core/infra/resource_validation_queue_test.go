@@ -50,19 +50,27 @@ func TestMicrosoftEnterpriseValidationQueueAndDispatcherAreIndependent(t *testin
 		require.NoError(t, json.Unmarshal(workers[0].Payload, &task))
 		require.Equal(t, entry.enterprise, task.Enterprise)
 	}
-	dispatchers, err := inspector.ListPendingTasks(platform.QueueBackgroundMicrosoftEnterpriseValidation)
+	dispatchers, err := inspector.ListPendingTasks(platform.QueueDefault)
 	require.NoError(t, err)
-	require.Len(t, dispatchers, 1)
-	require.Equal(t, TypeResourceValidationDispatcher, dispatchers[0].Type)
-	var payload coreapp.ResourceValidationDispatcherTask
-	require.NoError(t, json.Unmarshal(dispatchers[0].Payload, &payload))
-	require.True(t, payload.Enterprise)
-	require.Equal(t, platform.BackgroundTaskMaxRetry, dispatchers[0].MaxRetry)
-	personal, err := inspector.ListPendingTasks(MicrosoftResourceValidationQueueName)
-	require.NoError(t, err)
-	require.Len(t, personal, 1)
-	require.Equal(t, TypeResourceValidationDispatcher, personal[0].Type)
-	require.Equal(t, platform.BackgroundTaskMaxRetry, personal[0].MaxRetry)
+	require.Len(t, dispatchers, 2)
+	var enterpriseCount int
+	for _, dispatcher := range dispatchers {
+		require.Equal(t, TypeResourceValidationDispatcher, dispatcher.Type)
+		require.Equal(t, platform.BackgroundTaskMaxRetry, dispatcher.MaxRetry)
+		if len(dispatcher.Payload) > 0 {
+			var payload coreapp.ResourceValidationDispatcherTask
+			require.NoError(t, json.Unmarshal(dispatcher.Payload, &payload))
+			if payload.Enterprise {
+				enterpriseCount++
+			}
+		}
+	}
+	require.Equal(t, 1, enterpriseCount)
+	for _, name := range []string{MicrosoftResourceValidationQueueName, platform.QueueBackgroundMicrosoftEnterpriseValidation} {
+		pending, err := inspector.ListPendingTasks(name)
+		require.NoError(t, err)
+		require.Empty(t, pending, "dispatchers must not occupy business slots")
+	}
 }
 
 func TestResourceValidationQueueReportsOnlyNewEnqueueAsAccepted(t *testing.T) {

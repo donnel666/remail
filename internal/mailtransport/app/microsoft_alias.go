@@ -235,6 +235,9 @@ func (s *MicrosoftAliasService) DispatchPending(ctx context.Context, limit int) 
 	result := &MicrosoftAliasDispatchResult{Ensured: ensured, Attempted: len(tasks)}
 	var dispatchErr error
 	for _, task := range tasks {
+		if err := ctx.Err(); err != nil {
+			return result, errors.Join(dispatchErr, err)
+		}
 		if s.queue == nil {
 			result.Failed++
 			continue

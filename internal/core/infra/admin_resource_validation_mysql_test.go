@@ -52,9 +52,9 @@ func TestMicrosoftEnterpriseValidationDispatchIsolationMySQL(t *testing.T) {
 	require.True(t, enterprise[0].Enterprise)
 	require.NotEqual(t, personal.ID, enterprise[0].ResourceID)
 	require.True(t, mustActivateValidation(t, validations, enterprise[0]))
-	full, err := validations.ClaimPendingValidations(ctx, 1, true)
+	full, err := validations.ClaimPendingValidations(ctx, 0, true)
 	require.NoError(t, err)
-	require.Empty(t, full, "enterprise assignments still obey their own bounded window")
+	require.Empty(t, full, "a full gate supplies no free-slot budget")
 
 	require.NoError(t, db.Model(&MicrosoftResourceModel{}).Where("id = ?", personal.ID).
 		Updates(map[string]any{"status": "pending", "updated_at": time.Now().UTC().Add(-time.Minute)}).Error)
@@ -144,7 +144,7 @@ func TestResourceValidationRepoLimitsPendingScanMySQL(t *testing.T) {
 
 	tasks, err := validations.ClaimPendingValidations(context.Background(), 2, false)
 	require.NoError(t, err)
-	require.Len(t, tasks, 1)
+	require.Len(t, tasks, 2, "already running tasks must not be deducted from the free-slot budget again")
 	for _, task := range tasks {
 		activated, activateErr := validations.MarkValidationDispatched(context.Background(), task)
 		require.NoError(t, activateErr)
@@ -179,7 +179,7 @@ func TestResourceValidationRepoDoesNotStarveDomainBehindMicrosoftBacklogMySQL(t 
 	require.Contains(t, []uint{tasks[0].ResourceID, tasks[1].ResourceID, tasks[2].ResourceID, tasks[3].ResourceID}, domainRoot.ID)
 }
 
-func TestResourceValidationRepoAdmitsDomainWhenMicrosoftOwnsFullWindowMySQL(t *testing.T) {
+func TestResourceValidationRepoUsesFreeSlotsForDomainAlongsideMicrosoftMySQL(t *testing.T) {
 	db := newCoreMySQLTestDB(t)
 	repo := NewResourceRepo(db)
 	validations := NewResourceValidationRepo(db)
@@ -440,6 +440,8 @@ func TestResourceValidationRepoCountsOnlyBusinessFailuresMySQL(t *testing.T) {
 
 	for attempt := 1; attempt <= coreapp.ResourceValidationMaxFailures; attempt++ {
 		makeValidationAssignmentsReady(t, db)
+		require.NoError(t, db.Model(&MicrosoftResourceModel{}).Where("id = ?", root.ID).
+			Update("updated_at", time.Now().UTC().Add(-validationRepeatedRetryDelay-time.Second)).Error)
 		tasks, err := validations.ClaimPendingValidations(context.Background(), 1, false)
 		require.NoError(t, err)
 		require.Len(t, tasks, 1)

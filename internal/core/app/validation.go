@@ -490,7 +490,7 @@ func (uc *ResourceValidationUseCase) DispatchPending(ctx context.Context, limit 
 		return nil, ErrValidationTemporaryUnavailable
 	}
 	if limit <= 0 {
-		limit = 100
+		return &DispatchResourceValidationsResult{}, nil
 	}
 	tasks, err := uc.validations.ClaimPendingValidations(ctx, limit, enterprise)
 	if err != nil {
@@ -499,6 +499,9 @@ func (uc *ResourceValidationUseCase) DispatchPending(ctx context.Context, limit 
 	result := &DispatchResourceValidationsResult{Attempted: len(tasks)}
 	var dispatchErrors []error
 	for _, task := range tasks {
+		if err := ctx.Err(); err != nil {
+			return result, errors.Join(append(dispatchErrors, err)...)
+		}
 		accepted, err := uc.queue.EnqueueResourceValidation(ctx, task)
 		if err != nil {
 			result.Failed++

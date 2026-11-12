@@ -3,6 +3,7 @@ package icloud
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -263,6 +264,7 @@ func (s *Service) ApplyAdminICloudBatch(
 	result := &AdminICloudBulkResult{}
 	replayed := false
 	reasons := make(map[string]int64)
+	// Each resource must see runs committed after the batch's selection read.
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		wasReplayed, err := s.reserveAdminICloudCommand(ctx, tx, receipt, result)
 		if err != nil || wasReplayed {
@@ -313,7 +315,7 @@ func (s *Service) ApplyAdminICloudBatch(
 			return err
 		}
 		return s.completeAdminICloudCommand(ctx, tx, operatorUserID, idempotencyKey, result)
-	})
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return nil, normalizeAdminICloudCommandError(err)
 	}

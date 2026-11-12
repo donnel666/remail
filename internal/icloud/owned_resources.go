@@ -2,6 +2,7 @@ package icloud
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sort"
@@ -215,6 +216,7 @@ func (s *Service) applyOwnedICloudBatch(ctx context.Context, userID uint, comman
 	}
 	result := &AdminICloudBulkResult{AffectedResourceIDs: []uint{}, SkippedResourceIDs: []uint{}, ReasonCounts: []AdminICloudReasonCount{}}
 	replayed := false
+	// Nested resource commands must see runs committed after the batch's selection read.
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
 		replayed, err = s.reserveAdminICloudCommand(ctx, tx, receipt, result)
@@ -256,7 +258,7 @@ func (s *Service) applyOwnedICloudBatch(ctx context.Context, userID uint, comman
 		result.Affected, result.Skipped = len(result.AffectedResourceIDs), len(result.SkippedResourceIDs)
 		result.ReasonCounts = adminICloudReasonCounts(reasons)
 		return s.completeAdminICloudCommand(ctx, tx, userID, key, result)
-	})
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if errors.Is(err, ErrICloudImportConflict) {
 		return nil, err
 	}

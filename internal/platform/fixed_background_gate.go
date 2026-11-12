@@ -3,308 +3,169 @@ package platform
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
+	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 )
 
 const (
 	BackgroundValidationConcurrency = 10
 	BackgroundAliasConcurrency      = 20
-	fixedBackgroundLeaseTTL         = 90 * time.Minute
+	fixedBackgroundDispatchTimeout  = time.Minute
+	fixedBackgroundDispatchLockTTL  = 2 * time.Minute
 )
 
 var (
-	fixedGateReserveScript = redis.NewScript(`
-local now = tonumber(ARGV[1])
-local limit = tonumber(ARGV[2])
-local ttl = tonumber(ARGV[3])
-local requested = tonumber(ARGV[4])
-local reserved = KEYS[1]
-local active = KEYS[2]
-redis.call('ZREMRANGEBYSCORE', reserved, '-inf', now)
-redis.call('ZREMRANGEBYSCORE', active, '-inf', now)
-local used = redis.call('ZCARD', reserved) + redis.call('ZCARD', active)
-local count = math.min(requested, math.max(0, limit - used))
-for i = 1, count do
-  redis.call('ZADD', reserved, now + ttl, ARGV[5] .. ':' .. i)
+	fixedGateOutstandingScript = redis.NewScript(`
+local outstanding = 0
+for _, prefix in ipairs(KEYS) do
+  outstanding = outstanding + redis.call('LLEN', prefix .. 'pending')
+    + redis.call('LLEN', prefix .. 'active')
+    + redis.call('ZCARD', prefix .. 'scheduled')
+    + redis.call('ZCARD', prefix .. 'retry')
 end
-if count > 0 then
-  redis.call('EXPIRE', reserved, math.ceil(ttl / 1000))
-  redis.call('EXPIRE', active, math.ceil(ttl / 1000))
+return outstanding
+`)
+	fixedGateUnlockScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
 end
-return count
+return 0
 `)
 	fixedGateAcquireScript = redis.NewScript(`
-local now = tonumber(ARGV[1])
-local limit = tonumber(ARGV[2])
-local ttl = tonumber(ARGV[3])
-local active = KEYS[1]
-local reserved = KEYS[2]
-redis.call('ZREMRANGEBYSCORE', reserved, '-inf', now)
-redis.call('ZREMRANGEBYSCORE', active, '-inf', now)
-local member = redis.call('ZRANGE', reserved, 0, 0)[1]
-if member then
-  redis.call('ZREM', reserved, member)
-else
-  if redis.call('ZCARD', active) + redis.call('ZCARD', reserved) >= limit then
-    return ''
+for _, task in ipairs(redis.call('HKEYS', KEYS[1])) do
+  if redis.call('HGET', task, 'state') ~= 'active' then
+    redis.call('HDEL', KEYS[1], task)
   end
-  member = ARGV[4]
 end
-redis.call('ZADD', active, now + ttl, member)
-redis.call('EXPIRE', active, math.ceil(ttl / 1000))
-redis.call('EXPIRE', reserved, math.ceil(ttl / 1000))
-return member
+if redis.call('HGET', KEYS[2], 'state') ~= 'active' then
+  return -1
+end
+if redis.call('HEXISTS', KEYS[1], KEYS[2]) == 0 and redis.call('HLEN', KEYS[1]) >= tonumber(ARGV[1]) then
+  return 0
+end
+redis.call('HSET', KEYS[1], KEYS[2], ARGV[2])
+return 1
 `)
 	fixedGateReleaseScript = redis.NewScript(`
-return redis.call('ZREM', KEYS[1], ARGV[1])
-`)
-	fixedGateReleaseReservedScript = redis.NewScript(`
-local members = redis.call('ZRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1)
-for _, member in ipairs(members) do
-  redis.call('ZREM', KEYS[1], member)
+if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then
+  return redis.call('HDEL', KEYS[1], ARGV[1])
 end
-return #members
-`)
-	fixedGateAvailableScript = redis.NewScript(`
-local now = tonumber(ARGV[1])
-local limit = tonumber(ARGV[2])
-local reserved = KEYS[1]
-local active = KEYS[2]
-redis.call('ZREMRANGEBYSCORE', reserved, '-inf', now)
-redis.call('ZREMRANGEBYSCORE', active, '-inf', now)
-return math.max(0, limit - redis.call('ZCARD', reserved) - redis.call('ZCARD', active))
-`)
-	fixedGateStatsScript = redis.NewScript(`
-local now = tonumber(ARGV[1])
-local reserved = KEYS[1]
-local active = KEYS[2]
-redis.call('ZREMRANGEBYSCORE', reserved, '-inf', now)
-redis.call('ZREMRANGEBYSCORE', active, '-inf', now)
-return {redis.call('ZCARD', active), redis.call('ZCARD', reserved)}
-`)
-	fixedGatePrimeScript = redis.NewScript(`
-local now = tonumber(ARGV[1])
-local limit = tonumber(ARGV[2])
-local ttl = tonumber(ARGV[3])
-local desired = tonumber(ARGV[4])
-local reserved = KEYS[1]
-local active = KEYS[2]
-redis.call('ZREMRANGEBYSCORE', reserved, '-inf', now)
-redis.call('ZREMRANGEBYSCORE', active, '-inf', now)
-local used = redis.call('ZCARD', reserved) + redis.call('ZCARD', active)
-local count = math.min(math.max(0, desired - used), math.max(0, limit - used))
-for i = 1, count do
-  redis.call('ZADD', reserved, now + ttl, ARGV[5] .. ':' .. i)
-end
-if count > 0 then
-  redis.call('EXPIRE', reserved, math.ceil(ttl / 1000))
-  redis.call('EXPIRE', active, math.ceil(ttl / 1000))
-end
-return count
+return 0
 `)
 )
 
-// FixedBackgroundExecutionGate is a fixed execution window shared through
-// Redis when available. Reservations cover the gap between dispatch and worker
-// start, and leases make abandoned reservations recover automatically.
+// FixedBackgroundExecutionGate counts durable Asynq work instead of anonymous
+// reservations. Dispatch is serialized until selected tasks have been enqueued.
 type FixedBackgroundExecutionGate struct {
-	mu          sync.Mutex
 	limit       int
-	active      int
-	reserved    int
 	redis       redis.UniversalClient
-	reservedKey string
+	queues      []string
+	dispatchKey string
 	activeKey   string
 }
 
-func NewFixedBackgroundExecutionGate(limit int, clients ...redis.UniversalClient) *FixedBackgroundExecutionGate {
-	if limit < 1 {
-		limit = 1
+func NewFixedBackgroundExecutionGate(limit int, client redis.UniversalClient, name string, queues ...string) *FixedBackgroundExecutionGate {
+	return &FixedBackgroundExecutionGate{
+		limit: max(1, limit), redis: client, queues: queues,
+		dispatchKey: "remail:fixed_slots:{" + name + "}:dispatch",
+		// Old anonymous leases cannot identify running tasks and must not be reused.
+		activeKey: "remail:fixed_slots:{" + name + "}:tasks",
 	}
-	gate := &FixedBackgroundExecutionGate{limit: limit}
-	if len(clients) > 0 && clients[0] != nil {
-		gate.redis = clients[0]
-	}
-	return gate
 }
 
-func (g *FixedBackgroundExecutionGate) WithName(name string) *FixedBackgroundExecutionGate {
-	if g != nil && g.redis != nil {
-		g.reservedKey = "remail:fixed_slots:{" + name + "}:reserved"
-		g.activeKey = "remail:fixed_slots:{" + name + "}:active"
+func (g *FixedBackgroundExecutionGate) Dispatch(ctx context.Context, maximum int, dispatch func(context.Context, int) error) error {
+	if g == nil || g.redis == nil || len(g.queues) == 0 {
+		return fmt.Errorf("fixed background gate is unavailable")
 	}
-	return g
+	// Dispatch must stop before its mutex can expire and admit another dispatcher.
+	ctx, cancel := context.WithTimeout(ctx, fixedBackgroundDispatchTimeout)
+	defer cancel()
+	owner := NewUUIDV7String()
+	locked, err := g.redis.SetNX(ctx, g.dispatchKey, owner, fixedBackgroundDispatchLockTTL).Result()
+	if err != nil {
+		return fmt.Errorf("lock fixed background dispatch: %w", err)
+	}
+	if !locked {
+		return nil
+	}
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := fixedGateUnlockScript.Run(releaseCtx, g.redis, []string{g.dispatchKey}, owner).Err(); err != nil {
+			slog.Warn("release fixed background dispatch lock failed", "key", g.dispatchKey, "error", err)
+		}
+	}()
+	keys := make([]string, len(g.queues))
+	for i, queue := range g.queues {
+		keys[i] = "asynq:{" + queue + "}:"
+	}
+	outstanding, err := fixedGateOutstandingScript.Run(ctx, g.redis, keys).Int()
+	if err != nil {
+		return fmt.Errorf("count fixed background tasks: %w", err)
+	}
+	if available := min(maximum, g.limit-outstanding); available > 0 {
+		return dispatch(ctx, available)
+	}
+	return nil
 }
 
+// TryAcquire satisfies legacy gate callers, which cannot safely own a fixed slot without a task ID.
 func (g *FixedBackgroundExecutionGate) TryAcquire() (func(), bool) {
-	if g == nil {
-		return func() {}, true
-	}
-	if g.redis != nil {
-		if g.reservedKey == "" || g.activeKey == "" {
-			return func() {}, false
-		}
-		member, err := fixedGateAcquireScript.Run(
-			context.Background(), g.redis,
-			[]string{g.activeKey, g.reservedKey},
-			time.Now().UnixMilli(), g.limit, fixedBackgroundLeaseTTL.Milliseconds(), NewUUIDV7String(),
-		).Text()
-		if err != nil || member == "" {
-			return func() {}, false
-		}
-		var once sync.Once
-		return func() {
-			once.Do(func() {
-				_ = fixedGateReleaseScript.Run(context.Background(), g.redis, []string{g.activeKey}, member).Err()
-			})
-		}, true
-	}
+	return func() {}, false
+}
 
-	g.mu.Lock()
-	if g.reserved == 0 && g.active >= g.limit {
-		g.mu.Unlock()
-		return func() {}, false
-	}
-	if g.reserved > 0 {
-		g.reserved--
-	}
-	g.active++
-	g.mu.Unlock()
+func (g *FixedBackgroundExecutionGate) TryAcquireContext(ctx context.Context) (func(), bool, error) {
+	id, _ := asynq.GetTaskID(ctx)
+	queue, _ := asynq.GetQueueName(ctx)
+	return g.acquireTask(ctx, queue, id)
+}
 
+func (g *FixedBackgroundExecutionGate) acquireTask(ctx context.Context, queue, id string) (func(), bool, error) {
+	if g == nil || g.redis == nil || id == "" || !slices.Contains(g.queues, queue) {
+		return func() {}, false, fmt.Errorf("fixed background task identity is missing or outside its pool")
+	}
+	taskKey := "asynq:{" + queue + "}:t:" + id
+	owner := NewUUIDV7String()
+	admitted, err := fixedGateAcquireScript.Run(ctx, g.redis, []string{g.activeKey, taskKey}, g.limit, owner).Int()
+	if err != nil {
+		return func() {}, false, fmt.Errorf("acquire fixed background execution: %w", err)
+	}
+	if admitted < 0 {
+		return func() {}, false, fmt.Errorf("fixed background task is no longer active")
+	}
+	if admitted == 0 {
+		return func() {}, false, nil
+	}
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			g.mu.Lock()
-			if g.active > 0 {
-				g.active--
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if err := fixedGateReleaseScript.Run(releaseCtx, g.redis, []string{g.activeKey}, taskKey, owner).Err(); err != nil {
+				slog.Warn("release fixed background execution failed", "queue", queue, "task_id", id, "error", err)
 			}
-			g.mu.Unlock()
 		})
-	}, true
+	}, true, nil
 }
 
-func (g *FixedBackgroundExecutionGate) TryAcquireQueue(string) (func(), bool) {
-	return g.TryAcquire()
-}
-
-func (g *FixedBackgroundExecutionGate) Available() int {
-	if g == nil {
-		return 0
-	}
-	if g.redis != nil {
-		value, err := fixedGateAvailableScript.Run(
-			context.Background(), g.redis, []string{g.reservedKey, g.activeKey}, time.Now().UnixMilli(), g.limit,
-		).Int()
-		if err != nil {
-			return 0
-		}
-		return value
-	}
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return max(0, g.limit-g.active-g.reserved)
-}
-
-func (g *FixedBackgroundExecutionGate) Reserve(maximum int) int {
-	if g == nil || maximum <= 0 {
-		return 0
-	}
-	if g.redis != nil {
-		value, err := fixedGateReserveScript.Run(
-			context.Background(), g.redis, []string{g.reservedKey, g.activeKey},
-			time.Now().UnixMilli(), g.limit, fixedBackgroundLeaseTTL.Milliseconds(), maximum, NewUUIDV7String(),
-		).Int()
-		if err != nil {
-			return 0
-		}
-		return value
-	}
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	reserved := min(maximum, max(0, g.limit-g.active-g.reserved))
-	g.reserved += reserved
-	return reserved
-}
-
-func (g *FixedBackgroundExecutionGate) ReleaseReserved(count int) {
-	if g == nil || count <= 0 {
-		return
-	}
-	if g.redis != nil {
-		_, _ = fixedGateReleaseReservedScript.Run(context.Background(), g.redis, []string{g.reservedKey}, count).Int()
-		return
-	}
-	g.mu.Lock()
-	g.reserved = max(0, g.reserved-count)
-	g.mu.Unlock()
-}
-
-func (g *FixedBackgroundExecutionGate) Stats() (limit, active, reserved int) {
-	if g == nil {
-		return 0, 0, 0
-	}
-	if g.redis != nil {
-		values, err := fixedGateStatsScript.Run(context.Background(), g.redis, []string{g.reservedKey, g.activeKey}, time.Now().UnixMilli()).Slice()
-		if err != nil || len(values) != 2 {
-			return g.limit, 0, 0
-		}
-		active, _ = redisToInt(values[0])
-		reserved, _ = redisToInt(values[1])
-		return g.limit, active, reserved
-	}
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.limit, g.active, g.reserved
-}
-
-func (g *FixedBackgroundExecutionGate) Prime(ctx context.Context, desired int) error {
-	if g == nil || g.redis == nil || desired <= 0 {
+// DispatchBackgroundTasks treats a full fixed pool as ordinary backpressure.
+func DispatchBackgroundTasks(ctx context.Context, gate interface{}, maximum int, dispatch func(context.Context, int) error) error {
+	if maximum <= 0 {
 		return nil
 	}
-	if g.reservedKey == "" || g.activeKey == "" {
-		return fmt.Errorf("fixed background gate name is missing")
-	}
-	_, err := fixedGatePrimeScript.Run(
-		ctx, g.redis, []string{g.reservedKey, g.activeKey},
-		time.Now().UnixMilli(), g.limit, fixedBackgroundLeaseTTL.Milliseconds(), desired, NewUUIDV7String(),
-	).Int()
-	return err
-}
-
-func redisToInt(value any) (int, bool) {
-	switch typed := value.(type) {
-	case int64:
-		return int(typed), true
-	case string:
-		var parsed int
-		_, err := fmt.Sscan(typed, &parsed)
-		return parsed, err == nil
-	default:
-		return 0, false
-	}
-}
-
-// ReserveBackgroundDispatch reserves free fixed-gate slots before a dispatcher
-// queries the database. The returned function releases slots not represented by
-// successfully queued business tasks.
-func ReserveBackgroundDispatch(gate interface{}, maximum int) (int, func(used int)) {
-	if maximum <= 0 {
-		return 0, func(int) {}
-	}
-	if fixed, ok := gate.(interface {
-		Reserve(int) int
-		ReleaseReserved(int)
-	}); ok {
-		reserved := fixed.Reserve(maximum)
-		return reserved, func(used int) {
-			fixed.ReleaseReserved(max(0, reserved-used))
-		}
+	if fixed, ok := gate.(*FixedBackgroundExecutionGate); ok {
+		return fixed.Dispatch(ctx, maximum, dispatch)
 	}
 	if available, ok := gate.(interface{ Available() int }); ok {
-		return min(maximum, max(0, available.Available())), func(int) {}
+		maximum = min(maximum, available.Available())
 	}
-	return maximum, func(int) {}
+	if maximum > 0 {
+		return dispatch(ctx, maximum)
+	}
+	return nil
 }

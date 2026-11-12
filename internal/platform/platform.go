@@ -174,39 +174,10 @@ func (p *Platform) InitWorkers() {
 	p.AsynqServer = initAsynqServer(p.redisConfig)
 	p.BackgroundAsynqServer = initBackgroundAsynqServer(p.redisConfig)
 	p.BackgroundLoad = NewBackgroundLoadController(asynqBackgroundWorkerConcurrencyValue())
-	p.ValidationLoad = NewFixedBackgroundExecutionGate(BackgroundValidationConcurrency, p.Redis).WithName("validation")
-	p.AliasLoad = NewFixedBackgroundExecutionGate(BackgroundAliasConcurrency, p.Redis).WithName("alias")
-	if p.Redis != nil {
-		if err := p.ValidationLoad.Prime(context.Background(), fixedQueueOutstanding(p.Redis,
-			QueueBackgroundValidation,
-			QueueBackgroundDomainValidation,
-			QueueBackgroundMicrosoftEnterpriseValidation,
-		)); err != nil {
-			slog.Warn("prime fixed validation background slots failed", "error", err)
-		}
-		if err := p.AliasLoad.Prime(context.Background(), fixedQueueOutstanding(p.Redis, QueueBackgroundAlias)); err != nil {
-			slog.Warn("prime fixed alias background slots failed", "error", err)
-		}
-	}
+	p.ValidationLoad = NewFixedBackgroundExecutionGate(BackgroundValidationConcurrency, p.Redis, "validation",
+		QueueBackgroundValidation, QueueBackgroundDomainValidation, QueueBackgroundMicrosoftEnterpriseValidation)
+	p.AliasLoad = NewFixedBackgroundExecutionGate(BackgroundAliasConcurrency, p.Redis, "alias", QueueBackgroundAlias)
 	SetMetricsBackgroundLoad(p.BackgroundLoad)
-}
-
-func fixedQueueOutstanding(client *redis.Client, queues ...string) int {
-	if client == nil {
-		return 0
-	}
-	total := 0
-	for _, queue := range queues {
-		pending, err := client.LLen(context.Background(), "asynq:{"+queue+"}:pending").Result()
-		if err == nil {
-			total += int(pending)
-		}
-		active, err := client.LLen(context.Background(), "asynq:{"+queue+"}:active").Result()
-		if err == nil {
-			total += int(active)
-		}
-	}
-	return total
 }
 
 func (p *Platform) ShutdownWorkers() {

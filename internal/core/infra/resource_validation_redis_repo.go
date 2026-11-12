@@ -11,6 +11,7 @@ import (
 	"github.com/donnel666/remail/internal/core/domain"
 	governancedomain "github.com/donnel666/remail/internal/governance/domain"
 	"github.com/donnel666/remail/internal/platform"
+	"github.com/donnel666/remail/internal/systemsettings/runtimeconfig"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -19,6 +20,9 @@ const (
 	validationAssignmentSettleAfter = time.Second
 	validationDispatchCursorKey     = "core:resource_validation:dispatch_cursor"
 	validationDispatchCycle         = platform.BackgroundMicrosoftValidationWeight + platform.BackgroundDomainValidationWeight
+	validationRetryDelay            = time.Minute
+	validationRepeatedRetryDelay    = 5 * time.Minute
+	validationRecoveryMailboxBusy   = "Microsoft recovery mailbox is already processing another verification code."
 )
 
 func (r *ResourceValidationRepo) MarkResourcePendingWithLog(
@@ -287,55 +291,28 @@ SELECT
 	return assigned, nil
 }
 
-func (r *ResourceValidationRepo) ClaimPendingValidations(ctx context.Context, windowLimit int, enterprise bool) ([]coreapp.ResourceValidationTask, error) {
-	if r == nil || r.db == nil || windowLimit <= 0 {
+// limit is the free-slot budget measured by the serialized dispatcher.
+func (r *ResourceValidationRepo) ClaimPendingValidations(ctx context.Context, limit int, enterprise bool) ([]coreapp.ResourceValidationTask, error) {
+	if r == nil || r.db == nil || limit <= 0 {
 		return nil, nil
 	}
 	if err := r.recoverStaleValidations(ctx, time.Now().UTC(), enterprise); err != nil {
 		return nil, err
 	}
 	if enterprise {
-		var assigned int64
-		if err := r.db.WithContext(ctx).Model(&MicrosoftResourceModel{}).Table("microsoft_enterprise_resources").
-			Where("status = ?", string(domain.MicrosoftStatusValidating)).
-			Count(&assigned).Error; err != nil {
-			return nil, fmt.Errorf("count assigned enterprise validations: %w", err)
-		}
-		available := max(0, windowLimit-int(assigned))
-		if available == 0 {
-			return nil, nil
-		}
-		return r.listPendingMicrosoftValidations(ctx, available, time.Now().UTC().Add(-validationAssignmentSettleAfter), true)
+		return r.listPendingMicrosoftValidations(ctx, limit, time.Now().UTC().Add(-validationAssignmentSettleAfter), true)
 	}
-	assigned, err := r.countAssignedValidations(ctx)
-	if err != nil {
-		return nil, err
-	}
-	available := max(0, windowLimit-assigned.total())
-	if available == 0 && assigned.Microsoft > 0 && assigned.Domain > 0 {
-		return nil, nil
-	}
-	scanLimit := max(available, 1)
 	now := time.Now().UTC()
 	readyBefore := now.Add(-validationAssignmentSettleAfter)
-	microsoftTasks, err := r.listPendingMicrosoftValidations(ctx, scanLimit, readyBefore, false)
+	microsoftTasks, err := r.listPendingMicrosoftValidations(ctx, limit, readyBefore, false)
 	if err != nil {
 		return nil, err
 	}
-	domainTasks, err := r.listPendingDomainValidations(ctx, scanLimit, readyBefore)
+	domainTasks, err := r.listPendingDomainValidations(ctx, limit, readyBefore)
 	if err != nil {
 		return nil, err
 	}
-	needMicrosoft := assigned.Microsoft == 0 && len(microsoftTasks) > 0
-	needDomain := assigned.Domain == 0 && len(domainTasks) > 0
-	reservations := 0
-	if needMicrosoft {
-		reservations++
-	}
-	if needDomain {
-		reservations++
-	}
-	slots := min(max(available, reservations), len(microsoftTasks)+len(domainTasks))
+	slots := min(limit, len(microsoftTasks)+len(domainTasks))
 	if slots == 0 {
 		return nil, nil
 	}
@@ -344,7 +321,8 @@ func (r *ResourceValidationRepo) ClaimPendingValidations(ctx context.Context, wi
 		return nil, err
 	}
 	tasks := interleaveValidationTasks(microsoftTasks, domainTasks, slots, start)
-	return ensureValidationTypesPresent(tasks, microsoftTasks, domainTasks, needMicrosoft, needDomain), nil
+	shareBoth := slots > 1 && len(microsoftTasks) > 0 && len(domainTasks) > 0
+	return ensureValidationTypesPresent(tasks, microsoftTasks, domainTasks, shareBoth, shareBoth), nil
 }
 
 func (r *ResourceValidationRepo) advanceValidationDispatchCursor(ctx context.Context, slots int) (int, error) {
@@ -398,12 +376,19 @@ type pendingValidationRow struct {
 
 func (r *ResourceValidationRepo) listPendingMicrosoftValidations(ctx context.Context, limit int, readyBefore time.Time, enterprise bool) ([]coreapp.ResourceValidationTask, error) {
 	resourceType := domain.MicrosoftResourceType(enterprise)
+	now := readyBefore.Add(validationAssignmentSettleAfter)
+	busyDelay := max(
+		runtimeconfig.Duration("recovery_code_lease_minutes", 10*time.Minute, time.Minute, 1),
+		runtimeconfig.Duration("password_recovery_code_wait_seconds", 90*time.Second, time.Second, 1)+30*time.Second,
+	)
 	var rows []pendingValidationRow
 	if err := r.db.WithContext(ctx).
 		Table(microsoftResourceTable(resourceType)+" AS ms").
-		Select("ms.id, er.owner_user_id, ms.credential_revision, ms.validation_generation").
+		Select("/*+ MAX_EXECUTION_TIME(1500) */ ms.id, er.owner_user_id, ms.credential_revision, ms.validation_generation").
 		Joins("JOIN email_resources AS er ON er.id = ms.id AND er.type = ?", string(resourceType)).
 		Where("ms.status = ? AND ms.updated_at <= ?", string(domain.MicrosoftStatusPending), readyBefore).
+		Where("ms.last_safe_error <> ? OR ms.updated_at <= ?", validationRecoveryMailboxBusy, now.Add(-busyDelay)).
+		Where("ms.validation_failures = 0 OR (ms.validation_failures = 1 AND ms.updated_at <= ?) OR ms.updated_at <= ?", now.Add(-validationRetryDelay), now.Add(-validationRepeatedRetryDelay)).
 		Order("ms.id ASC").Limit(limit).
 		Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list pending Microsoft validations: %w", err)
@@ -421,12 +406,14 @@ func (r *ResourceValidationRepo) listPendingMicrosoftValidations(ctx context.Con
 }
 
 func (r *ResourceValidationRepo) listPendingDomainValidations(ctx context.Context, limit int, readyBefore time.Time) ([]coreapp.ResourceValidationTask, error) {
+	now := readyBefore.Add(validationAssignmentSettleAfter)
 	var rows []pendingValidationRow
 	if err := r.db.WithContext(ctx).
 		Table("domain_resources AS dr").
 		Select("dr.id, er.owner_user_id, dr.validation_generation").
 		Joins("JOIN email_resources AS er ON er.id = dr.id AND er.type = ?", string(domain.ResourceTypeDomain)).
 		Where("dr.status = ? AND dr.updated_at <= ?", string(domain.DomainStatusPending), readyBefore).
+		Where("dr.validation_failures = 0 OR (dr.validation_failures = 1 AND dr.updated_at <= ?) OR dr.updated_at <= ?", now.Add(-validationRetryDelay), now.Add(-validationRepeatedRetryDelay)).
 		Order("dr.id ASC").Limit(limit).
 		Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list pending domain validations: %w", err)
@@ -570,6 +557,7 @@ func (r *ResourceValidationRepo) ApplyMicrosoftResult(ctx context.Context, task 
 			// in pending without consuming its three business-failure attempts.
 			nextStatus = string(domain.MicrosoftStatusPending)
 			nextFailures = ms.ValidationFailures
+			safeMessage = validationRecoveryMailboxBusy
 		} else if result.Retryable && nextFailures < maxFailures {
 			nextStatus = string(domain.MicrosoftStatusPending)
 		}

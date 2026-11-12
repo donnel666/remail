@@ -211,10 +211,8 @@ func (q *ResourceValidationQueue) enqueueValidationDispatcher(ctx context.Contex
 	if q == nil || q.client == nil {
 		return fmt.Errorf("resource validation queue is unavailable")
 	}
-	queueName := platform.QueueBackgroundValidation
 	var payload []byte
 	if enterprise {
-		queueName = platform.QueueBackgroundMicrosoftEnterpriseValidation
 		payload = []byte(`{"enterprise":true}`)
 	}
 	asynqTask := asynq.NewTask(TypeResourceValidationDispatcher, payload)
@@ -223,7 +221,7 @@ func (q *ResourceValidationQueue) enqueueValidationDispatcher(ctx context.Contex
 		uniqueTTL += delay
 	}
 	options := []asynq.Option{
-		asynq.Queue(queueName),
+		asynq.Queue(platform.QueueDefault),
 		// Asynq releases the uniqueness key as soon as the dispatcher finishes.
 		// Keeping the lease for the full task timeout prevents a slow scan from
 		// spawning overlapping dispatcher tasks every two seconds.

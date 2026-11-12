@@ -112,9 +112,9 @@ func queueAdminICloudLivenessTx(ctx context.Context, tx *gorm.DB, root iCloudRoo
 		return nil, false, err
 	}
 	generation := resource.ValidationGeneration + 1
-	if err := tx.WithContext(ctx).Model(&iCloudMaintenanceRunModel{}).
-		Where("resource_id = ? AND kind = ? AND status IN ?", resource.ID, iCloudMaintenanceValidation, []string{iCloudMaintenanceQueued, iCloudMaintenanceRunning}).
-		Updates(map[string]any{"status": iCloudMaintenanceCanceled, "finished_at": now, "updated_at": now}).Error; err != nil {
+	if err := updateICloudMaintenanceRunsByID(tx.WithContext(ctx).Model(&iCloudMaintenanceRunModel{}).
+		Where("resource_id = ? AND kind = ? AND status IN ?", resource.ID, iCloudMaintenanceValidation, []string{iCloudMaintenanceQueued, iCloudMaintenanceRunning}),
+		map[string]any{"status": iCloudMaintenanceCanceled, "finished_at": now, "updated_at": now}); err != nil {
 		return nil, false, err
 	}
 	run := iCloudMaintenanceRunModel{

@@ -111,32 +111,25 @@ func RegisterMailTransportTaskHandlers(mux *asynq.ServeMux, module *MailTranspor
 		if aliasGate == nil {
 			aliasGate = module.BackgroundExecution
 		}
-		limit, releaseReservation := platform.ReserveBackgroundDispatch(aliasGate, microsoftAliasDispatchMaximum)
-		if limit <= 0 {
-			return nil
-		}
-		result, err := module.MicrosoftAliases.DispatchPending(ctx, limit)
-		if result != nil {
-			defer releaseReservation(result.Accepted)
-		} else {
-			defer releaseReservation(0)
-		}
-		if err != nil {
-			slog.Warn("microsoft alias dispatcher failed", "error", err)
-			return nil
-		}
-		if result != nil {
-			if result.Ensured > 0 || result.Attempted > 0 {
-				slog.Info(
-					"microsoft alias dispatcher finished",
-					"ensured", result.Ensured,
-					"attempted", result.Attempted,
-					"queued", result.Queued,
-					"failed", result.Failed,
-				)
+		return platform.DispatchBackgroundTasks(ctx, aliasGate, microsoftAliasDispatchMaximum, func(ctx context.Context, limit int) error {
+			result, err := module.MicrosoftAliases.DispatchPending(ctx, limit)
+			if err != nil {
+				slog.Warn("microsoft alias dispatcher failed", "error", err)
+				return nil
 			}
-		}
-		return nil
+			if result != nil {
+				if result.Ensured > 0 || result.Attempted > 0 {
+					slog.Info(
+						"microsoft alias dispatcher finished",
+						"ensured", result.Ensured,
+						"attempted", result.Attempted,
+						"queued", result.Queued,
+						"failed", result.Failed,
+					)
+				}
+			}
+			return nil
+		})
 	})
 
 	mux.HandleFunc(mailinfra.TypeMicrosoftAlias, func(ctx context.Context, task *asynq.Task) error {
@@ -295,6 +288,11 @@ func tryAcquireBackgroundExecution(ctx context.Context, gate BackgroundExecution
 	}
 	if gate == nil {
 		return func() {}, true, nil
+	}
+	if fixed, ok := gate.(interface {
+		TryAcquireContext(context.Context) (func(), bool, error)
+	}); ok {
+		return fixed.TryAcquireContext(ctx)
 	}
 	release, admitted := platform.AcquireBackgroundExecution(ctx, gate)
 	return release, admitted, nil
