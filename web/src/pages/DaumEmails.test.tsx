@@ -78,7 +78,7 @@ beforeEach(() => {
   mocks.removeBatch.mockResolvedValue(bulkResult);
   mocks.removeFilter.mockResolvedValue(bulkResult);
   mocks.supplier.mockResolvedValue(true);
-  mocks.confirm.mockImplementation(({ onOk }: any) => onOk());
+  mocks.confirm.mockImplementation(({ onOk }: any) => { void onOk(); return { destroy: vi.fn() }; });
 });
 afterEach(cleanup);
 
@@ -209,7 +209,7 @@ it.each([
 });
 
 it("uses the current filter when a previously opened confirmation is accepted later", async () => {
-  mocks.confirm.mockImplementation(() => undefined);
+  mocks.confirm.mockImplementation(() => ({ destroy: vi.fn() }));
   useDifferentRowsForStatusFilters();
   render(<DaumEmails />);
   await screen.findByTestId("row-41");

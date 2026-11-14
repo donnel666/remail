@@ -10,6 +10,7 @@ import {
   type InventoryRefreshResponse,
 } from "@/lib/inventory-refresh-api";
 import { getIamErrorMessage } from "@/lib/iam-errors";
+import { usePageConfirmation } from "@/hooks/use-page-confirmation";
 import { SettingsCardHeader, SettingsSection } from "./settings-layout";
 
 const { Text } = Typography;
@@ -29,6 +30,7 @@ const STATUS = {
 
 export default function InventoryRefreshSection({ canWrite }: { canWrite: boolean }) {
   const { t } = useTranslation();
+  const confirmAction = usePageConfirmation();
   const [data, setData] = useState<InventoryRefreshResponse | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<number>();
   const [loading, setLoading] = useState(true);
@@ -90,6 +92,17 @@ export default function InventoryRefreshSection({ canWrite }: { canWrite: boolea
     label: `${item.projectName} (#${item.projectId})`, value: item.projectId,
   })), [data?.items]);
 
+  const confirmRefresh = (projectId?: number) => {
+    if (!canWrite || refreshing !== null) return;
+    confirmAction({
+      title: t("Confirm inventory refresh"),
+      content: t(projectId ? "Confirm selected inventory refresh content" : "Confirm all inventory refresh content"),
+      okText: t("Confirm"),
+      cancelText: t("Cancel"),
+      onOk: () => trigger(projectId),
+    });
+  };
+
   return (
     <SettingsSection title={<SettingsCardHeader
       icon={<DatabaseZap size={16} />}
@@ -111,7 +124,7 @@ export default function InventoryRefreshSection({ canWrite }: { canWrite: boolea
           disabled={!canWrite || !selectedProjectId || refreshing !== null}
           icon={<RefreshCw size={14} />}
           loading={refreshing === selectedProjectId}
-          onClick={() => void trigger(selectedProjectId)}
+          onClick={() => confirmRefresh(selectedProjectId)}
           theme="solid"
           type="primary"
         >刷新所选项目</Button>
@@ -119,7 +132,7 @@ export default function InventoryRefreshSection({ canWrite }: { canWrite: boolea
           disabled={!canWrite || refreshing !== null}
           icon={<RefreshCw size={14} />}
           loading={refreshing === "all"}
-          onClick={() => void trigger()}
+          onClick={() => confirmRefresh()}
         >刷新全部</Button>
         <Tooltip content="重新加载状态">
           <Button

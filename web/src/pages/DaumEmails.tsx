@@ -33,6 +33,7 @@ import { useAuth } from "@/context/auth-provider";
 import { useBlockPagedList } from "@/hooks/use-block-paged-list";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import { usePageConfirmation } from "@/hooks/use-page-confirmation";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
@@ -90,6 +91,7 @@ type BooleanFilter = "all" | "yes" | "no";
 
 export default function DaumEmails() {
   const { t } = useTranslation();
+  const confirmAction = usePageConfirmation();
   const { currentUser, refreshCurrentUser } = useAuth();
   const isMobile = useIsMobile();
   const validationControllersRef = useRef(new Set<AbortController>());
@@ -491,8 +493,18 @@ export default function DaumEmails() {
   }, []);
 
   const confirmCheckAll = useCallback(() => {
-    void queueFilteredResourceChecks();
-  }, [queueFilteredResourceChecks]);
+    if (total === 0) {
+      Toast.info(t("No resources to check."));
+      return;
+    }
+    confirmAction({
+      title: t("Confirm check all"),
+      content: t("Confirm check all content", { count: total }),
+      okText: t("Check"),
+      cancelText: t("Cancel"),
+      onOk: queueFilteredResourceChecks,
+    });
+  }, [confirmAction, queueFilteredResourceChecks, t, total]);
 
   const confirmSellAll = useCallback(async () => {
     if (!isCurrentPage()) return;

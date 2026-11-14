@@ -41,6 +41,7 @@ import {
 import { useBlockPagedList } from "@/hooks/use-block-paged-list";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import { usePageConfirmation } from "@/hooks/use-page-confirmation";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import {
   deleteAdminKitesimPhones,
@@ -882,6 +883,7 @@ export function KitesimSMSLinkModal({ item, onCancel }: { item: AdminKitesimPhon
 
 export default function AdminKitesim() {
   const { t } = useTranslation();
+  const confirmAction = usePageConfirmation();
   const { currentUser } = useAuth();
   const isMobile = useIsMobile();
   const [activeStatus, setActiveStatus] = useState<StatusFilter>("all");
@@ -1067,6 +1069,19 @@ export default function AdminKitesim() {
     },
     [canOperate, refresh, t],
   );
+
+  const confirmSyncPage = useCallback(() => {
+    if (!canOperate || pagedItems.length === 0) return;
+    confirmAction({
+      title: t("Synchronize current page"),
+      content: t("Confirm synchronize current page content", {
+        count: new Set(pagedItems.map((item) => item.accountId)).size,
+      }),
+      okText: t("Synchronize"),
+      cancelText: t("Cancel"),
+      onOk: () => queueSync(pagedItems),
+    });
+  }, [confirmAction, canOperate, pagedItems, queueSync, t]);
 
   const runLifecycle = useCallback(
     async (
@@ -1379,7 +1394,7 @@ export default function AdminKitesim() {
           {t("Refresh")}
         </Button>
         <Tooltip content={t("Synchronize current page")} mouseEnterDelay={0} mouseLeaveDelay={0.05} position="top">
-          <Button className="flex-1 md:flex-initial" disabled={!canOperate || pagedItems.length === 0} loading={syncingAccountIds.length > 0} onClick={() => void queueSync(pagedItems)} size="small" type="tertiary">
+          <Button className="flex-1 md:flex-initial" disabled={!canOperate || pagedItems.length === 0} loading={syncingAccountIds.length > 0} onClick={confirmSyncPage} size="small" type="tertiary">
             {t("Synchronize")}
           </Button>
         </Tooltip>

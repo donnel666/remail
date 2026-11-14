@@ -41,6 +41,7 @@ import { StatisticFilterOption } from "@/components/semi/statistic-filter-option
 import { useBlockPagedList } from "@/hooks/use-block-paged-list";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import { usePageConfirmation } from "@/hooks/use-page-confirmation";
 import { useSharedPageSize } from "@/hooks/use-shared-page-size";
 import { getIamErrorMessage } from "@/lib/iam-errors";
 import {
@@ -571,6 +572,7 @@ function EditProxyModal({
 
 export default function ProxyManagement() {
   const { t } = useTranslation();
+  const confirmAction = usePageConfirmation();
   const isMobile = useIsMobile();
   const [proxyStats, setProxyStats] = useState<ProxyStatsResponse | null>(null);
   const [currentProxyStats, setCurrentProxyStats] =
@@ -806,6 +808,20 @@ export default function ProxyManagement() {
       setOperationLoading(false);
     }
   }, [proxyBulkFilter, refresh, t, totalItems, updateProxyItems]);
+
+  const confirmCheckAll = useCallback(() => {
+    if (totalItems === 0) {
+      Toast.info(t("No proxies to check."));
+      return;
+    }
+    confirmAction({
+      title: t("Confirm check all"),
+      content: t("Confirm check all proxies content", { count: totalItems }),
+      okText: t("Check"),
+      cancelText: t("Cancel"),
+      onOk: handleCheckFiltered,
+    });
+  }, [confirmAction, handleCheckFiltered, t, totalItems]);
 
   const handleCheckSelected = useCallback(async () => {
     if (selectedKeys.length === 0) {
@@ -1368,7 +1384,7 @@ export default function ProxyManagement() {
             size="small"
             className="flex-1 md:flex-initial"
             loading={operationLoading}
-            onClick={() => void handleCheckFiltered()}
+            onClick={confirmCheckAll}
           >
             {t("Check")}
           </Button>

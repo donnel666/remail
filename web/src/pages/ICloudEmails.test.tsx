@@ -54,8 +54,17 @@ describe("Apple email console", () => {
     mocks.list.mockResolvedValue({ items: [resource(1)], total: 1001 });
     render(<ICloudEmails />);
     await screen.findByText("apple1@example.com");
-    fireEvent.click(screen.getAllByRole("button", { name: "Check" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
     expect(mocks.toast).toHaveBeenCalledWith("iCloud bulk selection limit exceeded.");
+    expect(mocks.actionByFilter).not.toHaveBeenCalled();
+  });
+  it("does not expose a toolbar action that validates every matching account", async () => {
+    mocks.list.mockResolvedValue({ items: [resource(1)], total: 1 });
+    render(<ICloudEmails />);
+    const row = await screen.findByTestId("row-1");
+    expect(screen.getAllByRole("button", { name: "Check" })).toHaveLength(1);
+    fireEvent.click(within(row).getByRole("button", { name: "Check" }));
+    await waitFor(() => expect(mocks.action).toHaveBeenCalledWith("validate", [expect.objectContaining({ id: 1, version: 5 })]));
     expect(mocks.actionByFilter).not.toHaveBeenCalled();
   });
   it("keeps Apple columns visible when switching the compact layout", async () => {
@@ -85,8 +94,9 @@ describe("Apple email console", () => {
     await screen.findByText("apple1@example.com");
     fireEvent.click(screen.getByRole("tab", { name: /example.com/ }));
     await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ suffix: "example.com", offset: 0 }), expect.any(AbortSignal)));
-    fireEvent.click(screen.getAllByRole("button", { name: "Check" })[0]);
-    await waitFor(() => expect(mocks.actionByFilter).toHaveBeenCalledWith("validate", expect.objectContaining({ suffix: "example.com" })));
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    await act(async () => mocks.confirm.mock.lastCall?.[0].onOk());
+    await waitFor(() => expect(mocks.actionByFilter).toHaveBeenCalledWith("delete", expect.objectContaining({ suffix: "example.com" })));
     expect(mocks.action).not.toHaveBeenCalled();
   });
   it("keeps the confirmed filter when a bulk confirmation remains open", async () => {

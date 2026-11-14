@@ -157,7 +157,6 @@ export default function ICloudEmails() {
     } catch (error) { Toast.error(getIamErrorMessage(t, error, "Operation failed.")); }
   };
   const selected = loadedItems.filter((item) => selectedKeys.includes(item.id));
-  const confirmCheckAll = () => { void act("validate"); };
   const confirmSellAll = () => act("publish");
   const confirmDeleteAll = () => { void act("delete"); };
   useSelectionNotification({
@@ -246,22 +245,6 @@ export default function ICloudEmails() {
         >
           {t("Refresh")}
         </Button>
-        <Tooltip
-          content={t("Check all")}
-          mouseEnterDelay={0}
-          mouseLeaveDelay={0.05}
-          position="top"
-        >
-          <Button
-            type="tertiary"
-            size="small"
-            className="flex-1 md:flex-initial"
-            disabled={busy || loading || total === 0}
-            onClick={confirmCheckAll}
-          >
-            {t("Check")}
-          </Button>
-        </Tooltip>
         <Tooltip
           content={t("Sell all")}
           mouseEnterDelay={0}
