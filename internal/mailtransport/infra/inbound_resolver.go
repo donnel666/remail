@@ -29,6 +29,7 @@ func (r *InboundResourceResolver) ResolveInboundRecipient(ctx context.Context, e
 	}
 
 	var resolved domain.InboundRecipient
+	// Disabling Microsoft API work must not change ownership of its recovery mail.
 	err := r.db.WithContext(ctx).Raw(`
 SELECT mb.binding_address AS email,
        mb.resource_id AS resource_id,
@@ -38,7 +39,7 @@ FROM microsoft_binding_mailboxes AS mb
 JOIN microsoft_resources AS mr ON mr.id = mb.resource_id
 WHERE mb.binding_address = ?
   AND mb.status IN ('pending', 'code_sent', 'verified', 'timeout', 'failed')
-  AND mr.status NOT IN ('deleted', 'disabled')
+  AND mr.status <> 'deleted'
 LIMIT 1`, email).Scan(&resolved).Error
 	if err != nil {
 		return nil, fmt.Errorf("resolve microsoft binding mailbox: %w", err)
